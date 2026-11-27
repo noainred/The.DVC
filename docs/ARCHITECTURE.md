@@ -76,7 +76,7 @@
 <!-- arch-doc:modules:start -->
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
-| `agent/` | 54 | 8,540 | `agent/envTimeout.js` (27) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
+| `agent/` | 54 | 8,545 | `agent/envTimeout.js` (27) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
 | `attach/` | 1 | 333 | `attach/store.js` (3) | attach/store.js — 위키 문서 · 이슈 첨부 파일(v2.889 · 시안 ⑨⑩ '첨부' · C-4). |
 | `auth/` | 16 | 4,566 | `auth/scope.js` (111) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
@@ -88,7 +88,7 @@
 | `bmusage/` | 111 | 25,944 | `bmusage/poller.js` (19) | bmusage/poller.js — 베어메탈 사용률 주기 수집(v2.550). |
 | `bulletin/` | 1 | 851 | `bulletin/store.js` (4) | bulletin/store.js — 접속 공지(팝업)와 게시판 글 저장소(v2.722). |
 | `capacity/` | 4 | 860 | `capacity/sampler.js` (4) | Capacity Advisor 샘플러 — 운영 중인 포탈 프로세스 안에서 30초마다 자기 호스트를 실측한다 |
-| `central/` | 63 | 11,972 | `central/inventory.js` (20) | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. |
+| `central/` | 63 | 11,990 | `central/inventory.js` (20) | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. |
 | `clustercfg/` | 4 | 582 | `clustercfg/analyze.js` (13) | clustercfg/analyze.js — 특수 기능 '클러스터 HA·DRS 점검'(도구 키 `cluster-check`, v2.701) 판정(순수). |
 | `collector/` | 11 | 2,529 | `collector/registry.js` (85) | Collector registry — the list of remote collector agents (one per datacenter) |
 | `commmap/` | 2 | 461 | `commmap/demoMask.js` (3) | commmap/demoMask.js — 통신 지도·데이터 흐름 지도·3단 지도의 **데모 계정 판본** 입력 가림(v2.768 점검 R3-C2-2). |
@@ -106,7 +106,7 @@
 | `dscfg/` | 4 | 408 | `dscfg/collect.js` (7) | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. |
 | `edgelog/` | 3 | 506 | `edgelog/spec.js` (6) | edgelog/spec.js — 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). |
 | `fieldcheck/` | 1 | 151 | `fieldcheck/judge.js` (1) | fieldcheck/judge.js — 법인별 실환경 확인(v2.938 · 사용자 요청 '개선 포인트 8번은 법인별로 적용'). |
-| `focusmon/` | 38 | 8,994 | `focusmon/service.js` (6) | focusmon/service.js — 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. |
+| `focusmon/` | 38 | 9,349 | `focusmon/service.js` (6) | focusmon/service.js — 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. |
 | `gpu/` | 18 | 3,632 | `gpu/settings.js` (10) | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 |
 | `guest/` | 1 | 69 | `guest/accountService.js` (1) | 게스트 계정 추가 오케스트레이션 — vCenter에 로그인해 선택된 VM들의 게스트 OS에 sudo 계정을 |
 | `guestdisk/` | 5 | 1,451 | `guestdisk/settings.js` (6) | guestdisk/settings.js — 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). |
@@ -148,7 +148,7 @@
 | `relaytopo/` | 4 | 757 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 1,050 | `reports/compliance.js` (6) | 버전/패치 준수 리포트 — VMware Tools 상태·VM 하드웨어 버전·ESXi 버전 분포를 스냅샷만으로 |
 | `rma/` | 14 | 2,917 | `rma/jobs.js` (8) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 183 | 58,354 | `routes/bmEvents.js` (1) | routes/bmEvents.js — 물리서버 장애 바로 받기(v3.52 · ⑬) — 장비(iDRAC)가 보내는 Redfish 이벤트를 받는다. **사용자 인증이 없다**(index.js 가 authMiddleware 없이 단다). |
+| `routes/` | 183 | 58,356 | `routes/bmEvents.js` (1) | routes/bmEvents.js — 물리서버 장애 바로 받기(v3.52 · ⑬) — 장비(iDRAC)가 보내는 Redfish 이벤트를 받는다. **사용자 인증이 없다**(index.js 가 authMiddleware 없이 단다). |
 | `sanswitch/` | 51 | 11,672 | `sanswitch/registry.js` (12) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 944 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 20 | 5,224 | `security/secretVault.js` (38) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -186,7 +186,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 109개 · 파일 1615개 · 375,368줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 109개 · 파일 1615개 · 375,748줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

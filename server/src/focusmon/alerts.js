@@ -165,8 +165,9 @@ export function judge(pts, rule, prev = null, now = Date.now(), { holdAfterMs = 
   const lastIdle = !!(last && last[1] == null && last[2] === true);
   // 보류 — 표본이 없거나 오래됐거나 지금 값을 못 읽었다(조용한 표본은 보류가 아니다)
   if (!last || now - last[0] > holdAfterMs || (lastVal == null && !lastIdle)) {
-    if (st === 'hold') return { state: 'hold', since: prev.since, event: null, value: null, was: prev.was };
-    return { state: 'hold', since: now, event: 'hold', value: null, was: st };
+    const cut = !!(last && now - last[0] <= holdAfterMs && last[2] === 'cut') ? { cut: true } : {}; // 서비스 목록이 잘려 모름(수집은 된다)
+    if (st === 'hold') return { state: 'hold', since: prev.since, event: null, value: null, was: prev.was, ...cut };
+    return { state: 'hold', since: now, event: 'hold', value: null, was: st, ...cut };
   }
   const from = now - durMs;
   const win = pts.filter(([t]) => t >= from);
@@ -229,6 +230,16 @@ function forgetRuleState(ruleId) {
   for (const k of Object.keys(s)) if (k.startsWith(`${ruleId}|`)) { delete s[k]; changed = true; }
   if (changed) saveState(s);
 }
+/**
+ * v3.57.0 묶음 B(30회차 남긴 것 K): 대상의 **주소가 바뀌면** 그 대상의 알림 상태(`규칙|대상`)를 지운다 — 예전 기계의 '발생 중' 이 남아
+ *   새 기계에서 '[해제]' 가 나가거나 섞인 판정이 됐다. 다음 주기에 새로 판정한다(지우는 쪽이라 알림이 새로 '발생' 할 수는 있다).
+ */
+export function forgetTargetAlerts(targetId) {
+  const s = loadState(); let changed = false;
+  for (const k of Object.keys(s)) if (k.endsWith(`|${targetId}`)) { delete s[k]; changed = true; }
+  if (changed) saveState(s);
+  return changed;
+}
 export function _resetForTest() { rulesCache = null; stateCache = null; loadErr.clear(); }
 
 /* ── 판정 주기(중앙만 — 서비스 1분 틱) ─────────────────────────────────── */
@@ -245,7 +256,8 @@ export function ruleTargets(rule, targets, recordIds) {
 
 /** 서버 하나의 [시각, 값] — 메모리의 최근 묶음(31분)에서. app 은 프로세스 표본의 앱 묶음(서비스 기준). */
 export function pointsFor(store, rule, id, now) {
-  const from = now - rule.durMin * 60_000 - 120_000;
+  // v3.57.0 묶음 B(30회차 K 다시 설계): 기계 경계(주소 · 담당 노드를 고친 순간) 앞 표본은 예전 서버 — 판정에 넣지 않는다(기록은 그대로)
+  const from = Math.max(now - rule.durMin * 60_000 - 120_000, Number(store.resetAtOf?.(id)) || 0);
   const out = [];
   if (rule.metric === 'app') {
     // 반증 H1: 서비스마다 프로세스 수(apps.all — 수집기가 약 20초마다 싣는다)가 있으면 그것만 쓴다(없는 이름 = 0 — 죽음). 상위 20(sv)은
@@ -257,7 +269,8 @@ export function pointsFor(store, rule, id, now) {
     for (const s of rows) {
       // 29회차 F6: 목록이 잘린 표본(allCut)에서 없는 이름은 0(죽음)이 아니라 모름(null — 판정 보류)
       //   30회차 E: 'nonsvc'(.service 가 아닌 단위만 잘림 — .service 는 먼저 실린다)이면 .service 이름의 부재는 0 이다
-      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const cut = s.apps.allCut === true || (s.apps.allCut === 'nonsvc' && !String(rule.app).endsWith('.service')); const v = Object.hasOwn(s.apps.all, rule.app) ? Number(s.apps.all[rule.app]) : (cut ? null : 0); out.push([s.t, Number.isFinite(v) ? v : null]); } continue; }
+      // v3.57.0 묶음 B(30회차 남긴 것): 잘린 목록 때문에 모르는 값은 세 번째 칸 'cut' — 보류 사건 문구가 '수집 끊김' 이 아니라 '목록 잘림' 을 말한다(판정은 그대로 보류)
+      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const cut = s.apps.allCut === true || (s.apps.allCut === 'nonsvc' && !String(rule.app).endsWith('.service')); const has = Object.hasOwn(s.apps.all, rule.app); const v = has ? Number(s.apps.all[rule.app]) : (cut ? null : 0); out.push(!has && cut ? [s.t, null, 'cut'] : [s.t, Number.isFinite(v) ? v : null]); } continue; }
       if (!Array.isArray(s.apps.sv)) { out.push([s.t, null]); continue; } // 서비스 지도 없음 — 모름
       const a = s.apps.sv.find((x) => x.k === rule.app);
       out.push([s.t, a ? a.n : (s.apps.sv.length < 20 ? 0 : null)]);
@@ -314,10 +327,11 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
     for (const t of ruleTargets(r, targets, recordIds)) {
       const key = `${r.id}|${t.id}`;
       const p0 = prev[key] || null;
-      const j = judge(pointsFor(store, r, t.id, now), { ...r, op: METRICS[r.metric].op }, p0, now);
+      const pts = pointsFor(store, r, t.id, now);
+      const j = judge(pts, { ...r, op: METRICS[r.metric].op }, p0, now);
       const retry = j.event === 'fire' || j.event === 'resolve' ? (p0?.retryOf === j.event ? (p0.retry || 0) : 0) : 0;
       next[key] = { state: j.state, since: j.since, ...(j.firedAt ? { firedAt: j.firedAt } : {}), ...(j.state === 'hold' ? { was: j.was ?? p0?.was ?? 'ok' } : {}), value: j.value, at: now };
-      if (j.event === 'fire' || j.event === 'resolve' || j.event === 'hold') fires.push({ r, t, j, key, p0, retry });
+      if (j.event === 'fire' || j.event === 'resolve' || j.event === 'hold') fires.push({ r, t, j, key, p0, retry, npts: pts.length });
     }
   }
   // 덮지 않게 된(규칙을 끄거나 수집이 끝난) 짝은 상태에서 뺀다 — 다시 덮이면 '새로' 판정한다
@@ -334,7 +348,13 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
     }
     if (f.retry > 0) continue; // 다시 보내는 것 — 사건은 처음 한 번만
     const kindText = j.event === 'fire' ? '발생' : j.event === 'resolve' ? '해제' : '판정 보류';
-    const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
+    // v3.57.0 묶음 B: 판정 구간이 기계 경계(주소 · 노드를 고친 순간) 뒤에서 시작하면 보류의 까닭은 '아직 새 서버 값이 없음' 이다(수집 끊김으로 단정하지 않는다)
+    //   반증 AE-1: 경계 뒤 표본이 하나라도 왔으면(왔다가 끊김) 그것은 '아직 없음' 이 아니다 — 경계 뒤 표본이 하나도 없을 때만
+    //   (경계 뒤 '지금 값' 도 없어야 — 판정 창보다 오래전에 왔다 끊긴 경우도 '아직 없음' 이 아니다)
+    const noneSince = r.metric === 'app' ? store.latestProcsOf?.(t.id) == null : store.latestOf?.(t.id) == null;
+    const afterMove = f.npts === 0 && noneSince && (Number(store.resetAtOf?.(t.id)) || 0) >= now - r.durMin * 60_000 - 120_000;
+    const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : j.cut ? ' · 서비스 목록이 상한에서 잘려 이 이름을 못 봄(수집은 됨)'
+      : afterMove ? ' · 접속처를 바꾼 뒤 새 서버 값이 아직 없음' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
     store.queueEvent(t.id, 'alert', `${r.name} — ${condText(r)} · ${kindText}${valText}${f.suppressed ? ' · 정비 창이라 보내지 않음' : ''}`.slice(0, 300), now, { id: `al:${r.id}:${t.id}:${j.event}:${now}`, scope: 'server' });
   }
   saveState(next);
@@ -352,6 +372,9 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
       failed += 1;
       if (f.retry < SEND_RETRY) { // 앞 상태로 되돌려 다음 주기에 다시(횟수를 남긴다)
         const st = loadState();
+        // v3.57.0 묶음 B 반증 F1 · F3(재현): 보내는 동안 그 짝이 지워졌으면(주소 · 노드를 고침 — forgetTargetAlerts · 규칙 조건을 바꿈 — forgetRuleState)
+        //   되돌리지 않는다. 예전에는 예전 서버의 '발생' 상태를 되살려 새 서버에 '[해제]' 가 나갔다. saveState(next) 가 이 열쇠를 await 전에 썼으므로 없으면 지운 것이다.
+        if (!Object.hasOwn(st, key)) continue;
         st[key] = { ...(f.p0 || { state: 'ok', since: now, at: now }), retry: f.retry + 1, retryOf: j.event };
         saveState(st);
       }

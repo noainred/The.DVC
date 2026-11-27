@@ -191,7 +191,58 @@ export function decodeBlock(buf) {
   } catch { return null; }
 }
 
+/**
+ * 두 묶음 합치기(v3.57.0 묶음 B 반증 K1 — DB 에 이미 있는 분 + 메모리에 없던 분으로 새로 만든 묶음). 표본 시각의 합집합 · 같은 시각은 뒤(b)가 이긴다 ·
+ * 표본 상한(MAX_N)을 넘는 것은 appendToBlock 이 버린다. 메타는 b 를 기준으로 파일시스템 이름을 합친다.
+ */
+export function mergeBlocks(a, b) {
+  // 반증 SD-1: 겹치지 않는 두 묶음(재시작 경로의 보통 경우 — 앞 프로세스가 쓴 앞부분 + 재시작 뒤 받은 뒷부분)은 열 배열을 그대로 잇는다(표본마다 appendToBlock 을 돌지 않는다).
+  //   결과는 아래 일반 길과 같다(시험이 무작위 묶음으로 대조) — 열 순서 · 열 상한(MAX_KEYS — 먼저 본 열부터) · 같은 시각 없음 · 표본 상한 안일 때만.
+  const [x, y] = a.ts.length && b.ts.length && a.ts[a.ts.length - 1] < b.ts[0] ? [a, b] : a.ts.length && b.ts.length && b.ts[b.ts.length - 1] < a.ts[0] ? [b, a] : [null, null];
+  if (x && x.ts.length + y.ts.length <= MAX_N) {
+    const n = x.ts.length + y.ts.length; const cols = new Map();
+    const val = (arr, i) => { const v = arr ? arr[i] : null; return v == null || Number.isNaN(v) ? null : v; };
+    for (const k of [...a.cols.keys(), ...b.cols.keys()]) {
+      if (cols.has(k)) continue;
+      if (cols.size >= MAX_KEYS) break;
+      const xa = x.cols.get(k); const ya = y.cols.get(k); const arr = new Array(n);
+      for (let i = 0; i < x.ts.length; i++) arr[i] = val(xa, i);
+      for (let i = 0; i < y.ts.length; i++) arr[x.ts.length + i] = val(ya, i);
+      cols.set(k, arr);
+    }
+    return { minute: b.minute, ts: [...x.ts, ...y.ts], cols, meta: a.meta && b.meta ? mergeMeta(a.meta, b.meta) : (b.meta || a.meta || null) };
+  }
+  return mergeBlocksSlow(a, b);
+}
+/** 일반 길(겹치거나 상한을 넘는 경우 · 시험 대조용으로 내보낸다). */
+export function mergeBlocksSlow(a, b) {
+  const out = newBlock(b.minute);
+  for (const src of [a, b]) {
+    for (let i = 0; i < src.ts.length; i++) {
+      const row = [];
+      for (const [k, arr] of src.cols) { const v = arr[i]; if (v != null && !Number.isNaN(v)) row.push([k, v]); }
+      appendToBlock(out, src.ts[i], row, null);
+    }
+  }
+  out.meta = a.meta && b.meta ? mergeMeta(a.meta, b.meta) : (b.meta || a.meta || null);
+  return out;
+}
+
 /* ── 프로세스 묶음(1분 안의 상위 30 표본들) ──────────────────────────────────── */
+
+/** 분의 프로세스 표본 상한(store.ingestProcs 와 같은 값). */
+export const PROC_PER_MIN = 60;
+/** 프로세스 묶음 → DB 줄(앱 묶음은 그 분의 **마지막 표본에만** — 그것도 서비스마다 수(all)는 빼고 · v3.14.0 ⑮). 합쳐 쓰기도 같은 규칙. */
+export function procRowsForDb(list) {
+  const last = list.length - 1;
+  return list.map((s, i) => (!s.apps ? s : i === last ? (s.apps.all ? { ...s, apps: { sv: s.apps.sv, cm: s.apps.cm } } : s) : { ...s, apps: undefined }));
+}
+/** 두 프로세스 목록 합치기 — 시각 합집합(같은 시각은 뒤가 이긴다) · 시각 순 · 최근 PROC_PER_MIN 개 · 앱 묶음 규칙을 다시 건다. */
+export function mergeProcLists(a, b) {
+  const m = new Map();
+  for (const s of [...(a || []), ...(b || [])]) if (s && Number.isFinite(s.t)) m.set(s.t, s);
+  return procRowsForDb([...m.values()].sort((x, y) => x.t - y.t).slice(-PROC_PER_MIN));
+}
 
 export function encodeProcBlock(list) {
   return zlib.gzipSync(Buffer.from(JSON.stringify({ v: CODEC_VERSION, s: list }), 'utf8'), { level: 6 });

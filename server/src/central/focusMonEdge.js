@@ -23,7 +23,7 @@ import { okMount, BOOT_ID_RE } from '../focusmon/parse.js'; // v3.12.0 ⑬ 파�
 import { FS_ROWS_MAX } from '../focusmon/codec.js';
 import { INTERVALS, PROC_EVERY_CHOICES } from '../focusmon/script.js';
 import { cleanHello, LOGIN_KINDS } from '../focusmon/hello.js';
-import { handleEdgeAudit } from '../focusmon/audit/service.js'; // v3.11.0 디스크 점검 — 작업 배달 · 원문 결과 받기(중앙이 다시 해석)
+import { handleEdgeAudit, endpointKey } from '../focusmon/audit/service.js'; // v3.11.0 디스크 점검 — 작업 배달 · 원문 결과 받기(중앙이 다시 해석)
 
 export const VALID_MS = 30_000;
 export const MAX_SAMPLES = 6000;
@@ -168,7 +168,8 @@ function cleanApps(a) {
     all = Object.create(null); let c = 0;
     for (const [k, v] of Object.entries(a.all)) { if (c >= APP_ALL_MAX) { allCut = true; break; } if (!APP_UNIT_RE.test(k)) { allCut = true; continue; } const x = n(v); if (x == null || !Number.isInteger(x) || x < 0 || x > 1e6) { allCut = true; continue; } all[k] = x; c += 1; }
   }
-  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [], ...(all ? { all, ...(allCut ? { allCut: true } : {}) } : {}) };
+  // v3.57.0 묶음 B 반증(alerts F2 — 재현): 'nonsvc' 를 true 로 뭉개 엣지 서버에서는 30회차 E(없는 .service = 죽음)가 듣지 않았다 — 정제한 값 그대로
+  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [], ...(all ? { all, ...(allCut ? { allCut } : {}) } : {}) };
 }
 
 function cleanStatus(st, now, sentAt = null) {
@@ -279,10 +280,16 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   const perTarget = new Map();
   // 지금 수집 중이거나 막 끝난 수집의 대상만 받는다 — 아무도 시작하지 않은 대상의 값을 엣지가 밀어 넣어 메모리 · DB 를 채우지 못하게(반증 1번).
   const accepting = store.acceptingTargetIds(now);
+  // v3.57.0 묶음 B 반증 F2(재현): 주소 · 담당 노드를 고친 뒤 깨우기 동기화가 예전 서버의 밀린 표본을 실어 와 지운 지금 값 · OS 를 다시 채우고 '재부팅' 사건을 만들었다.
+  //   엣지는 수집기를 연 기계 열쇠(ep)를 값마다 붙인다 — 지금 열쇠와 다르면 받지 않는다(oldEp). 열쇠가 없는 옛 엣지는 바뀐 뒤 동기화 두 번 받지 않는다(store.edgeFenced).
+  const epNow = new Map([...mine].map(([id, t]) => [id, store.machineKeyOf(t)]));
+  const oldEp = (id, ep, hello = null) => (typeof ep === 'string' && store.MACHINE_KEY_RE.test(ep) ? ep !== epNow.get(id) : store.edgeFenced(id, now, hello));
+  const skipOld = (id, ep, hello = null) => { if (!oldEp(id, ep, hello)) return false; got.oldEp = (got.oldEp || 0) + 1; return true; };
   for (const x of arr(b.samples, MAX_SAMPLES)) {
     if (!isObj(x) || typeof x.id !== 'string') { got.bad += 1; continue; }
     if (!mine.has(x.id)) { got.foreign += 1; continue; }
     if (!accepting.has(x.id)) { got.idle += 1; continue; }
+    if (skipOld(x.id, x.ep, isObj(x.hello) ? cleanHello(x.hello) : null)) continue;
     const c = (perTarget.get(x.id) || 0) + 1; perTarget.set(x.id, c);
     if (c > MAX_PER_TARGET) { got.bad += 1; continue; }
     const ts = toCentral(x.t); const s = cleanSample(x.s);
@@ -295,6 +302,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     if (!isObj(x) || typeof x.id !== 'string') { got.bad += 1; continue; }
     if (!mine.has(x.id)) { got.foreign += 1; continue; }
     if (!accepting.has(x.id)) { got.idle += 1; continue; }
+    if (skipOld(x.id, x.ep)) continue;
     const ts = toCentral(x.t); const p = cleanProcs(x.p);
     if (ts == null || !p) { got.bad += 1; continue; }
     if (store.ingestProcs(x.id, ts, p)) got.procs += 1;
@@ -302,12 +310,19 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   if (isObj(b.status)) {
     for (const [id, st] of Object.entries(b.status).slice(0, 200)) {
       if (!mine.has(id)) { got.foreign += 1; continue; }
+      if (isObj(st) && skipOld(id, st.ep)) continue; // 예전 서버 수집기의 '연결됨 · OS' · 멈춤을 새 서버의 것처럼 두지 않는다
       const c = cleanStatus(st, now, sentAt);   // 보낸 시각이 없거나 상태 시각보다 앞서면(옛 · 비정상 엣지) 예전처럼 위쪽만 자른다(나이 0 으로 '방금' 을 지어내지 않게)
       if (c) store.setStatus(id, { ...c, via: 'edge' }, now);
     }
   }
   for (const x of arr(b.tests, 50)) {
     if (!isObj(x) || !mine.has(x.id) || !isObj(x.result)) continue;
+    // 시험은 접속처 전체(노드 · 주소 · 포트 · 계정)의 결과 — 엣지가 돌려준 표지가 지금 접속처와 다르면 예전 접속처의 것이다
+    //   반증 EDGE-F2: 버린 결과 때문에 새 시험이 60초(다시 배달 간격) 늦지 않게 바로 다시 배달한다(엣지는 같은 서버의 시험이 돌고 있으면 새 시험을 건너뛴다) ·
+    //   표지가 없는 옛 엣지: 접속처를 바꿀 때 엣지에서 돌던 시험이 있었으면 그 뒤 첫 결과 하나는 그것이다(store.takeStaleTest — 시험은 표본보다 늦게 끝나 울타리만으로는 못 막는다) ·
+    //   기계가 바뀐 직후(울타리 동안)의 결과도 받지 않는다 — 예전 주소의 '연결됨' 이 새 주소의 결과로 남지 않게
+    const tagged = typeof x.ep === 'string' && /^[a-f0-9]{12}$/.test(x.ep);
+    if (tagged ? x.ep !== endpointKey(mine.get(x.id)) : (store.takeStaleTest(x.id, now) || store.edgeFenced(x.id, now))) { got.oldEp = (got.oldEp || 0) + 1; store.redeliverTest(x.id); continue; }
     const r = x.result;
     store.putTestResult(x.id, { ok: r.ok === true, kind: enumOr(r.kind, TEST_KINDS, 'unreachable'), error: r.error ? strOf(r.error, 240) : '', hello: cleanHello(r.hello), ms: n(r.ms), via: 'edge' }, now);
   }
@@ -316,6 +331,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     for (const [id, l] of Object.entries(b.load).slice(0, 200)) {
       if (!mine.has(id)) { got.foreign += 1; continue; }
       if (!accepting.has(id)) { got.idle += 1; continue; }
+      if (isObj(l) && skipOld(id, l.ep)) continue;
       const c = cleanLoad(l);
       if (c) store.setLoad(id, { ...c, via: 'edge' }, now); else got.bad += 1;
     }
@@ -329,10 +345,12 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   // v3.11.0 디스크 점검 — 그 엣지가 맡은 대상의 작업만 · 결과는 원문으로 받아 중앙이 해석한다(audit/service cleanEdgeResult · analyzeRun)
   const audit = handleEdgeAudit(key, mine, b.audit, now);
   const desired = store.desiredFor(key, (id) => mine.get(id) || null, now);
-  const tests = store.pendingTestsFor(key, now, { busy: diag ? diag.testsBusy : null }).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
+  const tests = store.pendingTestsFor(key, now, { busy: diag ? diag.testsBusy : null }).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username, ep: endpointKey(t) }; });
+  store.edgeFenceSynced([...mine.keys()]); // 옛 엣지 울타리 — 이 엣지의 동기화 한 번을 마쳤다(본문은 위에서 거름)
   return {
     ok: true, now, validUntil: now + VALID_MS,
-    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval, procEvery: procEveryFor(d.id, getSettings().procEvery) })), // v2.983 procEvery — 프로세스 표본 주기(중앙 설정 · v3.16.0 자동 조절)
+    // v2.983 procEvery — 프로세스 표본 주기(중앙 설정 · v3.16.0 자동 조절) · v3.57.0 ep — 기계 열쇠(엣지가 그 수집기의 값에 붙여 돌려보낸다)
+    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval, procEvery: procEveryFor(d.id, getSettings().procEvery), ep: epNow.get(d.id) })),
     // retries(id) 는 옛 판 엣지용 · retryTargets(v2.978)는 접속 정보까지 — 수집 중이 아닌 대상(시험만 한 서버)의 인증 정지도 엣지가 풀 수 있게.
     //   예전에는 엣지가 수집 목록에서만 대상을 찾아, 시험만 한 서버의 '다시 연결' 이 아무것도 풀지 못했다(사용자 보고 2026-11-12 — 키를 넣어도 '거부로 멈춤').
     ...(() => { const ids = store.takeEdgeRetries(key, now).filter((id) => mine.has(id)); return { retries: ids, retryTargets: ids.map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; }) }; })(),

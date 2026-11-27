@@ -17,8 +17,8 @@ import { DEMO_TARGETS, isDemoTarget } from './mock.js';
 import { recordTick, flushOnExit, recorderStatus } from './recorder.js';
 import { every } from '../util/longTimer.js';
 import { startAuditService } from './audit/service.js';
-import { tuneTick, procEveryFor } from './tune.js'; // v3.16.0 ⑯ C3 수집 부하 자동 조절
-import { alertCycle } from './alerts.js'; // v3.16.0 ⑯ C1 지속 시간 조건 알림
+import { tuneTick, procEveryFor, forgetTune } from './tune.js'; // v3.16.0 ⑯ C3 수집 부하 자동 조절
+import { alertCycle, forgetTargetAlerts } from './alerts.js'; // v3.16.0 ⑯ C1 지속 시간 조건 알림
 import { maintStateForTarget } from './maintMatch.js'; // v3.16.0 ⑯ 반증 H2 — 법인(DataCenter) → vCenter 들로 정비 창 판정
 import { corpResolver } from './audit/corp.js';
 import { getDatacenterAssign } from '../datacenter/store.js';
@@ -77,6 +77,8 @@ export async function minuteTick(now = Date.now(), { send = null, maintJudge = n
   // 전체 점검 30회차 C(재현): 등록부를 못 읽으면 대상 목록이 비어 알림 주기가 발생 중 상태를 지웠다(해제 알림도 없이 — 복구 뒤 같은 알림이 다시 나감).
   //   규칙 파일 손상과 같이 이 주기를 건너뛴다(판정 · 조절 모두 — 대상이 없다는 뜻이 아니다).
   if (registryLoadError()) return { skipped: 'registry-unreadable' };
+  pruneOrphans(now);
+  store.flushHeldStatusEvents(now);   // 반증 AE-5 — 끝난 창에서 줄인 상태 사건 수를 그 창 끝 시각의 한 줄로
   const settings = getSettings();
   const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
   const targets = allTargets().filter((t) => recordIds.has(t.id));
@@ -95,6 +97,23 @@ export async function minuteTick(now = Date.now(), { send = null, maintJudge = n
   }
   return alertCycle({ store, targets: allTargets(), recordIds, send, maintState, mock: isMockMode(), now });
 }
+/**
+ * v3.57.0 묶음 B(29회차 남긴 것): 등록부에 없는 대상이 수집 정의에 남은 것(29회차 F5 전에 지운 서버 — 그 뒤로는 지울 때 뺀다)을 뺀다 —
+ *   한도(계속 수집 20대)를 차지하고 그 서버의 '수집 종료' 가 404 였다. 등록부를 **읽었을 때만**(못 읽으면 minuteTick 이 먼저 돌아간다) · 10분에 한 번.
+ *   빼는 것은 '서버별 수집 종료' 와 같은 길(removeFromCollection — 실행 기록 · 마지막이면 그 수집이 끝난다).
+ */
+export const ORPHAN_EVERY_MS = 10 * 60_000;
+let orphanAt = 0;
+export function pruneOrphans(now = Date.now()) {
+  if (now - orphanAt < ORPHAN_EVERY_MS && now >= orphanAt) return 0;
+  if (registryLoadError()) return 0;
+  orphanAt = now;
+  let n = 0;
+  for (const s of store.listSessions(now)) for (const id of [...s.targets]) if (!findTarget(id)) { const r = removeFromCollection(s.id, id); if (r.ok) n += 1; }
+  if (n) console.warn(`[focusmon] 등록부에 없는 서버 ${n}대를 수집 정의에서 뺐습니다(예전에 지운 서버 — 한도를 차지하던 것)`);
+  return n;
+}
+export function _resetOrphanForTest() { orphanAt = 0; }
 let sendImpl = null; let maintImpl = null;
 /** 발송 · 정비 창 판정 주입(central/focusMonEdge.js 가 등록 — 이 모듈이 alerts.js · bmusage 를 직접 import 하지 않게). */
 export function setAlertDeps({ send = null, maintJudge = null } = {}) { sendImpl = send; maintImpl = maintJudge; }
@@ -144,13 +163,26 @@ export function targetEndpointChanged(before, after) {
  *   (대상마다 targetEndpointChanged 를 부르면 50대 옮기기가 같은 엣지에 깨우기 100번이었다).
  * @param {Array<[object|null, object|null]>} pairs [예전, 지금]
  */
-export function targetsEndpointChanged(pairs = []) {
+export function targetsEndpointChanged(pairs = [], now = Date.now()) {
   const list = (Array.isArray(pairs) ? pairs : []).filter((p) => Array.isArray(p) && p[1]?.id);
   if (!list.length) return;
-  tick1();
+  // 반증 AE-4: 수집 조절 상태는 틱 **앞에서** 지운다 — 틱이 예전 서버의 주기(procEvery)로 새 수집기를 열지 않게
+  const moved = (b, a) => !b || String(b.host || '') !== String(a.host || '') || String(b.agent || '').toLowerCase() !== String(a.agent || '').toLowerCase();
+  for (const [before, after] of list) if (moved(before, after)) forgetTune(after.id);
+  tick1(now);
   const wake = new Map();   // 소문자 → 저장된 글자
   for (const [before, after] of list) {
-    store.forgetTargetState(after.id);
+    // v3.57.0 묶음 B(30회차 K · 반증 F3): **기계가 바뀜** = 주소 또는 담당 노드(사설 주소는 법인마다 겹친다 — 같은 10.0.0.5 를 다른 노드로 옮기면 다른 기계다).
+    //   계정 · 포트만 바뀌면 같은 기계라 남긴다. 기계가 바뀌면 경계(store.forgetTargetState) · 알림 상태 · 사건 한 줄.
+    const hostChanged = !before || String(before.host || '') !== String(after.host || '');
+    const nodeChanged = !before || String(before.agent || '').toLowerCase() !== String(after.agent || '').toLowerCase();
+    const machineChanged = hostChanged || nodeChanged;
+    store.forgetTargetState(after.id, { machineChanged, now });
+    if (machineChanged) {
+      try { forgetTargetAlerts(after.id); } catch { /* 알림 상태는 다음 주기에 다시 판정 */ }
+      // 차트의 끊긴 자리를 설명한다(기록은 같은 id 로 잇는다) — 주소 · 노드 이름은 싣지 않는다(사건 글은 데모 판본에도 보인다)
+      if (before) store.queueEvent(after.id, 'endpoint', `${hostChanged && nodeChanged ? '접속 주소 · 담당 노드' : hostChanged ? '접속 주소' : '담당 노드'}를 바꿈 — 이 앞의 값은 예전 서버의 것입니다`, now, { scope: 'server' });
+    }
     for (const a of [before?.agent, after.agent]) { const s = String(a || ''); if (s && !wake.has(s.toLowerCase())) wake.set(s.toLowerCase(), s); }
   }
   for (const a of wake.values()) wakeImpl?.(a);
@@ -200,9 +232,18 @@ export function startFocusMon() {
     every(() => { minuteTick(Date.now(), { send: sendImpl, maintJudge: maintImpl }).catch((e) => console.warn(`[focusmon] 알림 · 자동 조절 실패: ${String(e?.message || e).slice(0, 160)}`)); }, 60_000), // v3.16.0 ⑯
   ];
   try { nodeTick(); } catch { /* 첫 창의 기준점 */ }
+  // v3.57.0 반증 SD-3: 기계 경계(메모리)를 DB 의 최근 24시간 '접속처 바뀜' 사건으로 되살린다 — 재시작 뒤 가득 참 추정 · 구간 평균이 예전 서버 값을 섞지 않게(못 읽으면 없이 간다)
+  restoreResets().catch(() => {});
   // 계속 수집 정의가 남아 있으면(재시작) 곧바로 이어 받는다 — 첫 틱이 desiredFor 로 읽는다.
   const resumed = store.listSessions().filter((x) => x.resumed).length;
   if (resumed) console.log(`[focusmon] 계속 수집 ${resumed}건을 이어 받습니다.`);
+}
+
+/** 최근 24시간 '접속처 바뀜' 사건 → 기계 경계(store.noteResetAt). 되살린 수. */
+export async function restoreResets(now = Date.now()) {
+  const rows = await db.readEventsOfKinds(now - store.RESET_KEEP_MS, now + 60_000, ['endpoint'], 5000);
+  let n = 0; for (const r of rows || []) if (store.noteResetAt(r.target, r.at, now)) n += 1;
+  return n;
 }
 
 export function stopFocusMon() {

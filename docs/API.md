@@ -1278,11 +1278,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/esxi-temp/spark` | 권한 `tools` · `textFields` | [server/src/routes/api/toolsCapacity.js:1736](../server/src/routes/api/toolsCapacity.js#L1736) |
 | GET | `/tools/focus-mon` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:154](../server/src/routes/api/focusMon.js#L154) |
 | GET | `/tools/focus-mon/alerts` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:705](../server/src/routes/api/focusMon.js#L705) |
-| POST | `/tools/focus-mon/alerts/preview` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/focusMon.js:757](../server/src/routes/api/focusMon.js#L757) |
-| POST | `/tools/focus-mon/alerts/rules` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `textFields` · `ruleWrite` | [server/src/routes/api/focusMon.js:753](../server/src/routes/api/focusMon.js#L753) |
-| DELETE | `/tools/focus-mon/alerts/rules/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `ruleWrite` | [server/src/routes/api/focusMon.js:755](../server/src/routes/api/focusMon.js#L755) |
-| PUT | `/tools/focus-mon/alerts/rules/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `ruleWrite` | [server/src/routes/api/focusMon.js:754](../server/src/routes/api/focusMon.js#L754) |
-| GET | `/tools/focus-mon/apps` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:778](../server/src/routes/api/focusMon.js#L778) |
+| POST | `/tools/focus-mon/alerts/preview` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/focusMon.js:759](../server/src/routes/api/focusMon.js#L759) |
+| POST | `/tools/focus-mon/alerts/rules` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `textFields` · `ruleWrite` | [server/src/routes/api/focusMon.js:755](../server/src/routes/api/focusMon.js#L755) |
+| DELETE | `/tools/focus-mon/alerts/rules/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `ruleWrite` | [server/src/routes/api/focusMon.js:757](../server/src/routes/api/focusMon.js#L757) |
+| PUT | `/tools/focus-mon/alerts/rules/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `ruleWrite` | [server/src/routes/api/focusMon.js:756](../server/src/routes/api/focusMon.js#L756) |
+| GET | `/tools/focus-mon/apps` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:780](../server/src/routes/api/focusMon.js#L780) |
 | GET | `/tools/focus-mon/audit` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMonAudit.js:120](../server/src/routes/api/focusMonAudit.js#L120) |
 | GET | `/tools/focus-mon/audit/:id/runs` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMonAudit.js:299](../server/src/routes/api/focusMonAudit.js#L299) |
 | POST | `/tools/focus-mon/audit/install` | 역할 `admin` · `requireSettingsOwner` · `fullRwOnly` · `demoBlockWrite` · `reauth` | [server/src/routes/api/focusMonAudit.js:168](../server/src/routes/api/focusMonAudit.js#L168) |
@@ -1293,12 +1293,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/focus-mon/audit/run/:runId` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMonAudit.js:310](../server/src/routes/api/focusMonAudit.js#L310) |
 | GET | `/tools/focus-mon/audit/run/:runId/report.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/focusMonAudit.js:334](../server/src/routes/api/focusMonAudit.js#L334) |
 | GET | `/tools/focus-mon/changes` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:559](../server/src/routes/api/focusMon.js#L559) |
-| GET | `/tools/focus-mon/coverage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:812](../server/src/routes/api/focusMon.js#L812) |
+| GET | `/tools/focus-mon/coverage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:814](../server/src/routes/api/focusMon.js#L814) |
 | GET | `/tools/focus-mon/data` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:526](../server/src/routes/api/focusMon.js#L526) |
 | POST | `/tools/focus-mon/edges/:agent/wake` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:368](../server/src/routes/api/focusMon.js#L368) |
 | POST | `/tools/focus-mon/events` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `textFields` | [server/src/routes/api/focusMon.js:574](../server/src/routes/api/focusMon.js#L574) |
 | DELETE | `/tools/focus-mon/events/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:589](../server/src/routes/api/focusMon.js#L589) |
-| GET | `/tools/focus-mon/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:823](../server/src/routes/api/focusMon.js#L823) |
+| GET | `/tools/focus-mon/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:825](../server/src/routes/api/focusMon.js#L825) |
 | POST | `/tools/focus-mon/groups` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `textFields` | [server/src/routes/api/focusMon.js:234](../server/src/routes/api/focusMon.js#L234) |
 | DELETE | `/tools/focus-mon/groups/:name` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:250](../server/src/routes/api/focusMon.js#L250) |
 | PUT | `/tools/focus-mon/groups/:name` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:241](../server/src/routes/api/focusMon.js#L241) |
@@ -1306,7 +1306,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/focus-mon/load` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:609](../server/src/routes/api/focusMon.js#L609) |
 | GET | `/tools/focus-mon/prep` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMonAudit.js:226](../server/src/routes/api/focusMonAudit.js#L226) |
 | POST | `/tools/focus-mon/prep` | 역할 `admin` · `requireSettingsOwner` · `fullRwOnly` · `demoBlockWrite` · `reauth` | [server/src/routes/api/focusMonAudit.js:261](../server/src/routes/api/focusMonAudit.js#L261) |
-| GET | `/tools/focus-mon/proc` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:793](../server/src/routes/api/focusMon.js#L793) |
+| GET | `/tools/focus-mon/proc` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:795](../server/src/routes/api/focusMon.js#L795) |
 | GET | `/tools/focus-mon/procs` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:679](../server/src/routes/api/focusMon.js#L679) |
 | POST | `/tools/focus-mon/sessions` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` · `textFields` | [server/src/routes/api/focusMon.js:454](../server/src/routes/api/focusMon.js#L454) |
 | DELETE | `/tools/focus-mon/sessions/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:511](../server/src/routes/api/focusMon.js#L511) |

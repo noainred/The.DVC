@@ -85,6 +85,12 @@ function positions(blocks, from, to) {
   for (const b of blocks) for (let i = 0; i < b.ts.length; i++) { const t = b.ts[i]; if (t >= from && t <= to) out.push([b, i, t]); }
   return out;
 }
+/**
+ * 기계 경계 뒤 표본만(v3.57.0 묶음 B 반증 SD-2): 주소 · 담당 노드를 고친 뒤 **지금 값 · 구간 평균 · 표 · 최고 값**은 새 서버의 표본만 쓴다 —
+ *   예전에는 store.latest 만 지웠고 화면은 메모리 묶음의 마지막 표본(예전 서버)을 지금 값으로 냈다. 차트(추이)는 같은 id 의 기록 그대로(사건 '접속처 바뀜' 이 경계를 알린다).
+ *   경계는 메모리에만 있다(재시작하면 없다 — 그때는 새 표본만 들어온다).
+ */
+export function sinceReset(id, pos) { const f = store.resetAtOf(id); return f ? pos.filter((p) => p[2] >= f) : pos; }
 
 /** 수집 공백으로 보는 틈 — 이보다 긴 표본 간격은 칸 폭 계산에서 뺀다(그 구간은 비워 둔다). */
 export const GAP_MS = 60_000;
@@ -231,7 +237,7 @@ export async function overview(ids, w) {
     const { blocks, partial: p } = await blocksFor(id, w.from, w.to);
     partial = partial || p;
     const pos = positions(blocks, w.from, w.to);
-    const lp = lastPos(pos);
+    const lp = lastPos(sinceReset(id, pos));
     const last = lp ? sampleAt(lp[0], lp[1]) : null;
     const series = {};
     for (const [k, key] of [['cpu', 's.cpu'], ['mem', 's.mem'], ['net', 's.net'], ['disk', 's.disk']]) series[k] = bucketize(pos, key, w.from, w.to, OVERVIEW_POINTS).avg;
@@ -293,7 +299,8 @@ export async function compare(ids, w, { metric = 'cpu', item = 'pct', scope = 'a
     if (!key) { out.push({ id, key: null, avg: [], max: [], last: null, missing: 'no-series' }); continue; }
     const { avg, max } = bucketize(pos, key, w.from, w.to, points, { fixed: true });
     let last = null; let lastAt = null;
-    for (let k = pos.length - 1; k >= 0; k--) { const v = val(pos[k][0], key, pos[k][1]); if (v != null) { last = r2(v); lastAt = pos[k][2]; break; } }
+    const cur = sinceReset(id, pos);
+    for (let k = cur.length - 1; k >= 0; k--) { const v = val(cur[k][0], key, cur[k][1]); if (v != null) { last = r2(v); lastAt = cur[k][2]; break; } }
     out.push({ id, key, avg, max, last, lastAt, n: pos.length, ...(pos.length && !blocks.some((b) => b.cols.has(key)) ? { missing: 'no-series' } : {}) });
     await y();
   }
@@ -304,8 +311,9 @@ export async function compare(ids, w, { metric = 'cpu', item = 'pct', scope = 'a
 export async function serverDetail(id, w, { at = 'end', dev = '', cmp = '' } = {}) {
   const { blocks, partial } = await blocksFor(id, w.from, w.to);
   const pos = positions(blocks, w.from, w.to);
-  const lp = lastPos(pos);
-  const table = at === 'avg' ? averageSample(pos) : (lp ? sampleAt(lp[0], lp[1]) : null);
+  const cur = sinceReset(id, pos);   // 표 · 최고 · 파일시스템은 경계 뒤(반증 SD-2) — 차트는 pos 그대로
+  const lp = lastPos(cur);
+  const table = at === 'avg' ? averageSample(cur) : (lp ? sampleAt(lp[0], lp[1]) : null);
   const meta = blocks.length ? blocks[blocks.length - 1].meta : null;
   const P = MAX_POINTS; const SP = 60;
   const chart = (key, pts = P) => bucketize(pos, key, w.from, w.to, pts).avg;
@@ -325,12 +333,12 @@ export async function serverDetail(id, w, { at = 'end', dev = '', cmp = '' } = {
   const ext = {};
   for (const key of EXT_KEYS) {
     let mx = null; let mxAt = null;
-    for (const [b, i, t] of pos) { const v = val(b, key, i); if (v != null && (mx == null || v > mx)) { mx = v; mxAt = t; } }
+    for (const [b, i, t] of cur) { const v = val(b, key, i); if (v != null && (mx == null || v > mx)) { mx = v; mxAt = t; } }
     ext[key] = { vals: chart(key, SP), max: mx == null ? null : r2(mx), maxAt: mxAt };
   }
   // 파일시스템 표는 구간 안 마지막 확인(끝 순간 표본에 없을 수 있다 — 60초마다)
   let fsLast = null;
-  for (let k = pos.length - 1; k >= 0 && !fsLast; k--) { const [b, i, t] = pos[k]; if (val(b, 'f.rc', i) != null || val(b, 'f.age', i) != null) { const sm = sampleAt(b, i); fsLast = sm.fs ? { ...sm.fs, at: t - (sm.fs.age ?? 0) * 1000 } : null; } }
+  for (let k = cur.length - 1; k >= 0 && !fsLast; k--) { const [b, i, t] = cur[k]; if (val(b, 'f.rc', i) != null || val(b, 'f.age', i) != null) { const sm = sampleAt(b, i); fsLast = sm.fs ? { ...sm.fs, at: t - (sm.fs.age ?? 0) * 1000 } : null; } }
   // v3.13.0(⑭): CPU 사용률 띠(칸 안 최저 ~ 최고) · 겹쳐 보기(하루 · 이레 앞 같은 칸 수 — 그때 수집 안 한 칸은 null)
   const cpuB = bucketize(pos, 'c.pct', w.from, w.to, P);
   charts.band = { min: cpuB.min, max: cpuB.max, avg: cpuB.avg };
@@ -370,8 +378,10 @@ export async function fillEstimate(id, { rows = [], now = Date.now() } = {}) {
   if (isDemoTarget(id)) return demoFill(id); // 데모(목) 대상 — 하루 기록이 없다
   const sess = store.sessionOfTarget(id);
   if (!sess || sess.mode !== 'record') return { state: 'not-record', spanH: null, rows: {} };
+  // 기계 경계(반증 SD-3): 예전 서버의 파일시스템 값과 새 서버의 값을 한 직선으로 잇지 않는다 — 경계 뒤 점만(기록이 짧으면 '짧음')
+  const floor = store.resetAtOf(id) || 0;
   const c = fillCache.get(id);
-  if (c && now - c.at < FILL_CACHE_MS) return c.out;
+  if (c && now - c.at < FILL_CACHE_MS && c.floor === floor) return c.out;
   const toMin = Math.floor(now / 60_000); const fromMin = toMin - FILL_LOOK_H * 60;
   const dbRows = await db.readMetricEvery(id, fromMin, toMin, FILL_STEP_MIN);
   if (dbRows == null) return { state: 'no-db', spanH: null, rows: {} };
@@ -384,7 +394,7 @@ export async function fillEstimate(id, { rows = [], now = Date.now() } = {}) {
     const keys = [...b.cols.keys()].filter((k) => k.startsWith('f.') && k.endsWith('.p'));
     for (const k of keys) {
       const arr = b.cols.get(k); let v = null; let t = null;
-      for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) { v = arr[i]; t = b.ts[i]; break; }
+      for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null && b.ts[i] >= floor) { v = arr[i]; t = b.ts[i]; break; }
       if (v == null) continue;
       const m = k.slice(2, -2);
       if (!pts.has(m)) pts.set(m, []);
@@ -411,7 +421,7 @@ export async function fillEstimate(id, { rows = [], now = Date.now() } = {}) {
       out.rows[m] = { days: days > 365 ? null : Math.max(0, Math.round(days * 10) / 10), trend: 'up', perDay, over: days > 365 };
     }
   }
-  fillCache.set(id, { at: now, out });
+  fillCache.set(id, { at: now, out, floor });
   if (fillCache.size > 200) fillCache.delete(fillCache.keys().next().value);
   return out;
 }
@@ -426,8 +436,9 @@ export async function iostatCompare(ids, w, { at = 'end', scope = 'phys', col = 
     partial = partial || p;
     const pos = positions(blocks, w.from, w.to);
     posBy.set(id, pos);
-    const lp = lastPos(pos);
-    const s = at === 'avg' ? averageSample(pos) : (lp ? sampleAt(lp[0], lp[1]) : null);
+    const cur = sinceReset(id, pos);
+    const lp = lastPos(cur);
+    const s = at === 'avg' ? averageSample(cur) : (lp ? sampleAt(lp[0], lp[1]) : null);
     const dsk = (s?.dsk || []).filter((d) => scope === 'all' || d.k === 'disk');
     rows.push({ id, lastAt: lp ? lp[2] : null, total: s?.dtot || null, devices: dsk.map((d) => ({ n: d.n, dn: d.dn || null, k: d.k, p: d.p || null, mp: d.mp || '', v: d.v, fl: d.fl ?? null, ...(d.stuck ? { stuck: true } : {}) })) });
     await y();
@@ -465,7 +476,8 @@ export async function procSnaps(id, from, to) {
     for (const r of rows || []) for (const s of decodeProcBlock(r.data) || []) snaps.push(s);
   }
   for (const [m, list] of mem) if (m >= fromMin && m <= toMin) for (const s of list) snaps.push(s);
-  return snaps.filter((s) => s && s.t >= from && s.t <= to).sort((a, b) => a.t - b.t);
+  const floor = Math.max(from, store.resetAtOf(id) || 0); // 기계 경계 뒤만(반증 SD-2 — 프로세스 목록 · 세부는 '그 서버의 지금')
+  return snaps.filter((s) => s && s.t >= floor && s.t <= to).sort((a, b) => a.t - b.t);
 }
 
 /**
@@ -599,5 +611,7 @@ export async function coverage(ids, from, to) {
   return { from, to, ranges: toRanges(all), dbOk, oldestMinute: oldest };
 }
 
+/** 그 분의 DB 묶음 기억을 버린다(v3.57.0 반증 SD-4 — 합쳐 쓰기 전에 읽어 둔 부분 묶음이 남지 않게 · 기록기가 부른다). */
+export function forgetCached(id, minute) { lru.delete(`${id}|${minute}`); }
 export function _resetForTest() { lru.clear(); fillCache.clear(); }
 export { isNum as _isNum };

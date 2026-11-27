@@ -44,7 +44,7 @@ const MJ = await import('../src/bmusage/maint/judge.js');
 const base = { name: 'CPU 높음', metric: 'cpu', threshold: 50, durMin: 1, severity: 'crit', scope: { kind: 'record' } };
 const fill = (id, now, row, from = now - 100_000) => { for (let t = from; t <= now - 1000; t += 2000) store.ingestSample(id, t, row, null, t); };
 
-test('H1 필수 앱 — 서비스마다 프로세스 수(all) · 상위 20 밖 · 죽으면 0 → 발생', () => {
+test('H1 필수 앱 — 서비스마다 프로세스 수(all) · 상위 20 밖 · 죽으면 0 → 발생', async () => {
   // 서비스 22개 + 필수 앱(CPU 가 가장 낮음) — 상위 20 에 들지 않는다
   const units = new Map(); const cur = []; const rows = [];
   for (let i = 0; i < 22; i++) { const pid = 100 + i; units.set(pid, `s${i}.service`); cur.push({ pid, ppid: 1, comm: `s${i}`, thr: 1, rss: 10 }); rows.push({ p: { pid }, cpu: 10 + i }); }
@@ -64,8 +64,11 @@ test('H1 필수 앱 — 서비스마다 프로세스 수(all) · 상위 20 밖 �
   const c = edge.cleanProcs({ n: 1, top: [], apps: { sv: [], cm: [], all: { 'a.service': 2, 'b c': 1, 'x.service': -1, 'y.service': 1.5, 'z.scope': 3 } } });
   assert.deepEqual({ ...c.apps.all }, { 'a.service': 2, 'z.scope': 3 });
   // DB 에는 all 을 남기지 않는다(마지막 표본의 apps 도 sv · cm 만)
-  const src = fs.readFileSync(new URL('../src/focusmon/store.js', import.meta.url), 'utf8');
-  assert.match(src, /s\.apps\.all \? \{ \.\.\.s, apps: \{ sv: s\.apps\.sv, cm: s\.apps\.cm \} \}/);
+  //   v3.57.0: 규칙은 codec.procRowsForDb 하나(합쳐 쓰기도 같은 함수) — 글자 대조 대신 동작으로 본다
+  const { procRowsForDb } = await import('../src/focusmon/codec.js');
+  const dbRows = procRowsForDb([{ t: 1, apps: { sv: [{ k: 'a' }], cm: [], all: { a: 1 } } }, { t: 2, apps: { sv: [{ k: 'b' }], cm: ['c'], all: { b: 1 } } }]);
+  assert.equal(dbRows[0].apps, undefined, '마지막이 아닌 표본은 앱 묶음 없음');
+  assert.deepEqual(dbRows[1].apps, { sv: [{ k: 'b' }], cm: ['c'] }, '마지막 표본은 sv · cm 만(all 없음)');
 });
 
 test('H2 정비 창 — 법인(DataCenter) → vCenter 들 · 실제 판정 코어 · vCenter 가 여럿이면 서버 창만', () => {
