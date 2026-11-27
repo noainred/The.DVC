@@ -244,6 +244,19 @@ export function flushReopened(id = null) {
   return n;
 }
 
+/**
+ * DB 에 합쳐 쓴 분을 메모리 묶음에도(v3.57.0 묶음 B 반증 SD-4): 메모리에는 재시작 뒤 받은 표본뿐이라 최근 31분 화면이 그 분을 덜 촘촘하게 보였다.
+ * 그 분이 다시 열려 있으면(늦은 표본이 또 옴) 두지 않는다 — 그 묶음은 다시 합쳐 쓰고 그때 다시 맞춘다. 바꾸면 true.
+ */
+export function adoptMerged(id, minute, block) {
+  const e = T.get(String(id));
+  if (!e || !block || e.reopen.has(minute)) return false;
+  const i = e.recent.findIndex((x) => x.minute === minute);
+  if (i < 0) return false;
+  e.recent[i] = freeze({ ...block, minute, merge: true });
+  return true;
+}
+
 /** 분 닫기 · 메모리 정리(1초 틱). 수집 중인 대상 집합을 받아 그 밖의 오래된 대상은 뺀다. */
 export function closeMinutes(now = Date.now(), activeIds = new Set()) {
   flushReopened();
@@ -777,10 +790,12 @@ export function machineKeyOf(t) {
 export const MACHINE_KEY_RE = /^[a-f0-9]{16}$/;
 /**
  * 표지를 싣지 않는 옛 엣지의 울타리 — 기계가 바뀐 뒤 그 대상을 맡은 엣지의 **동기화 두 번**(바뀐 뒤 첫 동기화 본문 · 그 응답을 기다리는 사이 모인 것)은
- * 그 대상의 표지 없는 값을 받지 않는다(새 서버 표본 몇 초를 잃을 수 있다 — 옛 엣지만 · 섞이는 것보다 낫다). 2분이 지나면 저절로 풀린다(엣지가 멈춘 경우).
+ * 그 대상의 표지 없는 값을 받지 않는다(새 서버 표본 몇 초를 잃을 수 있다 — 옛 엣지만 · 섞이는 것보다 낫다).
+ * 반증 SD-5(재현): 처음 판은 2분이 지나면 저절로 풀려, 회선이 끊긴 사이 주소를 고치면 다시 붙은 엣지의 밀린 예전 서버 표본(시각은 경계 뒤로 옮겨진다)을 받았다 —
+ *   이제는 **동기화 횟수로만** 푼다(엣지가 다시 붙어 두 번 동기화해야 풀린다). 상한 24시간은 지도 정리용(엣지 버퍼는 그보다 훨씬 짧다 — 밀린 표본 보존 10분).
  */
 export const EDGE_FENCE_SYNCS = 2;
-export const EDGE_FENCE_MS = 120_000;
+export const EDGE_FENCE_MS = 24 * 3600_000;
 const EDGE_FENCE = new Map(); // targetId → { at, syncs }
 export function edgeFenced(id, now = Date.now()) {
   const f = EDGE_FENCE.get(String(id));

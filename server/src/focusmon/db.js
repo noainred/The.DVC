@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { decodeBlock, encodeBlock, mergeBlocks, decodeProcBlock, encodeProcBlock, mergeProcLists } from './codec.js';
 import { summarizeBlock, encodeSum } from './summary.js';
+import { createYielder } from '../util/timeSlice.js';
 
 // ⚠ 파일 이름은 리터럴로 둔다 — scripts/config-doc.mjs 가 path.join(…, '<이름>.db') 모양으로 찾는다.
 const FILE = () => path.join(config.dbDir || config.configDir, 'focusmon.db');
@@ -110,25 +111,52 @@ function runRows(db, rows) {
   const s60 = db.prepare('INSERT OR REPLACE INTO fm_sum60 (target, hour, data) VALUES (?, ?, ?)');
   const ev = db.prepare('INSERT OR REPLACE INTO fm_event (id, target, at, kind, text, by, scope) VALUES (?, ?, ?, ?, ?, ?, ?)');
   for (const r of rows) {
-    if (r.kind === 'm' || r.kind == null) { const x = r.merge ? mergedMetric(getM.get(String(r.target), r.minute), r) : r; m.run(String(r.target), r.minute, x.n | 0, x.data); }
+    // _data: writeBlocks 가 트랜잭션 **밖에서** 양보하며 미리 합친 값(반증 SD-1) · 없으면(종료 직전 동기 경로) 여기서 합친다
+    if (r.kind === 'm' || r.kind == null) { const x = r._data ? { n: r._n, data: r._data } : r.merge ? mergedMetric(getM.get(String(r.target), r.minute), r) : r; m.run(String(r.target), r.minute, x.n | 0, x.data); }
     // 합친 분의 1분 요약은 합친 묶음(이미 위 줄이 쓴 fm_metric — 같은 트랜잭션 · 앞 트랜잭션)에서 다시 만든다
-    else if (r.kind === 's1') s1.run(String(r.target), r.minute, r.merge ? (mergedSum(getM.get(String(r.target), r.minute)) || r.data) : r.data);
+    else if (r.kind === 's1') s1.run(String(r.target), r.minute, r._data || (r.merge ? (mergedSum(getM.get(String(r.target), r.minute)) || r.data) : r.data));
     else if (r.kind === 's60') s60.run(String(r.target), r.hour, r.data);
     else if (r.kind === 'e') ev.run(String(r.id), String(r.target), r.at, String(r.ekind), String(r.text).slice(0, 300), String(r.by || '').slice(0, 64), String(r.scope || 'server'));
-    else if (r.kind === 'p') p.run(String(r.target), r.minute, r.merge ? mergedProc(getP.get(String(r.target), r.minute), r.data) : r.data);
+    else if (r.kind === 'p') p.run(String(r.target), r.minute, r._data || (r.merge ? mergedProc(getP.get(String(r.target), r.minute), r.data) : r.data));
     else if (r.kind === 'l') ld.run(String(r.target), r.minute, String(r.data));
     else if (r.kind === 'n') nd.run(String(r.target), r.minute, String(r.data));
   }
 }
 
-/** 있는 줄(없으면 그대로) + 새 묶음 → 합친 줄. 있는 줄이 깨졌으면 새 것으로(읽을 수 없는 줄을 지킬 이유가 없다) · 새 것이 깨졌으면 있는 것을 둔다. */
+/** 있는 줄(없으면 그대로) + 새 묶음 → 합친 줄(block = 합친 묶음 · 합치지 않았으면 없음). 있는 줄이 깨졌으면 새 것으로(읽을 수 없는 줄을 지킬 이유가 없다) · 새 것이 깨졌으면 있는 것을 둔다. */
 function mergedMetric(row, r) {
   if (!row) return r;
   const a = decodeBlock(row.data); const b = decodeBlock(r.data);
   if (!a) return r;
   if (!b) return { n: a.ts.length, data: row.data };
   const mg = mergeBlocks(a, b);
-  return { n: mg.ts.length, data: encodeBlock(mg) };
+  return { n: mg.ts.length, data: encodeBlock(mg), block: mg };
+}
+/**
+ * 합쳐 쓰기 미리 하기(v3.57.0 묶음 B 반증 SD-1): 풀기 · 합치기 · 다시 묶기를 **트랜잭션 밖에서 시간 기준 양보**하며 한다 —
+ *   재시작 직후 대상 수십 대의 첫 분이 한꺼번에 합쳐질 때 그 일을 한 동기 트랜잭션에서 하면 이벤트 루프가 그만큼 멈춘다(perf-db 규약).
+ *   기록기는 하나(recorder — 겹쳐 돌지 않는다)라 미리 읽은 줄과 트랜잭션 사이에 같은 (대상, 분)을 쓰는 다른 길이 없다.
+ * @returns {Array<{target, minute, block}>} 합친 분(기록기가 메모리 묶음 · 조회 기억을 맞춘다)
+ */
+async function premerge(db, rows) {
+  const want = rows.filter((r) => r.merge);
+  if (!want.length) return [];
+  const y = createYielder(10);
+  const getM = db.prepare('SELECT data FROM fm_metric WHERE target = ? AND minute = ?');
+  const getP = db.prepare('SELECT data FROM fm_proc WHERE target = ? AND minute = ?');
+  const blocks = new Map(); const merged = [];
+  for (const r of want) {
+    const k = `${r.target}|${r.minute}`;
+    if (r.kind === 'm' || r.kind == null) {
+      const x = mergedMetric(getM.get(String(r.target), r.minute), r);
+      if (x.block) { r._n = x.n; r._data = x.data; blocks.set(k, x.block); merged.push({ target: String(r.target), minute: r.minute, block: x.block }); }
+    } else if (r.kind === 's1') {
+      const b = blocks.get(k);
+      if (b) { const sm = summarizeBlock(b); if (sm) r._data = encodeSum(sm); } else { const v = mergedSum(getM.get(String(r.target), r.minute)); if (v) r._data = v; }
+    } else if (r.kind === 'p') r._data = mergedProc(getP.get(String(r.target), r.minute), r.data);
+    await y();
+  }
+  return merged;
 }
 function mergedSum(row) {
   const b = row ? decodeBlock(row.data) : null;
@@ -147,6 +175,8 @@ export async function writeBlocks(rows = []) {
   const db = await getDb();
   if (!db) return { ok: false, error: _err || lockRetry.note() || 'DB 를 열지 못했습니다' };
   if (!rows.length) return { ok: true, written: 0, ms: 0 };
+  let merged = [];
+  try { merged = await premerge(db, rows); } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
   const t0 = performance.now();
   try {
     db.exec('BEGIN');
@@ -156,7 +186,7 @@ export async function writeBlocks(rows = []) {
     try { db.exec('ROLLBACK'); } catch { /* */ }
     return { ok: false, error: String(e?.message || e).slice(0, 200) };
   }
-  return { ok: true, written: rows.length, ms: performance.now() - t0 };
+  return { ok: true, written: rows.length, ms: performance.now() - t0, merged };
 }
 
 /** 범위 조회 — [fromMinute, toMinute] 의 묶음들(시각 순). 한 번에 읽는 줄 수 상한 `limit`. */

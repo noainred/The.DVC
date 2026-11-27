@@ -347,7 +347,10 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
     }
     if (f.retry > 0) continue; // 다시 보내는 것 — 사건은 처음 한 번만
     const kindText = j.event === 'fire' ? '발생' : j.event === 'resolve' ? '해제' : '판정 보류';
-    const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : j.cut ? ' · 서비스 목록이 상한에서 잘려 이 이름을 못 봄(수집은 됨)' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
+    // v3.57.0 묶음 B: 판정 구간이 기계 경계(주소 · 노드를 고친 순간) 뒤에서 시작하면 보류의 까닭은 '아직 새 서버 값이 없음' 이다(수집 끊김으로 단정하지 않는다)
+    const afterMove = (Number(store.resetAtOf?.(t.id)) || 0) >= now - r.durMin * 60_000 - 120_000;
+    const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : j.cut ? ' · 서비스 목록이 상한에서 잘려 이 이름을 못 봄(수집은 됨)'
+      : afterMove ? ' · 접속처를 바꾼 뒤 새 서버 값이 아직 없음' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
     store.queueEvent(t.id, 'alert', `${r.name} — ${condText(r)} · ${kindText}${valText}${f.suppressed ? ' · 정비 창이라 보내지 않음' : ''}`.slice(0, 300), now, { id: `al:${r.id}:${t.id}:${j.event}:${now}`, scope: 'server' });
   }
   saveState(next);
