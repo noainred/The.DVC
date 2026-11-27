@@ -14,7 +14,7 @@ import { pushSensorSample, setSensorPollCycle, markSensorPollStart } from './sen
 import { fetchOmeDevices } from './ome.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(예전 ome.eachLimited 와 같은 격리 의미)
 import { setOmeDevices, dbKey } from './omeCache.js';
-import { setInventory, inventoryStale, isForcedStale, staleMarkOf } from './invCache.js';
+import { setInventory, getInventory, inventoryStale, isForcedStale, staleMarkOf } from './invCache.js';
 import { getDb } from './db.js';
 import { describeError } from '../util/errors.js';
 import { isStopped } from '../security/emergencyStop.js';
@@ -355,6 +355,7 @@ async function pollOnceInner({ manual = false, only = null, onRefreshed = null, 
         // 이벤트를 보낸 서버는 인벤토리를 늘 다시 읽는다(그것이 이유다 — 강제 표지 상한과 무관) · 정규 주기는 이벤트 묶음이 맡은 서버의 인벤토리를 읽지 않는다(이벤트 쪽 — 5회차 성능 D1)
         if (only || (inventoryStale(s.id, INVENTORY_MAX_AGE_MS) && !_eventPending.has(String(s.id)))) {
           const forced = isForcedStale(s.id); const mark = staleMarkOf(s.id);   // 읽기 시작 때의 표지 순번 — 그 뒤에 선 표지는 남긴다(5회차 엣지 #1)
+          const prevColl = only ? (getInventory(s.id)?.collections || null) : null;   // 이벤트 읽기의 ‘읽음’ 판정 — 앞 읽기에서 됐던 컬렉션이 이번에 실패했는가
           try {
             const inv = await fetchInventory(s);
             // 팬 파트 정보 — Thermal 은 fetchSensors 가 방금 받았으므로 재호출 없이 이관(추가 HTTP 0회).
@@ -363,7 +364,16 @@ async function pollOnceInner({ manual = false, only = null, onRefreshed = null, 
             if (inv.collections && typeof inv.collections === 'object') inv.collections.fans = sensorFans?.length ? 'ok' : (sensorErr ? 'failed' : 'ok');
             setInventory(s.id, inv, { mark });
             invRefreshed += 1;
-            if (only) { invRead.add(String(s.id)); if (onRefreshed) { try { onRefreshed(String(s.id)); } catch { /* 판정 고리 실패가 읽기를 막지 않는다 */ } } }   // 서버마다 판정을 깨운다(6회차 엣지 #2)
+            // 이벤트 읽기는 장비에 닿았고 부품 컬렉션이 모두 읽혔을 때만 ‘읽음’ — fetchInventory 는 503 · 404 에도 던지지 않고 reachable:false · 컬렉션 failed 를 돌려줘
+            //   읽음으로 쳐 재읽기 표지가 지워지고 30분 동안 다시 읽지 않았다(반증 14a H1). 못 읽음이면 호출부가 표지를 세워 다음 정규 주기가 한 번 다시 읽는다(urgent)
+            //   늘 실패하는 컬렉션(GPU 없는 서버 등)은 세지 않는다 — 앞 읽기에서 ‘ok’ 였던 컬렉션이 이번에 실패했을 때만(장비가 잠시 바쁨 · 부분 응답). 앞 읽기가 없으면 닿았는지만 본다
+            const coll = inv?.collections && typeof inv.collections === 'object' ? inv.collections : {};
+            const fullRead = inv?.reachable === true && !Object.entries(coll).some(([k, v]) => v === 'failed' && prevColl?.[k] === 'ok');
+            if (only) {
+              if (fullRead) invRead.add(String(s.id));
+              // 판정은 다시 읽은 서버마다 깨운다(6회차 엣지 #2) — 못 읽은 컬렉션은 전이가 보류하므로 깨워도 닫히지 않는다
+              if (onRefreshed) { try { onRefreshed(String(s.id)); } catch { /* 판정 고리 실패가 읽기를 막지 않는다 */ } }
+            }
             if (forced) evRefreshed += 1;
             // v2.611(감사 COL2611-01): v2.610 스캔이 HPE 의 제품번호(SKU)를 서비스태그로 등록했으면 시리얼로 1회 교정한다.
             if (inv.system?.hpe) { try { correctHpeServiceTag(s.id, { sku: inv.system.sku, serial: inv.system.serialNumber }); } catch { /* 교정 실패가 수집을 막지 않는다 */ } }

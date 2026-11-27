@@ -232,6 +232,11 @@ test('13c N1 — 판정 폴러의 가상 전이: DB 에 없는 기록의 장비�
     await RUN.runEscalationNow();
     const key = Object.keys(E.loadEscalationState().items).find((k) => k.startsWith('synth-n1|'));
     assert.ok(key && E.loadEscalationState().items[key].pk?.deviceId === 'synth-n1d', `기록과 판정 재료(${key})`);
+    // 14c M1 — 판정 재료(pk)가 없는 기록(업그레이드 전 · 확인 단추가 만든 것)도 열쇠와 sig 로 가상 장애를 만든다 — 재료를 지우고 진행
+    const stFile = path.join(tmp, 'partfault-escalation-state.json');
+    const st0 = JSON.parse(fs.readFileSync(stFile, 'utf8')); delete st0.items[key].pk; fs.writeFileSync(stFile, JSON.stringify(st0)); E._resetEscalationStateForTest();
+    assert.equal(E.loadEscalationState().items[key].pk, undefined);
+    assert.ok(E.phantomOf(key, E.loadEscalationState().items[key])?.deviceId === 'synth-n1d', 'sig 로 만든 가상 장애');
     // 새 DB 처럼 — 열린 행을 닫힘 이벤트 없이 지운다(그 열쇠의 마지막 이벤트는 ‘열림’ — DB 근거 없음)
     const { DatabaseSync } = await import('node:sqlite');
     const raw = new DatabaseSync(path.join(tmp, 'part-faults.db'));
@@ -255,8 +260,20 @@ test('13c N1 — 판정 폴러의 가상 전이: DB 에 없는 기록의 장비�
     await putEdgeReport('synth-n1', rep(true, false, [], ['psu:PSU.N1']));
     await PF.runPartFaultsNow({ reason: 'n1-ok' });
     assert.equal(CE.judgedClosedKeys().has(key), true, '읽었고 정상이면 닫힘 근거');
+    // 판정 재료가 없어도(sig) 닫힘을 가린다 — 이 회차는 기록을 정리한다(14c M1)
     await RUN.runEscalationNow();
     assert.equal(Object.hasOwn(E.loadEscalationState().items, key), false, '근거가 있으면 정리');
+    // 14c M2 — 다시 보이지 않는 장비의 기록(근거가 영영 없음)은 관리자가 정리한다 · 회차가 센다
+    const ghost = 'synth-gone|idrac:SYNTHGONE:disk:Disk.Bay.9';
+    const st1 = JSON.parse(fs.readFileSync(stFile, 'utf8'));
+    st1.items[ghost] = { since: 1, sig: 'synth-gone|idrac|synth-gone-d|disk|Disk.Bay.9', sent: [], ackedAt: 2, ackBy: 'oper', pol: 'pf', ps: {} };
+    fs.writeFileSync(stFile, JSON.stringify(st1)); E._resetEscalationStateForTest();
+    const r0 = await RUN.runEscalationNow();
+    assert.equal(r0.orphans, 1, '닫힘을 확인할 수 없는 기록 1건');
+    const f = await RUN.forgetEscalationOrphans();
+    assert.deepEqual([f.ok, f.removed], [true, 1]);
+    assert.equal(Object.hasOwn(E.loadEscalationState().items, ghost), false);
+    assert.equal(RUN.escalationRunStatus().orphans, 0);
   } finally { RUN._setEscalationDepsForTest(null); PF._setNotifyDepsForTest(null); CE._resetJudgedClosedForTest(); await PF._notifyIdleForTest(); }
 });
 
@@ -270,6 +287,12 @@ test('13a G1 — 묶음 A 에서 못 읽은 서버를 묶음 B 가 다시 읽어
     const b = req.params.box; log.push([b, Date.now(), xBad]);
     await sleep(b === 'gslow' ? 150 : 5);
     if (b === 'gx' && xBad) return res.status(401).end();
+    if (b === 'gx') {   // 고친 뒤에는 장비가 제대로 답한다(닿음 · 시스템 읽힘 — 반증 14a H1: 404 는 ‘읽음’ 이 아니다)
+      const u = req.url.split('?')[0];
+      if (u === '/redfish/v1/Systems') return res.json({ Members: [{ '@odata.id': '/redfish/v1/Systems/System.Embedded.1' }] });
+      if (u === '/redfish/v1/Systems/System.Embedded.1') return res.json({ SKU: 'SYNTHG1X', SerialNumber: 'SERG1X', Model: 'PowerEdge R650', Manufacturer: 'Dell Inc.', PowerState: 'On', Status: { Health: 'OK' } });
+      return res.json({ Members: [] });
+    }
     res.status(404).end();
   });
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
@@ -296,4 +319,51 @@ test('13a G1 — 묶음 A 에서 못 읽은 서버를 묶음 B 가 다시 읽어
   for (let i = 0; i < 600 && E.eventStatus().running; i += 1) await sleep(10);
   assert.equal(C.isForcedStale('g1-gx'), false, 'B 의 성공 읽기 뒤에 A 의 끝이 헛 표지를 세우지 않는다');
   C.removeInventory('g1-gx'); C.removeInventory('g1-gslow');
+});
+
+test('14a H1 — 이벤트 뒤 다시 읽기에서 장비가 503 · 404 로 답하면 ‘읽음’ 이 아니다(재읽기 표지) · 앞 읽기에서 됐던 컬렉션이 실패해도 · 늘 실패하는 컬렉션은 세지 않음', async (t) => {
+  let mode = 'busy'; const app = express();
+  app.use('/bmc/:box', async (req, res) => {
+    const u = req.url.split('?')[0];
+    if (mode === 'busy') return res.status(503).end();
+    if (u === '/redfish/v1/Systems') return res.json({ Members: [{ '@odata.id': '/redfish/v1/Systems/System.Embedded.1' }] });
+    if (u === '/redfish/v1/Systems/System.Embedded.1') return res.json({ SKU: 'SYNTHH1', SerialNumber: 'SERH1', Model: 'PowerEdge R650', Manufacturer: 'Dell Inc.', PowerState: 'On', Status: { Health: 'OK' } });
+    if (mode === 'partial' && !u.startsWith('/redfish/v1/Systems')) return res.status(503).end();
+    return res.json({ Members: [] });
+  });
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  t.after(() => { srv.closeAllConnections?.(); srv.close(); });
+  const registry = await import('../src/idrac/registry.js');
+  registry.importServers([{ id: 'h1-x', name: 'synth-h1', host: `http://127.0.0.1:${srv.address().port}/bmc/x`, username: 'u', password: 'p', serviceTag: 'SYNTHH1' }], 'replace');
+  const P = await import('../src/idrac/poller.js');
+  const C = await import('../src/idrac/invCache.js');
+  const readOf = async () => { const seen = []; await P.pollNowForEvent(['h1-x'], { onServerDone: (sid, info) => seen.push(info?.read) }); return seen; };
+  assert.deepEqual(await readOf(), [false], '503 전부 — 닿지 않음');
+  mode = 'ok';
+  assert.deepEqual(await readOf(), [true], '정상');
+  const okColl = Object.entries(C.getInventory('h1-x')?.collections || {}).filter(([, v]) => v === 'ok').map(([k]) => k);
+  mode = 'partial';
+  assert.deepEqual(await readOf(), okColl.some((k) => k !== 'system') ? [false] : [true], `앞에서 됐던 컬렉션(${okColl.join(',')})이 실패하면 못 읽음`);
+  C.removeInventory('h1-x');
+});
+
+test('14b M3 · M2 — 같은 부품의 새 알림은 맨 뒤로(받는 순서가 마지막 상태와 맞게) · 보내는 중 받지 못한 열림은 같은 부품의 뒤 알림이 받을 때 표시', async () => {
+  const PF = await import('../src/partfault/poller.js');
+  PF._resetNotifyForTest();
+  let release = null; const gate = new Promise((r) => { release = r; }); const order = []; const marks = [];
+  PF._setNotifyDepsForTest({
+    sendAlerts: async (list) => { for (const e of list) order.push(`${e.closed ? 'C' : 'O'}:${e.partKey}`); await gate; return { results: list.map((e) => ({ partKey: e.partKey, closed: e.closed, result: '', outcome: e.partKey === 'z' && !e.closed && order.filter((x) => x === 'O:z').length === 1 ? 'failed' : 'delivered' })) }; },
+    markNotified: async (k) => { marks.push(...k.map((m) => `${m.partKey}|${m.firstSeen}`)); }, enabled: () => ({ enabled: true, source: 'saved' }),
+  });
+  try {
+    const p = (k, state = 'fault') => ({ agent: '', partKey: k, state, scope: 'idrac', kind: 'psu', label: 'PSU', firstSeenAt: 55 });
+    PF._enqueueNotifyForTest({ opened: [p('z')], updated: [], closed: [] }, 'z-open');   // 보내는 중(막힘) — 실패로 끝난다
+    PF._enqueueNotifyForTest({ opened: [p('a')], updated: [], closed: [] }, 'a-open');
+    PF._enqueueNotifyForTest({ opened: [p('b')], updated: [], closed: [] }, 'b-open');
+    PF._enqueueNotifyForTest({ opened: [], updated: [], closed: [{ ...p('a'), closeReason: 'ok' }] }, 'a-close');   // a 의 열림을 대신 — 맨 뒤로
+    PF._enqueueNotifyForTest({ opened: [], updated: [{ ...p('z'), prevState: 'warn', sameState: false }], closed: [] }, 'z-change');
+    release(); await PF._notifyIdleForTest();
+    assert.deepEqual(order, ['O:z', 'O:b', 'C:a', 'O:z'], '대신한 알림은 맨 뒤(b 다음 a 해소)');
+    assert.deepEqual(marks, ['b|55', 'z|55'], '보내는 중 실패한 z 열림은 뒤 변화 알림이 받을 때 표시(14b M2) · 해소된 a 는 표시 없음');
+  } finally { release?.(); PF._setNotifyDepsForTest(null); PF._resetNotifyForTest(); }
 });

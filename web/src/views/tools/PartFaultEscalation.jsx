@@ -6,9 +6,9 @@
  *  · 바뀐 칸이 있는지 부모에게 알린다(onDirty — 닫기 전에 묻는다).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, putJson } from '../../api.js';
+import { fetchJson, putJson, postJson } from '../../api.js';
 import Select from '../../components/Select.jsx';
-import { ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL, DAY_LABEL, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults } from './partFaultEscText.js';
+import { ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL, DAY_LABEL, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults, escOrphanText } from './partFaultEscText.js';
 
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
@@ -45,6 +45,17 @@ export default function PartFaultEscalation({ initial = null, onSaved = null, on
   };
   const lim = d.limits || {};
   const results = escRunResults(d.run);
+  const orphanText = escOrphanText(d.run);
+  // 닫힘을 확인할 수 없는 기록 정리(반증 14c M2) — 결과로 숫자를 바로 고친다(다음 회차까지 기다리지 않게)
+  const forgetOrphans = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await postJson('/tools/part-faults/escalation/forget-orphans', {});
+      if (!r || r.ok === false) throw new Error(r?.reason || '정리하지 못했습니다.');
+      setSt({ d: { ...d, run: d.run ? { ...d.run, orphans: Math.max(0, (Number(d.run.orphans) || 0) - (Number(r.removed) || 0)) } : d.run }, err: '' });
+      setMsg({ ok: true, text: `닫힘을 확인할 수 없는 기록 ${Number(r.removed) || 0}건을 정리했습니다.` });
+    } catch (e) { setMsg({ ok: false, text: e?.message || String(e) }); } finally { setBusy(false); }
+  };
   return (
     <div className="card pfe" style={{ padding: 12, minWidth: 0 }}>
       <div className="flex wrap gap" style={{ alignItems: 'center' }}>
@@ -57,6 +68,12 @@ export default function PartFaultEscalation({ initial = null, onSaved = null, on
           <summary>마지막 회차 보낸 결과 {results.filter((x) => !x.notSent).length}건 · 안 감 {results.filter((x) => !x.ok && !x.notSent).length}{results.some((x) => x.notSent) ? ` · 그 사이 확인돼 보내지 않음 ${results.filter((x) => x.notSent).length}` : ''}</summary>
           <ul>{results.map((x) => <li key={x.key} className={x.ok || x.notSent ? (x.notSent ? 'muted' : '') : 'pfe-bad'}>{x.text}</li>)}</ul>
         </details>
+      ) : null}
+      {orphanText ? (
+        <div className="flex wrap gap" style={{ alignItems: 'center', minWidth: 0 }}>
+          <span className="muted" style={{ fontSize: 12, minWidth: 0, flex: '1 1 240px' }}>{orphanText}</span>
+          <button type="button" className="logout-btn" disabled={busy} onClick={forgetOrphans}>이 기록 정리</button>
+        </div>
       ) : null}
       <div className="muted pfe-note">{ESC_NOTE}</div>
       {d.unreadable ? <div className="pfe-warn" role="alert">설정 파일을 읽지 못했습니다(서비스 점검에서 확인) — 저장이 막힙니다.</div> : null}

@@ -129,6 +129,14 @@ export function escRunText(run, tickMs = null) {
   if (Array.isArray(run.errors) && run.errors.length) parts.push(run.errors.join(' · '));
   return parts.join(' · ');
 }
+/**
+ * 닫힘을 확인할 수 없어 남긴 진행 기록(v3.54 반증 14c M2) — 0 이면 빈 문자열. 그 장비가 다시 보이지 않으면 영영 남고, 같은 부품의 다음 장애가 옛 확인 · 단계를 이어받는다.
+ */
+export function escOrphanText(run) {
+  const n = int(run?.orphans) ?? 0;
+  if (!n) return '';
+  return `닫힘을 확인할 수 없는 진행 기록 ${n}건 — 그 장비가 다시 보이지 않습니다(재배정 · 철수 · 등록 삭제 등). 남아 있으면 같은 부품의 다음 장애가 옛 확인과 단계를 이어받습니다.`;
+}
 /** 마지막 회차의 보낸 결과 줄(최대 20) — 어디에 갔고 어디에 가지 않았는지(반증 B1). */
 export function escRunResults(run) {
   return (Array.isArray(run?.results) ? run.results : []).slice(0, 20).map((r, i) => ({

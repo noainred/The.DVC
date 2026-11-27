@@ -19,6 +19,8 @@ export const ESC_TICK_MS = 60_000;   // 회차 주기 — 화면은 API 값(tick
 const TICK_MS = ESC_TICK_MS;
 let _timer = null; let _busy = false;
 let _last = null;
+let _orphans = [];   // 마지막 회차에서 닫힘을 확인할 수 없어 남긴 기록 열쇠(관리자 정리용 — 14c M2)
+export const ESC_ORPHANS_MAX = 2_000;
 let _heldKeys = new Set();   // 마지막 회차에서 정비 창 보류로 보내지 않은 장애 열쇠(행 표지용 — 화면 U7)
 export const escalationRunMarks = () => (_last ? { why: _last.why || '', heldKeys: _heldKeys } : null);
 /**
@@ -154,6 +156,8 @@ export async function runEscalationNow() {
     if (!why) { try { const h = await deps.hold(open, now); hold = h?.hold || null; keyOf = h?.keyOf || null; } catch { hold = null; } }
     const plan = escalationPlan({ settings: why ? { ...settings, enabled: false } : settings, state, open, now, maxSends: ESC_SENDS_PER_RUN, hold, holdKeyOf: keyOf, closed });
     _heldKeys = new Set(plan.heldKeys || []);
+    // 닫힘을 확인할 수 없어 남긴 기록(열린 장애에 없음 · 근거 없음) — 장비가 다시 보이지 않으면(재배정 · 철수) 영영 남으므로 관리자가 정리할 수 있게 센다(반증 14c M2)
+    if (closed != null) { const openK = new Set(open.map(partKeyOf)); _orphans = Object.keys(plan.items).filter((k) => !openK.has(k)).slice(0, ESC_ORPHANS_MAX); } else _orphans = [];
     const results = [];
     for (const s of plan.sends) {
       // 보내기 직전 — 그 사이 확인됐으면 보내지 않는다(확인 라우트가 메모리 기록을 바꾼다)
@@ -180,13 +184,37 @@ export async function runEscalationNow() {
     const saved = changed ? saveEscalationState(next) : true;
     const sentRes = results.filter((r) => !r.notSent);
     _last = { at: now, enabled: settings.enabled, ...(why ? { why } : {}), sent: sentRes.length, delivered: sentRes.filter((r) => r.delivered).length, failed: sentRes.filter((r) => !r.delivered).length,
-      deferred: plan.deferred, overCap: plan.overCap, held: plan.held, errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
+      deferred: plan.deferred, overCap: plan.overCap, held: plan.held, orphans: _orphans.length, errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
       // 보내지 않은 줄(그 사이 확인)은 건너뜀 · 안 감을 말하지 않는다(그 회차는 skip 을 적지 않았다 — 11회차 판정 관찰)
       results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...(!results[i]?.notSent && (s.skippedNote || s.skipped)?.length ? { skipped: (s.skippedNote || s.skipped).map((k) => k + 2) } : {}), ...(!results[i]?.notSent && s.undeliveredNote?.length ? { undelivered: s.undeliveredNote.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered, ...(results[i]?.notSent ? { notSent: true } : {}) })).slice(0, 20) };   // notSent — 회차 도중 확인돼 보내지 않음(안 감 아님 · 10회차 화면 D5)
     return _last;
   } finally { _busy = false; }
 }
 export const escalationRunStatus = () => _last;
+/**
+ * 닫힘을 확인할 수 없어 남긴 진행 기록을 지운다(관리자 — 반증 14c M2). 마지막 회차가 센 열쇠 가운데 **지금도** 열린 장애에 없는 것만.
+ *   회차와 겹치지 않게 같은 가드를 쓴다(회차가 시작 때 읽은 기록을 끝에 저장하면 지운 것이 되살아난다). DB 를 못 읽으면 지우지 않는다.
+ * @returns {Promise<{ ok:boolean, removed?:number, busy?:boolean, reason?:string }>}
+ */
+export async function forgetEscalationOrphans() {
+  if (_busy) return { ok: false, busy: true, reason: '알림 단계 회차가 도는 중입니다 — 잠시 뒤 다시 누르십시오.' };
+  _busy = true;
+  try {
+    if (escalationStateUnreadable()) return { ok: false, reason: '진행 기록을 읽지 못했습니다.' };
+    const keys = _orphans.slice();
+    if (!keys.length) return { ok: true, removed: 0 };
+    let o = null; try { o = normOpen(await _deps.open()); } catch { o = null; }
+    if (!o) return { ok: false, reason: '열린 장애를 읽지 못해 정리하지 않았습니다.' };
+    const openK = new Set(o.open.map(partKeyOf));
+    const st = loadEscalationState();
+    const items = { ...st.items }; let removed = 0;
+    for (const k of keys) if (!openK.has(k) && Object.hasOwn(items, k)) { delete items[k]; removed += 1; }
+    if (removed && !saveEscalationState({ ...st, items })) return { ok: false, reason: '진행 기록을 쓰지 못했습니다.' };
+    _orphans = _orphans.filter((k) => Object.hasOwn(items, k) && !openK.has(k));
+    if (_last) _last = { ..._last, orphans: _orphans.length };
+    return { ok: true, removed };
+  } finally { _busy = false; }
+}
 
 export function startEscalation() {
   if (_timer || config.agent.centralUrl) return;   // 중앙만

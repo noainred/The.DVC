@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { stripComments } from '../../test/_stripComments.js';
-import { escMarkView, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults, ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL } from './partFaultEscText.js';
+import { escMarkView, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults, escOrphanText, ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL } from './partFaultEscText.js';
 
 const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 const read = (p) => stripComments(fs.readFileSync(new URL(p, import.meta.url), 'utf8'));
@@ -136,5 +136,18 @@ describe('렌더 · 연결', () => {
     expect(src).toMatch(/tab === 'open' && !isEdge && settings \? \(/);
     expect(src).toMatch(/tab === 'open' && !isEdge && settings && escOpen \? <PartFaultEscalation onSaved=\{load\} onDirty=/);
     expect(src).toMatch(/if \(escOpen && escDirty\.current && !window\.confirm\('알림 단계 · 당직에 저장하지 않은 변경이 있습니다/, '바뀐 칸이 있을 때만 닫기 전에 묻는다(변이 M41)');
+  });
+});
+
+describe('v3.54 반증 14c M2 — 닫힘을 확인할 수 없는 진행 기록', () => {
+  it('0 이면 아무 말도 하지 않고 · 있으면 이유와 결과를 말한다', () => {
+    expect(escOrphanText(null)).toBe('');
+    expect(escOrphanText({ orphans: 0 })).toBe('');
+    expect(escOrphanText({ orphans: 3 })).toMatch(/^닫힘을 확인할 수 없는 진행 기록 3건 — 그 장비가 다시 보이지 않습니다.*옛 확인과 단계를 이어받습니다\.$/);
+  });
+  it('패널은 정리 단추를 관리자 경로로 부른다(소스)', () => {
+    const src = stripComments(fs.readFileSync(new URL('./PartFaultEscalation.jsx', import.meta.url), 'utf8'));
+    expect(src).toMatch(/postJson\('\/tools\/part-faults\/escalation\/forget-orphans', \{\}\)/);
+    expect(src).toMatch(/orphanText \? \(/);
   });
 });

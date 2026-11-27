@@ -18,7 +18,7 @@ import { transition } from './transition.js';
 import { openFaults, applyTransition, partFaultDbStatus, markNotified, resetInfo } from './db.js';
 import { countDropped, transitionAlerts, sendAlerts } from './notify.js';
 import { partFaultEnabled } from './settings.js';
-import { loadEscalationState, escalationStateUnreadable, partKeyOf as escKeyOf } from './escalation.js';
+import { loadEscalationState, escalationStateUnreadable, partKeyOf as escKeyOf, phantomOf } from './escalation.js';
 import { setJudgedClosed } from './closeEvidence.js';
 
 // v2.599 T2599-02: 상한도 둔다(2^31 초과 → 1ms 루프).
@@ -100,18 +100,24 @@ export function _setNotifyDepsForTest(d) { ND = d ? { ...ND0, ...d } : ND0; }
 export async function _notifyIdleForTest() { while (_nqRunning || _q.size) await new Promise((r) => setTimeout(r, 5)); }
 export const _enqueueNotifyForTest = (tr, reason = 'test') => enqueueNotify(tr, reason);
 export const _notifyQueueStatusForTest = () => notifyQueueStatus();
-export function _resetNotifyForTest() { _q.clear(); Object.assign(_nqStat, NQ0()); }
+export function _resetNotifyForTest() { _q.clear(); _unmarked.clear(); Object.assign(_nqStat, NQ0()); }
 const keyOfAlert = (a) => `${String(a.agent || '').trim().toLowerCase()}|${a.partKey}`;
 const RESULTS_MAX = 200;
 function finishOne(view, at) {
   view.left -= 1;
-  if (view.left <= 0) { view.left = 0; view.pending = false; view.doneAt = at; view.dropped = countDropped(view.results); }
+  if (view.left <= 0) {
+    view.left = 0; view.pending = false; view.doneAt = at; view.dropped = countDropped(view.results);
+    // 판정의 마지막 알림이 어떻게 끝나든(보냄 · 대신됨 · 넘침 · 꺼짐) 한 줄 — 무음 실패 금지(반증 14b M6)
+    console.log(`[partfault] 알림(${view.reason || ''}) ${view.sent}건 발송${view.failed ? ` · 실패 ${view.failed}건` : ''}${view.skipped ? ` · 건너뜀 ${view.skipped}건` : ''}${view.superseded ? ` · 대신됨 ${view.superseded}건` : ''}${view.queueDropped ? ` · 넘침 ${view.queueDropped}건` : ''}${view.disabledSkipped ? ` · 꺼짐 ${view.disabledSkipped}건` : ''}${view.capped ? `(상한 ${view.capped}건 제외)` : ''}`);
+  }
 }
+// 보내지 못한(실패 · 건너뜀) 열림의 발송 표시 정보 — 같은 부품의 뒤 알림(해소가 아닌)이 받으면 그 행에 찍는다(보내는 중이라 대신될 수 없던 열림 — 반증 14b M2). 해소가 오면 버린다
+const _unmarked = new Map();
 function enqueueNotify(tr, reason) {
   const { alerts, total, capped } = transitionAlerts(tr);
   const now = ND.now();
   // queued — 보낼 수(상한까지). 상한 밖은 대기 중에도 capped 로 밝힌다(반증 12b #6). 보낼 알림이 없으면 큐에 넣지 않는다(키 이전만 — 반증 13b N2)
-  const view = { pending: alerts.length > 0, queued: alerts.length, capped, total, sent: 0, skipped: 0, failed: 0, superseded: 0, disabledSkipped: 0, queueDropped: 0, results: [], left: alerts.length };
+  const view = { pending: alerts.length > 0, queued: alerts.length, capped, total, sent: 0, skipped: 0, failed: 0, superseded: 0, disabledSkipped: 0, queueDropped: 0, results: [], left: alerts.length, reason: String(reason || '').slice(0, 60) };
   if (!alerts.length) return view;
   // 발송 표시 대상 — 그 판정이 연 열림만(알림이 있는 것만 붙잡는다 — 반증 13b N1b)
   const openedBy = new Map();
@@ -127,8 +133,9 @@ function enqueueNotify(tr, reason) {
       prev.view.superseded += 1; finishOne(prev.view, now); _nqStat.superseded += 1;
       if (!a.closed && !mark && prev.mark) mark = prev.mark;
       replaced = (prev.replaced || 0) + 1;
+      _q.delete(k);   // 맨 뒤로 — 앞 알림의 차례를 쓰면 키가 왕복한 같은 부품의 해소가 뒤 키의 열림보다 먼저 나가 받는 쪽 마지막 상태가 틀렸다(반증 14b M3) · 넘침은 가장 오래 바뀌지 않은 부품부터
     }
-    _q.set(k, { key: k, partKey: a.partKey, agent: a.agent, closed: a.closed, alert: a.alert, judgedAt: now, reason, view, mark, enabledAtEnqueue: en?.enabled === true, replaced });   // Map.set — 앞 알림의 차례를 그대로 쓴다
+    _q.set(k, { key: k, partKey: a.partKey, agent: a.agent, closed: a.closed, alert: a.alert, judgedAt: now, reason, view, mark, enabledAtEnqueue: en?.enabled === true, replaced });
   }
   _nqStat.enqueued += alerts.length;
   // 상한 — 부품마다 하나라 보통은 닿지 않는다. 넘으면 가장 오래된 것부터 빼고 센다(조용히 버리지 않는다)
@@ -150,7 +157,7 @@ async function drainNotify() {
       // 판정 뒤 점검이 꺼졌으면(데모로만 켜짐 포함) 보내지 않는다 — 꺼진 채 수동 점검이 만든 판정은 그때처럼 보낸다(반증 12b #5)
       let en = null; try { en = ND.enabled(); } catch { en = null; }
       if ((e.enabledAtEnqueue && en && en.enabled === false) || en?.source === 'demo') {
-        e.view.disabledSkipped += 1; _nqStat.disabledSkipped += 1; finishOne(e.view, ND.now());
+        e.view.disabledSkipped += 1; _nqStat.disabledSkipped += 1; finishOne(e.view, ND.now());   // 판정 끝 로그는 finishOne 이 찍는다(14b M6)
         continue;
       }
       // 늦은 알림 표기는 알림마다(판정 시각 → 보내는 지금) — 한 판정 안의 뒤쪽 알림도 붙는다(반증 13b D1)
@@ -167,10 +174,18 @@ async function drainNotify() {
       if (threw) e.view.error = threw;
       if (waited > NOTIFY_DELAY_NOTE_MS) e.view.delayedMs = Math.max(Number(e.view.delayedMs) || 0, waited);
       // 발송 표시 — 받은 열림만 · 그 판정이 연 행만(first_seen — 반증 12b #4) · 수집 주체까지 같은 행(반증 13b N5)
-      if (outcome === 'delivered' && e.mark) { try { await ND.markNotified([e.mark]); } catch (err) { console.warn(`[partfault] 발송 표시 실패: ${String(err?.message || err).slice(0, 160)}`); } }
+      let mark = e.mark;
+      if (e.closed) _unmarked.delete(k);
+      else if (!mark && _unmarked.has(k)) mark = _unmarked.get(k);
+      if (outcome === 'delivered' && mark) {
+        _unmarked.delete(k);
+        try { await ND.markNotified([mark]); } catch (err) { console.warn(`[partfault] 발송 표시 실패: ${String(err?.message || err).slice(0, 160)}`); }
+      } else if (outcome !== 'delivered' && mark && !e.closed) {
+        _unmarked.delete(k); _unmarked.set(k, mark);
+        while (_unmarked.size > NOTIFY_QUEUE_MAX_ITEMS) _unmarked.delete(_unmarked.keys().next().value);
+      }
       finishOne(e.view, ND.now());
       _nqStat.lastDoneAt = ND.now();
-      if (e.view.left === 0) console.log(`[partfault] 알림(${e.reason}) ${e.view.sent}건 발송${e.view.failed ? ` · 실패 ${e.view.failed}건` : ''}${e.view.skipped ? ` · 건너뜀 ${e.view.skipped}건` : ''}${e.view.superseded ? ` · 대신됨 ${e.view.superseded}건` : ''}${e.view.capped ? `(상한 ${e.view.capped}건 제외)` : ''} · 대기 ${waited}ms`);
     }
   } finally { _nqRunning = false; }
 }
@@ -206,19 +221,34 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
       if (!escalationStateUnreadable()) {
         const openK = new Set(prev.map(escKeyOf));
         for (const [k, v] of Object.entries(loadEscalationState().items || {})) {
-          if (openK.has(k) || !v?.pk) continue;
-          const i = k.indexOf('|');
-          phantoms.push({ ...v.pk, agent: k.slice(0, i), partKey: k.slice(i + 1), firstSeenAt: v.since, lastSeenAt: v.since });
+          if (openK.has(k)) continue;
+          const ph = phantomOf(k, v);   // 판정 재료(pk)가 없으면 열쇠와 sig 로 — 업그레이드 전 기록 · 확인 단추가 만든 기록도 닫힘을 가린다(반증 14c M1)
+          if (ph) phantoms.push(ph);
         }
       }
     } catch { phantoms = []; }
     let maint = null;
-    try { maint = await (await import('../bmusage/maint/partfaultHold.js')).partfaultMaintHold([...observed, ...prev, ...phantoms]); } catch { maint = null; }
+    try { maint = await (await import('../bmusage/maint/partfaultHold.js')).partfaultMaintHold([...observed, ...prev]); } catch { maint = null; }
     const scan = { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable, ...(maint?.hold?.size ? { maintHold: maint.hold } : {}) };
     let tr = transition({ open: prev, observed, scan });
     const saved = await applyTransition(tr);
-    // 가상 전이 — DB 에 쓰지 않는다(근거만). 판정마다 통째로 바꾼다
-    try { setJudgedClosed(phantoms.length ? transition({ open: phantoms, observed, scan }).closed.map(escKeyOf) : []); } catch { setJudgedClosed([]); }
+    // 가상 전이 — DB 에 쓰지 않는다(근거만) · 판정마다 통째로 바꾼다. 그 장비들의 관측만 넘긴다(전체 관측으로 한 번 더 돌면 큰 함대에서 판정 몫이 두 배 — 14c M3) ·
+    //   정비 창은 부수 효과 없는 엿보기로(보류 · 대상 모름 계수에 섞지 않는다 — 14c M4)
+    try {
+      if (!phantoms.length) setJudgedClosed([]);
+      else {
+        const devOf = (p) => `${String(p.agent || '').trim().toLowerCase()}|${String(p.deviceId || '').trim()}`;
+        const phDev = new Set(phantoms.map(devOf));
+        let phHold = maint?.hold || null;
+        try {
+          const M = await import('../bmusage/maint/partfaultHold.js');
+          const r = await M.partfaultMaintHoldPeek(phantoms.map((p) => ({ agent: p.agent, deviceId: p.deviceId, deviceKey: p.deviceKey, scope: p.scope })), { now: Date.now() });
+          if (r?.hold?.size) phHold = new Set([...(phHold || []), ...r.hold]);
+        } catch { /* 엿보기 실패 — 실제 전이와 같은 집합만 */ }
+        const scanPh = { ...scan, ...(phHold?.size ? { maintHold: phHold } : {}) };
+        setJudgedClosed(transition({ open: phantoms, observed: observed.filter((o) => phDev.has(devOf(o))), scan: scanPh }).closed.map(escKeyOf));
+      }
+    } catch { setJudgedClosed([]); }
     _lastJudgeCost = Date.now() - t0;   // 판정 몫(스캔 · 전이 · 적용)만 — 뒤의 알림 발송 대기는 넣지 않는다(곧 판정 간격의 비용 · 10회차 성능 #2)
 
     // v2.880: 파트 장애 → 이슈 자동 등록(issues/autoCreate.js — 설정에서 켠 칸만). DB 에 쓴 뒤 · 알림 전에 한 번. 던지지 않는다.

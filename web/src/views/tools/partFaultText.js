@@ -408,14 +408,19 @@ export function eventText(ev, labels = {}) {
 export function notifyNote(last, queue = null) {
   const nt = last?.notify;
   const bits = [];
-  if (nt) {
+  // 보낼 알림이 없던 판정(키 이전만 — total 0)은 판정 몫을 말하지 않는다(‘알림 0건 발송’ 이 아니다 — 반증 14b)
+  if (nt && !(nt.pending !== true && nt.total != null && num(nt.total) === 0)) {
     if (nt.pending) {
-      bits.push(`알림 ${num(nt.queued)}건 발송 대기(차례로 보냅니다)`);
+      // 대기 중에도 이미 끝난 것(보냄 · 실패)을 숨기지 않는다 — 남은 수(left)로 말한다(반증 14b M4). left 가 없는 옛 표지는 queued
+      const left = nt.left != null ? num(nt.left) : num(nt.queued);
+      bits.push(`알림 ${left}건 발송 대기(차례로 보냅니다)`);
+      if (num(nt.sent)) bits.push(`${num(nt.sent)}건 발송`);
+      if (num(nt.failed)) bits.push(`**${num(nt.failed)}건은 채널 오류로 받지 못했습니다**`);
       if (num(nt.capped)) bits.push(`**상한으로 ${num(nt.capped)}건은 보내지 않습니다**`);
     } else {
       bits.push(`알림 ${num(nt.sent)}건 발송`);
       if (num(nt.failed)) bits.push(`**${num(nt.failed)}건은 채널 오류로 받지 못했습니다**`);
-      if (num(nt.skipped)) bits.push(`억제 · 채널 미설정 · 메일 꺼짐 등으로 ${num(nt.skipped)}건 보내지 않음`);
+      if (num(nt.skipped)) bits.push(`억제나 채널 미설정 등으로 ${num(nt.skipped)}건 보내지 않음`);   // 항목 안에 가운뎃점을 쓰지 않는다(구분자와 헷갈림 — Chromium 판독)
       else if (num(nt.dropped)) bits.push(`채널 미설정 등으로 ${num(nt.dropped)}건 미발송`);   // v3.54 전 판정 표지(skipped 없음 — 메일 건너뜀만 셌다)
       if (num(nt.capped)) bits.push(`**상한으로 ${num(nt.capped)}건은 보내지 않았습니다**`);
       if (num(nt.queueDropped)) bits.push(`**알림 대기열이 넘쳐 ${num(nt.queueDropped)}건은 보내지 않았습니다**`);
@@ -428,7 +433,7 @@ export function notifyNote(last, queue = null) {
   if (queue) {
     if (num(queue.waiting) && !nt?.pending) bits.push(`발송 대기 ${num(queue.waiting)}건`);
     if (num(queue.failed) > num(nt?.failed)) bits.push(`**포탈 시작 뒤 채널 오류로 ${num(queue.failed)}건을 받지 못했습니다**`);
-    if (num(queue.overflowDropped)) bits.push(`**포탈 시작 뒤 알림 대기열이 넘쳐 ${num(queue.overflowDropped)}건을 보내지 않았습니다**`);
+    if (num(queue.overflowDropped) > num(nt?.queueDropped)) bits.push(`**포탈 시작 뒤 알림 대기열이 넘쳐 ${num(queue.overflowDropped)}건을 보내지 않았습니다**`);   // 같은 수면 되풀이하지 않는다(Chromium 판독)
     if (num(queue.superseded) > num(nt?.superseded)) bits.push(`포탈 시작 뒤 채널 지연으로 같은 부품의 뒤 알림이 ${num(queue.superseded)}건을 대신했습니다`);
   }
   return bits.join(' · ');

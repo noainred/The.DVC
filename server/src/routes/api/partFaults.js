@@ -35,7 +35,7 @@ import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js'
 import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent, partFaultSettingsWriteRefusal } from '../../partfault/settings.js';
 import { hookStatus } from '../../partfault/hooks.js';
 import { escalationStore, loadEscalationState, escalationStateError, escalationMarkOf, partOfAckId, ackEscalation, agentKeyOf, ESC_POLICIES_MAX, ESC_STEPS_MAX, ESC_EMAILS_MAX, ESC_AFTER_MIN, ESC_AFTER_MAX, ESC_DAYS, ESC_RETRY_MAX } from '../../partfault/escalation.js';   // v3.51 알림 단계 · 당직(⑪)
-import { escalationRunStatus, escalationMarksNow, ESC_TICK_MS } from '../../partfault/escalationRun.js';
+import { escalationRunStatus, escalationMarksNow, ESC_TICK_MS, forgetEscalationOrphans } from '../../partfault/escalationRun.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -554,6 +554,17 @@ api.put('/tools/part-faults/escalation', adminOnly, fullScopeOnly, async (req, r
   if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason });
   logAudit({ user: req.user?.username, action: '파트 장애 알림 단계 · 당직 설정 저장', detail: `${r.value.enabled ? '켜짐' : '꺼짐'} · 정책 ${r.value.policies.length} · 당직표 ${Object.keys(r.value.oncall).length}${r.turnedOn ? ' · 이번에 켬' : r.turnedOff ? ' · 이번에 끔' : ''}`, ip: req.ip });
   res.json({ ok: true, settings: r.value });
+});
+
+/**
+ * 닫힘을 확인할 수 없는 진행 기록 정리(v3.54 반증 14c M2) — 그 장비가 다시 보이지 않아(재배정 · 철수 · 등록 삭제) 근거가 영영 생기지 않는 기록. 남아 있으면 같은 부품의
+ *   다음 장애가 옛 확인 · 단계를 이어받는다. 전체 범위 관리자 · 감사 · 엣지는 409(단계 알림은 중앙).
+ */
+api.post('/tools/part-faults/escalation/forget-orphans', adminOnly, fullScopeOnly, async (req, res) => {
+  if (config.agent.centralUrl) return res.status(409).json({ ok: false, reason: '엣지에서는 알림 단계 기록이 없습니다 — 중앙 포탈에서 정리하십시오.' });
+  const r = await forgetEscalationOrphans();
+  logAudit({ user: req.user?.username, action: '파트 장애 알림 단계 — 닫힘을 모르는 기록 정리', detail: r.ok ? `${r.removed}건 지움` : String(r.reason || '실패').slice(0, 120), ip: req.ip });
+  res.status(r.ok ? 200 : 409).json(r);
 });
 
 /** 키 체계 변경으로 이력을 새로 시작했는지(v2.548 스키마 v2) — 화면 배지 근거. */

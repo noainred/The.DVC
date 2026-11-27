@@ -221,6 +221,24 @@ function pkShape(x) {
   return o.scope && o.deviceId && o.kind && o.partId ? o : null;
 }
 export const pkOf = (p) => pkShape(Object.fromEntries(PK_FIELDS.map((f) => [f, p?.[f] == null ? undefined : String(p[f])])));
+/**
+ * 진행 기록 → 판정 폴러의 가상 열린 장애(닫힘 근거용 — poller.js). 판정 재료(pk)가 있으면 그것으로, 없으면 열쇠(agent|partKey)와 sig(agent|장비군|장비 id|종류|부품 id)로
+ *   만든다(업그레이드 전 기록 · 확인 단추가 만든 기록 — 반증 14c M1). 둘 다 없으면 null(닫힘을 가릴 수 없다).
+ */
+export function phantomOf(key, v) {
+  const k = String(key); const i = k.indexOf('|');
+  if (i < 0 || !v) return null;
+  const agent = k.slice(0, i); const partKey = k.slice(i + 1);
+  if (!partKey) return null;
+  const base = { agent, partKey, firstSeenAt: numOrNull(v.since) ?? 0, lastSeenAt: numOrNull(v.since) ?? 0 };
+  if (v.pk) return { ...v.pk, ...base, state: v.pk.state || 'fault' };
+  const parts = String(v.sig || '').split('|');
+  if (parts.length < 5) return null;
+  const [, scope, deviceId, kind, ...rest] = parts;
+  const partId = rest.join('|');
+  if (!scope || !deviceId || !kind || !partId) return null;
+  return { ...base, scope, deviceId, kind, partId, state: 'fault' };
+}
 // 읽기 오류는 캐시하지 않는다 — 파일을 고치면 다음 재읽기(30초 간격)에 풀린다(v3.52 디버깅 1회차 성능 P4: 예전에는 재시작 전까지 멈췄다)
 export const ESC_STATE_RETRY_MS = 30_000;
 let _stateRetryAt = 0; let _stateErrUntil = 0;
@@ -434,7 +452,8 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
   const key = partKeyOf(p);
   const cur = Object.hasOwn(st.items, key) ? st.items[key] : null;
   if (cur?.ackedAt) return { ok: true, changed: false };
-  const next = { ...st, items: { ...st.items, [key]: { ...(cur || { since: now, sig: partSigOf(p), sent: [] }), ackedAt: now, ackBy: String(by).slice(0, 80) } } };
+  const pk = pkOf(p);   // 확인 단추가 만든 기록도 판정 재료를 싣는다(가상 전이 — 14c M1)
+  const next = { ...st, items: { ...st.items, [key]: { ...(cur || { since: now, sig: partSigOf(p), sent: [] }), ...(pk ? { pk } : {}), ackedAt: now, ackBy: String(by).slice(0, 80) } } };
   return saveEscalationState(next) ? { ok: true, changed: true } : { ok: false, reason: '진행 기록을 쓰지 못했습니다.' };
 }
 /**
