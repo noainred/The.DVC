@@ -16,7 +16,7 @@ import { evaluateHost, summarizeHosts, summarizeHostsAt, summarizeHostsRefreshin
 import { capacitySamplerStatus } from '../capacity/sampler.js';
 import { capacityPushStatus } from '../agent/capacityPush.js';
 import { collectorMeta } from '../capacity/collectors.js';
-
+import { isDemoGuest } from '../auth/demoGuest.js'; import { isDemoEdgeId } from '../mock/demo/edge.js';   // 보안 잔여 11-27 L7(반증 3회차 후속) — 데모 판본(파일 끝)
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { fullScopeOnlyWith } from './admin/shared.js';
 export const capacityRouter = express.Router();
@@ -38,19 +38,19 @@ const cleanKey = (v) => {
 /** 전 호스트 요약(1달 창 축 종합) + 샘플러/push 상태. 목록 화면의 단일 폴링 엔드포인트. */
 capacityRouter.get('/summary', async (req, res) => {
   try {
-    const hosts = await summarizeHosts();
+    const all = await summarizeHosts(); const hosts = all.filter((h) => capacityHostShownTo(req.user, h.k));   // 데모 계정: 포탈 자신 + 데모 엣지만(파일 끝)
     res.json({
       hosts,
       windows: WINDOWS.map((w) => ({ key: w.key, label: w.label })),
       collectors: collectorMeta(),
       sampler: capacitySamplerStatus(),
-      push: capacityPushStatus(),
+      push: capacityPushView(req.user, capacityPushStatus()),
       generatedAt: Date.now(),
       // v2.632(A6-2632-01): 판정은 최대 SUMMARY_TTL_MS 만큼 앞서 계산한 값이다(30일 창) — 캐시임을 숨기지 않는다.
       summaryAt: summarizeHostsAt(),
       summaryTtlMs: SUMMARY_TTL_MS,
       // v2.689(G2 B2): TTL 이 지나면 옛 값을 바로 주고 뒤에서 다시 계산한다(stale-while-revalidate) — 재계산 중이면 밝힌다.
-      summaryRefreshing: summarizeHostsRefreshing(),
+      summaryRefreshing: summarizeHostsRefreshing(), ...demoMaskedOf(all, hosts),
     });
   } catch (e) { res.status(500).json({ error: `요약 실패: ${e.message}` }); }
 });
@@ -58,7 +58,7 @@ capacityRouter.get('/summary', async (req, res) => {
 /** 호스트 1대 상세 — 창(1일/1주/1달)별 지표 통계·판정·권고 문장. */
 capacityRouter.get('/host', async (req, res) => {
   const k = cleanKey(req.query.k);
-  if (!k) return res.status(400).json({ error: '호스트 키(k)가 필요합니다.' });
+  if (!k) return res.status(400).json({ error: '호스트 키(k)가 필요합니다.' }); if (!capacityHostShownTo(req.user, k)) return res.status(404).json({ error: `호스트를 찾을 수 없습니다: ${k}` });
   try {
     const r = await evaluateHost(k);
     if (!r) return res.status(404).json({ error: `호스트를 찾을 수 없습니다: ${k}` });
@@ -72,7 +72,7 @@ capacityRouter.get('/history', async (req, res) => {
   const k = cleanKey(req.query.k);
   const metric = String(req.query.metric || '').trim();
   const win = WINDOWS.find((w) => w.key === req.query.window) || WINDOWS[0];
-  if (!k) return res.status(400).json({ error: '호스트 키(k)가 필요합니다.' });
+  if (!k) return res.status(400).json({ error: '호스트 키(k)가 필요합니다.' }); if (!capacityHostShownTo(req.user, k)) return res.status(404).json({ error: `호스트를 찾을 수 없습니다: ${k}` });
   if (!collectorMeta().some((m) => m.key === metric)) return res.status(400).json({ error: `알 수 없는 지표: ${metric.slice(0, 40)}` });
   try {
     const db = await getCapacityDb();
@@ -80,3 +80,27 @@ capacityRouter.get('/history', async (req, res) => {
     res.json({ metric, k, window: win.key, points });
   } catch (e) { res.status(500).json({ error: `조회 실패: ${e.message}` }); }
 });
+
+/*
+ * 보안 잔여 11-27 L7(반증 3회차 후속 — 하네스의 필수 질의 표가 드러냄, 실측): 이 라우터는 adminOnly 라 operator 판본이 없고, mock 모드 데모 계정
+ *   (요청 문맥 role admin)이 **사람이 등록한 엣지**의 호스트 이름 · 사양 · 자원 추이를 관리자 판본 그대로 받았다(엣지 등록부 /api/admin/collectors 는
+ *   READ_DENY — 형제 우회로). 데모 판본은 포탈 자신(local)과 데모 엣지(mock- — isDemoEdgeId, 에이전트 할당 데모 판본과 같은 판정)만 싣고
+ *   뺀 개수를 밝힌다(demoMasked). 사람 엣지 단건(/host · /history)은 없는 호스트와 같은 404(존재 은닉). 뺀 것이 없으면 관리자와 같은 모양.
+ *   이 노드가 엣지면 push 상태의 중앙 URL · 실패 사유(주소가 든다 — /api/admin/central-token READ_DENY 의 형제)도 데모 판본에서 비운다.
+ *   판정은 auth/demoGuest.js isDemoGuest 하나 · 관리자 판본은 그대로. 라우트 줄 번호(docs/API.md)를 밀지 않으려고 파일 끝에 둔다(함수는 호이스팅된다).
+ */
+export function capacityHostShownTo(user, k) {
+  if (!isDemoGuest(user)) return true;
+  if (k === 'local') return true;
+  try { return isDemoEdgeId(k); } catch { return false; }   // 판정이 던지면 데모 아님(제외)
+}
+export function capacityPushView(user, p) {
+  if (!isDemoGuest(user) || !p || typeof p !== 'object') return p;
+  const hideReason = !!(p.last && p.last.reason);
+  if (!p.centralUrl && !hideReason) return p;   // 중앙(push 꺼짐) — 관리자와 같은 모양
+  return { ...p, centralUrl: '', ...(p.last ? { last: { ...p.last, reason: '' } } : {}), addressHidden: true };
+}
+function demoMaskedOf(all, shown) {
+  const n = all.length - shown.length;
+  return n > 0 ? { demoOnly: true, demoMasked: { hosts: n } } : {};
+}

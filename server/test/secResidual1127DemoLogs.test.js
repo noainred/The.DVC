@@ -146,6 +146,8 @@ function harnessScript(phase) {
     const net = await import('node:net');
     // 데모 베어메탈 스토리지 서버(mock- id — 등록 API 는 id 를 만든다) — 등록부 모듈이 읽기 전에 파일로 둔다
     fs.writeFileSync(process.env.CONFIG_DIR + '/bm-storage.json', JSON.stringify({ servers: [{ id: 'mock-bm-t1', name: 'mockbm-01', host: '192.0.2.66', port: 22, username: 'root', password: 'mock', os: 'linux', mounts: ['/data'], enabled: true }], settings: {} }));
+    // 반증 3회차 후속: 데모 스토리지 장비(mock- id — saveDevice 는 id 를 만든다) — 노드 클라이언트 등 데모 전용 단건(demoGuard)을 데모가 열 수 있게
+    fs.writeFileSync(process.env.CONFIG_DIR + '/storage-devices.json', JSON.stringify({ version: 1, devices: [{ id: 'mock-st-t1', type: 'unity480', name: 'mockst-01', host: '192.0.2.67', username: 'admin', password: 'mock', agent: '', datacenterId: '', collectMethod: 'api', enabled: true, note: '데모(mock) 장비' }] }));
     const express = (await import('express')).default;
     const auth = await import(${J('auth/auth.js')});
     const { store } = await import(${J('store.js')});
@@ -176,6 +178,13 @@ function harnessScript(phase) {
     await tryi('dUnsup', async () => US.saveUnsupportedServers({ agent: '', datacenterId: '', service: 'scan-demo', trigger: 'demo' }, [{ ip: '192.0.2.77', vendor: 'hpe', vendorLabel: 'HPE', manufacturer: 'HPE', product: 'iLO 5', model: 'DL380' }]));
     const PG = await import(${J('gpu/physicalRegistry.js')});
     await tryi('dGpu', async () => PG.addPhysical({ id: 'mock-pgpu-1', name: 'mockpgpu-01', host: '192.0.2.88', username: 'root', password: 'mock', vcenterId: vcs[0] || '', gpuModels: ['NVIDIA A100'] }));
+    // 반증 3회차 후속: 리소스 적정성(capacity — adminOnly) — 포탈 자신(local) · 데모 엣지(mock-Edge-Seoul). 두 단계 공통(사람 엣지가 없으면 관리자와 같은 응답 — M-3)
+    const CAPM = (await import(${J('capacity/collectors.js')})).collectorMeta().slice(0, 3).map((m) => m.key);
+    const capRows = CAPM.map((metric, i) => ({ metric, v: 10 + i }));
+    const CD = await (await import(${J('capacity/db.js')})).getCapacityDb();
+    await tryi('dCapacity', async () => { const ts = Date.now() - 60_000;
+      CD.insertSnapshot('local', capRows, ts, { hostname: 'mockportal', platform: 'linux', cores: 8, totalMemMB: 16384, role: 'central' });
+      CD.insertSnapshot('mock-Edge-Seoul', capRows, ts, { hostname: 'mockedge-seoul', platform: 'linux', cores: 4, totalMemMB: 8192, role: 'edge' }); return { ok: true }; });
     ${phase === 'full' ? `
     // ── 사람이 등록한 항목(카나리) — full 단계만
     const IR = await import(${J('idrac/registry.js')});
@@ -259,6 +268,23 @@ function harnessScript(phase) {
       const j = (await import(${J('bareos/registry.js')})).addJob({ vcenterId: vcs[0], vmId: vmz.id, vmName: vmz.name, dc: '', folder: '', directorId: 'mock-bareos-dir', bareosJob: 'bj-mockdemo', client: 'mockdemo-fd', storage: 'File', pool: 'Full', schedule: 'Daily', level: 'Incremental', createdBy: 'bjdemouserq', demo: true });
       seedIds.bareosDemoJob = j.id; return j; });
     await tryi('xFocusBy', async () => (await import(${J('focusmon/registry.js')})).addTarget({ name: 'fm2-realq', host: '10.66.46.46', username: 'fm2userQ', password: 'pw-FN-qq', os: 'linux' }, { agents: [], by: 'fmbyuserq', corps: [] }));
+    // 반증 3회차 후속(필수 질의 표): 표가 실제 키로 부를 수 있게 시드 — 사람 항목은 카나리 꼴(…-realq · …userq · 10.66.x · qmail@corpq).
+    //   리소스 적정성(capacity) — 사람 엣지(edge-realq, 보고한 호스트 이름 edgehost-realq · 엣지 push 와 같은 적재 경로)
+    await tryi('xCapacity', async () => { CD.insertSnapshot('edge-realq', capRows, Date.now() - 60_000, { hostname: 'edgehost-realq', platform: 'linux', cores: 4, totalMemMB: 8192, role: 'edge' }); return { ok: true }; });
+    //   iDRAC 인벤토리 — 데모 서버와 사람 서버가 같은 CPU 모델(부품 드릴다운 key 하나에 둘 다 걸린다)
+    await tryi('xInv', async () => { const IC = await import(${J('idrac/invCache.js')}); const inv = (host) => ({ collectedAt: Date.now(), cpus: [{ model: 'Intel Xeon Gold 6338', cores: 32, maxSpeedMHz: 2000 }], memoryDimms: [{ manufacturer: 'Samsung', sizeGB: 64, type: 'DDR4', speedMHz: 3200, partNumber: 'M393A8G40AB2' }], system: { hostName: host } });
+      if (!IC.getInventory('mock-demo-1')) IC.setInventory('mock-demo-1', inv('mockdemo-01')); IC.setInventory('idrac-realq', inv('idrachost-realq')); return { ok: true }; });
+    //   SAN 포트 표본(사람 스위치 — 어레이 별칭) — 사람 스위치가 섞이면 데모 수식 경로가 꺼진다(isDemoPerfQuery) · 실제 적재 경로로 넣는다
+    await tryi('xSanPerf', async () => { const P = await import(${J('sanswitch/perfDb.js')}); const ts = Date.now() - 10 * 60_000;
+      return P.savePerfSample(seedIds.san, ts, { 1: 1e8, 2: 2e8 }, [{ port: 1, attachedName: 'SYMMETRIX::000197900111', attachedWwn: '50:00:09:73:00:00:00:01', speed: '32G', portType: 'F-Port' }, { port: 2, attachedName: 'SYMMETRIX::000197900111', speed: '32G', portType: 'F-Port' }]); });
+    //   vCenter 로그 연합 조회 바인딩 — 데모 자기 조회(2xx) · 관리자 조회(데모는 남의 조회라 404)
+    await tryi('xLogQ', async () => { const LQ = await import(${J('central/logQueries.js')}); seedIds.lqDemo = LQ.enqueueLogQuery(vcs[0], {}, auth.DEMO_USERNAME); seedIds.lqAdm = LQ.enqueueLogQuery(vcs[0], {}, 'fadm'); return { ok: true }; });
+    //   정기 점검 보고 — 지금 만들기(사람 관리자 prtuserq) + 메일 전달 실패 기록(받는 사람 주소)
+    await tryi('xPeriodic', async () => { const SV = await import(${J('periodic/service.js')}); const r = await SV.generateRun({ kind: 'daily', manual: true, by: 'prtuserq', deliver: false });
+      if (!r.ok) return r; seedIds.prRun = r.id;
+      await (await import(${J('periodic/db.js')})).addDelivery({ runId: r.id, kind: 'daily', channel: 'mail', target: 'qmail4@corpq.example', state: 'failed', reason: '550 <qmail4@corpq.example> rejected', recipients: 1 }); return { ok: true }; });
+    //   CVP 스냅샷(저장한 계정 snpuserq)
+    await tryi('xCvpSnap', async () => { const r = await (await import(${J('cvp/db.js')})).createSnap({ by: 'snpuserq', label: 'snp-realq', bodies: [] }); seedIds.cvpSnap = r.id; return { ok: true }; });
     ` : ''}
     const mk = (u) => auth.createUser(u, { trusted: true });
     mk({ username: 'fadm', role: 'admin', password: 'Passw0rd!long1' });
@@ -281,10 +307,15 @@ function harnessScript(phase) {
     const srv = app.listen(0, '127.0.0.1'); await new Promise((r) => srv.once('listening', r));
     const port = srv.address().port;
     const base = 'http://127.0.0.1:' + port;
-    const call = async (who, p) => {
+    // 반증 3회차 후속: 429(계정당 시작 한도 — cvp/heavyGate START_BURST · START_REFILL_MS)는 기다렸다 다시 부른다. 예전에는 스윕이 CVP 조회를
+    //   연달아 불러 데모 · operator 응답이 429 로 빠졌다(데모 429 는 불변식에서 빠지고, operator 429 는 '' 로 대조돼 거짓 실패가 된다).
+    const call = async (who, p, tries = 0) => {
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
-      try { const r = await fetch(base + p, { headers: { authorization: 'Bearer ' + TOK[who] }, signal: ac.signal }); return { st: r.status, txt: await r.text() }; }
+      let res0 = null;
+      try { const r = await fetch(base + p, { headers: { authorization: 'Bearer ' + TOK[who] }, signal: ac.signal }); res0 = { st: r.status, txt: await r.text(), ra: Number(r.headers.get('retry-after')) || 0 }; }
       catch (e) { return { st: -1, txt: String(e.message) }; } finally { clearTimeout(t); }
+      if (res0.st === 429 && tries < 8) { await new Promise((r) => setTimeout(r, Math.min(6000, Math.max(1600, res0.ra * 1000)))); return call(who, p, tries + 1); }
+      return { st: res0.st, txt: res0.txt };
     };
     const callPost = async (who, p) => {
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
@@ -311,9 +342,11 @@ function harnessScript(phase) {
     const BACKUP_VIEWS = ['/api/tools/backup-run/vms', '/api/tools/backup-run/vms?vcenterId=' + encodeURIComponent(vcs[0] || ''), '/api/tools/backup-run/runs',
       '/api/tools/backup-run/portal-vms', '/api/tools/backup-run/vm/' + encodeURIComponent(seedIds.veeamVm || vm0id)];
     out.backupViews = BACKUP_VIEWS;
+    const CAP_VIEWS = ['/api/capacity/summary', '/api/capacity/host?k=local', '/api/capacity/host?k=mock-Edge-Seoul', '/api/capacity/history?k=mock-Edge-Seoul&metric=' + encodeURIComponent(CAPM[0]) + '&window=day'];
+    out.capViews = CAP_VIEWS; out.capMetric = CAPM[0];
     if (${JSON.stringify(phase)} === 'base') {
       out.views = {};
-      for (const p of [...IDRAC_VIEWS, ...BACKUP_VIEWS]) out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p) };
+      for (const p of [...IDRAC_VIEWS, ...BACKUP_VIEWS, ...CAP_VIEWS]) out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p) };
     } else {
       // ③-d 캐시 순서(관리자 → 데모 → 관리자 · 데모 → 관리자)
       out.cache = [];
@@ -329,7 +362,8 @@ function harnessScript(phase) {
         '/api/tools/vm-clone', '/api/tools/bareos-backup/groups/tree?vcenterId=' + encodeURIComponent(vcs[0] || ''),
         '/api/provision/saved', '/api/provision/saved/' + encodeURIComponent(seedIds.xProv || 'x'), '/api/tools/bareos-backup', '/api/tools/bareos-backup/restore-folders',
         '/api/tools/bareos-backup/live', '/api/admin/ipam/vc-ranges/suggest?kind=idrac&vcenterId=' + encodeURIComponent(vcs[0] || '') + '&datacenterId=dc-realq',
-        '/api/admin/ipam/vc-ranges/suggest?kind=vm&vcenterId=' + encodeURIComponent(vcs[0] || ''), '/api/tools/guest-partition/mail'])
+        '/api/admin/ipam/vc-ranges/suggest?kind=vm&vcenterId=' + encodeURIComponent(vcs[0] || ''), '/api/tools/guest-partition/mail',
+        ...CAP_VIEWS, '/api/capacity/host?k=edge-realq', '/api/capacity/history?k=edge-realq&metric=' + encodeURIComponent(CAPM[0]) + '&window=day'])
         out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p), oper: await pick('oper', p) };
       // M-1 절대형 · 겹친 슬래시(원시 소켓 — fetch 는 대상을 정규화한다)
       out.raw = {};
@@ -340,15 +374,20 @@ function harnessScript(phase) {
       //   예전에는 'x' 로만 불러 단건 · 질의가 있어야 값이 나오는 GET 이 비어 있었다(백업 실행 /vms · /runs/:id 실례).
       //   읽기성 POST(감사 생략 — 데모 계정이 통과하는 POST)도 빈 본문으로 같은 불변식을 본다.
       const { auditSkipped } = await import(${J('audit.js')});
-      const idCands = [...new Set(['x', 'idrac-realq', 'hz-realq', 'pgpu-realq', 'edge-realq', 'vc-realq', ...Object.values(seedIds)])].map(encodeURIComponent);
+      //   반증 3회차 후속: 스냅샷의 실제 id(호스트 · VM · 데이터스토어 · vCenter)와 파일로 둔 데모 항목 id 도 — 예전 후보는 시드 등록부 id 뿐이라
+      //   /hosts/:id · /datastores/:id … 가 404 로만 답해 불변식에서 빠졌다(실측: 데모 2xx 1,081 → 1,144건).
+      const snapIds = [host0 && host0.id, ((snap.vms || []).find((v) => v.vcenterId === vcs[0] && v.template !== true) || {}).id, ((snap.datastores || []).find((d) => d.vcenterId === vcs[0]) || {}).id, vcs[0], 'mock-st-t1', 'mock-bm-t1', 'mock-Edge-Seoul'].filter(Boolean);
+      const idCands = [...new Set(['x', 'idrac-realq', 'hz-realq', 'pgpu-realq', 'edge-realq', 'vc-realq', ...Object.values(seedIds), ...snapIds])].map(encodeURIComponent);
       const uniq = [...new Set(gets)];
       const urlsOf = (g) => {
         if (/:[A-Za-z_]/.test(g)) return idCands.map((id) => g.replace(/:[A-Za-z_]\\w*/g, id));
         return [g, g + '?vcenterId=' + encodeURIComponent(vcs[0] || '')];
       };
       const sweep = [];
+      out.demoStatus = {};
       const sweepOne = async (route, u, method) => {
         const d = method === 'POST' ? await callPost('demo', u) : await call('demo', u);
+        out.demoStatus[d.st] = (out.demoStatus[d.st] || 0) + 1;
         if (!(d.st >= 200 && d.st < 300)) return d.st;
         const o = method === 'POST' ? await callPost('oper', u) : await call('oper', u);
         sweep.push({ route: (method === 'POST' ? 'POST ' : '') + route, url: u, demo: d.txt, oper: o.st >= 200 && o.st < 300 ? o.txt : '', operSt: o.st });
@@ -361,16 +400,95 @@ function harnessScript(phase) {
       const FILL_BASE = 'vcenterId=' + VC0 + '&datacenterId=dc-realq&hostId=' + H0 + '&vmId=' + VM0 + '&key=x&k=x&id=x&name=x&q=x&jobid=1&target=digest&hours=24&days=7&group=x&path=%2Fdata&from=0&to=' + Date.now();
       const FILLS = ['kind=idrac&dim=model&cat=cpu&type=cpu&metric=cpu', 'kind=vm&dim=vendor&cat=gpu&type=disk&metric=mem', 'kind=host&dim=serviceTag&cat=memory&type=host&metric=disk']
         .map((f) => FILL_BASE + '&' + f);
-      const still400 = [];
+      // 반증 3회차 후속 — **라우트별 유효 질의 표**(ROUTE_QUERIES): FILLS 는 같은 값(x · 1 · cpu …)을 모든 라우트에 넣어 '필수 질의가 있는' 26개 경로가
+      //   여전히 400 · 404 였다(실측). 경로마다 그 라우트 소스가 요구하는 질의를 **실제 키**(시드 · 목 스냅샷 · 다른 응답)로 채운다.
+      //   표의 URL 은 데모가 2xx 를 받든 말든 모두 스윕에 넣고(③-a 불변식), 표로도 2xx 를 못 받은 라우트는 tableMiss 로 내보낸다 —
+      //   아래 시험이 tableMiss · still400 ⊆ STILL400_KNOWN(사유 주석)을 요구한다. 새 필수 질의 라우트는 여기에 줄을 더할 것.
+      const E = encodeURIComponent;
+      const jget = async (who, p) => { const r = await call(who, p); try { return JSON.parse(r.txt); } catch { return null; } };
+      const valsOf = (o, prop, out2 = [], d = 0) => {   // JSON 안에서 이름이 prop 인 글자 · 수 값(깊이 · 개수 상한)
+        if (!o || typeof o !== 'object' || d > 10 || out2.length >= 200) return out2;
+        if (Array.isArray(o)) { for (const x of o) valsOf(x, prop, out2, d + 1); return out2; }
+        for (const [k, v] of Object.entries(o)) { if (k === prop && (typeof v === 'string' || typeof v === 'number')) out2.push(v); else valsOf(v, prop, out2, d + 1); }
+        return out2;
+      };
+      const uniqTake = (arr, n) => [...new Set(arr.map(String).filter(Boolean))].slice(0, n);
+      const vmA = (snap.vms || []).find((v) => v.vcenterId === vcs[0] && v.template !== true && (v.ipAddress || (v.ipAddresses || []).length)) || (snap.vms || [])[0] || {};
+      const vmIp = String(vmA.ipAddress || (vmA.ipAddresses || [])[0] || '');
+      const hostC = (snap.hosts || []).find((h) => h.vcenterId === vcs[0] && h.cluster) || {};
+      const dnsIps = uniqTake((snap.vms || []).flatMap((v) => [...(Array.isArray(v.dnsServers) ? v.dnsServers : []), ...(Array.isArray(v.guest?.dnsServers) ? v.guest.dnsServers : []), ...(Array.isArray(v.dns) ? v.dns : [])]), 3);
+      const ROUTE_QUERIES = {
+        // idracCore.js parts-servers: key = '<카테고리>|<라벨>'(partsInventory.serversWithPart) — 부품 집계(관리자 · 데모) 버킷의 key 그대로
+        '/api/admin/idrac/parts-servers': async () => {
+          const ks = []; for (const who of ['fadm', 'demo']) for (const c of ['cpu', 'dimm']) ks.push(...valsOf(await jget(who, '/api/admin/idrac/parts-inventory?cat=' + c), 'key').filter((k) => String(k).includes('|')));
+          return uniqTake(ks, 4).map((k) => '/api/admin/idrac/parts-servers?key=' + E(k));
+        },
+        // collectorsDc.js resolveVmTarget: 스냅샷 VM id(mock 모드에서는 400 — STILL400_KNOWN)
+        '/api/admin/vm/:id/hardware': async () => [vmA.id, seedIds.veeamVm].filter(Boolean).map((id) => '/api/admin/vm/' + E(id) + '/hardware'),
+        // ping.js /series: id = 대상 id(목록 /targets · 시드 pg-realq)
+        '/api/ping/series': async () => uniqTake([...valsOf(await jget('demo', '/api/ping/targets'), 'id'), seedIds.ping], 3).map((id) => '/api/ping/series?id=' + E(id) + '&range=6h'),
+        // capacity.js /host: k = 요약의 호스트 키(local · 엣지 agent 이름 — 시드)
+        '/api/capacity/host': async () => uniqTake(valsOf(await jget('fadm', '/api/capacity/summary'), 'k'), 4).map((k) => '/api/capacity/host?k=' + E(k)),
+        // capacity.js /history: k + metric(collectorMeta key) + window
+        '/api/capacity/history': async () => { const s = await jget('fadm', '/api/capacity/summary'); const ms = uniqTake(valsOf(s && s.collectors, 'key'), 2);
+          return uniqTake(valsOf(s && s.hosts, 'k'), 4).flatMap((k) => ms.map((m) => '/api/capacity/history?k=' + E(k) + '&metric=' + E(m) + '&window=day')); },
+        // overviewNsx.js group-members: groupId '<managerId>:<rawId>'(스냅샷 보안그룹 — mock 이면 합성 멤버)
+        '/api/nsx/group-members': async () => uniqTake([...valsOf((await jget('demo', '/api/nsx') || {}).securityGroups, 'id'), 'mock-nsx-1:grp-demo'], 2).map((g) => '/api/nsx/group-members?groupId=' + E(g)),
+        // searchNotes.js /release-notes/since: from = a.b.c
+        '/api/release-notes/since': async () => ['/api/release-notes/since?from=1.0.0'],
+        // hardwareGpu.js /tools/ip-ping: vcenterId + ips(그 vCenter VM 의 IP)
+        '/api/tools/ip-ping': async () => [vmA.vcenterId && vmIp ? '/api/tools/ip-ping?vcenterId=' + E(vmA.vcenterId) + '&ips=' + E(vmIp) : null].filter(Boolean),
+        // checksLogs.js /tools/vclogs/federate: reqId = 큐잉한 조회(시드 — 데모 자기 것 · 관리자 것)
+        '/api/tools/vclogs/federate': async () => [seedIds.lqDemo, seedIds.lqAdm].filter(Boolean).map((id) => '/api/tools/vclogs/federate?reqId=' + E(id)),
+        // veeam.js /stale: n(1~999) · unit · vc(backupSummaryAgg.staleQueryOf)
+        '/api/tools/backup-summary/stale': async () => ['/api/tools/backup-summary/stale?n=7&unit=d', '/api/tools/backup-summary/stale?n=1&unit=h&vc=' + VC0],
+        // bareosBackup.js jobs/:id/log: 대상 id + jobid(정수 > 0 — 시드 실행 777 · 데모 대상)
+        '/api/tools/bareos-backup/jobs/:id/log': async () => [seedIds.bareosDemoJob, seedIds.xBareosJob].filter(Boolean).flatMap((id) => [1, 777].map((j) => '/api/tools/bareos-backup/jobs/' + E(id) + '/log?jobid=' + j)),
+        // storageMon.js node-clients: 장비 id(데모는 mock- 만 — demoGuard) + node(정수 ≥ 0)
+        '/api/tools/storage/devices/:id/node-clients': async () => uniqTake([...valsOf((await jget('demo', '/api/tools/storage') || {}).devices, 'id'), seedIds.storage], 3).map((id) => '/api/tools/storage/devices/' + E(id) + '/node-clients?node=0&range=24h'),
+        // periodicReport.js runs/:id: RUN_ID_RE 형식의 회차(시드 — 지금 만들기 회차)
+        '/api/tools/periodic-report/runs/:id': async () => uniqTake([seedIds.prRun, ...valsOf((await jget('fadm', '/api/tools/periodic-report/runs?days=400') || {}).runs, 'id')], 2).map((id) => '/api/tools/periodic-report/runs/' + E(id)),
+        '/api/tools/periodic-report/runs/:id/report.html': async () => [seedIds.prRun].filter(Boolean).map((id) => '/api/tools/periodic-report/runs/' + E(id) + '/report.html'),
+        // sanStorage.js /array: key = 어레이 키(목록 rows[].key · 시드 포트 별칭)
+        '/api/tools/san-storage/array': async () => uniqTake([...valsOf((await jget('demo', '/api/tools/san-storage') || {}).rows, 'key'), 'SYMMETRIX::000197900111'], 3).map((k) => '/api/tools/san-storage/array?key=' + E(k) + '&hours=24'),
+        // cvpNet.js /locate: q = MAC · IP · 이름(2자 이상 — cvp/locate.parseQuery)
+        '/api/tools/cvp/locate': async () => [vmA.name, vmIp].filter(Boolean).map((q) => '/api/tools/cvp/locate?q=' + E(q)),
+        // cvpNet.js /compare: a = 스냅샷 id(시드) · b = now
+        '/api/tools/cvp/compare': async () => uniqTake([seedIds.cvpSnap, ...valsOf((await jget('demo', '/api/tools/cvp/snapshots') || {}).snapshots, 'id')], 2).map((a) => '/api/tools/cvp/compare?a=' + E(a) + '&b=now'),
+        // bmUsage.js /history · bmMaint.js /occurrences: key = 대상 키(목록 targets[].key — 비관리자는 토큰일 수 있다) · bmCompare.js: keys = 쉼표 목록
+        '/api/tools/bm-usage/history': async () => uniqTake(valsOf((await jget('demo', '/api/tools/bm-usage') || {}).targets, 'key'), 3).map((k) => '/api/tools/bm-usage/history?key=' + E(k)),
+        '/api/tools/bm-usage/compare': async () => { const ks = uniqTake(valsOf((await jget('demo', '/api/tools/bm-usage') || {}).targets, 'key'), 3); return ks.length ? ['/api/tools/bm-usage/compare?keys=' + E(ks.join(',')) + '&range=24h'] : []; },
+        '/api/tools/bm-usage/maintenance/occurrences': async () => uniqTake(valsOf((await jget('demo', '/api/tools/bm-usage') || {}).targets, 'key'), 3).map((k) => '/api/tools/bm-usage/maintenance/occurrences?key=' + E(k)),
+        // vmtrack.js /changes · /ds-changes: slot(YYYY-MM-DDTHH — 추적 점 points[].slot) 또는 snapId · /ds-series: dsId(로스터 · 스냅샷 DS id)
+        '/api/tools/vm-track/changes': async () => uniqTake(valsOf((await jget('demo', '/api/tools/vm-track?days=30') || {}).points, 'slot'), 200).slice(-2).map((s) => '/api/tools/vm-track/changes?slot=' + E(s)),
+        '/api/tools/vm-track/ds-changes': async () => uniqTake(valsOf((await jget('demo', '/api/tools/vm-track?days=30') || {}).points, 'slot'), 200).slice(-2).map((s) => '/api/tools/vm-track/ds-changes?slot=' + E(s)),
+        '/api/tools/vm-track/ds-series': async () => uniqTake([...valsOf((await jget('demo', '/api/tools/vm-track/ds-list') || {}).items, 'dsId'), ...(snap.datastores || []).filter((d) => d.vcenterId === vcs[0]).map((d) => d.id)], 2).map((id) => '/api/tools/vm-track/ds-series?dsId=' + E(id) + '&days=30'),
+        // clusterCheck.js /of: vcenterId + cluster(스냅샷 호스트의 클러스터)
+        '/api/tools/cluster-check/of': async () => [hostC.cluster ? '/api/tools/cluster-check/of?vcenterId=' + E(hostC.vcenterId) + '&cluster=' + E(hostC.cluster) + (hostC.id ? '&hostId=' + E(hostC.id) : '') : null].filter(Boolean),
+        // vmDns.js /server: ip = VM 이 DNS 서버로 쓰는 주소 · /vm: id = VM id
+        '/api/tools/vm-dns/server': async () => uniqTake([...dnsIps, ...valsOf(await jget('demo', '/api/tools/vm-dns'), 'ip')], 3).map((ip) => '/api/tools/vm-dns/server?ip=' + E(ip)),
+        '/api/tools/vm-dns/vm': async () => [vmA.id, seedIds.veeamVm].filter(Boolean).map((id) => '/api/tools/vm-dns/vm?id=' + E(id)),
+      };
+      const still400 = []; const tableMiss = {}; out.routeTable = {};
       for (const g of uniq) {
         let got400 = false; let gotOk = false;
         for (const u of urlsOf(g)) { const st = await sweepOne(g, u, 'GET'); if (st === 400) got400 = true; else if (st >= 200 && st < 300) gotOk = true; }
+        if (ROUTE_QUERIES[g]) {
+          let us = []; try { us = await ROUTE_QUERIES[g](); } catch (e) { us = []; tableMiss[g] = 'table-throw ' + e.message; }
+          const tried = [];
+          for (const u of us) { const st = await sweepOne(g, u, 'GET'); tried.push(st + ' ' + u); if (st >= 200 && st < 300) gotOk = true; else if (st === 400) got400 = true; }
+          out.routeTable[g] = tried;
+          if (!tried.some((x) => /^2\\d\\d /.test(x)) && !tableMiss[g]) {
+            const u = us[0]; const r = u ? await call('demo', u) : { st: 0, txt: '표가 URL 을 만들지 못함(키 없음)' };
+            tableMiss[g] = r.st + ' ' + String(r.txt).slice(0, 200);
+          }
+        }
         if (!got400 || gotOk) continue;
         let filledOk = false;
         for (const u of urlsOf(g)) for (const f of FILLS) { const st = await sweepOne(g, u + (u.includes('?') ? '&' : '?') + f, 'GET'); if (st >= 200 && st < 300) filledOk = true; }
-        if (!filledOk) still400.push(g);
+        if (!filledOk) { still400.push(g); const u = urlsOf(g)[0]; const r = await call('demo', u + (u.includes('?') ? '&' : '?') + FILLS[0]); (out.still400Why ||= {})[g] = r.st + ' ' + r.txt.slice(0, 220); }
       }
-      out.still400 = still400;
+      out.still400 = still400; out.tableMiss = tableMiss; out.routeTableKeys = Object.keys(ROUTE_QUERIES); out.routeTableDead = Object.keys(ROUTE_QUERIES).filter((k) => !uniq.includes(k));
       const readPosts = [...new Set(posts)].filter((p) => auditSkipped('POST', p));
       for (const p of readPosts) await sweepOne(p, p, 'POST');
       out.sweep = sweep; out.totalGets = uniq.length; out.readPosts = readPosts; out.seedIds = seedIds;
@@ -411,8 +529,26 @@ function runHarness(phase) {
 const H = {};
 const harness = (phase) => (H[phase] ||= runHarness(phase));
 
-// 반증 3회차 should: 필수 질의를 채운 판본(FILLS)으로도 데모가 2xx 를 못 받는 GET — 실행할 때 하나씩 확인해 사유를 적는다(아래 시험이 목록 밖을 실패로 본다).
-const STILL400_KNOWN = [];
+// 반증 3회차 후속: 라우트별 유효 질의 표(하네스 ROUTE_QUERIES — 실제 키 · 시드)로도 데모가 2xx 를 **받을 수 없는** GET. 경로마다 근거(소스 줄)를 적는다 —
+//   '질의를 못 찾음' 은 사유가 아니다(표를 고칠 것). 항목이 still400 · tableMiss 어디에도 없게 되면(이제 2xx) 아래 시험이 '낡은 항목' 으로 실패한다.
+//   3회차 첫 실행의 26개 중 나머지 24개는 표로 2xx 를 받아 ③-a 불변식 스윕에 들어간다(R3_FIRST_RUN_26 · 시험 '③-r3 should').
+const STILL400_KNOWN = [
+  // routes/admin/collectorsDc.js resolveVmTarget(74행): `if (snap.source === 'mock') return { error: '데모(mock) 모드에서는 사양 변경을 사용할 수 없습니다.', code: 400 }` —
+  //   mock 스냅샷이면 VM 이 있어도 **모든 계정**이 400(관리자도 — 실제 vCenter SOAP 조회 경로라 합성 판본이 없다). 데모 계정은 mock 모드에서만 존재하므로 2xx 가 없다.
+  '/api/admin/vm/:id/hardware',
+  // routes/api/bareosBackup.js jobs/:id/log(1083행) → readDirector({ demoOnly: isDemoGuest }) → bareos/service.js onDirector(196행):
+  //   `if (demoOnly && !isDemoActive()) throw fail('demo-only')` · isDemoActive = mock ∧ 사람 Director 0개(62행). full 단계는 사람 Director(bd-realq)를 시드하므로
+  //   데모 계정은 **어느 대상**(데모 대상 포함)의 작업 로그도 403 이다(사람이 등록한 Director 에 접속하지 않는 규칙 — demoGuest.js 머리말). 표는 데모 대상 ·
+  //   사람 대상 × jobid 1 · 777 로 부른다(전부 403 실측). 사람 Director 가 없는 설치본에서는 데모 Director 로그가 열린다(이 스윕은 full 단계만).
+  '/api/tools/bareos-backup/jobs/:id/log',
+];
+// 반증 3회차 첫 실행(6d137260)에서 FILLS 로도 2xx 를 못 받은 26개 — 모두 질의 표에 있어야 한다(줄이 빠지면 FILLS 로 되돌아가 조용히 빠진다).
+const R3_FIRST_RUN_26 = ['/api/admin/idrac/parts-servers', '/api/admin/vm/:id/hardware', '/api/ping/series', '/api/capacity/host', '/api/capacity/history',
+  '/api/nsx/group-members', '/api/release-notes/since', '/api/tools/ip-ping', '/api/tools/vclogs/federate', '/api/tools/backup-summary/stale',
+  '/api/tools/bareos-backup/jobs/:id/log', '/api/tools/storage/devices/:id/node-clients', '/api/tools/periodic-report/runs/:id', '/api/tools/periodic-report/runs/:id/report.html',
+  '/api/tools/san-storage/array', '/api/tools/cvp/locate', '/api/tools/cvp/compare', '/api/tools/bm-usage/history', '/api/tools/bm-usage/compare',
+  '/api/tools/bm-usage/maintenance/occurrences', '/api/tools/vm-track/changes', '/api/tools/vm-track/ds-changes', '/api/tools/vm-track/ds-series',
+  '/api/tools/cluster-check/of', '/api/tools/vm-dns/server', '/api/tools/vm-dns/vm'];
 const lower = (s) => String(s || '').toLowerCase();
 const sens = (txt, configDir) => {
   const set = new Set((lower(txt).match(new RegExp(SENS_SRC, 'g')) || []));
@@ -431,7 +567,7 @@ test('③ 시드 — 하네스가 넣은 사람 · 데모 항목이 모두 들�
 
 test('③-a L7 일반 불변식 — 모든 GET: 데모 민감 카나리 ⊆ 같은 경로 operator · 데모 이름 ⊆ operator 가 어디서든 받는 이름', () => {
   const h = harness('full');
-  assert.ok(h.sweep.length > 300, `데모 2xx GET ${h.sweep.length}/${h.totalGets}`);
+  assert.ok(h.sweep.length > 1000, `데모 2xx GET ${h.sweep.length}/${h.totalGets} · 데모 상태 분포 ${JSON.stringify(h.demoStatus)}`);   // 반증 3회차 후속 실측 1,144(질의 표 · 스냅샷 id 후보 · 429 재시도) — 크게 줄면 시드 · 표가 깨진 것
   const operNames = new Set();
   for (const s of h.sweep) for (const n of names(s.oper)) operNames.add(n);
   const bad = [];
@@ -614,6 +750,11 @@ test('③ M-3 사람 장비가 없는 데모 설치본 — iDRAC 화면 응답�
   assert.equal(body(U.demo).rows.length, body(U.fadm).rows.length);
   const A = h.views['/api/admin/assignments'];
   assert.equal(body(A.demo).assignments.length, body(A.fadm).assignments.length);
+  // 반증 3회차 후속: 사람 엣지가 없으면 리소스 적정성도 관리자와 같은 응답(포탈 자신 · 데모 엣지 — 표지 없음)
+  const CS = h.views['/api/capacity/summary'];
+  assert.deepEqual(body(CS.demo).hosts.map((x) => x.k).sort(), ['local', 'mock-Edge-Seoul'], CS.demo.txt.slice(0, 200));
+  assert.deepEqual(body(CS.demo).hosts, body(CS.fadm).hosts); assert.deepEqual(body(CS.demo).push, body(CS.fadm).push);
+  for (const p of h.capViews.slice(1)) assert.deepEqual(body(h.views[p].demo), body(h.views[p].fadm), p);
   // 반증 1회차 M-1: 사람 Veeam 서버가 없으면 백업 실행 화면도 관리자와 같은 응답(표지 없음)
   for (const p of h.backupViews) {
     assert.equal(h.views[p].demo.st, 200, `${p} ${h.views[p].demo.txt.slice(0, 160)}`);
@@ -970,7 +1111,62 @@ test('③-r3 데모 판본 메일 상태 — 실패 사유 · 마지막 오류�
 
 test('③-r3 should: 필수 질의를 채워도 데모가 2xx 를 못 받는 GET 은 알려진 목록 안에만(새 필수 질의 라우트가 스윕에서 조용히 빠지지 않게)', () => {
   const h = harness('full');
-  assert.ok(Array.isArray(h.still400), '하네스가 still400 을 내보내지 않았다');
-  const extra = h.still400.filter((r) => !STILL400_KNOWN.includes(r));
-  assert.deepEqual(extra, [], '필수 질의 표에 없는 데모 400 GET — FILLS 에 그 라우트의 질의를 더하거나(스윕 대상) 아래 목록에 사유와 함께 적을 것');
+  assert.ok(Array.isArray(h.still400) && h.tableMiss && typeof h.tableMiss === 'object' && Array.isArray(h.routeTableKeys), '하네스가 still400 · tableMiss 를 내보내지 않았다');
+  const why = h.still400Why || {};
+  const extra = h.still400.filter((r) => !STILL400_KNOWN.includes(r)).map((r) => `${r} — ${why[r] || ''}`);
+  assert.deepEqual(extra, [], '필수 질의 표에 없는 데모 400 GET — 하네스 ROUTE_QUERIES 에 그 라우트의 실제 질의를 더하거나(스윕 대상) STILL400_KNOWN 에 근거와 함께 적을 것');
+  const miss = Object.entries(h.tableMiss).filter(([r]) => !STILL400_KNOWN.includes(r)).map(([r, w]) => `${r} — ${w}`);
+  assert.deepEqual(miss, [], '질의 표가 데모 2xx 를 만들지 못한 라우트 — 표의 키 · 시드를 고칠 것(마지막 응답이 사유)');
+  const stale = STILL400_KNOWN.filter((r) => !h.still400.includes(r) && !Object.hasOwn(h.tableMiss, r));
+  assert.deepEqual(stale, [], '이제 데모가 2xx 를 받는 항목 — STILL400_KNOWN 에서 지울 것');
+  for (const r of R3_FIRST_RUN_26) assert.ok(h.routeTableKeys.includes(r), `질의 표에 ${r} 가 없다`);
+  assert.deepEqual(h.routeTableDead, [], '라우터 스택에 없는 표 항목(라우트 이름이 바뀌었다 — 표를 고칠 것)');
+  const swept = new Set(h.sweep.map((x) => x.route));
+  const notSwept = h.routeTableKeys.filter((r) => !STILL400_KNOWN.includes(r) && !swept.has(r));
+  assert.deepEqual(notSwept, [], '표로 2xx 를 받았다는 라우트가 ③-a 스윕에 없다');
+});
+
+test('③-r3f 반증 3회차 후속(표가 드러냄) — 리소스 적정성(capacity · adminOnly): 데모는 포탈 자신 + 데모 엣지만(뺀 개수) · 사람 엣지 단건 404 · 관리자 무변경', () => {
+  const h = harness('full');
+  const V = h.views;
+  const S = V['/api/capacity/summary'];
+  assert.equal(S.demo.st, 200, S.demo.txt.slice(0, 200));
+  assert.equal(S.oper.st, 403, 'operator 는 adminOnly 403 — operator 판본이 없다');
+  const d = body(S.demo);
+  assert.deepEqual(d.hosts.map((x) => x.k).sort(), ['local', 'mock-Edge-Seoul']);
+  assert.equal(d.demoOnly, true); assert.deepEqual(d.demoMasked, { hosts: 1 });
+  for (const c of ['edgehost-realq', 'edge-realq']) assert.equal(S.demo.txt.includes(c), false, `데모 요약에 ${c}`);
+  const f = body(S.fadm);
+  assert.deepEqual(f.hosts.map((x) => x.k).sort(), ['edge-realq', 'local', 'mock-Edge-Seoul'], '관리자 판본이 바뀌었다');
+  assert.ok(S.fadm.txt.includes('edgehost-realq'));
+  assert.equal('demoOnly' in f, false); assert.equal('demoMasked' in f, false);
+  for (const p of ['/api/capacity/host?k=edge-realq', `/api/capacity/history?k=edge-realq&metric=${encodeURIComponent(h.capMetric)}&window=day`]) {
+    assert.equal(V[p].demo.st, 404, `${p} ${V[p].demo.txt.slice(0, 160)}`);
+    assert.equal(V[p].demo.txt.includes('edgehost-realq'), false);
+    assert.equal(V[p].fadm.st, 200, `${p} 관리자 대조 ${V[p].fadm.st}`);
+  }
+  assert.ok(V['/api/capacity/host?k=edge-realq'].fadm.txt.includes('edgehost-realq'), '대조: 관리자는 사람 엣지 호스트 이름을 본다');
+  assert.ok(body(V[`/api/capacity/history?k=edge-realq&metric=${encodeURIComponent(h.capMetric)}&window=day`].fadm).points.length >= 1, '대조: 관리자는 사람 엣지 추이를 본다(시드가 들어갔다)');
+  for (const p of ['/api/capacity/host?k=local', '/api/capacity/host?k=mock-Edge-Seoul']) {
+    assert.equal(V[p].demo.st, 200, `${p} ${V[p].demo.txt.slice(0, 160)}`);
+    assert.deepEqual(body(V[p].demo).meta, body(V[p].fadm).meta, `${p} 데모 · 포탈 자신 행은 관리자와 같다`);
+  }
+});
+
+test('③-r3f 순수 판정 — capacityHostShownTo(데모 = local · mock- 만, 판정이 던지면 제외) · capacityPushView(데모 판본만 중앙 URL · 실패 사유를 비운다)', async () => {
+  const { capacityHostShownTo, capacityPushView } = await import('../src/routes/capacity.js');
+  const demo = { username: 'thedvcdemp', role: 'admin', demoGuest: true };
+  const adm = { username: 'a', role: 'admin' };
+  for (const k of ['local', 'mock-Edge-Seoul', 'MOCK-x']) assert.equal(capacityHostShownTo(demo, k), true, k);
+  for (const k of ['edge-realq', 'Local', '', 'xmock-1', null, undefined, { toString() { throw new Error('x'); } }]) assert.equal(capacityHostShownTo(demo, k), false, String(typeof k));
+  for (const k of ['edge-realq', 'local', '']) { assert.equal(capacityHostShownTo(adm, k), true); assert.equal(capacityHostShownTo({ role: 'operator' }, k), true); }
+  const edgePush = { enabled: true, centralUrl: 'https://10.66.60.60:4000', agent: 'edge-a', intervalMs: 60000, unsupportedUntil: null, last: { at: 1, ok: false, status: 0, rows: 0, reason: 'connect ECONNREFUSED 10.66.60.60:4000' } };
+  const v = capacityPushView(demo, edgePush);
+  assert.equal(JSON.stringify(v).includes('10.66.60.60'), false, JSON.stringify(v));
+  assert.equal(v.addressHidden, true); assert.equal(v.enabled, true); assert.equal(v.last.at, 1);
+  assert.equal(edgePush.centralUrl, 'https://10.66.60.60:4000', '원본을 바꿨다');
+  assert.equal(capacityPushView(adm, edgePush), edgePush, '관리자 판본은 원본 그대로');
+  const central = { enabled: false, centralUrl: '', agent: '', intervalMs: 60000, unsupportedUntil: null, last: null };
+  assert.equal(capacityPushView(demo, central), central, '중앙(push 꺼짐)은 관리자와 같은 모양');
+  assert.equal(capacityPushView(demo, null), null);
 });
