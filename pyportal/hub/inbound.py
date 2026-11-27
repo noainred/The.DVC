@@ -112,6 +112,14 @@ class ConnPhase:
         self._acc = (0.0, 0.0)
 
     def enter(self, phase, started):
+        # 반증 3회차 R3-1: 닫히지 않은 쌓이는 단계를 덮어쓰면(예: 'Expect: 100-continue' — 헤더를 다 읽은 뒤 stdlib 가
+        # 100 을 쓰면서 PhaseWriter.auto 가 'write' 를 연다 → 뒤의 leave('header') 는 단계가 달라 아무것도 안 했다)
+        # 그 진행분을 먼저 누계에 더한다. 같은 단계를 다시 여는 것도 덮어쓰기다(닫지 않은 앞 구간을 잃지 않게).
+        prev = self.phase
+        if prev is not None and self.counts(prev):
+            prev_started = self.started
+            self.phase = None   # leave 와 같은 순서 — 읽는 쪽이 진행분 + 누계를 이중으로 세지 않게
+            self.add_slow(started - prev_started, started)
         self.started = started
         self.phase = phase
 

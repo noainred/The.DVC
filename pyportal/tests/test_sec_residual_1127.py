@@ -34,6 +34,7 @@ from hub.config import config  # noqa: E402
 from test_api import ServerCase  # noqa: E402
 
 _GET = b"GET /api/meta HTTP/1.1\r\nHost: x\r\n\r\n"
+_GET_EXPECT = b"GET /api/meta HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n\r\n"   # 반증 3회차 R3-1
 _GET_CLOSE = b"GET /api/meta HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
 
 
@@ -72,6 +73,38 @@ def _read_response(sock):
             break
         body += chunk
     return lines[0], "\r\n".join(lines[1:]), body[:length]
+
+
+def _read_final(sock):
+    """1xx(100 Continue)를 건너뛰고 최종 응답 상태줄을 돌려준다(본문은 Content-Length 만큼). 응답 없이 닫히면 ''.
+    반증 3회차 R3-1 — `_read_response` 는 첫 응답만 읽어 100 뒤의 최종 응답을 버퍼에 남긴다."""
+    buf = b""
+    while True:
+        while b"\r\n\r\n" not in buf:
+            try:
+                chunk = sock.recv(65536)
+            except (ConnectionError, socket.timeout, OSError):
+                return ""
+            if not chunk:
+                return ""
+            buf += chunk
+        head, buf = buf.split(b"\r\n\r\n", 1)
+        lines = head.decode("latin-1").split("\r\n")
+        if lines[0].startswith("HTTP/1.1 1"):
+            continue
+        length = 0
+        for line in lines[1:]:
+            if line.lower().startswith("content-length:"):
+                length = int(line.split(":", 1)[1])
+        while len(buf) < length:
+            try:
+                chunk = sock.recv(65536)
+            except (ConnectionError, socket.timeout, OSError):
+                return ""
+            if not chunk:
+                return ""
+            buf += chunk
+        return lines[0]
 
 
 def _read_all(sock, limit=10.0):
@@ -1265,18 +1298,19 @@ class RestartTest(InboundCase):
 
 def _cycler(port, stop, mode, phase=0.4, idle=0.4):
     """반증 2회차 R2-1: 단계마다 되찾기 기준(0.5초) 직전에 다음 단계로 갈아탄다 — 유휴 → 헤더 드립 → 본문 드립 → 응답 → 유휴 …
-    (반증 refute_cycle.py 와 같은 꼴). mode 'hdr' 는 쉬지 않고 헤더만 흘린다."""
+    (반증 refute_cycle.py 와 같은 꼴). mode 'hdr' 는 쉬지 않고 헤더만 흘린다. mode 'expect'(반증 3회차 R3-1)는 유휴 → 헤더 드립 끝에
+    'Expect: 100-continue' — stdlib 가 100 을 쓰며 단계를 덮어써 헤더 드립이 누계에서 빠지던 우회."""
     while time.monotonic() < stop:
         try:
             s = _open(port, timeout=5)
             s.settimeout(5)
             first = True
             while time.monotonic() < stop:
-                if mode == "full":
+                if mode in ("full", "expect"):
                     if not first:
                         time.sleep(idle)
                     first = False
-                    req = b"POST /x HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\n"
+                    req = (b"POST /x HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\n" if mode == "full" else _GET_EXPECT)
                 else:
                     req = _GET
                 step = phase / len(req) * 0.9
@@ -1287,7 +1321,7 @@ def _cycler(port, stop, mode, phase=0.4, idle=0.4):
                     for _ in range(4):
                         time.sleep(phase / 4 * 0.9)
                         s.sendall(b"a")
-                if not _read_response(s)[0]:
+                if not (_read_final(s) if mode == "expect" else _read_response(s)[0]):
                     break
             s.close()
         except OSError:
@@ -1327,7 +1361,7 @@ class PhaseCyclingTest(InboundCase):
                 self.assertGreater(drops.get("shed", 0), 0)
 
     def test_existing_keepalive_keeps_working_during_phase_cycling(self):
-        for mode in ("full", "hdr"):
+        for mode in ("full", "hdr", "expect"):
             with self.subTest(mode=mode), _capture():
                 srv, self._port = self._server(header=1.0, max_connections=4, admit_wait=1.0)
                 user = self._keepalive_user(self._port)
@@ -1426,6 +1460,60 @@ class ReclaimScoreTest(InboundCase):
         with _capture():
             srv2.note_inbound_drop("header")
         self.assertGreater(srv2._attack_seen_at, now)   # noqa: SLF001 — 단계 시한 초과도 공격 신호
+
+    def test_overwritten_phase_still_counts(self):
+        """반증 3회차 R3-1: 닫히지 않은 쌓이는 단계를 다른 단계(또는 같은 단계)로 덮어써도 그 진행분은 누계에 남는다.
+        'Expect: 100-continue' 는 헤더를 다 읽은 뒤 100 을 쓰며 'write' 를 열어 헤더 단계를 덮었다 → 뒤의 leave('header') 는 무시 → 누계 0."""
+        from hub.inbound import ConnPhase
+        c = ConnPhase(half_life=0)
+        t = 200.0
+        c.enter("header", t)
+        c.enter("write", t + 0.6)                  # 덮어쓰기 — 헤더 0.6초가 남아야 한다
+        self.assertAlmostEqual(c.slow_score(t + 0.6, current=False), 0.6, delta=1e-6, msg="덮어쓴 헤더 단계가 누계에서 빠졌다")
+        c.leave("header", t + 0.65)                # 이미 덮인 단계 — 아무것도 안 한다(이중으로 세지 않음)
+        self.assertAlmostEqual(c.slow_score(t + 0.65), 0.6 + 0.05, delta=1e-6)
+        c.leave("write", t + 0.7)
+        self.assertAlmostEqual(c.slow_score(t + 0.7), 0.7, delta=1e-6)
+        c.enter("body", t + 1.0)
+        c.enter("body", t + 1.3)                   # 같은 단계를 닫지 않고 다시 열어도 앞 구간을 잃지 않는다
+        c.leave("body", t + 1.4)
+        self.assertAlmostEqual(c.slow_score(t + 1.4), 1.1, delta=1e-6)
+        c.enter("linger", t + 2.0)
+        c.enter("header", t + 5.0)                 # 린저(쌓지 않는 단계)를 덮어쓰면 더하지 않는다
+        self.assertAlmostEqual(c.slow_score(t + 5.0), 1.1, delta=1e-6, msg="린저를 쌓았다")
+        c.leave("header", t + 5.0)
+        c.trusted = True
+        c.enter("body", t + 6.0)
+        c.enter("write", t + 9.0)                  # 로그인 세션의 본문은 덮어써도 쌓지 않는다
+        self.assertAlmostEqual(c.slow_score(t + 9.0), 1.1, delta=1e-6, msg="로그인 세션 본문을 쌓았다")
+
+    def test_expect_100_header_drip_counts_on_a_real_socket(self):
+        """반증 3회차 R3-1(실소켓): 같은 헤더를 0.6초 흘린 뒤 연결 누계 — Expect 가 있어도 없을 때와 같게 쌓인다(수정 전 0.0)."""
+        with _capture():
+            srv, port = self._server(header=2.0, max_connections=4)
+            scores = {}
+            for expect in (False, True):
+                s = _open(port)
+                self.addCleanup(s.close)
+                req = _GET_EXPECT if expect else _GET
+                for i in range(len(req)):
+                    s.sendall(req[i:i + 1])
+                    time.sleep(0.6 / len(req))
+                self.assertTrue(_read_final(s).startswith("HTTP/1.1 200"), expect)
+                time.sleep(0.1)
+                with srv._cond:
+                    seats = list(srv._admitted.values())
+                self.assertEqual(len(seats), 1, seats)
+                scores[expect] = seats[0].conn.slow_score(time.monotonic(), current=False)
+                s.close()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    with srv._cond:
+                        if not srv._admitted:
+                            break
+                    time.sleep(0.02)
+            self.assertGreater(scores[False], 0.4, scores)
+            self.assertGreater(scores[True], 0.4, "Expect: 100-continue 로 헤더 드립이 누계에서 빠졌다: {}".format(scores))
 
     def test_trusted_exemption_is_capped_per_account(self):
         """반증 2회차 S: 로그인 세션의 본문 · 쓰기 제외는 계정당 2개까지(오래 진행한 것 보호) — viewer 하나로 64칸을 못 쥔다.
