@@ -25,15 +25,35 @@ export function remoteOutText(v) {
 }
 
 /**
+ * 접속 전 설정 거절의 code — 호출부(provision · 철거)가 '스스로 낫지 않는 설정 문제' 를 일시 실패와 가른다.
+ *   반증 1회차 S-1: 설정 파일 경로 거절(157회차)도 같은 부류다 — 예전에는 code 가 없어 일시 실패처럼 철거를 '성공' 으로 보고 매핑을 지웠다(열린 포트 은폐).
+ */
+export const DEPLOY_REFUSAL_CODES = Object.freeze({ cmd: 'deploy-cmd-invalid', path: 'deploy-path-invalid' });
+const REFUSAL_CODE_SET = new Set(Object.values(DEPLOY_REFUSAL_CODES));
+export function isDeployConfigRefusal(d) { return !!d && d.ok === false && REFUSAL_CODE_SET.has(d.code); }
+
+// 반증 1회차 N-2: 같은 중계(호스트) · 같은 칸의 거절 경고는 5분에 한 번 — 철거 보류 매핑이 여럿이면 만료 주기마다 매핑 수만큼 같은 줄이 나왔다(값은 원래 싣지 않는다)
+const REFUSAL_WARN_MS = 5 * 60_000;
+const _refusalWarnAt = new Map();
+function warnRefusal(deploy, what) {
+  const key = `${String(deploy?.host ?? '').slice(0, 255)}|${what}`;
+  const now = Date.now();
+  if (now - (_refusalWarnAt.get(key) ?? -Infinity) < REFUSAL_WARN_MS) return;
+  if (_refusalWarnAt.size > 1000) _refusalWarnAt.clear();
+  _refusalWarnAt.set(key, now);
+  console.warn(`[remote] HAProxy 자동 배포 거절(접속 전) — 저장된 ${what} 가 허용 형식 밖입니다(설정 › 중계 서버에서 확인).`);
+}
+export function _resetRefusalWarnForTest() { _refusalWarnAt.clear(); }
+
+/**
  * 보안 잔여 11-27 M1: 검증 · 재적재 명령이 허용 형식 밖이면 **접속 전에** 거절한다(비밀이 이동하지 않고 원격에 임시 파일도 남지 않는다).
  *   로그에는 칸 이름 · 출처만(값은 싣지 않는다). code 는 호출부(provision · 철거)가 '설정 문제' 를 일반 실패와 가르는 데 쓴다.
  */
 function refuseBadCmds(deploy) {
   const bad = deployCmdRefusal(deploy);
   if (!bad) return null;
-  const which = DEPLOY_CMD_KINDS.filter((k) => resolveDeployCmd(deploy, k).issue).join(',');
-  console.warn(`[remote] HAProxy 자동 배포 거절(접속 전) — 저장된 ${which} 가 허용 형식 밖입니다(설정 › 중계 서버에서 확인).`);
-  return { ok: false, reason: bad, code: 'deploy-cmd-invalid' };
+  warnRefusal(deploy, DEPLOY_CMD_KINDS.filter((k) => resolveDeployCmd(deploy, k).issue).join(','));
+  return { ok: false, reason: bad, code: DEPLOY_REFUSAL_CODES.cmd };
 }
 
 const BEGIN = '# >>> portal-remote-access (auto-generated — do not edit) >>>';
@@ -79,7 +99,8 @@ export function previewConfig(mappings, cfg) {
  */
 export async function deployToProxy(deploy, mappings, opts = {}) {
   if (!deploy?.host || !deploy?.username) return { ok: false, reason: '배포 SSH 접속 정보(host/username)가 필요합니다.' };
-  { const bad = haproxyCfgPathIssue(deploy.haproxyConfigPath); if (bad) return { ok: false, reason: bad }; }   // 157회차: 아래 셸 명령에 보간되는 값 — 접속 전에 거절
+  // 157회차: 아래 셸 명령에 보간되는 값 — 접속 전에 거절 · 보안 잔여 11-27 M1(반증 1회차 S-1): 설정 거절 code 를 붙여 철거가 매핑을 지우지 않게
+  { const bad = haproxyCfgPathIssue(deploy.haproxyConfigPath); if (bad) { warnRefusal(deploy, 'haproxyConfigPath'); return { ok: false, reason: bad, code: DEPLOY_REFUSAL_CODES.path }; } }
   { const r = refuseBadCmds(deploy); if (r) return r; }   // 보안 잔여 11-27 M1
   const validateCmd = resolveDeployCmd(deploy, 'validateCmd').cmd;   // 정규형(화면/API 값) 또는 운영자 env 원문 · 내장 기본
   const reloadCmd = resolveDeployCmd(deploy, 'reloadCmd').cmd;

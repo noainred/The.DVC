@@ -56,4 +56,4 @@ export function deployResultText(r) {
 
 /** 매핑 상태 배지 글 — 서버 상태 코드는 그대로 두고 사람이 읽을 이름만. */
 export const MAPPING_STATUS_LABEL = Object.freeze({ 'teardown-pending': '철거 보류' });
-export const MAPPING_TEARDOWN_TITLE = '삭제했지만 중계 서버의 자동 배포 명령 설정 문제로 HAProxy 포트를 아직 닫지 못했습니다 — 관리자가 설정 › 중계 서버에서 고치면 자동으로 정리됩니다.';
+export const MAPPING_TEARDOWN_TITLE = '삭제했지만 중계 서버의 자동 배포 설정(명령 · 설정 파일 경로) 문제로 HAProxy 포트를 아직 닫지 못했습니다 — 관리자가 설정 › 중계 서버에서 고치면 자동으로 정리됩니다.';

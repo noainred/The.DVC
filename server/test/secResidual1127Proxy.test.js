@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import ssh2 from 'ssh2';
@@ -454,4 +455,151 @@ test('T6 게이트웨이 — auth 의 shell 크기 · resize 의 setWindow 가 t
     assert.deepEqual(sh.s.win, [[1000, 200, 0, 0], [43, 132, 0, 0]], JSON.stringify(sh.s.win));
     ws.close(1000, 'bye');
   } finally { gw._setSshDepsForTest(null); gw._setRemoteDepsForTest(null); reg.removeMapping(m.mapping.id); }
+});
+
+/* ═══════════════ 반증 1회차(fix1) — 철거 보류는 한 방향 · 경로 거절도 보류 · 유닛 템플릿 · 블록에 든 보류 · 경고 요약 ═══════════════ */
+// 업그레이드 전 현장의 옛 저장값은 저장 라우트가 이제 400 으로 막으므로, 등록부 캐시(= 읽어 들인 파일)에 직접 둔다
+const legacyProxy = (o) => { reg.getConfig().proxies.push(o); return o; };
+const rawProxy = (id) => reg.getConfig().proxies.find((p) => p.id === id);
+
+test('R-1 철거 보류는 한 방향 — 관리자 재적용(SSH · Data Plane) · 직접 상태 쓰기 · 재프로비저닝이 되살리지 못한다 · .rdp 도 주지 않는다', async () => {
+  store.snapshot = { ...store.get(), vcenters: [...store.get().vcenters, { id: 'vc-d' }, { id: 'vc-e' }] };
+  legacyProxy({ id: 'p3', name: '법인C 중계', vcenterIds: ['vc-d'], proxyHost: '10.9.9.11', publicPortBase: 23000, deploy: sshDep({ reloadCmd: BAD_RELOAD }) });
+  const am = reg.addMapping({ protocol: 'ssh', targetHost: '10.3.3.7', targetPort: 22, proxyId: 'p3', owner: 'op1', vcenterId: 'vc-d' });
+  assert.equal(am.ok, true, JSON.stringify(am));
+  const id = am.mapping.id;
+  let s0 = snap();
+  assert.equal((await call('op1', 'DELETE', `/mappings/${id}`)).status, 409);
+  assert.equal(reg.getMapping(id).status, prov.TEARDOWN_PENDING);
+  // 재현 경로: 관리자 재적용 → 예전에는 400 + 상태 'error'(보류가 풀렸다)
+  const ap = await call('fadm', 'POST', `/mappings/${id}/apply`, {});
+  assert.equal(ap.status, 409, JSON.stringify(ap.body));
+  assert.equal(ap.body.code, prov.TEARDOWN_PENDING);
+  assert.equal(reg.getMapping(id).status, prov.TEARDOWN_PENDING, '재적용이 보류를 풀면 안 된다');
+  assert.equal(gw.mappingAccessIssue({ username: 'op1', role: 'operator', scope: {} }, reg.getMapping(id)), reg.MAPPING_TEARDOWN_TEXT);
+  assert.equal(prov.deployMappingsFor('p3').some((x) => x.id === id), false, '다음 배포 블록에 들어가면 안 된다');
+  const qc = await call('op1', 'POST', '/quick-connect', { targetHost: '10.3.3.7', targetPort: 22, protocol: 'ssh', vcenterId: 'vc-d' });
+  assert.equal(qc.status, 200, JSON.stringify(qc.body));
+  assert.notEqual(qc.body.mapping.id, id, 'quick-connect 가 보류 매핑을 재사용하면 안 된다');
+  assertNoContact(s0, '보류 매핑 재적용');
+  // 등록부 판정 하나: 보류 → 다른 상태 쓰기는 무시(false) · 보류 → 보류는 허용
+  const err0 = reg.getMapping(id).error;
+  assert.equal(reg.setMappingStatus(id, 'active', null), false);
+  assert.equal(reg.setMappingStatus(id, 'error', 'x'), false);
+  assert.equal(reg.getMapping(id).status, prov.TEARDOWN_PENDING); assert.equal(reg.getMapping(id).error, err0);
+  assert.equal(reg.setMappingStatus(id, prov.TEARDOWN_PENDING, reg.MAPPING_TEARDOWN_TEXT), true);
+  assert.equal(reg.setMappingStatus('no-such-id', 'active', null), false);
+  // 재프로비저닝(SSH 배포 중계)도 보류 매핑을 건드리지 않는다
+  s0 = snap();
+  await prov.provision(reg.getMapping(id));
+  assert.equal(reg.getMapping(id).status, prov.TEARDOWN_PENDING);
+  assertNoContact(s0, '보류 매핑 provision');
+
+  // 중계를 Data Plane 으로 바꾼 뒤의 재적용 · 재프로비저닝 — HAProxy(Data Plane API)에 그 포트를 다시 만들면 안 된다(상태 쓰기만 막아서는 막히지 않는다)
+  const hits = [];
+  const dpSrv = http.createServer((req, res) => { hits.push(`${req.method} ${req.url}`); res.writeHead(500, { 'content-type': 'application/json' }); res.end('{"message":"no"}'); });
+  await new Promise((r) => dpSrv.listen(0, '127.0.0.1', r));
+  try {
+    rawProxy('p3').dataplane = { enabled: true, url: `http://127.0.0.1:${dpSrv.address().port}`, username: 'u', password: 'p', bindAddress: '*' };
+    const ap2 = await call('fadm', 'POST', `/mappings/${id}/apply`, {});
+    assert.equal(ap2.status, 409, JSON.stringify(ap2.body));
+    await prov.provision(reg.getMapping(id));
+    assert.deepEqual(hits, [], `보류 매핑으로 Data Plane 을 부르면 안 된다 ${JSON.stringify(hits)}`);
+    assert.equal(reg.getMapping(id).status, prov.TEARDOWN_PENDING);
+    // 대조: 보류가 아닌 매핑의 재적용은 Data Plane 을 부른다(계수기가 살아 있다)
+    const ap3 = await call('fadm', 'POST', `/mappings/${qc.body.mapping.id}/apply`, {});
+    assert.notEqual(ap3.status, 409);
+    assert.ok(hits.length > 0, '대조 매핑은 Data Plane 을 불러야 한다');
+  } finally {
+    rawProxy('p3').dataplane = { enabled: false };
+    await new Promise((r) => dpSrv.close(() => r()));
+  }
+
+  // .rdp — 아직 열린 공개 포트를 가리키는 파일을 주지 않는다(소유자 · 관리자 모두)
+  const rm = reg.addMapping({ protocol: 'rdp', targetHost: '10.3.3.8', targetPort: 3389, proxyId: 'p3', owner: 'op1', vcenterId: 'vc-d' });
+  const rdp0 = await fetch(`http://127.0.0.1:${web.address().port}/api/remote/rdp/${rm.mapping.id}`, { headers: { authorization: `Bearer ${TOK.op1}` } });
+  assert.equal(rdp0.status, 200, '보류 전에는 받는다(대조)');
+  assert.equal((await call('op1', 'DELETE', `/mappings/${rm.mapping.id}`)).status, 409);
+  for (const who of ['op1', 'fadm']) {
+    const r = await call(who, 'GET', `/rdp/${rm.mapping.id}`);
+    assert.equal(r.status, 409, `${who}: ${JSON.stringify(r.body)}`); assert.equal(r.body.code, prov.TEARDOWN_PENDING);
+  }
+});
+
+test('S-1 설정 파일 경로 거절(157회차 옛 저장값)도 접속 전 설정 거절 — 철거 보류 · 비관리자 사유에 경로 없음 · 기동 경고에 센다 · 고치면 정리', async () => {
+  const before = exp.warnBadDeployCmds();
+  legacyProxy({ id: 'p4', name: '법인D 중계', vcenterIds: ['vc-e'], proxyHost: '10.9.9.12', publicPortBase: 24000, deploy: sshDep({ haproxyConfigPath: '/etc/haproxy/haproxy.cfg; id' }) });
+  assert.equal(exp.warnBadDeployCmds(), before + 1, '경로가 형식 밖인 중계도 센다');
+  assert.ok(reg.deployConfigRefusal(rawProxy('p4').deploy));
+  assert.equal(reg.deployConfigRefusal(sshDep()), null);
+  const s0 = snap();
+  const d = await dep.deployToProxy(rawProxy('p4').deploy, []);
+  assert.equal(d.ok, false); assert.equal(d.code, dep.DEPLOY_REFUSAL_CODES.path); assert.equal(dep.isDeployConfigRefusal(d), true);
+  assert.equal(dep.isDeployConfigRefusal({ ok: false, reason: '접속 실패' }), false, '일시 실패는 설정 거절이 아니다');
+  assert.equal(dep.isDeployConfigRefusal({ ok: true, code: dep.DEPLOY_REFUSAL_CODES.cmd }), false);
+  // 새 매핑의 프로비저닝 실패 사유(소유자가 본다)에 경로 · 명령이 없다
+  const nm = reg.addMapping({ protocol: 'ssh', targetHost: '10.4.4.6', targetPort: 22, proxyId: 'p4', owner: 'op1', vcenterId: 'vc-e' });
+  await prov.provision(nm.mapping);
+  assert.equal(reg.getMapping(nm.mapping.id).status, 'error');
+  assert.equal(reg.getMapping(nm.mapping.id).error, reg.DEPLOY_CMD_MAPPING_TEXT);
+  // 삭제 — 예전: code 없는 거절을 일시 실패로 보고 등록부에서 지웠다(열린 포트 은폐)
+  const del = await call('op1', 'DELETE', `/mappings/${nm.mapping.id}`);
+  assert.equal(del.status, 409, JSON.stringify(del.body));
+  assert.equal(del.body.reason, prov.TEARDOWN_PENDING_TEXT); assert.equal(/; id|haproxyConfigPath|경로는/.test(del.body.reason), false);
+  assert.equal(reg.getMapping(nm.mapping.id).status, prov.TEARDOWN_PENDING);
+  // 만료 — 임시 매핑도 지우지 않고 보류
+  const em = reg.addMapping({ protocol: 'ssh', targetHost: '10.4.4.7', targetPort: 22, proxyId: 'p4', owner: 'op1', vcenterId: 'vc-e', ephemeral: true });
+  reg.getMapping(em.mapping.id).lastUsedAt = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  await exp.pruneExpiredMappings();
+  assert.equal(reg.getMapping(em.mapping.id)?.status, prov.TEARDOWN_PENDING, '만료 철거가 거절되면 남긴다');
+  assertNoContact(s0, '경로 거절');
+  // 관리자가 경로를 고친다 → 다음 만료 주기가 철거하고 지운다
+  rawProxy('p4').deploy.haproxyConfigPath = '/etc/haproxy/haproxy.cfg';
+  dep._setDeployDepsForTest({ withSsh: async (_c, fn) => fn({ readFile: async () => 'global\n', writeFile: async () => {}, exec: async () => ({ code: 0, stdout: '', stderr: '' }) }) });
+  try {
+    await exp.pruneExpiredMappings();
+    assert.equal(reg.getMapping(em.mapping.id), null);
+    assert.equal(reg.getMapping(nm.mapping.id), null);
+  } finally { dep._setDeployDepsForTest(null); }
+});
+
+test('N-1 재적재 유닛 — haproxy 는 템플릿 이름(@ 앞)에 · 다른 템플릿에 인스턴스 이름만 맞춘 유닛은 거절', () => {
+  for (const s of ['systemctl restart getty@haproxy', 'systemctl restart user@haproxy', 'systemctl restart serial-getty@haproxy', 'systemctl restart systemd-poweroff@haproxy.service', 'service getty@haproxy restart']) {
+    const r = reg.parseDeployCmd('reloadCmd', s);
+    assert.equal(r.ok, false, s); assert.match(r.issue, /@/);
+  }
+  for (const s of ['systemctl reload haproxy@edge', 'systemctl reload rh-haproxy18-haproxy@a.service', 'systemctl reload haproxy.service', 'service haproxy reload']) {
+    assert.equal(reg.parseDeployCmd('reloadCmd', s).ok, true, s);
+  }
+});
+
+test('N-3 · N-2 성공 배포는 블록에 실제로 든 보류 매핑을 지우지 않는다 · 보류 경고는 주기당 한 줄 · 거절 경고는 중계 · 칸마다 한 번', async () => {
+  // N-3: 배포가 도는 사이에 보류가 된 매핑은 블록에 들어갔다(listen 이 열려 있다) — 지우면 열린 포트가 화면에서 사라진다
+  const a = reg.addMapping({ protocol: 'ssh', targetHost: '10.3.3.20', targetPort: 22, proxyId: 'p3', owner: 'op1', vcenterId: 'vc-d' }).mapping;
+  const b = reg.addMapping({ protocol: 'ssh', targetHost: '10.3.3.21', targetPort: 22, proxyId: 'p3', owner: 'op1', vcenterId: 'vc-d' }).mapping;
+  for (const m of [a, b]) reg.setMappingStatus(m.id, prov.TEARDOWN_PENDING, reg.MAPPING_TEARDOWN_TEXT);
+  prov.finishSshDeploy('p3', [reg.getMapping(a.id)]);
+  assert.equal(reg.getMapping(a.id)?.status, prov.TEARDOWN_PENDING, '블록에 든 보류 매핑은 남는다');
+  assert.equal(reg.getMapping(b.id), null, '블록에 없던 보류 매핑은 닫혔으니 지운다');
+  // N-2: 보류 매핑 여럿(p3 — 재적재 명령 형식 밖)의 만료 주기
+  for (let i = 0; i < 3; i += 1) reg.addMapping({ protocol: 'ssh', targetHost: `10.3.3.${30 + i}`, targetPort: 22, proxyId: 'p3', owner: 'op1', vcenterId: 'vc-d', ephemeral: true });
+  for (const m of reg.listMappings().filter((x) => x.proxyId === 'p3' && x.ephemeral)) m.lastUsedAt = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  const heldCount = () => reg.listMappings().filter((x) => x.proxyId === 'p3' && x.status === prov.TEARDOWN_PENDING).length;
+  const lines = [];
+  const orig = console.warn;
+  dep._resetRefusalWarnForTest();
+  console.warn = (...x) => { lines.push(x.join(' ')); };
+  try {
+    await exp.pruneExpiredMappings();
+    await exp.pruneExpiredMappings();
+    // 같은 중계(호스트)라도 다른 칸의 거절은 따로 알린다(가려지면 안 된다)
+    assert.equal((await dep.deployToProxy(sshDep({ haproxyConfigPath: '/etc/haproxy/x y.cfg' }), [])).code, dep.DEPLOY_REFUSAL_CODES.path);
+  } finally { console.warn = orig; }
+  assert.equal(lines.filter((l) => l.includes('HAProxy 자동 배포 거절') && l.includes('haproxyConfigPath')).length, 1, JSON.stringify(lines));
+  assert.ok(heldCount() >= 4, String(heldCount()));
+  const summary = lines.filter((l) => l.includes('매핑 철거 보류'));
+  assert.equal(summary.length, 2, `주기당 한 줄: ${JSON.stringify(summary)}`);
+  assert.match(summary[1], new RegExp(`보류 ${heldCount()}건`));
+  const refusals = lines.filter((l) => l.includes('HAProxy 자동 배포 거절') && l.includes('reloadCmd'));
+  assert.equal(refusals.length, 1, `같은 중계 · 같은 칸의 거절 경고는 한 번: ${JSON.stringify(refusals)}`);
 });

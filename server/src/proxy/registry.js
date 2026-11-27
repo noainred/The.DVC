@@ -279,7 +279,7 @@ export const DEPLOY_CMD_LABEL = Object.freeze({ validateCmd: '검증 명령', re
 /** 화면이 그대로 보이는 형식 안내(서버가 내려 준다 — 웹은 문법 · 상한을 복제하지 않는다). 백틱 금지 · 인용은 ‘ ’. */
 export const DEPLOY_CMD_HELP = Object.freeze({
   validateCmd: '‘[sudo -n] haproxy -c -f {file}’ 꼴만 받습니다 — 실행 파일은 ‘haproxy’ 또는 /usr/sbin · /usr/bin · /usr/local/sbin · /usr/local/bin · /sbin · /bin 의 haproxy, /opt/rh/<이름>/root/usr/sbin/haproxy, /opt/haproxy/sbin/haproxy · 옵션은 -c(필수) · -q · -V 와 ‘-f {file}’ 한 번(순서 무관) · 추가 설정은 ‘-f /etc/haproxy/…’ 로 4개까지 · sudo 는 -n(비밀번호를 묻지 않음)으로 실행합니다. 셸 기호 · 따옴표 · 줄바꿈은 쓸 수 없습니다(300자까지).',
-  reloadCmd: '‘[sudo -n] systemctl reload|restart|reload-or-restart|try-reload-or-restart <유닛>’ 또는 ‘[sudo -n] service <이름> reload|restart’ 꼴만 받습니다 — 유닛 · 이름에는 ‘haproxy’ 가 들어가야 하고 영숫자와 @ . _ - 만(100자까지) · sudo 는 -n 으로 실행합니다. 셸 기호 · 따옴표 · 줄바꿈은 쓸 수 없습니다(300자까지).',
+  reloadCmd: '‘[sudo -n] systemctl reload|restart|reload-or-restart|try-reload-or-restart <유닛>’ 또는 ‘[sudo -n] service <이름> reload|restart’ 꼴만 받습니다 — 유닛 · 이름에는 ‘haproxy’ 가 들어가야 하고(템플릿 유닛이면 ‘@’ 앞에) 영숫자와 @ . _ - 만(100자까지) · sudo 는 -n 으로 실행합니다. 셸 기호 · 따옴표 · 줄바꿈은 쓸 수 없습니다(300자까지).',
 });
 const DEPLOY_CMD_MAX = 300;
 const DEPLOY_CMD_CHARS = /^[A-Za-z0-9 ._/@{}-]+$/;   // 길이를 먼저 자른 뒤에만 — 문자 집합 하나라 선형
@@ -355,7 +355,8 @@ export function parseDeployCmd(kind, s) {
     if (SYSTEMCTL_BINS.has(bin)) { if (!SYSTEMCTL_VERBS.has(a)) return { ok: false, issue: `systemctl 동작은 reload · restart · reload-or-restart · try-reload-or-restart 만 쓸 수 있습니다(${a.slice(0, 40)}).` }; unit = b; }
     else if (SERVICE_BINS.has(bin)) { if (!SERVICE_VERBS.has(b)) return { ok: false, issue: `service 동작은 reload · restart 만 쓸 수 있습니다(${b.slice(0, 40)}).` }; unit = a; }
     else return { ok: false, issue: '실행 파일은 systemctl 또는 service 만 쓸 수 있습니다.' };
-    if (!UNIT_RE.test(unit) || !/haproxy/i.test(unit)) return { ok: false, issue: '유닛 · 이름은 영숫자로 시작하고 영숫자와 @ . _ - 만(100자까지) 쓸 수 있으며 ‘haproxy’ 가 들어가야 합니다.' };
+    // 반증 1회차 N-1: 'haproxy' 는 템플릿 이름(‘@’ 앞)에 있어야 한다 — 'getty@haproxy' · 'user@haproxy' 처럼 다른 템플릿에 인스턴스 이름만 맞춘 유닛을 받지 않는다
+    if (!UNIT_RE.test(unit) || !/haproxy/i.test(unit.split('@')[0])) return { ok: false, issue: '유닛 · 이름은 영숫자로 시작하고 영숫자와 @ . _ - 만(100자까지) 쓸 수 있으며 ‘haproxy’ 가 들어가야 합니다(템플릿 유닛이면 ‘@’ 앞에).' };
     return { ok: true, canonical: [...pre, ...tk].join(' ') };
   }
   return { ok: false, issue: '알 수 없는 명령 종류입니다.' };
@@ -389,9 +390,16 @@ export function deployCmdRefusal(deploy) {
 }
 /** 철거 보류 매핑 상태(보안 잔여 11-27 M1 — proxy/provision.js): 삭제 · 만료했지만 배포 명령 거절로 HAProxy 포트를 닫지 못했다. 게이트웨이 · quick-connect 가 쓰지 않는다. */
 export const MAPPING_TEARDOWN_PENDING = 'teardown-pending';
-export const MAPPING_TEARDOWN_TEXT = '중계 서버의 자동 배포 명령 설정이 허용 형식 밖이라 HAProxy 포트를 닫지 못해 삭제를 보류했습니다 — 관리자가 설정 › 중계 서버에서 고치면 자동으로 정리됩니다.';
+export const MAPPING_TEARDOWN_TEXT = '중계 서버의 자동 배포 설정(명령 · 설정 파일 경로)이 허용 형식 밖이라 HAProxy 포트를 닫지 못해 삭제를 보류했습니다 — 관리자가 설정 › 중계 서버에서 고치면 자동으로 정리됩니다.';
 /** 접속 전 거절이 매핑 상태(소유자 — 비관리자일 수 있다)에 남길 문구 — 구성 단서(env 이름 · 명령)를 싣지 않는다. */
-export const DEPLOY_CMD_MAPPING_TEXT = '중계 서버의 자동 배포 명령 설정이 허용 형식 밖이라 배포하지 않았습니다 — 관리자에게 문의하세요(설정 › 중계 서버에서 고칩니다).';
+export const DEPLOY_CMD_MAPPING_TEXT = '중계 서버의 자동 배포 설정(명령 · 설정 파일 경로)이 허용 형식 밖이라 배포하지 않았습니다 — 관리자에게 문의하세요(설정 › 중계 서버에서 고칩니다).';
+/**
+ * 접속 전 설정 거절(스스로 낫지 않는 거절) 문구 또는 null — 설정 파일 경로(157회차 haproxyCfgPathIssue) · 두 명령(deployCmdRefusal) 순.
+ *   반증 1회차 S-1: 경로 거절도 명령 거절과 같은 '접속 전 · 설정 문제' 라 철거 보류 · 기동 경고가 같이 본다(deploy.js 가 code 로 가른다).
+ */
+export function deployConfigRefusal(deploy) {
+  return haproxyCfgPathIssue(deploy?.haproxyConfigPath) || deployCmdRefusal(deploy);
+}
 
 /** 화면 표시용 — { validateCmd: { value, stored, source, issue, help }, reloadCmd: {…} }. value 는 실효 명령(문법 밖이면 null). */
 export function deployCommandsView(deploy) {
@@ -717,10 +725,18 @@ export function removeMapping(id) {
   return { ok: true };
 }
 
+/**
+ * 매핑 상태 쓰기 — 바꿨으면 true.
+ * 보안 잔여 11-27 M1(반증 1회차 R-1 — 재현): 철거 보류(MAPPING_TEARDOWN_PENDING)는 **한 방향**이다. 빠져나가는 길은 철거 성공 뒤의 등록부 삭제(removeMapping) 하나뿐 —
+ *   예전에는 관리자 재적용(POST /mappings/:id/apply)이 보류 매핑을 'error' 로 덮어, 소유자가 지운 매핑이 게이트웨이 접속 · quick-connect 재사용 · 다음 배포 블록으로 되살아났다.
+ *   전이 판정을 호출처마다 두지 않고 여기 하나에 둔다(새 호출처가 생겨도 같은 판정).
+ */
 export function setMappingStatus(id, status, error) {
   const m = getMapping(id);
-  if (!m) return;
+  if (!m) return false;
+  if (m.status === MAPPING_TEARDOWN_PENDING && status !== MAPPING_TEARDOWN_PENDING) return false;
   m.status = status;
   if (error !== undefined) m.error = error;
   persist();
+  return true;
 }

@@ -543,6 +543,9 @@ remoteRouter.post('/quick-connect', requirePerm('remote.access'), textFields('ta
 remoteRouter.post('/mappings/:id/apply', adminOnly, async (req, res) => {
   const m = getMapping(req.params.id);
   if (!m || scopedAdminMappingIssue(req.user, m)) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
+  // 보안 잔여 11-27 M1(반증 1회차 R-1 — 재현): 철거 보류 매핑은 다시 적용하지 않는다 — 예전에는 상태를 'error' 로 덮어 지운 매핑이 접속 · 재사용 · 다음 배포 블록으로 되살아났고,
+  //   Data Plane 중계면 applyMapping 이 HAProxy 에 그 포트를 다시 만들었다. 상태 쓰기는 등록부(setMappingStatus)도 막지만 HAProxy 호출은 여기서 먼저 막는다.
+  if (m.status === TEARDOWN_PENDING) return res.status(409).json({ ok: false, code: TEARDOWN_PENDING, reason: TEARDOWN_PENDING_TEXT, mapping: { id: m.id, status: TEARDOWN_PENDING } });
   try { await applyMapping(mappingProxy(m).dataplane, m); setMappingStatus(m.id, 'active', null); res.json({ ok: true, mapping: getMapping(m.id) }); }
   catch (err) { setMappingStatus(m.id, 'error', err.message); res.status(400).json({ ok: false, reason: err.message }); }
 });
@@ -583,6 +586,8 @@ remoteRouter.get('/rdp/:id', requirePerm('remote.access'), (req, res) => {
     // v2.770(점검 R5-E5-1): (vcenterId, targetHost) 쌍 + 매핑의 중계 — WS mappingAccessIssue 와 같은 판정.
     if (mappingTargetScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m, { proxyIdOf })) return res.status(404).end();
   }
+  // 보안 잔여 11-27 M1(반증 1회차 R-1 후속): 철거 보류 매핑은 지운 것과 같다 — 게이트웨이(mappingAccessIssue)처럼 아직 열린 공개 포트를 가리키는 .rdp 도 주지 않는다
+  if (m.status === TEARDOWN_PENDING) return res.status(409).json({ ok: false, code: TEARDOWN_PENDING, reason: TEARDOWN_PENDING_TEXT });
   // 76회차 F3: 매핑의 중계가 지워졌으면 .rdp 를 만들지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(게이트웨이와 같은 판정).
   const via = mappingProxyOf(m);
   if (!via) return res.status(409).json({ ok: false, reason: MAPPING_PROXY_GONE_TEXT });
