@@ -20,8 +20,12 @@
 - **로그인 실패 잠금은 출발지(IP)별**: 전역 카운터 하나만 두면 아무나 몇 번 틀리는 것으로
   **정상 관리자까지 설정 화면에서 밀어낼 수 있다**(가용성 공격). 전역 상한은 임계값 10배로
   분산 시도 방어에만 쓴다(`SessionStore.GLOBAL_FACTOR`).
-- **소켓 타임아웃·동시 연결 상한 유지**: 핸들러 `timeout = 20`(slowloris·유휴 keep-alive 정리),
-  `HubServer` 의 연결 세마포어 64(스레드 폭주 차단). 유휴 종료는 오류 로그로 찍지 않는다.
+- **수신 단계 시한·연결 자리**(보안 잔여 11-27 L12 · `tests/test_sec_residual_1127.py`): 핸들러 `timeout = 20` 은 유휴(recv 1회)만 —
+  헤더·본문은 `hub/inbound.py PhaseReader` 가 recv 마다 남은 시간을 건다(헤더 `HUB_HEADER_TIMEOUT` 10초: 새 연결은 입장 시각부터 · keep-alive 다음 요청은 첫 바이트부터 ·
+  본문 = 헤더 시한 + **받은** 바이트/`HUB_BODY_MIN_RATE`, 상한 `HUB_BODY_TIMEOUT_MAX` — 선언 길이로 늘리지 말 것). `InboundDeadline` 을 TimeoutError/OSError 하위로 만들지 말 것(stdlib 가 삼킨다) ·
+  EOF 로 끝난 헤더 · 짧은 본문 · 엄격하지 않은 Content-Length 는 라우팅하지 않는다(400/408 + 닫기 + 짧은 린저). 자리 64 는 **스레드 생성 전** `process_request` 에서 잡고,
+  가득 차면 가장 오래 유휴한 keep-alive 를 내보낸 뒤 accept 루프에서 유한 대기(즉시 거절은 재접속 공격에서 정상 사용자를 굶긴다) · 반환은 `shutdown_request` 하나(닫기 전 · 멱등).
+  유휴 종료는 오류 로그로 찍지 않는다. 남는 것: 여러 출발지의 재접속 · 느린 읽기(쓰기 1회당 20초) — 앞단 프록시의 일.
 - **요청 본문은 라우팅 전에 일괄 drain**: 본문을 쓰지 않는 핸들러(리셋·백업 생성) 뒤의 요청이
   `501 Unsupported method ('{}PUT')` 로 깨진다(keep-alive desync).
 - **SSRF 가드·스킴 화이트리스트·리다이렉트 미추적**: `hub/ssrf.py` 는 **해석된 주소**를 검사해
@@ -127,7 +131,7 @@
   **요청 본문 · 서버 파일 JSON 은 `_reject_lone_surrogates` 를 지난다**(저장소는 메모리를 먼저 바꾸고 파일에 쓴다 — UTF-8 로 못 쓰는 글자가 들어오면 저장은 실패하고 메모리에만 남아 공개 목록이 깨진다) ·
   **마지막 admin 보호는 사본에 적용해 검사한 뒤 원본에**(`UserStore.update` — 거절한 강등 · 중지가 메모리에 남으면 재기동 전까지 admin 0명) ·
   **이력 DB 는 부가 자료**: 손상(`DatabaseError`)은 `.corrupt.<ts>` 로 옮기고 새로 시작 · 열기 실패(`OperationalError`)는 옮기지 않는다 · 적재 실패가 알림 판정 · 점검 응답을 막지 않는다(`app._run_health_check`).
-  ⚠ 위 '소켓 타임아웃' 항목의 `timeout = 20` 은 **유휴 연결만** 정리한다 — 헤더를 조금씩 흘리는 연결(고전 slowloris)은 막지 못한다(재현). 124회차: **출발지(IP)당 동시 연결 상한**(`HubServer` · `HUB_MAX_CONN_PER_CLIENT` 기본 48 · 0 = 끔)으로 한 출발지가 64칸을 다 쥐지 못한다 — 여러 출발지로 나눈 공격은 앞단 프록시의 일.
+  124회차: **출발지(IP)당 동시 연결 상한**(`HubServer` · `HUB_MAX_CONN_PER_CLIENT` 기본 48 · 0 = 끔)으로 한 출발지가 64칸을 다 쥐지 못한다 — 여러 출발지로 나눈 공격은 앞단 프록시의 일.
 - 124회차(`tests/test_rebut124.py` — 117 반증): **걸려 있는 출발지 잠금은 성공으로 풀리지 않는다**(잠금 검사가 PBKDF2 앞이라 오답과 함께 보낸 자기 계정 로그인이 잠금 뒤에 끝나면 잠금을 지웠다 — `note_success` 는 실패 수만 뺀다) ·
   **전역 실패 창도 그 계정의 실패만 뺀다**(`_global_fails` = (시각, 계정 이름) — 통째로 비우면 유효 계정 하나의 주기적 로그인으로 전역 잠금이 걸리지 않는다).
 - 131회차(`tests/test_rebut131.py` — 124 반증): **인증(PBKDF2)을 부르는 경로는 `_begin_auth_attempt` → `finally: end_attempt`**(`SessionStore.begin_attempt` — 잠금 검사와 함께 진행 중인 시도를 예약한다.

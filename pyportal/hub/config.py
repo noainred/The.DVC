@@ -120,6 +120,14 @@ class Config:
         #   헤더를 조금씩 흘리는 연결(slowloris)은 소켓 시한(20초)으로 정리되지 않는다 — 한 출발지에서 64개를 열면 다른 사용자가 못 붙었다.
         #   NAT · 리버스 프록시 뒤에서는 여러 사용자가 한 출발지로 보이므로 넉넉히 둔다(기본 48). 0 = 끔(예전 동작).
         self.max_conn_per_client = _env_int("HUB_MAX_CONN_PER_CLIENT", 48, low=0, high=64)
+        # 보안 잔여 11-27 L12: 수신 전체 시한(hub/inbound.py) — 소켓 시한(20초)은 recv 1회 단위라 1바이트씩 흘리는 연결이 끊기지 않았다.
+        #   헤더: 새 연결은 입장 시각부터, keep-alive 다음 요청은 첫 바이트부터. 브라우저는 요청 줄+헤더를 한 세그먼트(수 KB)로 보낸다 —
+        #   RTT 800ms 에 손실 재전송(RTO 1+2+4초)까지 7초라 10초는 그 위.
+        self.header_timeout = _env_float("HUB_HEADER_TIMEOUT", 10.0, low=1.0, high=60.0)
+        #   본문: 헤더 시한 + **받은 바이트**/최저 속도(상한 HUB_BODY_TIMEOUT_MAX). 16KiB/s = 128kbit/s — 창 스케일링 없는 64KB 창도
+        #   RTT 800ms 에서 약 80KB/s 라 5배 여유. HUB_MAX_BODY 를 16MiB 로 올리면 상한 300초 안에 약 56KB/s 가 필요하다.
+        self.body_min_rate = _env_int("HUB_BODY_MIN_RATE", 16384, low=1024, high=104_857_600)
+        self.body_timeout_max = _env_float("HUB_BODY_TIMEOUT_MAX", 300.0, low=10.0, high=3600.0)
 
         # 설정 화면 로그인 세션 유지 시간(분) + 실패 잠금
         self.session_ttl_min = _env_int("HUB_SESSION_TTL_MIN", 480, low=5, high=10080)
