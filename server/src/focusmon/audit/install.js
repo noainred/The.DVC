@@ -35,7 +35,8 @@ export const NODE_INSTALL_CONCURRENCY = 4;
 export const AUTH_STOP_AFTER = 3;
 export const AUTH_STOP_MS = 10 * 60_000;
 /** 결과 까닭(화면 문구 키 — 웹 `INSTALL_CODE_TEXT` 와 같다 · 시험 대조). 'script' 는 설치 파일이 멈춘 것(fail = INSTALL_FAILS). */
-export const INSTALL_CODES = Object.freeze(['ok', 'cred', 'bad-dir', 'bad-acct', 'version', 'key-stopped', 'auth', 'hostkey', 'unreachable', 'timeout', 'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other', 'check', 'not-ready']);
+// v3.54.0: 'not-mine'(④ 엣지가 맡은 서버 목록에 없는 작업 — 엣지가 거절) · 'lost'(⑥ 결과를 받지 못함 — 중앙이 적는다)
+export const INSTALL_CODES = Object.freeze(['ok', 'cred', 'bad-dir', 'bad-acct', 'version', 'key-stopped', 'auth', 'hostkey', 'unreachable', 'timeout', 'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other', 'check', 'not-ready', 'not-mine', 'lost']);
 /** 단계(0 ~ 7 — 화면 막대). */
 export const INSTALL_STEPS = Object.freeze(['cred', 'connect', 'priv', 'dir', 'files', 'sudoers', 'old', 'check']);
 /** 권한 확인(상수) — root · 비밀번호 없는 sudo · 아님. */
@@ -111,7 +112,9 @@ export async function installOnce(t, { keys, connect = withSsh, expect = {}, cre
   }
   // 엣지: 법인 = 그 엣지 스냅샷의 vCenter 들(installExec 의 edgeVcs — 중앙이 보낸 값이 아니다 · JSON 으로는 함수를 실을 수 없다)
   const corpVcs = expect?.edge ? (typeof expect.edgeVcs === 'function' ? expect.edgeVcs() : []) : (Array.isArray(expect?.corpVcs) ? expect.corpVcs : []);
-  const cred = credOf(t, { edge: !!expect?.edge, corpVcs, pick: expect?.pick || null, withAuth: true });
+  // v3.54.0 ④: 엣지는 법인 공통 계정을 자기가 아는 서버에만(installCred 'not-local' — edgeLocal 이 없으면 닫힌다)
+  const local = expect?.edge && typeof expect.edgeLocal === 'function' ? expect.edgeLocal() : null;
+  const cred = credOf(t, { edge: !!expect?.edge, corpVcs, pick: expect?.pick || null, withAuth: true, local });
   if (!cred || cred.state !== 'ok' || !cred.auth) return res('cred', { cred: cred?.state || 'error', acct: cred?.acct || '', key: cred?.key || '', src: cred?.src || null });
   const who = { acct: cred.acct, key: cred.key, src: cred.src };
   const fp = cred.auth.fingerprint || '';
@@ -156,6 +159,8 @@ export async function installOnce(t, { keys, connect = withSsh, expect = {}, cre
   } finally { clearTimeout(timer); }
   if (priv === 'no' || priv === 'tty') return res(priv === 'tty' ? 'sudo-tty' : 'sudo-password', { step: 2, priv, ...who });
   if (parsed?.upload) return res('upload', { step: 3, priv, ...who });
+  // v3.54.0 ⑧: 설치 파일이 원격 시한(bundle.selfTimeoutLines — timeout 124 · KILL 137)으로 멈췄다
+  if (!parsed?.ok && !parsed?.fail && (parsed?.rc === 124 || parsed?.rc === 137)) return res('timeout', { step: stepOf(parsed), rc: parsed.rc, nopy: !!parsed.nopy, priv, ...who });
   if (!parsed?.ok) return res(parsed?.fail ? 'script' : 'script-other', { step: parsed ? stepOf(parsed) : 3, fail: parsed?.fail || null, rc: parsed?.rc ?? null, nopy: !!parsed?.nopy, priv, ...who });
   // ⑥ 수집 계정으로 준비 확인(설치한 디렉터리 하나) — 키 로그인이 거부되면 '설치함 · 확인 못 함'
   onPhase('준비 확인');

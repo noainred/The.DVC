@@ -62,6 +62,8 @@ export const CRED_TEXT = Object.freeze({
   folder: { tone: 'warn', label: '못 함 — 키 폴더 밖', hint: '찾은 키의 폴더(법인 · 서버)가 이 서버를 덮지 않습니다.' },
   'key-missing': { tone: 'warn', label: '못 함 — 키 · 계정 없음', hint: '참조한 키 · 공통 계정이 지워졌습니다.' },
   unreadable: { tone: 'bad', label: '모름 — 키 저장소를 못 읽음', hint: 'SSH 키 저장소 · 서버 등록부 · 사용 중지 상태 파일을 읽지 못했습니다.' },
+  'not-local': { tone: 'warn', label: '못 함 — 엣지가 모르는 주소', hint: '엣지는 법인 공통 계정(root 키)을 자기가 아는 서버에만 씁니다 — 그 엣지 vCenter 의 VM IP 이거나 그 엣지 SSH 공용 접속에 등록한 서버 주소여야 합니다. 물리 서버는 그 엣지 포탈의 SSH 공용 접속에 이 서버(같은 주소)를 등록하세요.' },
+  'local-unknown': { tone: 'off', label: '모름 — 엣지가 인벤토리를 아직 다 읽지 못함', hint: '엣지가 막 다시 시작했거나 그 엣지의 vCenter 를 읽지 못하는 동안입니다 — 이 서버가 그 엣지가 아는 서버인지 아직 모릅니다. 잠시 뒤 다시 보세요(그동안 법인 공통 계정은 쓰지 않습니다).' },
   error: { tone: 'bad', label: '모름 — 해석 오류', hint: '' },
   'edge-unknown': { tone: 'off', label: '모름 — 엣지가 아직 알려 오지 않음', hint: '엣지 포탈이 옛 판이거나 연결이 끊겼습니다(엣지는 1분마다 알려 옵니다). 옛 판이면 엣지를 올리세요.' },
 });
@@ -87,6 +89,14 @@ export const INSTALL_CODE_TEXT = Object.freeze({
   upload: '설치 파일을 올리지 못함(SFTP)',
   script: '설치 파일이 멈춤',
   'script-other': '설치 파일이 끝까지 돌지 못함',
+  'not-mine': '엣지가 맡은 서버 목록에 없어 거절함',
+  lost: '결과를 받지 못함',
+});
+/** v3.54.0 ⑥ 'lost' 의 까닭(서버 service.LOST_WHY — 접속 준비 문구와 같다). */
+export const INSTALL_LOST_TEXT = Object.freeze({
+  undelivered: '엣지가 작업을 받아 가지 않았습니다(엣지 연결 · 판을 확인)',
+  'no-result': '시한 안에 결과가 오지 않았습니다 — 그 서버에서 실제로 돌았을 수 있습니다(늦게 오면 그때 반영)',
+  restart: '포탈이 다시 시작돼 진행 중이던 설치의 결과를 받지 못했습니다',
 });
 /** 설치 파일이 멈춘 까닭(서버 bundle.INSTALL_FAILS). */
 export const INSTALL_FAIL_TEXT = Object.freeze({
@@ -109,13 +119,16 @@ export const INSTALL_FIX_TEXT = Object.freeze({
   'host-busy': '같은 주소의 다른 서버 항목을 설치하는 중입니다 — 그 설치가 끝난 뒤 다시 누르세요.',
   'host-shared': '같은 주소에 다른 수집 계정 항목이 있어 sudoers 를 서로 덮습니다 — 손으로 설치하세요.',
   'not-ready': '파일은 놓았지만 수집 계정으로 확인한 결과가 준비됨이 아닙니다 — ‘지금 상태’ 칸의 까닭을 보고 고친 뒤 다시 설치하세요.',
+  'not-mine': '중앙 · 엣지의 서버 목록이 어긋났습니다(등록을 막 고쳤거나 엣지가 다시 시작) — 1분쯤 뒤 다시 누르세요.',
+  lost: '‘준비 상태 다시 확인’ 으로 실제 상태를 본 뒤 필요하면 다시 설치하세요.',
 });
 export function installResultText(li) {
   if (!li) return null;
   const base = INSTALL_CODE_TEXT[li.code] || li.code;
   const why = li.code === 'script' && li.fail ? ` — ${INSTALL_FAIL_TEXT[li.fail] || li.fail}` : li.code === 'cred' && li.cred ? ` — ${credText({ state: li.cred }).label.replace(/^(못 함|모름|고르면 됨) — /, '')}` : '';
-  const extra = [li.nopy ? 'python3 없음(설치는 됨)' : '', li.oldRm ? `옛 파일 ${li.oldRm}개 지움` : '', li.oldKeep ? `옛 파일 ${li.oldKeep}개는 판본이 달라 둠` : ''].filter(Boolean).join(' · ');
-  return { tone: li.code === 'ok' ? 'ok' : li.code === 'check' || li.code === 'not-ready' ? 'warn' : 'bad', label: `${base}${why}`, sub: [extra, INSTALL_FIX_TEXT[li.code] || ''].filter(Boolean).join(' · ') };
+  const extra = [li.code === 'lost' ? [INSTALL_LOST_TEXT[li.why] || INSTALL_LOST_TEXT['no-result'], li.node ? `맡은 노드 ${li.node}` : ''].filter(Boolean).join(' · ') : '',
+    li.nopy ? 'python3 없음(설치는 됨)' : '', li.oldRm ? `옛 파일 ${li.oldRm}개 지움` : '', li.oldKeep ? `옛 파일 ${li.oldKeep}개는 판본이 달라 둠` : ''].filter(Boolean).join(' · ');
+  return { tone: li.code === 'ok' ? 'ok' : li.code === 'check' || li.code === 'not-ready' || li.code === 'lost' ? 'warn' : 'bad', label: `${base}${why}`, sub: [extra, INSTALL_FIX_TEXT[li.code] || ''].filter(Boolean).join(' · ') };
 }
 
 /** 설치 단계 막대(서버 INSTALL_STEPS 0 ~ 7). */

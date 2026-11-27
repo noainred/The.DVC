@@ -30,6 +30,7 @@ import { installCredFor, credView, CRED_STATES, PREP_FEATURE, INSTALL_FEATURE } 
 import { prepExec, PREP_CODES, PREP_FAILS, AUDIT_SKIPS, PREP_TIMEOUT_MS } from './prep.js'; // v3.18.0 접속 자동 준비
 import { putTestResult } from '../store.js'; // v3.18.0 — 준비 뒤 연결 시험 결과를 '키 로그인' 칸에(엣지 시험 결과와 같은 정제)
 import { cleanHello, LOGIN_KINDS } from '../hello.js';
+import { sameMachinePeers, BASIS, STRONG_BASIS } from './sameMachine.js'; // v3.54.0 ⑤ 같은 서버 판정(주소 · 인벤토리 VM · 호스트 이름)
 
 const gzipAsync = promisify(zlib.gzip);
 export const RUN_GAP_MS = 10 * 60_000;
@@ -39,6 +40,8 @@ export const LOST_AFTER_MS = AUDIT_DEADLINE_MS + 10 * 60_000;
 export const SEEN_TTL_MS = 10 * 60_000;
 export const JOB_MAX_MS = 12 * 3600_000;
 export const LOST_KEEP_MS = 2 * 3600_000;
+/** v3.54.0 ⑥ 설치 · 준비 'lost' 의 까닭(markLost — 웹 LOST_WHY_TEXT 와 같다). 모듈 머리에 둔다(load 가 쓴다 — TDZ). */
+export const LOST_WHY = Object.freeze(['undelivered', 'no-result', 'restart']);
 const LOST_MAX = 300;
 /** 엣지 진행 목록 받기 상한 — 엣지 대기열(runner QUEUE_MAX 200) + 보낼 결과보다 크게. */
 const ACTIVE_MAX = 300;   // 51회차 #7: 엣지 대기열(runner QUEUE_MAX 200) + 보낼 결과(엣지 AUDIT_RESULTS_MAX 64) 보다 크게
@@ -99,7 +102,13 @@ function load() {
     // 이 프로세스에서 처음 읽은 때 남아 있는 중앙 작업은 앞 프로세스의 것 — 끝을 알 수 없으므로 'lost' 로 남긴다(엣지 작업은 그대로 기다린다).
     //   startAuditService 에서 하면 기동 직후(폴러 순차 기동 최대 1분) 사용자가 건 작업까지 지웠다.
     const stale = S.jobs.filter((x) => !x.node);
-    for (const x of stale) { const rec = S.ready[x.tid] || {}; rec.lastError = { at: Date.now(), kind: 'lost', error: '포탈이 다시 시작돼 진행 중이던 점검의 결과를 받지 못했습니다.' }; S.ready[x.tid] = rec; }
+    for (const x of stale) {
+      const rec = S.ready[x.tid] || {};
+      // v3.54.0 ⑥: 설치 · 준비 작업은 그 카드의 마지막 결과 칸에(디스크 점검 카드의 오류 칸이 아니다)
+      if (x.mode === 'install' || x.mode === 'prep') markLost(rec, x, Date.now(), 'restart');
+      else rec.lastError = { at: Date.now(), kind: 'lost', error: '포탈이 다시 시작돼 진행 중이던 점검의 결과를 받지 못했습니다.' };
+      S.ready[x.tid] = rec;
+    }
     if (stale.length) { S.jobs = S.jobs.filter((x) => x.node); persist(); }
   } catch (e) {
     if (e?.code !== 'ENOENT') { try { preserveCorrupt(file()); } catch { /* */ } loadErr = String(e?.message || e).slice(0, 160); }
@@ -368,6 +377,8 @@ export function expectFor(job) {
 const edgeCred = new Map(); // agent(소문자) → { at, rows: Map(tid → credView) }
 const knownSentAt = new Map(); // agent(소문자) → 맡은 서버 목록을 마지막으로 실은 때
 export const KNOWN_EVERY_MS = 60_000;
+/** 맡은 서버 목록 상한(엣지 워커가 받는 상한과 같다 — focusMonWorker.js KNOWN_MAX). 넘는 대상은 계정 보고가 없어 root 작업을 받지 않는다. */
+export const KNOWN_MAX = 500;
 /**
  * 그 서버의 설치 계정 상태(화면 · 접수 공용 — 비밀 없음). 중앙 직접 서버는 이 노드에서 해석, 엣지 서버는 그 엣지가 알려 온 값(시한 안 · 없으면 'edge-unknown').
  * @param {object} t  대상  @param {{corpVcs?:string[], pick?:string|null, now?:number}} o
@@ -392,25 +403,45 @@ function demoCred(t, feature = INSTALL_FEATURE) {
  * 설치 요청(서버 하나). 한 서버에 작업 하나 · 설치 계정이 'ok' 인 서버만(고르면 되는 'ambig' 는 고른 계정이 후보일 때) · 설정을 못 읽으면 거절.
  * @returns {{ok:true, runId, via} | {ok:false, code, reason}}
  */
-/** 같은 서버 주소인가(대소문자 무시 — 별칭 · IP 와 이름이 다른 등록은 알아보지 못한다: 문서의 남은 것). */
+/** 같은 서버 주소인가(대소문자 무시 — 글자 비교만). v3.54.0: 접수 · 화면은 `sameMachine.machineIndex` 를 넘겨 다른 IP 로 등록한 같은 서버도 본다(sameMachinePeers). */
 export const sameHost = (a, b) => String(a?.host || '').trim().toLowerCase() === String(b?.host || '').trim().toLowerCase() && String(a?.host || '').trim() !== '';
+/** 같은 서버로 본 다른 항목을 문구로(이름 · 근거 — 최대 3개). 근거 이름은 sameMachine.BASIS. */
+const BASIS_TEXT = Object.freeze({ addr: '같은 주소', vm: '인벤토리의 같은 VM', hostname: '같은 호스트 이름', name: '이름이 그 서버의 호스트 이름과 같음' });
+export const sharedWith = (same) => same.slice(0, 3).map((p) => ({ id: p.id, name: String(p.name || '').slice(0, 64), basis: BASIS.includes(p.basis) ? p.basis : 'addr' }));
+/** 라우트용(같은 판정 — sameMachinePeers 를 다시 내보낸다). */
+export const sameMachinePeersOf = (t, peers, machine) => sameMachinePeers(t, peers, machine);
+/**
+ * 같은 서버 작업이 진행 중인가 — **강한 근거(주소 · 인벤토리 VM)** 만 본다(반증 F2 same-machine: 이름 근거까지 쓰면 템플릿 이름이 같은 다른 서버들의 일괄 설치가 1대씩만 시작했다).
+ * 이름 근거는 sudoers 를 덮는 쪽(host-shared)에만 쓴다.
+ */
+function hostBusy(st, same) {
+  const strong = same.filter((p) => STRONG_BASIS.includes(p.basis));
+  const ids = new Set(strong.map((p) => p.id));
+  const on = st.jobs.filter((x) => (x.mode === 'install' || x.mode === 'prep') && ids.has(x.tid));
+  if (!on.length) return null;
+  const busyWith = strong.filter((p) => on.some((x) => x.tid === p.id));
+  return { ok: false, code: 'host-busy', sharedWith: sharedWith(busyWith), reason: `같은 서버로 보이는 다른 항목(${sharedText(busyWith)})을 설치 · 준비하는 중입니다 — 그 작업이 끝난 뒤 다시 누르세요.` };
+}
+const sharedText = (same) => same.slice(0, 3).map((p) => `${String(p.name || p.id).slice(0, 64)}(${BASIS_TEXT[p.basis] || BASIS_TEXT.addr})`).join(' · ');
 /**
  * @param {object} t  등록부 대상
  * @param {{peers?: object[]}} o  peers = 등록부의 다른 대상 전부(범위와 무관 — 같은 주소를 찾는다)
  *   v3.17.0 반증 S3: sudoers 파일은 서버마다 하나(계정 한 줄)라 같은 주소에 다른 수집 계정이 등록돼 있으면 설치가 서로의 sudo 규칙을 덮는다 —
  *   그런 서버는 자동 설치하지 않는다('host-shared'). 같은 주소의 설치가 진행 중이면 차례를 겹치지 않는다('host-busy').
  */
-export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null, peers = [] } = {}) {
+export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null, peers = [], machine = null } = {}) {
   if (!keysRef && keys) keysRef = keys;
   const st = load();
   sweep(now);
   const dir = installDir();
   if (dir === null) return { ok: false, code: 'settings-unreadable', reason: '설치 디렉터리 설정을 읽지 못해 설치하지 않습니다 — 손상 보존본을 확인하세요.' };
   if (st.jobs.some((x) => x.tid === t.id)) return { ok: false, code: 'busy', reason: '이 서버는 이미 점검 · 확인 · 설치 작업이 진행 중이거나 차례를 기다리고 있습니다.' };
-  const same = (Array.isArray(peers) ? peers : []).filter((p) => p && p.id !== t.id && sameHost(p, t));
-  if (same.some((p) => String(p.username || '') !== String(t.username || ''))) return { ok: false, code: 'host-shared', reason: '같은 주소에 다른 수집 계정으로 등록된 항목이 있습니다 — sudoers 파일 하나에 계정 하나만 적으므로 자동 설치가 다른 계정의 sudo 규칙을 지웁니다. 손으로 설치하세요.' };
-  const sameIds = new Set(same.map((p) => p.id));
-  if (st.jobs.some((x) => (x.mode === 'install' || x.mode === 'prep') && sameIds.has(x.tid))) return { ok: false, code: 'host-busy', reason: '같은 주소의 다른 항목을 설치 · 준비하는 중입니다 — 그 작업이 끝난 뒤 다시 누르세요.' };
+  // v3.54.0 ⑤: 같은 서버 = 같은 주소 + (machine 이 있으면) 같은 노드의 인벤토리 같은 VM · 같은 호스트 이름 — 넓게 잡는 쪽이 안전하다(자동 설치를 하지 않을 뿐)
+  const same = sameMachinePeers(t, peers, machine);
+  const other = same.filter((p) => String(p.username || '') !== String(t.username || ''));
+  if (other.length) return { ok: false, code: 'host-shared', sharedWith: sharedWith(other), reason: `같은 서버로 보이는 항목이 다른 수집 계정으로 등록돼 있습니다(${sharedText(other)}) — sudoers 파일 하나에 계정 하나만 적으므로 자동 설치가 다른 계정의 sudo 규칙을 지웁니다. 손으로 설치하세요.` };
+  const busy = hostBusy(st, same);
+  if (busy) return busy;
   if (st.jobs.length >= MAX_JOBS) return { ok: false, code: 'queue-full', reason: '대기 중인 작업이 너무 많습니다 — 잠시 뒤 다시 누르세요.' };
   const c = credOfTarget(t, { corpVcs, pick, now });
   const pickOk = c.state === 'ambig' && pick && Array.isArray(c.choices) && c.choices.some((x) => x.id === pick);
@@ -436,15 +467,15 @@ export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Da
  *   withAudit — 디스크 점검 함께(설정을 못 읽거나 같은 주소에 다른 수집 계정이 있으면 그 서버는 준비만 — 까닭 auditWhy)
  * @returns {{ok:true, runId, via, audit:boolean, auditWhy:string|null} | {ok:false, code, reason}}
  */
-export function requestPrep(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null, peers = [], withAudit = false, from = false, age = 'never' } = {}) {
+export function requestPrep(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null, peers = [], machine = null, withAudit = false, from = false, age = 'never' } = {}) {
   if (!keysRef && keys) keysRef = keys;
   const st = load();
   sweep(now);
   if (String(t.username || '') === 'root') return { ok: false, code: 'acct-root', reason: '수집 계정이 root 입니다 — 일반 계정으로 등록을 고치세요(root 에는 넣지 않습니다).' };
   if (st.jobs.some((x) => x.tid === t.id)) return { ok: false, code: 'busy', reason: '이 서버는 이미 점검 · 확인 · 설치 · 준비 작업이 진행 중이거나 차례를 기다리고 있습니다.' };
-  const same = (Array.isArray(peers) ? peers : []).filter((p) => p && p.id !== t.id && sameHost(p, t));
-  const sameIds = new Set(same.map((p) => p.id));
-  if (st.jobs.some((x) => (x.mode === 'install' || x.mode === 'prep') && sameIds.has(x.tid))) return { ok: false, code: 'host-busy', reason: '같은 주소의 다른 항목을 설치 · 준비하는 중입니다 — 그 작업이 끝난 뒤 다시 누르세요.' };
+  const same = sameMachinePeers(t, peers, machine); // v3.54.0 ⑤
+  const busy = hostBusy(st, same);
+  if (busy) return busy;
   if (st.jobs.length >= MAX_JOBS) return { ok: false, code: 'queue-full', reason: '대기 중인 작업이 너무 많습니다 — 잠시 뒤 다시 누르세요.' };
   const c = credOfTarget(t, { corpVcs, pick, now, feature: PREP_FEATURE });
   const pickOk = c.state === 'ambig' && pick && Array.isArray(c.choices) && c.choices.some((x) => x.id === pick);
@@ -486,12 +517,23 @@ export function jobExpired(j, now) {
   if (j.state === 'running' && j.startedAt && now - j.startedAt > LOST_AFTER_MS) return true;
   return j.deliveries >= MAX_DELIVER && now - seen > REDELIVER_MS * 2;
 }
+/**
+ * v3.54.0 ⑥: 설치 · 준비 작업이 'lost' 가 되면 **그 카드의 마지막 결과 칸**(lastInstall · lastPrep)에 '결과를 받지 못함' 을 남긴다 — 예전에는
+ *   디스크 점검 카드의 오류 칸(lastError)에만 적어 접속 준비 카드에는 아무것도 보이지 않았고(진행 중 표시만 사라짐), 준비가 아닌 점검 오류처럼 읽혔다.
+ *   늦은 결과가 'lost' 기억 시한 안에 오면 ingestResult 가 이 칸을 덮는다. why: 'undelivered'(엣지가 받아 가지 않음) · 'no-result'(시한 안에 결과 없음) · 'restart'(포탈 재시작).
+ */
+function markLost(rec, j, now, why) {
+  const base = { at: now, by: j.by || '', ok: false, code: 'lost', why: LOST_WHY.includes(why) ? why : 'no-result', node: String(j.node || '').slice(0, 128), fail: null, step: 0, rc: null, acct: '', key: '', src: null, cred: null, priv: null };
+  if (j.mode === 'prep') rec.lastPrep = { ...base, created: false, exists: false, added: false, have: false, differs: false, partial: false, warn: [], from: false, fromAsked: !!j.from, age: j.age === 'default' ? 'default' : 'never', login: null, audit: j.audit ? 'unknown' : 'off' };
+  else rec.lastInstall = { ...base, ready: null, dir: j.dir ?? '', nopy: false, oldRm: 0, oldKeep: 0 };
+}
 export function sweep(now = Date.now()) {
   const st = load(); let changed = false;
   st.jobs = st.jobs.filter((j) => {
     if (!jobExpired(j, now)) return true;
     const rec = st.ready[j.tid] || {};
-    rec.lastError = { at: now, kind: 'lost', error: j.node && !j.deliveredAt ? `엣지 ${j.node} 가 ${DELIVER_TTL_MS / 60_000}분 안에 작업을 받아 가지 않았습니다.` : '시한 안에 결과를 받지 못했습니다(늦게 오면 그때 반영합니다).' };
+    if (j.mode === 'install' || j.mode === 'prep') markLost(rec, j, now, j.node && !j.deliveredAt ? 'undelivered' : 'no-result'); // v3.54.0 ⑥
+    else rec.lastError = { at: now, kind: 'lost', error: j.node && !j.deliveredAt ? `엣지 ${j.node} 가 ${DELIVER_TTL_MS / 60_000}분 안에 작업을 받아 가지 않았습니다.` : '시한 안에 결과를 받지 못했습니다(늦게 오면 그때 반영합니다).' };
     st.ready[j.tid] = rec; changed = true;
     // v3.18.0 반증 D5: 늦게 온 결과를 그 작업이 정한 값으로 해석하게 — 설치 디렉터리 · 후보 · 준비 선택(예전에는 빠져 설치 결과 · 위치를 버리고 선택 값을 다르게 적었다 — v3.17.0 설치에도 있던 빈틈)
     st.lost[j.runId] = { runId: j.runId, tid: j.tid, mode: j.mode, node: j.node || '-', by: j.by || '', requestedAt: j.requestedAt, startedAt: j.startedAt || null, ep: j.ep || null, lostAt: now,
@@ -521,9 +563,14 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
   return inPersistBatch(() => handleEdgeAuditOnce(agent, mine, a, now));
 }
 function handleEdgeAuditOnce(agent, mine, a, now) {
+  const key = String(agent || '').toLowerCase();
+  // 반증 L3(재현): 시한 정리를 이번 본문의 진행 목록보다 먼저 하면, 중앙이 오래 멈췄다 돌아온 첫 동기화에서 엣지가 바로 그 본문에 싣는 작업까지 'lost' 로 지웠다
+  //   (v3.54.0 부터 카드에 '결과를 받지 못함' 으로 보이고 같은 서버를 곧바로 다시 접수할 수 있었다) — 정리 전에 이번 본문이 싣는 작업의 '본 때' 를 먼저 적는다.
+  { const ac = a && typeof a === 'object' && Array.isArray(a.active) ? a.active.slice(0, ACTIVE_MAX) : [];
+    const ids = new Set(ac.filter((x) => x && typeof x.runId === 'string' && x.runId.length <= 40).map((x) => x.runId));
+    if (ids.size) for (const j of load().jobs) if (ids.has(j.runId) && String(j.node).toLowerCase() === key) j.seenAt = now; }
   sweep(now); // 시한 정리(바뀐 때만 쓴다)
   const st = load();
-  const key = String(agent || '').toLowerCase();
   const ack = []; const cancel = []; let changed = false;
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
   const b = isObj(a) ? a : {};
@@ -584,11 +631,13 @@ function handleEdgeAuditOnce(agent, mine, a, now) {
   // 상태가 실제로 바뀐 때만 쓴다(반증 F8 — 엣지는 작업이 있는 동안 2초마다 동기화한다 · 원자 쓰기는 fsync 둘)
   if (changed) persist();
   // v3.17.0: 그 엣지가 맡은 등록 서버 목록(설치 계정 상태를 알려 오게) — 60초에 한 번만 싣는다(비밀 없음 · 이름 · 주소 · 포트)
+  // v3.54.0 ④: 수집 계정(username)도 싣고, root 작업(설치 · 준비)을 내려보내는 응답에는 **늘** 싣는다 — 엣지는 받은 root 작업의 대상이
+  //   이 목록(같은 id · 주소 · 포트 · 계정)에 있을 때만 돌린다(엣지가 다시 시작해 목록이 비었을 때 거절하지 않게).
   let known;
   const kAt = knownSentAt.get(key) || 0;
-  if (now - kAt >= KNOWN_EVERY_MS || now < kAt) {
+  if (now - kAt >= KNOWN_EVERY_MS || now < kAt || jobs.some((x) => x.mode === 'install' || x.mode === 'prep')) {
     knownSentAt.set(key, now); if (knownSentAt.size > 200) knownSentAt.delete(knownSentAt.keys().next().value);
-    known = [...mine.values()].slice(0, 500).map((t) => ({ id: t.id, name: t.name, host: t.host, port: t.port }));
+    known = [...mine.values()].slice(0, KNOWN_MAX).map((t) => ({ id: t.id, name: t.name, host: t.host, port: t.port, username: t.username }));
   }
   return { jobs, ack, cancel, ...(known ? { known } : {}) };
 }
@@ -609,8 +658,9 @@ export function cleanEdgeResult(x) {
   const dir = typeof x.dir === 'string' && !dirIssue(x.dir) ? x.dir : (x.dir === undefined ? undefined : null);
   const ii = (v, lo, hi) => (Number.isInteger(v) && v >= lo && v <= hi ? v : null);
   const nm = (v) => (typeof v === 'string' && /^[A-Za-z0-9가-힣_.@ -]{0,64}$/.test(v) ? v : '');
+  // v3.54.0 반증 L2: 'lost' 는 중앙만 적는 값이다 — 엣지가 보내면 'unreachable'(아래 설치 · 준비 code 둘 다)
   const cleanInstall = (v) => ({
-    code: INSTALL_CODES.includes(v.code) ? v.code : 'unreachable', fail: INSTALL_FAILS.includes(v.fail) ? v.fail : (v.fail == null ? null : 'other'),
+    code: INSTALL_CODES.includes(v.code) && v.code !== 'lost' ? v.code : 'unreachable', fail: INSTALL_FAILS.includes(v.fail) ? v.fail : (v.fail == null ? null : 'other'),
     step: ii(v.step, 0, 7) ?? 0, rc: ii(v.rc, 0, 255), acct: nm(v.acct), key: nm(v.key), src: ['server', 'corp'].includes(v.src) ? v.src : null,
     cred: CRED_STATES.includes(v.cred) ? v.cred : null, nopy: v.nopy === true, oldRm: ii(v.oldRm, 0, 10) ?? 0, oldKeep: ii(v.oldKeep, 0, 10) ?? 0,
     priv: ['root', 'sudo', 'tty', 'no'].includes(v.priv) ? v.priv : null,
@@ -620,7 +670,7 @@ export function cleanEdgeResult(x) {
   const isPrep = x.mode === 'prep';
   const pp = isPrep && x.prep && typeof x.prep === 'object' && !Array.isArray(x.prep) ? x.prep : null;
   const prep = pp ? {
-    code: PREP_CODES.includes(pp.code) ? pp.code : 'unreachable', fail: PREP_FAILS.includes(pp.fail) ? pp.fail : (pp.fail == null ? null : 'other'),
+    code: PREP_CODES.includes(pp.code) && pp.code !== 'lost' ? pp.code : 'unreachable', fail: PREP_FAILS.includes(pp.fail) ? pp.fail : (pp.fail == null ? null : 'other'),
     step: ii(pp.step, 0, 7) ?? 0, rc: ii(pp.rc, 0, 255), acct: nm(pp.acct), key: nm(pp.key), src: ['server', 'corp'].includes(pp.src) ? pp.src : null,
     cred: CRED_STATES.includes(pp.cred) ? pp.cred : null, priv: ['root', 'sudo', 'tty', 'no'].includes(pp.priv) ? pp.priv : null,
     created: pp.created === true, exists: pp.exists === true, added: pp.added === true, have: pp.have === true, differs: pp.differs === true, partial: pp.partial === true, from: pp.from === true,

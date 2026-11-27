@@ -19,6 +19,8 @@ export const PREP_CRED_TEXT = Object.freeze({
   folder: { tone: 'warn', label: '못 함 — 키 폴더 밖', hint: '찾은 키의 폴더(법인 · 서버)가 이 서버를 덮지 않습니다.' },
   'key-missing': { tone: 'warn', label: '못 함 — 키 · 계정 없음', hint: '참조한 키 · 공통 계정이 지워졌습니다.' },
   unreadable: { tone: 'bad', label: '모름 — 키 저장소를 못 읽음', hint: 'SSH 키 저장소 · 서버 등록부 · 사용 중지 상태 파일을 읽지 못했습니다.' },
+  'not-local': { tone: 'warn', label: '못 함 — 엣지가 모르는 주소', hint: '엣지는 법인 공통 계정(root 키)을 자기가 아는 서버에만 씁니다 — 그 엣지 vCenter 의 VM IP 이거나 그 엣지 SSH 공용 접속에 등록한 서버 주소여야 합니다. 물리 서버 · VMware Tools 가 IP 를 알리지 않는 VM 은 그 엣지 포탈의 SSH 공용 접속에 이 서버(같은 주소)를 등록하세요.' },
+  'local-unknown': { tone: 'off', label: '모름 — 엣지가 인벤토리를 아직 다 읽지 못함', hint: '엣지가 막 다시 시작했거나 그 엣지의 vCenter 를 읽지 못하는 동안입니다 — 이 서버가 그 엣지가 아는 서버인지 아직 모릅니다. 잠시 뒤 다시 보세요(그동안 법인 공통 계정은 쓰지 않습니다).' },
   error: { tone: 'bad', label: '모름 — 해석 오류', hint: '' },
   'edge-unknown': { tone: 'off', label: '모름 — 엣지가 아직 알려 오지 않음', hint: '엣지 포탈이 이 판(3.18) 아래이거나 연결이 끊겼습니다(엣지는 1분마다 알려 옵니다). 옛 판이면 엣지를 올리세요.' },
 });
@@ -46,6 +48,14 @@ export const PREP_CODE_TEXT = Object.freeze({
   'script-other': '준비 파일이 끝까지 돌지 못함',
   busy: '엣지에서 같은 서버의 작업이 아직 끝나지 않음',
   'queue-full': '엣지 대기열이 가득 참',
+  'not-mine': '엣지가 맡은 서버 목록에 없어 거절함',
+  lost: '결과를 받지 못함',
+});
+/** v3.54.0 ⑥ 'lost' 의 까닭(서버 service.LOST_WHY). */
+export const LOST_WHY_TEXT = Object.freeze({
+  undelivered: '엣지가 작업을 받아 가지 않았습니다(엣지 연결 · 판을 확인)',
+  'no-result': '시한 안에 결과가 오지 않았습니다 — 그 서버에서 실제로 돌았을 수 있습니다(늦게 오면 그때 반영)',
+  restart: '포탈이 다시 시작돼 진행 중이던 작업의 결과를 받지 못했습니다',
 });
 /** 준비 파일이 멈춘 까닭(서버 PREP_FAILS) — 멈춘 경우 대상 서버에서 바뀐 것이 없다(계정 만들기 뒤 단계는 계정만 생긴다). */
 export const PREP_FAIL_TEXT = Object.freeze({
@@ -63,7 +73,8 @@ export const PREP_FAIL_TEXT = Object.freeze({
   'acct-create': '수집 계정을 만들지 못함',
   'acct-shell': '수집 계정의 셸이 nologin · false',
   'acct-home': '수집 계정의 홈 디렉터리가 없거나 이상함',
-  'acct-sudo': '수집 계정이 이미 sudo 로 모든 명령을 할 수 있음(wheel · sudo 그룹 포함) — 넣지 않음',
+  'acct-sudo': '수집 계정이 이미 sudo 로 root 와 같은 일을 할 수 있음(모든 명령 · 셸 · su · env · wheel · sudo 그룹) — 넣지 않음',
+  'acct-sudo-unknown': '수집 계정의 sudo 권한을 확인하지 못함(sudo 가 터미널을 요구 등) — 넣지 않음',
   'key-symlink': '.ssh 또는 authorized_keys 가 심링크',
   'key-write': 'authorized_keys 에 쓰지 못함',
   'no-runuser': 'runuser 가 없음(그 계정 권한으로 쓸 수 없음)',
@@ -82,12 +93,14 @@ export const PREP_FIX_TEXT = Object.freeze({
   'no-key': '노드별 SSH 공개키 카드에서 키 상태를 확인하세요.',
   login: '홈 · .ssh 권한(StrictModes) · SELinux · PAM(만료 · access.conf)을 확인한 뒤 ‘다시 연결’ 을 누르세요.',
   'acct-root': '등록을 일반 계정으로 고치세요 — root 에는 넣지 않습니다.',
+  'not-mine': '중앙 · 엣지의 서버 목록이 어긋났습니다(등록을 막 고쳤거나 엣지가 다시 시작) — 1분쯤 뒤 다시 누르세요.',
+  lost: '‘다시 연결’ 로 키 로그인을 확인하세요 — 안 되면 다시 누르면 됩니다(같은 키 · 계정은 다시 넣지 않습니다).',
   script: '서버 담당자가 고칠 것(sshd 설정 · 계정) — 포탈은 바꾸지 않았습니다. 손으로 넣을 수도 있습니다.',
   scriptAfterAcct: '계정은 생겼습니다(그 뒤 단계에서 멈춤) — 까닭을 고친 뒤 다시 누르면 그 계정에 이어서 넣습니다.',
 });
 /** 디스크 점검을 함께 하지 않은 까닭(서버 AUDIT_SKIPS + 'skip'). */
 export const AUDIT_SKIP_TEXT = Object.freeze({
-  off: '고르지 않음', login: '키 로그인이 안 돼 건너뜀', cred: '설치 계정이 정해지지 않아 건너뜀', key: '그 키에 ‘설치’ 가 꺼져 있어 건너뜀', skip: '건너뜀', done: '이어서 설치함',
+  off: '고르지 않음', login: '키 로그인이 안 돼 건너뜀', cred: '설치 계정이 정해지지 않아 건너뜀', key: '그 키에 ‘설치’ 가 꺼져 있어 건너뜀', skip: '건너뜀', done: '이어서 설치함', unknown: '결과를 모름',
 });
 export const WARN_TEXT = Object.freeze({ 'home-perm': '홈 디렉터리를 그룹 · 다른 계정이 쓸 수 있음(StrictModes 가 거부할 수 있음)', passwd: '비밀번호 칸을 바꾸지 못함', chage: '만료 설정을 바꾸지 못함' });
 
@@ -102,6 +115,17 @@ export function loginText(l) {
 }
 /** 연결됨(할 일 없음)인가. */
 export const loginOk = (l) => l?.kind === 'ok' || l?.kind === 'os-unverified';
+
+/** v3.54.0 ⑤ 같은 서버 근거(서버 sameMachine.BASIS). */
+export const BASIS_TEXT = Object.freeze({ addr: '같은 주소', vm: '인벤토리의 같은 VM', hostname: '같은 호스트 이름', name: '이름이 그 서버의 호스트 이름과 같음' });
+/** 같은 서버에 다른 수집 계정 — 근거가 주소뿐이면 예전 문구 그대로. */
+export function sharedWhy(list) {
+  const xs = Array.isArray(list) ? list : [];
+  const bases = [...new Set(xs.map((x) => x?.basis).filter((b) => b && b !== 'addr'))];
+  if (!bases.length) return '같은 주소에 다른 수집 계정 — 손으로 설치';
+  const names = xs.map((x) => x?.name).filter(Boolean).slice(0, 2).join(' · ');
+  return `같은 서버로 보임(${bases.map((b) => BASIS_TEXT[b] || b).join(' · ')}${names ? ` — ${names}` : ''})에 다른 수집 계정 — 손으로 설치`;
+}
 
 /**
  * 한 행의 자동 준비 판정.
@@ -123,7 +147,7 @@ export function prepRowState(r, pick = null) {
   const ci = r?.credInstall || { state: 'error' };
   let awhy = null;
   if (!can) awhy = null;
-  else if (r?.hostShared) awhy = '같은 주소에 다른 수집 계정 — 손으로 설치';
+  else if (r?.hostShared) awhy = sharedWhy(r.hostSharedWith);
   // 반증 D7: 공통 계정을 고르는 행은 노드가 고른 계정으로 설치 계정을 다시 푼다 — 화면은 단정하지 않는다(maybe)
   else if (c.state === 'ambig' || ci.state === 'ambig') return { settled, can, why, audit: { can: true, maybe: true, why: '고른 계정의 키가 ‘설치’ 도 켰을 때만(노드가 판단)' } };
   else if (ci.state === 'feature') awhy = '그 키에 ‘설치’ 가 꺼져 있음';
@@ -137,14 +161,17 @@ export function prepResultText(lp) {
   if (!lp) return null;
   const base = PREP_CODE_TEXT[lp.code] || lp.code;
   const why = lp.code === 'script' && lp.fail ? ` — ${PREP_FAIL_TEXT[lp.fail] || lp.fail}` : '';
-  const did = [lp.created ? '계정 만듦' : lp.partial ? '계정은 생겼지만 홈을 만들지 못함' : lp.exists ? '계정은 있었음' : '',
+  // 반증 L1: 결과를 받지 못한(lost) 작업은 한 일을 모른다 — '주소 제한은 적용되지 않음' 처럼 단정하지 않는다
+  const did = lp.code === 'lost' ? '' : [lp.created ? '계정 만듦' : lp.partial ? '계정은 생겼지만 홈을 만들지 못함' : lp.exists ? '계정은 있었음' : '',
     lp.added ? '공개키 넣음' : lp.have ? '같은 키가 이미 있음' : lp.differs ? '같은 키가 다른 옵션(주소 제한 등)으로 이미 있어 그대로 둠 — 바꾸려면 그 줄을 손으로 고치세요' : '',
     lp.from ? '주소 제한' : lp.fromAsked && !lp.added ? '주소 제한은 적용되지 않음(새 줄을 넣지 않았음)' : ''].filter(Boolean).join(' · ');
   const audit = lp.audit && lp.audit !== 'off' ? `디스크 점검: ${AUDIT_SKIP_TEXT[lp.audit] || lp.audit}` : '';
   const warn = (lp.warn || []).map((w) => WARN_TEXT[w] || w).join(' · ');
-  const tone = lp.code === 'ok' ? 'ok' : lp.code === 'login' ? 'warn' : 'bad';
+  const tone = lp.code === 'ok' ? 'ok' : lp.code === 'login' || lp.code === 'lost' ? 'warn' : 'bad';
   const fix = lp.code === 'script' ? ((lp.created || lp.partial) ? PREP_FIX_TEXT.scriptAfterAcct : PREP_FIX_TEXT.script) : PREP_FIX_TEXT[lp.code] || '';
-  return { tone, label: `${base}${why}`, sub: [did, audit, warn, fix].filter(Boolean).join(' · ') };
+  // v3.54.0 ⑥: 결과를 받지 못한 작업 — 까닭(엣지가 받아 가지 않음 · 결과 없음 · 재시작)과 맡은 노드
+  const lost = lp.code === 'lost' ? [LOST_WHY_TEXT[lp.why] || LOST_WHY_TEXT['no-result'], lp.node ? `맡은 노드 ${lp.node}` : ''].filter(Boolean).join(' · ') : '';
+  return { tone, label: `${base}${why}`, sub: [lost, did, audit, warn, fix].filter(Boolean).join(' · ') };
 }
 
 /** 단계 막대(서버 PREP_STEPS 0 ~ 7). */
