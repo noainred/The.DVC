@@ -5,10 +5,10 @@
  * 안전(guestScanScheduler의 lastRun 패턴). lastRunTs는 설정 파일에 함께 persist.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { numOrNull } from '../util/numOrNull.js';
 import { store } from '../store.js';
 import { sendText } from '../alerts.js';
@@ -43,12 +43,26 @@ function noteResult(r, nowTs = Date.now()) {
   failState = { streak, lastFailAt: nowTs, nextAt: nowTs + dailyReportBackoffMs(streak), lastReason: String(r?.reason || '').slice(0, 300) };
 }
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'daily-report' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function dailyReportWriteRefusal() {
+  loadDailyReportSettings();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `일일 리포트 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadDailyReportSettings() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { ...DEFAULTS }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
   cache = { ...DEFAULTS };
   try {
-    if (fs.existsSync(FILE)) {
-      const s = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const s = JSON.parse(rr.value);
       cache = {
         enabled: !!s.enabled,
         hour: Math.min(23, Math.max(0, Number.isFinite(Number(s.hour)) ? Number(s.hour) : 8)),
@@ -70,11 +84,14 @@ export function loadDailyReportSettings() {
 }
 
 function persist() {
+  if (!cache) return;   // 107회차: 설정을 못 읽은 동안(캐시 없음)에는 쓰지 않는다 — 'null' 로 원본을 덮지 않게
   atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
 }
 
 export function saveDailyReportSettings(body = {}) {
   const cur = loadDailyReportSettings();
+  { const no = dailyReportWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
+
   cache = {
     enabled: body.enabled != null ? !!body.enabled : cur.enabled,
     // v2.586 — 화면은 blur 마다 칸의 원문을 보낸다. 빈 칸('')을 0·기본값으로 읽으면 시각을 지우는 순간
@@ -118,7 +135,7 @@ export async function runDailyReportNow({ manual = false } = {}) {
     }
     const anyOk = anySendOk(results);
     let countedAsScheduled = false;
-    if (anyOk) {
+    if (anyOk && cache) {   // 107회차: 설정을 못 읽은 동안의 수동 발송은 발송 시각을 기록하지 않는다(캐시 없음)
       const at = Date.now();
       if (!manual) { cache.lastRunTs = at; cache.lastRunBy = 'schedule'; countedAsScheduled = true; }
       else {
@@ -187,4 +204,4 @@ export function startDailyReport() {
 }
 
 /** 테스트 전용. */
-export function _resetDailyReportForTest() { cache = null; running = false; failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' }; }
+export function _resetDailyReportForTest() { cache = null; _reader.reset(); _readErr = ''; running = false; failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' }; }

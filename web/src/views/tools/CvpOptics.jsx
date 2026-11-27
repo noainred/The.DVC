@@ -7,6 +7,8 @@ import { agoText, countText } from './cvpText.js';
 import { corpLabel } from './cvpOverviewText.js';
 import { OPTICS_NOTE, dbmText, opticRowState, basisText, opticsKpis, opticsEmptyNote } from './cvpOpticsText.js';
 import Select from '../../components/Select.jsx';
+import { Seg } from './CvpNetParts.jsx';
+import CvpOpticsTrendView from './CvpOpticsTrend.jsx';
 
 /**
  * CVP › 광신호(v2.646 — 사용자 요청 '각 GBIC 의 광신호 세기를 확인 · 신호가 약하면 장애로 판정').
@@ -16,7 +18,7 @@ const TONE = { ok: 'var(--green)', warn: 'var(--amber)', bad: 'var(--red)', mute
 const NOTE = { fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 };
 const FILTERS = [['problem', '약함·낮음'], ['judged', '판정한 것'], ['all', '전체']];
 
-export default function CvpOpticsView({ servers = [], onOpen }) {
+function OpticsNow({ servers = [], onOpen }) {
   const [cvpId, setCvpId] = useState('');
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
@@ -25,8 +27,10 @@ export default function CvpOpticsView({ servers = [], onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null);
+    // v3.42(D14): CVP 를 바꾸면 이전 CVP 의 표를 지운다(새 응답 전까지 이전 표가 새 선택 아래 보였다) — 같은 CVP 새로고침은 표를 유지한다.
+    setR((cur) => (cur && cur._cvp !== cvpId ? null : cur));
     fetchJson('/tools/cvp/optics', cvpId ? { cvpId } : {})
-      .then((x) => { if (active) setR(x); }).catch((e) => { if (active) { setErr(e); setR(null); } });
+      .then((x) => { if (active) setR(x && typeof x === 'object' ? { ...x, _cvp: cvpId } : x); }).catch((e) => { if (active) { setErr(e); setR(null); } });
     return () => { active = false; };
   }, [cvpId, reload]);
   const all = r && Array.isArray(r.optics) ? r.optics.filter((o) => o && typeof o === 'object') : [];
@@ -95,6 +99,23 @@ export default function CvpOpticsView({ servers = [], onOpen }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** v3.38: 광신호 › 현재 · 추세(⑮) · 재고 — 보기 전환만(각 보기가 자기 API 를 마운트 1회 부른다). */
+const PART_NOTE = Object.freeze({ now: '지금 수신 광량과 판정', trend: '일 최저 광량의 추세로 임계 도달을 예상합니다', stock: '트랜시버 종류별 링크 있음 · 예비 재고' });
+export default function CvpOpticsView({ servers = [], onOpen }) {
+  const [part, setPart] = useState('now');
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, minWidth: 0 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 14px', alignItems: 'center' }}>
+        <b style={{ fontSize: 15 }}>광신호</b>
+        <Seg label="보기" value={part} onChange={setPart} items={[['now', '현재'], ['trend', '추세'], ['stock', '재고']]} />
+        <span style={NOTE}>{PART_NOTE[part]}</span>
+      </div>
+      {/* v3.42(D14): 추세 ↔ 재고는 같은 응답이라 다시 부르지 않는다(key 를 두면 오갈 때마다 무거운 조회를 다시 했다). */}
+      {part === 'now' ? <OpticsNow servers={servers} onOpen={onOpen} /> : <CvpOpticsTrendView part={part} onOpen={onOpen} />}
     </div>
   );
 }

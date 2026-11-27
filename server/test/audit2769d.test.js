@@ -117,11 +117,15 @@ test('R4-D5-2 maskErrText 는 IPv6 리터럴을 가리고 시각·MAC·이름은
   assert.equal(maskBgpLabel({ label: 'a|b (v|x)', faultKey: 'bgp:v|x|a|b' }), '(주소 가림) (v|x)', 'VRF·피어에 | 가 있어도 정확히');
   assert.equal(maskBgpLabel({ label: 'odd label' }), '(주소 가림)', '대조 못 하면 VRF 도 지어내지 않는다');
   // ReDoS — 비율로(절대 ms 금지): 입력 8배에 시간이 64배(이차) 가까이 늘면 안 된다.
-  const time = (s) => { const t = process.hrtime.bigint(); for (let i = 0; i < 3; i++) maskErrText(s); return Number(process.hrtime.bigint() - t) + 1; };
+  // v3.1.0(정정 — CI 에서 두 번 실패: 59.7배 · 50.4배, 'a:'): 작은 입력 한 번이 약 0.3ms 라 공유 러너의 GC · CPU 양보 한 번(수십 ms)이
+  //   그대로 배율이 됐다(로컬 15회: 작은 0.29~0.45ms · 큰 2.37~2.92ms · 배율 8~10). 각각 5번 재서 **최솟값끼리** 비교한다 —
+  //   잡음은 최솟값을 늘리지 못하고, 이차 시간이면 최솟값끼리도 ~64배라 그대로 걸린다(검사 기준 40 은 그대로).
+  const once = (s) => { const t = process.hrtime.bigint(); for (let i = 0; i < 3; i++) maskErrText(s); return Number(process.hrtime.bigint() - t) + 1; };
+  const time = (s) => { let m = Infinity; for (let k = 0; k < 5; k++) m = Math.min(m, once(s)); return m; };
   for (const unit of [':', 'a', 'a:', '1:']) {
     const small = unit.repeat(Math.floor(20_000 / unit.length));
     const big = unit.repeat(Math.floor(160_000 / unit.length));
-    time(small);
+    once(small);
     const r = time(big) / time(small);
     assert.ok(r < 40, `'${unit}' 반복: 8배 입력에 ${r.toFixed(1)}배(선형이면 ~8)`);
   }

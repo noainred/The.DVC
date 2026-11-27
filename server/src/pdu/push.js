@@ -6,6 +6,7 @@
  * express.json 한도 아래로 유지한다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
@@ -36,7 +37,7 @@ let _busy = null;
 let _again = false;
 let _withholdSince = null;
 /** 부분 목록 보류 상한 — 첫 주기가 끝나지 않아도 이만큼 지나면 보낸다(보류에는 반드시 시한 — v2.601 규약). */
-export const PDU_PUSH_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.env.PDU_PUSH_WITHHOLD_MAX_MS) || 15 * 60_000);
+export const PDU_PUSH_WITHHOLD_MAX_MS = Math.max(60_000, envPositive(process.env.PDU_PUSH_WITHHOLD_MAX_MS, 15 * 60_000));
 
 /**
  * 이번 push 를 보류할지(순수 — v2.605 EDGE2605-01).

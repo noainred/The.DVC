@@ -1,0 +1,173 @@
+/**
+ * snaphist/history.js — 스냅샷 이력 DB 읽기(v3.26.0 · 설계 docs/design/snapshots §4 · §5).
+ *
+ * 규칙:
+ *   · **부분 합은 추이에 넣지 않는다**(루트 CLAUDE.md): 고른 범위의 vCenter 중 그날 기록이 없는(못 읽은 · 일부만 읽은) 것이 있으면
+ *     그날 점은 값이 아니라 `null` + missing 수다. ‘기록이 아직 시작되지 않은’ vCenter(그 vCenter 의 첫 행보다 앞)는 빠진 것으로 세지 않는다.
+ *   · 반증 3: 점검중(maintenance) · 비활성(disabled)은 그날 묶음에서 **뺀다**(빠진 것으로 세면 한 곳이 오래 점검중이면 전 함대 추이가 매일 비었다 —
+ *     metrics/unreadVcenters.js 의 v2.621 RECENT-03 과 같은 함정). 뺀 수는 excluded 로 따로 싣는다.
+ *   · 147회차(143 결정 D1 — 사용자 ‘권장안대로 반영’): REST 수집('no-snap' — 스냅샷 개수를 받지 않는다)도 뺀다(excluded · 그 가운데 수는 excludedRest).
+ *     REST 폴백은 일시 실패가 아니라 수집 방식의 성질이라 빠진 날로 세면 SOAP 으로 돌아올 때까지 전 범위 추이가 매일 비었다(반증 3 과 같은 함정).
+ *     일시 실패(unreachable · stale · pending)와 일부만 읽은 날(partial)은 그대로 빠진 날이다. 판정은 읽을 때(status 로) 하므로 이미 기록된 날에도 적용된다.
+ *   · 크기를 못 읽은 VM 이 있는 날의 크기 합은 null(개수 · 기준 넘김 수는 그대로 — 그 VM 은 행이 있다).
+ *   · 법인(묶음) 판정은 view.js 와 같다(DataCenter → 없으면 vCenter). 법인별 추이도 같은 규칙으로 서버가 만든다(화면에 두 번째 판정을 두지 않는다).
+ *   · 범위 · 고른 법인 교집합은 부르는 라우트가 먼저 건 집합(vcIds)으로만 읽는다.
+ */
+import { dayKeyOf } from './record.js';
+import { snapHistStmts, snapHistMeta, snapHistDbStatus, retentionDays } from './db.js';
+import { snapHistPollerStatus } from './poller.js';
+
+const DAY = 86_400_000;
+export const DAYS_MAX = 400;
+export const GONE_MAX = 2000;
+const r1 = (x) => (x == null ? null : Math.round(x * 10) / 10);
+
+export function clampDays(v, def = 30) {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) && n >= 1 ? Math.min(DAYS_MAX, n) : def;
+}
+
+/**
+ * n일 전 날 열쇠 — 달력으로 센다(그날 정오). 143회차(재현 TZ=Europe/Warsaw): 예전 `now - n×24h` 는 서머타임이 바뀐 주에 자정 근처(1시간)에서
+ * 하루를 빼거나(봄) 같은 날을 두 번 넣었고(가을), ‘7일 전’ 이 6 · 8일 전이 됐다(이 폴러는 엣지에서도 돈다 — 엣지 서버가 서머타임 지역 시각이면 해당).
+ */
+export function dayKeyAgo(now, n) {
+  const d = new Date(now);
+  return dayKeyOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() - n, 12).getTime());
+}
+
+/** 기간의 날 열쇠 목록(오래된 날부터, 오늘 포함). */
+export function dayKeys(now, days) {
+  const out = [];
+  for (let i = days - 1; i >= 0; i -= 1) out.push(dayKeyAgo(now, i));
+  return out;
+}
+
+/** 그날 묶음에서 빼는 상태 → 사유('maint' = 점검중 · 비활성 · 'rest' = REST 수집). 그 밖(ok 아님)은 빠진 날. 추이 · 빠진 날(gaps)이 같이 쓴다. */
+const EXCLUDE_KIND = new Map([['maintenance', 'maint'], ['disabled', 'maint'], ['no-snap', 'rest']]);
+export const excludeKindOf = (status) => EXCLUDE_KIND.get(status) || null;
+
+/**
+ * 날별 합(순수 — 시험용). rows = snap_vcday 행, vcIds = 이 묶음의 vCenter, firstOk = vcId → 그 vCenter 의 첫 기록 날(상태 무관 — 반증 2).
+ * @returns {{day:string, vms:number|null, snaps:number|null, gb:number|null, gbUnknown:number|null, over:number|null, missing:number, excluded:number, excludedRest:number}[]}
+ */
+export function aggregateDays(days, rows, vcIds, firstOk) {
+  const byDay = new Map();
+  for (const r of rows) {
+    if (!vcIds.has(r.vcenter_id)) continue;
+    if (!byDay.has(r.day)) byDay.set(r.day, new Map());
+    byDay.get(r.day).set(r.vcenter_id, r);
+  }
+  return days.map((day) => {
+    const m = byDay.get(day) || new Map();
+    let missing = 0; let excluded = 0; let excludedRest = 0; let any = false;
+    const acc = { vms: 0, snaps: 0, gb: 0, gbUnknown: 0, over: 0 };
+    for (const id of vcIds) {
+      const f = firstOk.get(id);
+      if (!f || day < f) continue;            // 이 vCenter 는 그날 아직 기록을 시작하지 않았다
+      const r = m.get(id);
+      const ex = r ? excludeKindOf(r.status) : null;
+      if (ex) { excluded += 1; if (ex === 'rest') excludedRest += 1; continue; }
+      if (!r || r.status !== 'ok') { missing += 1; continue; }
+      any = true;
+      acc.vms += r.vms || 0; acc.snaps += r.snaps || 0; acc.gb += r.gb || 0; acc.gbUnknown += r.gb_unknown || 0; acc.over += r.over || 0;
+    }
+    if (missing || !any) return { day, vms: null, snaps: null, gb: null, gbUnknown: null, over: null, missing, excluded, excludedRest };
+    return { day, vms: acc.vms, snaps: acc.snaps, gb: acc.gbUnknown ? null : r1(acc.gb), gbUnknown: acc.gbUnknown, over: acc.over, missing: 0, excluded, excludedRest };
+  });
+}
+
+export async function historyStatus() {
+  const meta = await snapHistMeta();
+  const db = snapHistDbStatus();
+  const p = snapHistPollerStatus();
+  return {
+    available: db.available && !!meta, error: db.error, started: meta?.started || null, lastDay: meta?.lastDay || null,
+    retentionDays: p.retentionDays, recordHour: p.recordHour,
+    last: p.lastResult ? { at: p.lastResult.at, day: p.lastResult.day, ok: p.lastResult.ok, recorded: p.lastResult.recorded, missing: p.lastResult.missing, gone: p.lastResult.gone } : null,
+  };
+}
+
+/**
+ * 추이 — 전체(고른 범위) + 법인별. corpOf(vcId) → { corpId }.
+ * @param {{vcIds:Set<string>, days:number, now:number, corpOf:(id:string)=>{corpId:string}}} o
+ */
+export async function historySeries({ vcIds, days, now = Date.now(), corpOf }) {
+  const st = await snapHistStmts();
+  if (!st) return null;
+  const keys = dayKeys(now, days);
+  const rows = st.vcdaySince.all(keys[0]);
+  const firstOk = new Map();
+  for (const id of vcIds) { const d = st.firstDay.get(id)?.d; if (d) firstOk.set(id, d); }
+  const groups = new Map();
+  for (const id of vcIds) { const c = corpOf(id).corpId; if (!groups.has(c)) groups.set(c, new Set()); groups.get(c).add(id); }
+  // 143회차(E1): 행을 vCenter 별로 한 번 묶는다 — 법인마다 · vCenter 마다 전체 행을 다시 훑으면 O(vCenter × 행)이었다(30곳 · 400일 약 110ms 동기).
+  //   aggregateDays 는 묶음 밖 행을 버리고 (날, vCenter) 가 유일하므로 그 묶음의 행만 넘겨도 결과가 같다(시험이 예전 계산과 대조).
+  const rowsByVc = new Map();
+  for (const r of rows) { if (!vcIds.has(r.vcenter_id)) continue; if (!rowsByVc.has(r.vcenter_id)) rowsByVc.set(r.vcenter_id, []); rowsByVc.get(r.vcenter_id).push(r); }
+  const rowsOf = (ids) => { const out = []; for (const id of ids) for (const r of rowsByVc.get(id) || []) out.push(r); return out; };
+  const byCorp = {};
+  for (const [c, ids] of groups) byCorp[c] = aggregateDays(keys, rowsOf(ids), ids, firstOk);
+  // 빠진 날 — vCenter 별(그 기간 안에서 기록을 시작한 뒤 'ok' 도 뺀 날(점검중 · 비활성 · REST 수집 — excludeKindOf)도 아닌 날)
+  const gaps = [];
+  for (const id of vcIds) {
+    const f = firstOk.get(id);
+    if (!f) continue;
+    const ok = new Set((rowsByVc.get(id) || []).filter((r) => r.status === 'ok' || excludeKindOf(r.status)).map((r) => r.day));
+    const miss = keys.filter((d) => d >= f && !ok.has(d) && d !== keys[keys.length - 1]);   // 오늘은 아직 기록 전일 수 있어 세지 않는다
+    if (miss.length) gaps.push({ vcenterId: id, days: miss.length, last: miss[miss.length - 1] });
+  }
+  return { days: keys, series: aggregateDays(keys, rows, vcIds, firstOk), byCorp, gaps, recordingVcenters: firstOk.size };
+}
+
+/** 없어진 스냅샷(기간 안). */
+export async function goneList({ vcIds, sinceTs, limit = GONE_MAX }) {
+  const st = await snapHistStmts();
+  if (!st) return null;
+  const out = [];
+  let more = false;
+  // gone_at 인덱스로 최근부터 읽어 범위 밖은 건너뛴다 — 범위 계정이 많이 버려도 상한(limit × 4) 안에서 멈춘다
+  const rows = st.goneSince.all(sinceTs, limit * 4);
+  for (const r of rows) {
+    if (!vcIds.has(r.vcenter_id)) continue;
+    if (out.length >= limit) { more = true; break; }
+    out.push({ vcenterId: r.vcenter_id, vmId: r.vm_id, vmName: r.vm_name, name: r.name, createTs: r.create_ts, firstSeen: r.first_seen, lastSeen: r.last_seen,
+      goneAt: r.gone_at, reason: r.gone_reason === 'vm' ? 'vm' : 'snap' });
+  }
+  // 반증 7: 읽기 창(limit × 4)을 다 썼으면 그 뒤에 범위 안 항목이 더 있을 수 있다 — ‘더 있음’ 으로 말한다(조용한 상한 금지)
+  if (rows.length >= limit * 4) more = true;
+  return { items: out, more };
+}
+
+/** VM 하나의 이력 — 날별 개수 · 크기 + 스냅샷 생애. 빠진 날은 그 vCenter 의 기록 상태로 가린다. */
+export async function vmHistory({ vcenterId, vmId, days, now = Date.now() }) {
+  const st = await snapHistStmts();
+  if (!st) return null;
+  const keys = dayKeys(now, days);
+  const rows = new Map(st.vmDays.all(vcenterId, vmId, keys[0]).map((r) => [r.day, r]));
+  const ok = new Set(st.okDaysOf.all(vcenterId, keys[0]).map((r) => r.day));
+  const series = keys.map((day) => {
+    const r = rows.get(day);
+    if (r) return { day, count: r.count, gb: r.gb, over: !!r.over };
+    // 그날 그 vCenter 를 'ok' 로 기록했는데 행이 없으면 = 스냅샷이 없었다(0). 기록이 없으면 모름(null).
+    return ok.has(day) ? { day, count: 0, gb: 0, over: false } : { day, count: null, gb: null, over: null };
+  });
+  const items = st.itemsOfVm.all(vcenterId, vmId).map((r) => ({ name: r.name, createTs: r.create_ts, mem: r.mem == null ? null : !!r.mem, quiesced: r.quiesced == null ? null : !!r.quiesced,
+    firstSeen: r.first_seen, lastSeen: r.last_seen, goneAt: r.gone_at, reason: r.gone_reason || null }));
+  return { days: keys, series, items };
+}
+
+/**
+ * 7일 변화의 재료 — n일 전 그 vCenter 를 'ok' 로 기록한 날의 VM 별 크기. 그날 기록이 없으면 그 vCenter 는 모름.
+ * @returns {{day:string, okVcenters:string[], rows:{vcenterId:string, vmId:string, count:number, gb:number|null}[]}|null}
+ */
+export async function dayAgo({ vcIds, n = 7, now = Date.now() }) {
+  const st = await snapHistStmts();
+  if (!st) return null;
+  const day = dayKeyAgo(now, n);
+  const okVc = new Set(st.dayStatuses.all(day).filter((r) => r.status === 'ok' && vcIds.has(r.vcenter_id)).map((r) => r.vcenter_id));
+  const rows = st.dayRows.all(day).filter((r) => okVc.has(r.vcenter_id)).map((r) => ({ vcenterId: r.vcenter_id, vmId: r.vm_id, count: r.count, gb: r.gb }));
+  return { day, okVcenters: [...okVc], rows };
+}
+
+export { retentionDays };

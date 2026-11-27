@@ -88,8 +88,12 @@ export function startBulkTest({ kind, rows, testOne, skipReason = () => null, us
     try {
       await pool(list, Math.max(1, concurrency), async (row, i) => {
         const slot = run.results[i];
-        const skip = skipReason(row);
-        if (skip) { slot.status = 'skipped'; slot.reason = skip; run.done++; return; }
+        // v3.10.4(공용 유틸 점검 2회차): 건너뛰기 판정이 던지면 그 행만 실패로 적는다. 예전에는 예외가 풀 전체를 거부시켜 남은 행이 'pending' 인 채
+        //   run.status 만 'done' 이 됐고, 바깥 async 함수의 거부를 받는 곳이 없어 **처리되지 않은 rejection** 이 됐다(포탈은 index.js 의 전역 처리기가
+        //   로그만 남기고 계속 돈다 — 프로세스가 죽지는 않지만 화면은 끝나지 않은 행을 '대기' 로 보인다).
+        let skip = null;
+        try { skip = skipReason(row); } catch (e) { slot.status = 'fail'; slot.reason = `건너뛰기 판정 실패: ${String(e?.message || e).slice(0, 200)}`; run.done++; return; }
+        if (skip) { slot.status = 'skipped'; slot.reason = String(skip); run.done++; return; }
         slot.status = 'testing';
         const t0 = Date.now();
         try {
@@ -107,6 +111,9 @@ export function startBulkTest({ kind, rows, testOne, skipReason = () => null, us
           run.done++;
         }
       });
+    } catch (e) {
+      // 위에서 행마다 잡으므로 여기 오는 것은 풀 자체의 실패뿐이다 — 남은 행을 '중단' 으로 적고 삼킨다(처리되지 않은 rejection 금지).
+      for (const slot of run.results) if (slot.status === 'pending' || slot.status === 'testing') { slot.status = 'fail'; slot.reason = `중단됨: ${String(e?.message || e).slice(0, 200)}`; }
     } finally {
       run.status = 'done';
       run.finishedAt = Date.now();

@@ -6,13 +6,14 @@
 import React, { useRef, useState } from 'react';
 import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../api.js';
 import EscClose from './EscClose.jsx';
+import { backdropClose } from './backdropClose.js'; // 95회차: 누름 · 뗌 모두 배경일 때만 닫는다
 import { STable } from './STable.jsx';
 import { passwordDroppedLines } from '../views/droppedSecretText.js';
 
 // v2.643: 방어선 — 호출부가 버튼을 숨기지만, 열렸더라도 CSV 권한이 없으면 안내만 보인다.
 function CsvDeniedModal({ title, onClose }) {
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(onClose)}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 480 }}>
         <h3 style={{ marginTop: 0 }}>{title}</h3>
@@ -41,7 +42,7 @@ export function CsvExportModal({ title, description, exportPath, secretsQuery = 
   };
   if (!canCsv()) return <CsvDeniedModal title={title} onClose={onClose} />; // 훅은 모두 위에(React #310)
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(onClose)}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 540 }}>
         <h3 style={{ marginTop: 0 }}>{title}</h3>
@@ -102,7 +103,7 @@ export function CsvImportModal({ title, description, importPath, samplePath, col
   const actLabel = { add: '추가', overwrite: '덮어쓰기', error: '오류' };
   if (!canCsv()) return <CsvDeniedModal title={title} onClose={onClose} />; // 훅은 모두 위에(React #310)
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(onClose, { disabled: busy })}>
       <EscClose onClose={() => { if (!busy) onClose(); }} />
       <div className="modal card" style={{ maxWidth: 800 }}>
         <h3 style={{ marginTop: 0 }}>{title}</h3>

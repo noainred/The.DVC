@@ -6,7 +6,7 @@
  *  9 포탈 알림함(받을 사람 판정 공유 · 메일 스위치와 따로 · 지금 범위로 다시 거름)
  * 10 다른 알람 · 백업 실패 → 이슈 자동 등록(지연 · 중복 · 해소 · 하루 상한)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,11 +20,18 @@ import { normalizeIssueSettings } from '../src/issues/settings.js';
 import { staleDaysOf } from '../src/issues/store.js';
 import { dayIndex } from '../src/util/dayKey.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2908-'));
+  const dir = tmpDir('c2908-');
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});
@@ -153,7 +160,8 @@ test('10 판정 — 지연 · 중복 · 다시 발생 · 해소 · 하루 상한
   assert.deepEqual(p.actions.map((a) => [a.type, a.f.key]), [['create', 'vc:vc-a'], ['create', 'vcstale:vc-c']], '10분 미만 · 오버커밋 · 꺼진 종류(host) 는 만들지 않는다');
   assert.equal(p.capped, 1, '하루 상한 2건 — massoff 는 세고 만들지 않는다');
   const existing = [{ key: 'ISS-1', origin: { alertKey: 'vc:vc-a', resolvedAt: null } }, { key: 'ISS-2', origin: { alertKey: 'ds:d1', resolvedAt: 123 } }];
-  const p2 = planAlertIssues({ firing: [f('vc:vc-a', 99), f('ds:d1', 1)], resolved: [{ key: 'vc:vc-a', alert: {} }, { key: 'ds:zz', alert: {} }] }, { ...cfg, kinds: { ...cfg.kinds, ds: true } }, { existing, now });
+  // v2.932(점검 B1-03): 다시 발생도 delayMin(10분) 넘게 이어질 때만 — 예전 1분짜리 재발은 이제 재발로 치지 않는다(sweep2932Issues 가 고정)
+  const p2 = planAlertIssues({ firing: [f('vc:vc-a', 99), f('ds:d1', 11)], resolved: [{ key: 'vc:vc-a', alert: {} }, { key: 'ds:zz', alert: {} }] }, { ...cfg, kinds: { ...cfg.kinds, ds: true } }, { existing, now });
   assert.deepEqual(p2.actions.map((a) => [a.type, a.key]), [['again', 'ISS-2'], ['resolve', 'ISS-1']], '열린 이슈가 있으면 만들지 않고 · 해소된 뒤 다시 나면 다시 발생 · 이슈 없는 해소는 무시');
   assert.equal(alertKindOf('backup:x'), '', '백업은 알람 엔진 키가 아니다');
   // 백업 — 잡마다 하나 · 이미 적은 jobid 는 다시 쓰지 않는다 · 복원 실패는 대상 밖
@@ -272,7 +280,8 @@ test('6 · 9 · 10 실제 경로 — 알림함 · 자동화 규칙 · 멈춤 · 
   assert.equal(out.read, 1); assert.equal(out.unreadAfter, 2);
   assert.equal(out.mails, 0, '메일 알림은 꺼져 있다(기본) — 알림함만');
   assert.ok(!out.inboxScoped.includes('ISS-1'), '범위 밖 법인(vc-a) 줄은 지금 범위로 다시 거른다');
-  assert.ok(out.inboxScoped.length >= 2, '공용 이슈 줄은 보인다');
+  // v2.932(점검 B1-05): 범위 계정은 공용 이슈 줄도 보지 않는다(이슈 · 위키 가시성 규칙과 같다) — 예전 단언 '공용 이슈 줄은 보인다' 를 뒤집었다
+  assert.deepEqual(out.inboxScoped, [], '범위 계정(vc-b)은 vc-a 줄도 공용 줄도 보지 않는다');
   assert.equal(out.inboxDemo.demo, true); assert.equal(out.inboxDemo.items.length, 0);
   assert.equal(out.inboxDemoRead, 403);
   assert.equal(out.inboxOff, 3, '알림함을 끄면 더 쌓지 않는다');

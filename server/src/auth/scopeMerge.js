@@ -1,4 +1,4 @@
-import { scopedVcenterIds } from './scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope, WRITE_SCOPE_PARTIAL_REASON } from './scope.js';
 import { store } from '../store.js';
 
 /**
@@ -53,8 +53,10 @@ export function mergeScopedIds(before, body, allowed, allIds) {
   for (const id of inScope) mergedSet.add(id);
   const same = mergedSet.size === prevSet.size && [...mergedSet].every((id) => prevSet.has(id));
   // 적용하지 않은 요청은 사유를 싣는다(v2.606 RECENT2606-04) — 화면이 '저장됐다' 고만 말하지 않게.
-  const emptyNote = req.length === 0 && prevInScope.length > 0
-    ? '범위 안 vCenter 를 모두 빼는 요청은 적용하지 않았습니다 — 빈 목록은 이 계정에서 \'범위 안은 그대로\' 를 뜻합니다.'
+  // 전체 점검 7회차 반증 R-1: 범위 밖 id 만 보낸 경우도 같다(쓰기 범위 병합 — 조회 무제한 · 쓰기 제한 계정의 GET 에는 쓰기 밖 id 가 보인다).
+  //   예전 조건(req.length === 0)이면 쓰기 범위의 마지막 vCenter 를 뺀 요청이 안내 없이 무시됐다.
+  const emptyNote = inScopeReq.length === 0 && prevInScope.length > 0
+    ? '범위 안 vCenter 를 모두 빼는 요청은 적용하지 않았습니다 — 범위 안 목록이 비면 이 계정에서 \'범위 안은 그대로\' 를 뜻합니다.'
     : null;
   if (same) return { merged: prev, ignored, ...(emptyNote && prev.length ? { unapplied: 'empty-in-scope', unappliedReason: emptyNote } : {}) };
   // v2.606 RECENT2606-04: 직전이 '전체 대상([])' 이면 범위 계정은 그것을 **고정 목록으로 바꾸지 않는다**. 펼쳐 저장하면
@@ -75,12 +77,33 @@ export function mergeScopedIds(before, body, allowed, allIds) {
  * 실행 자체가 범위 밖 vCenter·서버에 접속한다. 거절했으면 true.
  */
 export function denyScopedRun(req, res, what = '이 실행') {
-  if (!scopedVcenterIds(req.user, store.get())) return false;
-  res.status(403).json({
-    ok: false, error: 'forbidden', requiredOwner: true,
-    reason: `${what}은(는) 전 법인에 접속하고 전 법인 결과를 돌려줍니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.`,
-  });
+  return denyFleetWrite(req, res, `${what}은(는) 전 법인에 접속하고 전 법인 결과를 돌려줍니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.`);
+}
+
+/**
+ * 전 법인 공용 **쓰기 · 실행**의 판정 하나(전체 점검 2회차 V-1 — 6회차 A1 · v2.904 규칙의 남은 빈칸).
+ * 통과 = 조회 ∧ 쓰기 모두 전체 범위(`isFullReadWriteScope` — 던지면 거부). 공용 게이트(`fullScopeOnlyWith` · `requireSettingsOwner`)는 6회차에 고쳤지만
+ * 이 함수(예전 `denyScopedRun`)와 라우트 안 인라인 검사(`if (scopedVcenterIds(...)) 403`)는 조회 범위만 봐서, writeVcenters 로 쓰기만 줄인 관리자가
+ * 전 법인 설정(vCenter 로그 보관 · 로그인 실패 감시 · OS 스캔 · 중계 서버 · 역할 권한)을 바꾸고 전 법인 수동 실행을 돌렸다.
+ * 조회 범위 때문에 막으면 그 라우트의 사유를, 쓰기 범위 때문이면 `WRITE_SCOPE_PARTIAL_REASON`(writeScope:'partial')을 준다. 거절했으면 true.
+ */
+export function denyFleetWrite(req, res, reason) {
+  if (isFullReadWriteScope(req.user, store.get())) return false;
+  let readScoped = true;
+  try { readScoped = !!scopedVcenterIds(req.user, store.get()); } catch { readScoped = true; }
+  res.status(403).json(readScoped
+    ? { ok: false, error: 'forbidden', requiredOwner: true, reason }
+    : { ok: false, error: 'forbidden', requiredOwner: true, reason: WRITE_SCOPE_PARTIAL_REASON, writeScope: 'partial' });
   return true;
+}
+
+/**
+ * 설정 저장(범위 병합 · 전역 필드 보존)이 쓰는 범위 — **쓰기 범위**(조회와의 교집합 · 둘 다 무제한이면 null · 던지면 빈 집합 = 전부 보존).
+ * 전체 점검 7회차(2회차 반증 R-3): 저장 라우트가 조회 범위(scopedVcenterIds)로 병합해, 조회 무제한 · 쓰기 제한 관리자의 PUT 이 전 법인 키 ·
+ *   전역 필드(보존일 · 주기)를 바꾸고 대상에서 뺀 법인의 DB 파일까지 지웠다. 응답 가림(보이는 것)은 그대로 조회 범위로 한다.
+ */
+export function writeMergeScope(req) {
+  try { return writeScopedVcenterIds(req.user, store.get()); } catch { return new Set(); }
 }
 
 /**

@@ -15,7 +15,7 @@ import { loadRegistry as loadIdracRegistry } from '../idrac/registry.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { loadCollectors } from '../collector/registry.js';
 import { allRemoteServers, dedupRemoteServers } from '../collector/remoteInventory.js';
-import { matchDatacenterId } from '../collector/datacenterMatch.js';
+import { matchDatacenterId, resolvePickedDc } from '../collector/datacenterMatch.js';
 import { serverInScope } from './analysisScope.js';
 import { listDatacenters, getDatacenterAssign, ensureDatacenter } from '../datacenter/store.js';
 import { listScanRanges } from '../idrac/scanRanges.js';
@@ -82,20 +82,31 @@ export function withMappedVc(s, tagMap) {
 
 // 수집기(에이전트) → DataCenter id 매핑. collector.datacenter 라벨/이름/ id를 등록된
 // DataCenter(id 또는 name, 대소문자 무시)에 맞춘다. '에이전트로 검색하면 그 법인에 속하게'의 근거.
-export function collectorToDatacenterMap() {
+export function collectorToDatacenterMap() { return collectorDcMaps().map; }
+
+/**
+ * v2.972: { map: 수집 서버 id → 법인 id(사용자 매칭 → 이름 맞춤), manual: 사용자 매칭만(지금 목록에 있는 법인) }.
+ * 사용자 매칭(collector.datacenterId — 설정 › 수집 서버)은 그 법인이 지금 목록에 있을 때만 쓴다(지워진 법인이면 이름 맞춤으로).
+ */
+export function collectorDcMaps() {
   const dcs = listDatacenters();
-  const map = new Map();
+  // P5(v2.985): 실제 법인 id 로(정확 일치 → 대소문자 무시 — collector/datacenterMatch.js resolvePickedDc 하나, 반증 D2).
+  const map = new Map(); const manual = new Map();
   for (const c of loadCollectors()) {
+    const picked = resolvePickedDc(c.datacenterId, dcs);
+    if (picked) { map.set(String(c.id), picked); manual.set(String(c.id), picked); continue; }
     map.set(String(c.id), matchDatacenterId([c.datacenter, c.id, c.name], dcs));
   }
-  return map;
+  return { map, manual };
 }
 
 // 원격 서버 + DataCenter 해석: 엣지가 datacenterId를 태깅하지 못한 경우(스캔 시점/버전 차이)에도
 // 그 서버를 보고한 수집기(에이전트)의 소속 DataCenter로 자동 귀속시킨다.
 export function remoteServersResolved() {
-  const m = collectorToDatacenterMap();
-  const resolved = allRemoteServers().map((s) => ({ ...s, datacenterId: s.datacenterId || m.get(String(s.collectorId)) || '' }));
+  const { map: m, manual } = collectorDcMaps();
+  // v2.972: 사용자가 이 수집 서버를 법인에 매칭했으면 그 수집 서버가 보고한 서버는 모두 그 법인이다(법인 · vCenter · 수집 서버 1:1:1) —
+  //   엣지가 자기 목록으로 붙인 법인 id(중앙 목록에 없을 수 있다)보다 먼저. 매칭이 없으면 예전대로 엣지 태그 → 이름 맞춤.
+  const resolved = allRemoteServers().map((s) => ({ ...s, datacenterId: manual.get(String(s.collectorId)) || s.datacenterId || m.get(String(s.collectorId)) || '' }));
   // 같은 엣지를 둘 이상의 수집서버(대소문자만 다른 'nj'·'NJ' 등)가 pull하면 동일 물리 서버가
   // 중복 유입돼 목록·집계가 2배가 된다 → 물리 식별키로 dedup.
   return dedupRemoteServers(resolved);
@@ -151,9 +162,18 @@ export function invForServer(s) {
 
 // 수집 서버의 데이터센터(라벨/ id)를 DataCenter로 자동 등록 — '스캔 대역 추가' 등 DataCenter
 // 목록에 바로 뜨게 한다(수집 서버만 있고 법인 미등록이면 스캔 대상에 안 보이던 문제 해결).
+// P6(v2.985 — 재현): 이미 그 수집 서버의 법인이 정해졌으면 새 법인을 만들지 않는다. 예전에는 라벨 'Seoul' 이 기존 법인
+//   'dc-seoul'(이름 'Seoul 법인')과 id 가 달라 'Seoul' 법인을 하나 더 만들어 법인 목록에 둘이 나란히 보였다(목 데이터에서 발견 —
+//   운영도 라벨이 기존 법인의 id 와 다르면 같다). 건너뛰는 경우: ① 사용자가 매칭한 법인(collector.datacenterId)이 지금 목록에 있다
+//   ② 라벨 · id · 이름이 기존 법인의 id 또는 **이름**과 맞는다(collector/datacenterMatch.js — 판정과 같은 규칙).
 export function ensureCollectorDatacenter(c) {
   if (!c) return;
+  const dcs = listDatacenters();
+  const picked = String(c.datacenterId || '').trim().toLowerCase();
+  if (picked && dcs.some((d) => String(d.id).toLowerCase() === picked)) return;
+  // 반증 D1: 라벨이 있으면 **라벨만** 본다 — id · 이름이 우연히 다른 법인과 같아 라벨이 밝힌 새 법인을 막지 않게(IP 관리 dcIdOf 도 라벨만 본다).
   const label = String(c.datacenter || '').trim();
+  if (matchDatacenterId(label ? [label] : [c.id, c.name], dcs)) return;
   const id = (label || c.id || '').toString();
   if (id) ensureDatacenter({ id, name: label || c.name || c.id });
 }

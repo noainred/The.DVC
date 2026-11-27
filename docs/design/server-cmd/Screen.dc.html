@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 명령 실행 — 실행과 결과 화면</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sc.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 1900px; padding: 28px 32px 44px; display: flex; flex-direction: column; gap: 16px">
+
+  <div style="display: flex; flex-direction: column; gap: 6px; max-width: 1100px">
+    <div class="crumb">특수 기능 › 서버 › 서버 명령 실행 · 화면 시안(1440) · 서버 · 주소 · 출력은 그림용 가상값</div>
+    <h1>서버 명령 실행</h1>
+    <p class="soft" style="font-size: 14px">등록된 서버에 정해 둔 확인 명령을 돌리고 출력을 봅니다. 읽기 전용이며 출력은 저장하지 않습니다.</p>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start">
+
+    <div class="card" style="flex: 1 1 440px; max-width: 500px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">1</span><h2>프리셋 고르기</h2></div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 6px">
+        <button class="btn" type="button">시스템 3</button>
+        <button class="btn" type="button">디스크 5</button>
+        <button class="btn" type="button">프로세스 3</button>
+        <button class="btn" type="button">네트워크 4</button>
+        <button class="btn p" type="button" aria-pressed="true">서비스 · 로그 4</button>
+        <button class="btn" type="button">접속 3</button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="pi"><span class="nm">실패한 서비스</span><span class="chip c-mut">Linux</span><span class="chip c-mut">Windows</span></div>
+        <div class="pi on"><span class="nm"><b>서비스 상태</b></span><span class="chip c-new">값</span><span class="chip c-mut">Linux</span><span class="chip c-mut">Windows</span></div>
+        <div class="pi"><span class="nm">서비스 로그</span><span class="chip c-new">값</span><span class="chip c-mut">Linux</span></div>
+        <div class="pi"><span class="nm">최근 경고 · 오류</span><span class="chip c-mut">Linux</span><span class="chip c-mut">Windows</span></div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <label class="lbl" for="sc-unit" style="margin-bottom: 0">서비스 이름</label>
+        <input class="inp" id="sc-unit" type="text" value="chronyd">
+        <span class="dim" style="font-size: 12px">영숫자로 시작 · 영숫자와 @ . _ - · 80자까지</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><h3>실행될 명령</h3><span class="dim" style="font-size: 12px">서버가 만든 것을 그대로 보여 줍니다</span></div>
+        <div class="dim" style="font-size: 12px">Linux</div>
+        <pre class="code" style="white-space: pre-wrap; word-break: break-all">systemctl show -p Id,LoadState,ActiveState,SubState,UnitFileState,ActiveEnterTimestamp,MainPID,NRestarts,Result -- 'chronyd'</pre>
+        <div style="display: flex; align-items: center; gap: 8px"><span class="dim" style="font-size: 12px">Windows</span><span class="chip c-part">시험</span></div>
+        <pre class="code" style="white-space: pre-wrap; word-break: break-all">Get-Service -Name 'chronyd' | Select Name, Status, StartType</pre>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 6px">
+        <span class="chip c-ok">읽기 전용</span>
+        <span class="chip c-mut">시한 10초</span>
+        <span class="chip c-mut">출력 상한 64KB</span>
+      </div>
+    </div>
+
+    <div class="card" style="flex: 999 1 560px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">2</span><h2>대상 서버 고르기</h2></div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end">
+        <div style="flex: 0 1 170px; min-width: 0">
+          <label class="lbl" for="sc-corp">법인</label>
+          <select class="inp" id="sc-corp"><option>KR-본사 외 1</option></select>
+        </div>
+        <div style="flex: 0 1 130px; min-width: 0">
+          <label class="lbl" for="sc-os">OS 종류</label>
+          <select class="inp" id="sc-os"><option>전체</option></select>
+        </div>
+        <div style="flex: 1 1 180px; min-width: 0">
+          <label class="lbl" for="sc-q">찾기</label>
+          <input class="inp" id="sc-q" type="text" placeholder="서버 이름 · 주소">
+        </div>
+        <button class="btn" type="button">고를 수 있는 서버 모두 선택</button>
+      </div>
+
+      <div class="tw">
+        <table class="t" style="min-width: 760px">
+          <thead>
+            <tr><th style="width: 28px"><span class="dim">선택</span></th><th>서버</th><th>법인</th><th>OS</th><th>계정</th><th>붙을 수 있나</th></tr>
+          </thead>
+          <tbody>
+            <tr class="sel"><td><input type="checkbox" checked aria-label="kr-db-01 선택" style="accent-color: #3b82f6"></td><td class="k">kr-db-01 <span class="dim mono">192.0.2.11</span></td><td>KR-본사</td><td>Linux</td><td>물려받음 · svc-portal · 키</td><td><span class="chip c-ok">가능</span></td></tr>
+            <tr class="sel"><td><input type="checkbox" checked aria-label="kr-db-02 선택" style="accent-color: #3b82f6"></td><td class="k">kr-db-02 <span class="dim mono">192.0.2.12</span></td><td>KR-본사</td><td>Linux</td><td>물려받음 · svc-portal · 키</td><td><span class="chip c-ok">가능</span></td></tr>
+            <tr class="sel"><td><input type="checkbox" checked aria-label="kr-app-01 선택" style="accent-color: #3b82f6"></td><td class="k">kr-app-01 <span class="dim mono">192.0.2.21</span></td><td>KR-본사</td><td>Linux</td><td>물려받음 · svc-portal · 키</td><td><span class="chip c-ok">가능</span></td></tr>
+            <tr class="sel"><td><input type="checkbox" checked aria-label="kr-app-02 선택" style="accent-color: #3b82f6"></td><td class="k">kr-app-02 <span class="dim mono">192.0.2.22</span></td><td>KR-본사</td><td>Linux</td><td>따로 정함 · appadm · 비밀번호</td><td><span class="chip c-ok">가능</span></td></tr>
+            <tr class="sel"><td><input type="checkbox" checked aria-label="kr-ad-01 선택" style="accent-color: #3b82f6"></td><td class="k">kr-ad-01 <span class="dim mono">192.0.2.31</span></td><td>KR-본사</td><td>Windows</td><td>물려받음 · KR\svc-portal · WinRM</td><td><span class="chip c-ok">가능</span> <span class="chip c-part">시험</span></td></tr>
+            <tr class="sel"><td><input type="checkbox" checked aria-label="kr-bk-01 선택" style="accent-color: #3b82f6"></td><td class="k">kr-bk-01 <span class="dim mono">192.0.2.41</span></td><td>KR-본사</td><td>Linux</td><td>물려받음 · svc-portal · 키</td><td><span class="chip c-ok">가능</span></td></tr>
+            <tr class="off"><td><input type="checkbox" disabled aria-label="kr-mon-01 은 고를 수 없음"></td><td class="k">kr-mon-01 <span class="dim mono">192.0.2.51</span></td><td>KR-본사</td><td>Linux</td><td>물려받음 · svc-mon · 키</td><td><span class="chip c-part">이 계정은 서버 명령에 쓰지 않음</span></td></tr>
+            <tr class="off"><td><input type="checkbox" disabled aria-label="pl-db-01 은 고를 수 없음"></td><td class="k">pl-db-01 <span class="dim mono">192.0.2.71</span></td><td>PL-바르샤바</td><td>Linux</td><td>—</td><td><span class="chip c-mut">엣지 PL-EDGE 포탈의 같은 화면에서</span></td></tr>
+            <tr class="off"><td><input type="checkbox" disabled aria-label="kr-old-01 은 고를 수 없음"></td><td class="k">kr-old-01 <span class="dim mono">192.0.2.61</span></td><td>KR-본사</td><td>미지정</td><td>—</td><td><span class="chip c-mut">수집 끔</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between">
+        <span class="soft">선택 <b>6</b>대 · 한 번에 최대 50대 · 동시에 4대씩</span>
+        <button class="btn p" type="button">선택한 6대에 실행</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="card" style="display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+      <span class="num">3</span><h2>결과</h2>
+      <span class="soft">서비스 상태 · 값 chronyd</span>
+      <span class="dim">11-20 05:40 · admin1 실행 · 6 / 6 끝남</span>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between">
+      <div style="display: flex; flex-wrap: wrap; gap: 6px">
+        <span class="chip c-ok">실행됨 4</span>
+        <span class="chip c-no">로그인 거부 1</span>
+        <span class="chip c-part">시한 1</span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px">
+        <button class="btn" type="button">모두 펼치기</button>
+        <button class="btn" type="button">전체 복사</button>
+      </div>
+    </div>
+
+    <div class="tw">
+      <table class="t" style="min-width: 980px">
+        <thead>
+          <tr><th>서버</th><th>결과</th><th>출력 첫 줄</th><th>줄 수</th><th>걸린 시간</th><th><span class="dim">보기</span></th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">kr-db-01</td><td><span class="chip c-ok">실행됨</span> 끝 코드 0</td><td class="mono">Id=chronyd.service</td><td>9</td><td>0.8초</td><td><button class="btn" type="button" aria-expanded="true">접기</button></td></tr>
+          <tr>
+            <td colspan="6" style="background: #0f1626">
+              <div style="display: flex; flex-direction: column; gap: 8px">
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between">
+                  <span class="dim" style="font-size: 12px">SSH · 키 · svc-portal(법인 › Linux 에서 물려받음) · Linux · 잘림 없음</span>
+                  <button class="btn" type="button">복사</button>
+                </div>
+                <pre class="code" style="background: #0a0e17">Id=chronyd.service
+LoadState=loaded
+ActiveState=active
+SubState=running
+UnitFileState=enabled
+ActiveEnterTimestamp=Mon 2026-11-16 09:12:44 KST
+MainPID=1187
+NRestarts=0
+Result=success</pre>
+              </div>
+            </td>
+          </tr>
+          <tr><td class="k">kr-db-02</td><td><span class="chip c-ok">실행됨</span> 끝 코드 0</td><td class="mono">Id=chronyd.service</td><td>9</td><td>0.9초</td><td><button class="btn" type="button" aria-expanded="false">펼치기</button></td></tr>
+          <tr><td class="k">kr-app-01</td><td><span class="chip c-ok">실행됨</span> 끝 코드 0</td><td class="mono">Id=chronyd.service</td><td>9</td><td>1.1초</td><td><button class="btn" type="button" aria-expanded="false">펼치기</button></td></tr>
+          <tr><td class="k">kr-app-02</td><td><span class="chip c-no">로그인 거부</span></td><td class="soft">다시 시도하지 않습니다 — 이 서버에 따로 정한 계정 appadm 의 비밀번호를 확인하세요</td><td class="dim">—</td><td>2.3초</td><td class="dim">—</td></tr>
+          <tr><td class="k">kr-ad-01</td><td><span class="chip c-ok">실행됨</span> 끝 코드 1</td><td class="mono">Get-Service : Cannot find any service with service name 'chronyd'.</td><td>6</td><td>3.4초</td><td><button class="btn" type="button" aria-expanded="false">펼치기</button></td></tr>
+          <tr><td class="k">kr-bk-01</td><td><span class="chip c-part">시한</span> 받은 만큼만</td><td class="dim">출력 없음</td><td>0</td><td>10.0초</td><td class="dim">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">끝 코드가 0 이 아니어도 실패로 치지 않습니다 — 서버가 낸 문구를 그대로 보여 줍니다(위 kr-ad-01: Windows 에는 그 이름의 서비스가 없음). <b>출력은 저장하지 않습니다</b> — 포탈 메모리에 마지막 실행 한 건만 두고 30분 뒤 지웁니다. 감사 로그에는 누가 · 프리셋 · 값 · 대상 · 결과 코드만 남습니다.</div>
+  </div>
+
+  <div class="sec">
+    <h2>화면 규칙(구현 때 지킬 것)</h2>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+      <div class="card">
+        <ul class="ul">
+          <li><i></i><span>표는 공용 STable — 제목을 눌러 정렬합니다</span></li>
+          <li><i></i><span>한 번에 대수 · 동시 실행 수 · 시한 · 상한은 서버가 준 값을 보여 줍니다(화면에 숫자를 박지 않음)</span></li>
+          <li><i></i><span>고를 수 없는 서버는 이유를 그 줄에 적습니다</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <ul class="ul">
+          <li><i></i><span>실행 중에는 실행 버튼만 잠급니다(프리셋 · 표는 볼 수 있음)</span></li>
+          <li><i></i><span>일괄은 포탈 전체에 한 번에 하나 — 다른 사람이 돌리는 중이면 누가 돌리는지 보여 줍니다</span></li>
+          <li><i></i><span>진행은 실행 중에만 짧게 물어 보고, 끝나면 멈춥니다</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <ul class="ul">
+          <li><i></i><span>출력은 글자로만 그립니다(HTML 로 해석하지 않음)</span></li>
+          <li><i></i><span>좁은 화면(400)에서는 카드가 세로로 쌓이고 표는 상자 안에서 가로로 밉니다</span></li>
+          <li><i></i><span>권한이 없으면 화면 대신 권한 안내를 보여 줍니다</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

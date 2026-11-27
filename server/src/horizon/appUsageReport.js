@@ -82,8 +82,11 @@ export function buildUsageReport(range, { fromDay, toDay, intervalMs, servers = 
   const expected = perDay * Math.max(1, Number(servers) || 1);
   const cov = new Map();
   for (const c of range?.cover || []) {
-    const e = cov.get(c.day) || { cycles: 0, okCycles: 0, servers: new Set() };
+    const e = cov.get(c.day) || { cycles: 0, okCycles: 0, servers: new Set(), failedAll: 0 };
     e.cycles += Number(c.cycles) || 0; e.okCycles += Number(c.okCycles) || 0; if (c.okCycles > 0) e.servers.add(c.serverId);
+    // 90회차 F1(재현): 그 날 수집을 시도했는데 한 번도 읽지 못한 서버 — 그 서버의 사용자는 그날 값에 없다(부분 합).
+    //   예전 판정(전체 성공 횟수 < 기대의 절반)만으로는 2대 중 1대가 하루 종일 실패해도 성공 횟수가 정확히 절반이라 '일부' 가 아니었다.
+    if ((Number(c.cycles) || 0) > 0 && !(Number(c.okCycles) > 0)) e.failedAll += 1;
     cov.set(c.day, e);
   }
   const dly = new Map((range?.daily || []).map((d) => [d.day, d]));
@@ -97,8 +100,10 @@ export function buildUsageReport(range, { fromDay, toDay, intervalMs, servers = 
       users: ok > 0 ? (d ? d.users : 0) : null,
       services: ok > 0 ? (d ? d.services : 0) : null,
       cycles: c ? c.cycles : 0, okCycles: ok,
-      // 오늘은 아직 끝나지 않은 날이라 '일부' 로 보지 않는다(지나간 날만 판정).
-      partial: ok > 0 && day !== today && ok < expected / 2,
+      // 오늘은 아직 끝나지 않은 날이라 횟수로는 '일부' 로 보지 않는다(지나간 날만 판정).
+      // 90회차 F1: 시도했는데 한 번도 못 읽은 서버가 있으면 오늘이든 지난 날이든 일부다(그 서버 사용자가 빠졌다).
+      partial: ok > 0 && ((c?.failedAll || 0) > 0 || (day !== today && ok < expected / 2)),
+      ...(ok > 0 && c?.failedAll ? { serversNoRead: c.failedAll } : {}),
       today: day === today,
     };
   });

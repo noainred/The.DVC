@@ -10,7 +10,7 @@ const DEVICE_XML =
   '<controllerKey>1000</controllerKey><unitNumber>0</unitNumber><capacityInKB>52428800</capacityInKB></VirtualDevice>' +
   '<VirtualDevice xsi:type="VirtualVmxnet3"><key>4000</key><deviceInfo><label>네트워크 어댑터 1</label></deviceInfo>' +
   '<backing xsi:type="VirtualEthernetCardNetworkBackingInfo"><deviceName>VM Network</deviceName></backing>' +
-  '<macAddress>00:50:56:01:02:03</macAddress><connectable><connected>true</connected></connectable></VirtualDevice>';
+  '<connectable><startConnected>true</startConnected><allowGuestControl>true</allowGuestControl><connected>true</connected></connectable><macAddress>00:50:56:01:02:03</macAddress></VirtualDevice>';   // v3.0.1: vim25 순서(connectable 이 macAddress 앞) — 토글이 본문을 그대로 되돌려 보낸다
 
 const META = { numCPU: 4, memoryMB: 8192, cpuHotAdd: 'true', memHotAdd: 'true', powerState: 'poweredOn' };
 

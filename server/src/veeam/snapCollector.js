@@ -43,6 +43,7 @@ import crypto from 'node:crypto';
 import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
 import { poolRun } from '../util/pool.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { isStopped } from '../security/emergencyStop.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { capStr } from '../util/capStr.js';
 import { collectVCenterEvents } from '../vcenter/soapClient.js';
@@ -304,6 +305,8 @@ export async function pollVeeamSnapOnce({ now = Date.now(), perCallMax = PER_CAL
   const s = loadLogSettings();
   const skip = skipReason(s);
   if (skip) { _last = { at: now, skipped: skip }; return _last; }
+  // 164회차(결정 6): 긴급중단(2인 승인) 동안은 vCenter 로 나가지 않는다 — store.refresh 와 같은 판정(isStopped) · 수동도 같다(주 폴러의 '지금 수집' 도 멈춘다)
+  if (isStopped()) { _last = { at: now, skipped: 'emergency-stop', emergencyStop: true }; return _last; }
   const budget = budgetMs ?? Math.min(Math.floor(intervalMs() / 2), BUDGET_MAX_MS);
   const split = splitDirectCollectTargets(loadVcenterConfig().vcenters || []);
   const targets = split.targets;

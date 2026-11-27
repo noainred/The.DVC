@@ -34,6 +34,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 97회차 F6: 읽기 오류 ≠ 손상
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js';
@@ -56,6 +57,8 @@ export const TYPES = Object.freeze(['incident', 'task', 'request', 'improve', 'e
 export const PRIORITIES = Object.freeze(['p0', 'p1', 'p2', 'p3']);
 export const LIMITS = Object.freeze({
   issueMax: 2000, title: 200, body: 10000, commentMax: 200, commentBody: 2000,
+  // v2.932(점검 B1-03 — 재현): 자동 등록(알람 · 파트 장애)이 다는 댓글은 따로 센다 — 사람 몫(commentMax)을 쓰지 않는다
+  autoCommentMax: 100,
   labelMax: 10, label: 30, component: 60, watcherMax: 50, historyMax: 300, name: 64, blockReason: 500, progressNote: 300, activityMax: 300,
   // v2.871 감사 A3-02: 요청 등록(viewer)은 전체 상한에서 운영자 몫(requestReserve)을 남기고, 한 사람이 열어 둔 요청은 requestOpenPerUser 건까지.
   requestReserve: 200, requestOpenPerUser: 20,
@@ -305,14 +308,30 @@ function writer() {
 
 const jsonBytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');
 
+/*
+ * 97회차 F6(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 이슈)을 `.corrupt.*` 로 옮긴 뒤
+ *   빈 목록을 캐시했다 — 표지 없이 이슈가 0건이 되고, 다음 등록 한 번이 그 한 건만 든 issues.json 을 썼다(나머지는 보존본에만 · 번호도 1부터).
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 읽기 오류면 30초 간격으로만 디스크를 다시 본다): 읽기 오류는 원본을 두고 · 캐시하지 않고(빈 목록을 돌려준다) ·
+ *   commit(모든 쓰기의 길목)이 409 로 거절한다. parse · 형식 실패는 아래 catch(예전과 같다 — 보존본 + 빈 목록).
+ */
+const _reader = makeJsonFileReader(issuesFile, { parse: (t) => t, preserve: false, tag: 'issues' });
+let _readErr = null;   // { at, code } — 마지막 읽기가 읽기 오류
+/** 97회차 F6: issues.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function issuesReadError() { load(); return _readErr ? { ..._readErr } : null; }
 function load() {
   if (cache) return cache;
   writer();
   const file = issuesFile();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return { issues: [], nextSeq: 1, sizes: new Map(), bytes: 0 };   // 캐시하지 않는다 — 쓰기는 commit 이 거절한다
+  }
+  _readErr = null;
   let issues = []; let nextSeq = 1;
   try {
-    if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!j || typeof j !== 'object' || !Array.isArray(j.issues)) throw new Error('issues 배열이 없습니다');
       issues = j.issues.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && typeof x.key === 'string');
       const n = numOrNull(j.nextSeq);
@@ -333,6 +352,8 @@ function load() {
 /** 캐시를 바꾸고 쓰기를 예약한다. changed = 바뀐 이슈(크기 재계산) · removedId = 지운 이슈 id. */
 function commit(issues, { changed = null, removedId = null, nextSeq = null } = {}) {
   const c = load();
+  // 97회차 F6: 읽기 오류 중에는 어떤 쓰기도 받지 않는다 — 빈 목록 위의 변경이 원본(전 이슈)을 덮지 않게(라우트 409).
+  if (_readErr) throw Object.assign(new Error(`이슈 파일(issues.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable' });
   c.issues = issues;
   if (nextSeq != null) c.nextSeq = nextSeq;
   if (removedId) { c.bytes -= c.sizes.get(removedId) || 0; c.sizes.delete(removedId); }
@@ -481,7 +502,7 @@ export function _resetIssuesCache() {
     for (const x of w.waiters) { clearTimeout(x.t); x.resolve(persistOfWriter(w, x.seq)); }
     w.waiters = [];
   }
-  cache = null; w = null;
+  cache = null; w = null; _readErr = null; _reader.reset();
 }
 
 /** 지금까지 받은 마지막 변경 순번(라우트가 쓰기 직후 부른다 — 쓰기는 동기라 사이에 다른 변경이 끼지 않는다). */
@@ -506,7 +527,7 @@ export function issuesPersist({ admin = false, now = Date.now() } = {}) {
   if (!w) return { state: 'saved', loaded: false, unsavedSince: null, retrying: false, retryExhausted: false };
   const p = persistOfWriter(w, w.seq);
   const retrying = !!w.retryTimer;
-  const out = { state: p.state, loaded: true, unsavedSince: p.state === 'saved' ? null : w.unsavedSince, retrying, retryExhausted: p.state === 'failed' && !retrying && w.failCount > RETRY.max, writing: w.writing };
+  const out = { state: p.state, loaded: true, unsavedSince: p.state === 'saved' ? null : w.unsavedSince, retrying, retryExhausted: p.state === 'failed' && !retrying && w.failCount > RETRY.max, writing: w.writing, ...(_readErr ? { readError: true } : {}) };   // 97회차 F6: 읽기 오류(원본 그대로 — 쓰기 거절 중)
   if (!admin) return out;
   return {
     ...out, unsaved: Math.max(0, w.seq - w.savedSeq), lastSavedAt: w.lastWriteAt,
@@ -557,7 +578,7 @@ function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
  * 사람이 만든 이슈에는 없다. 서버 내부 경로(issues/autoCreate.js)만 붙이고 라우트 본문으로는 받지 않는다(위조 금지).
  * partKeys 는 한 이슈가 덮는 파트 키(`agent|partKey`) — 장비 단위로 묶은 이슈는 여럿이다. resolved 는 해소된 키.
  */
-export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment', 'alert', 'backup']); // v2.908 alert · backup — issues/alertIssues.js
+export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment', 'alert', 'backup', 'bmperf']); // v2.908 alert · backup — issues/alertIssues.js · v2.929 bmperf(베어메탈 성능 알림 규칙)
 const ORIGIN_KEYS_MAX = 64;
 const WIKI_PAGE_RE = /^W\d{1,9}$/;
 const WIKI_COMMENT_RE = /^[0-9a-f]{1,40}$/;
@@ -569,11 +590,18 @@ function originField(o) {
     return { kind: 'wiki-comment', pageId: WIKI_PAGE_RE.test(String(o.pageId || '')) ? o.pageId : '', commentId: WIKI_COMMENT_RE.test(String(o.commentId || '')) ? o.commentId : '', partKeys: [], resolved: [] };
   }
   // v2.908 다른 알람(알람 키 하나) · Bareos 백업 실패(잡 하나 — 실패한 jobid 를 partKeys 에 쌓는다)
-  if (o?.kind === 'alert' || o?.kind === 'backup') {
+  // v2.929 베어메탈 성능 알림 규칙(같은 모양 — 발송 건 id 를 partKeys 에 쌓아 두 번 만들지 않는다)
+  if (o?.kind === 'alert' || o?.kind === 'backup' || o?.kind === 'bmperf') {
     return {
       kind: o.kind, alertKey: t(o.alertKey, 300), alertKind: t(o.alertKind, 32), title: t(o.title, 200), deviceName: t(o.deviceName, 200),
       partKeys: keys(o.partKeys), resolved: [], reopen: Math.max(0, Math.min(9999, Math.trunc(Number(o.reopen) || 0))),
       resolvedAt: Number.isFinite(Number(o.resolvedAt)) && Number(o.resolvedAt) > 0 ? Number(o.resolvedAt) : null,
+      // v2.932(점검 B1-03) 재발 · 해소 댓글 묶기 — 마지막 자동 댓글 시각 · 그 뒤 묶어 둔(댓글을 달지 않은) 재발 · 해소 수
+      noteAt: Number.isFinite(Number(o.noteAt)) && Number(o.noteAt) > 0 ? Number(o.noteAt) : null,
+      quietAgain: Math.max(0, Math.min(99_999, Math.trunc(Number(o.quietAgain) || 0))),
+      quietResolve: Math.max(0, Math.min(99_999, Math.trunc(Number(o.quietResolve) || 0))),
+      // v2.929(반증 F3): 베어메탈 성능 — 이 열쇠로 받은 가장 늦은 발송 시각(그보다 이른 건은 다시 쓰지 않는다 · partKeys 64개 상한에서 밀려난 id 가 ‘새 건’ 이 되지 않게)
+      ...(o.kind === 'bmperf' ? { lastAt: Number.isFinite(Number(o.lastAt)) && Number(o.lastAt) > 0 ? Number(o.lastAt) : null, lastIds: keys(o.lastIds) } : {}),
     };
   }
   return {
@@ -586,11 +614,12 @@ function originField(o) {
 const originNote = (o) => (o?.kind === 'wiki-comment' ? `위키 댓글에서 등록: ${o.pageId || '?'}`
   : o?.kind === 'alert' ? `자동 등록: 알람 · ${capStr(String(o.title || o.alertKey || ''), 80)}`
     : o?.kind === 'backup' ? `자동 등록: 백업 실패 · ${capStr(String(o.deviceName || o.alertKey || ''), 80)}`
+      : o?.kind === 'bmperf' ? `자동 등록: 베어메탈 성능 · ${capStr(String(o.title || o.deviceName || ''), 80)}`
       : `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`);
 /** 화면에 싣는 출처(키 목록 대신 개수 — 목록 응답을 키우지 않는다). */
 function originView(o) {
   if (o.kind === 'wiki-comment') return { kind: o.kind, pageId: o.pageId || '', commentId: o.commentId || '' };
-  if (o.kind === 'alert' || o.kind === 'backup') return { kind: o.kind, alertKind: o.alertKind || '', title: o.title || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, reopen: o.reopen || 0, resolvedAt: o.resolvedAt ?? null };
+  if (o.kind === 'alert' || o.kind === 'backup' || o.kind === 'bmperf') return { kind: o.kind, alertKind: o.alertKind || '', title: o.title || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, reopen: o.reopen || 0, resolvedAt: o.resolvedAt ?? null };
   return { kind: o.kind, agent: o.agent || '', scope: o.scope || '', deviceId: o.deviceId || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, resolved: (o.resolved || []).length };
 }
 /** 출처로 이슈 찾기(서버 내부 — 범위 없음). pred(origin, issue) 가 참인 이슈의 사본. */
@@ -611,9 +640,9 @@ export function patchOrigin(key, fn) {
   return replace(c, next, [], 'system', { touch: false });
 }
 /** 오늘(포탈 날짜) 자동 등록으로 만든 이슈 수 — 하루 상한 판정(상태 파일 없이 이슈에서 센다). */
-export function originCreatedSince(kind, sinceMs) {
+export function originCreatedSince(kind, sinceMs, pred = null) {
   let n = 0;
-  for (const x of load().issues) if (x.origin?.kind === kind && x.createdAt >= sinceMs) n += 1;
+  for (const x of load().issues) if (x.origin?.kind === kind && x.createdAt >= sinceMs && (!pred || pred(x))) n += 1;   // pred — v2.929 법인별 상한(베어메탈 성능)
   return n;
 }
 
@@ -731,6 +760,16 @@ function vcenterField(v, access, known) {
 
 /* ───── 조회 ───── */
 const commentsOf = (x) => (Array.isArray(x?.comments) ? x.comments.filter((c) => c && typeof c === 'object' && typeof c.id === 'string') : []);
+/** 응답에 싣는 댓글 칸(화이트리스트 — 고치기 전 원문 prev 는 싣지 않는다 · v2.932 점검 B1-01 에서 고치기 응답도 같은 모양으로). */
+const commentOut = (c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt, ...(c.editedAt ? { editedAt: c.editedAt, edits: c.edits || 1 } : {}) });
+/**
+ * v2.932(점검 B1-03): 자동 댓글 판정 — 저장 때 단 표지(auto). 표지가 생기기 전(v2.908~v2.926)에 자동 등록이 단 댓글은 그 계정 이름으로 본다
+ * (issues/alertIssues.js SYSTEM_USER 'alert-auto' · issues/autoCreate.js SYSTEM_USER 'partfault' — 순환 import 를 피해 이름만 둔다).
+ * 이미 사람 몫 200개가 자동 댓글로 찬 이슈도 이 판정으로 사람이 다시 댓글을 달 수 있다. v2.932 부터 새 댓글은 auto 를 늘 적으므로(true/false)
+ * 이름 판정은 표지 없는 옛 댓글에만 걸린다(같은 이름의 사람 계정이 새로 단 댓글은 사람 몫으로 센다).
+ */
+export const AUTO_COMMENT_AUTHORS = Object.freeze(['alert-auto', 'partfault']);
+export const isAutoComment = (c) => c?.auto === true || (c?.auto === undefined && AUTO_COMMENT_AUTHORS.includes(c?.author));
 const historyOf = (x) => (Array.isArray(x?.history) ? x.history.filter((h) => h && typeof h === 'object') : []);
 const isOpen = (x) => x.status !== 'done';
 
@@ -903,7 +942,7 @@ export function viewIssue(x, me = '', access = FULL_ACCESS) {
     links: relationsOf(x, idx, access),
     body: x.body || '', watcherNames: Array.isArray(x.watchers) ? x.watchers : [], watching: !!me && Array.isArray(x.watchers) && x.watchers.includes(me),
     createdBy: x.createdBy || x.reporter || '', updatedBy: x.updatedBy || '',
-    comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt, ...(c.editedAt ? { editedAt: c.editedAt, edits: c.edits || 1 } : {}) })),
+    comments: commentsOf(x).map(commentOut),
     history: historyFor(historyOf(x), idx, access), historyDropped: Number(x.historyDropped) || 0,
     worklog: worklogOf(x).map((w) => ({ id: w.id, by: w.by, at: w.at, on: w.on || '', minutes: w.minutes, note: w.note || '' })).reverse(), // v2.888 최신 먼저
   };
@@ -1424,12 +1463,18 @@ export function activityFeed({ access = FULL_ACCESS, limit = 100, since = 0 } = 
   return { items: out.slice(0, lim), truncated: out.length > lim, limit: lim };
 }
 
-export function addComment(key, body, user, { access = FULL_ACCESS } = {}) {
+/**
+ * 댓글 달기. auto=true 는 서버 내부 자동 등록(알람 · 파트 장애)만 — 자동 댓글은 autoCommentMax 로 따로 세고 사람 몫(commentMax)은 사람 댓글만 센다
+ * (v2.932 점검 B1-03 — 깜빡이는 알람의 '다시 발생' · '해소' 댓글이 200개를 채워 담당자가 409 로 댓글을 못 달았다).
+ */
+export function addComment(key, body, user, { access = FULL_ACCESS, auto = false } = {}) {
   const c = load();
   const x = findFor(key, access, { write: true });
   const comments = commentsOf(x);
-  if (comments.length >= LIMITS.commentMax) throw limitError(`댓글은 이슈마다 ${LIMITS.commentMax}개까지입니다`);
-  const cm = { id: newId(), author: user, body: text(body?.body, LIMITS.commentBody, 'body', { required: true }), createdAt: Date.now() };
+  const autoN = comments.filter(isAutoComment).length;
+  if (auto && autoN >= LIMITS.autoCommentMax) throw limitError(`자동 댓글은 이슈마다 ${LIMITS.autoCommentMax}개까지입니다(사람 댓글과 따로 셉니다)`, { code: 'auto-comments-full' });
+  if (!auto && comments.length - autoN >= LIMITS.commentMax) throw limitError(`댓글은 이슈마다 ${LIMITS.commentMax}개까지입니다`);
+  const cm = { id: newId(), author: user, body: text(body?.body, LIMITS.commentBody, 'body', { required: true }), createdAt: Date.now(), auto: !!auto }; // auto:false 도 적는다 — 이름 판정(옛 자동 댓글)이 새 사람 댓글에 걸리지 않게
   const next = { ...x, comments: [...comments, cm] };
   const y = replace(c, next, [], user);
   emit({ type: 'comment', actor: user, issue: evIssue(y), commentId: cm.id, excerpt: capStr(cm.body, 200), mentions: mentionsOf(cm.body) });
@@ -1448,13 +1493,13 @@ export function editComment(key, commentId, body, user, { access = FULL_ACCESS }
   if (!cm) throw notFound();
   if (cm.author !== user) throw forbidden('댓글은 쓴 사람만 고칠 수 있습니다');
   const nextBody = text(body?.body, LIMITS.commentBody, 'body', { required: true });
-  if (nextBody === cm.body) return cm;
+  if (nextBody === cm.body) return commentOut(cm);
   const edited = { ...cm, body: nextBody, editedAt: Date.now(), edits: (Number(cm.edits) || 0) + 1, prev: [...(Array.isArray(cm.prev) ? cm.prev : []), { at: cm.editedAt || cm.createdAt, body: cm.body }].slice(-5) };
   const y = replace(c, { ...x, comments: comments.map((q) => (q.id === commentId ? edited : q)) }, [], user);
   const before = new Set(mentionsOf(cm.body));
   const fresh = mentionsOf(nextBody).filter((m) => !before.has(m));
   if (fresh.length) emit({ type: 'comment', edit: true, actor: user, issue: evIssue(y), commentId, excerpt: capStr(nextBody, 200), mentions: fresh });
-  return edited;
+  return commentOut(edited); // v2.932(점검 B1-01): 작성자 응답에도 prev 를 싣지 않는다(viewIssue 와 같은 모양)
 }
 
 /** 댓글 삭제 — 작성자 본인 또는 관리자(isMod). */

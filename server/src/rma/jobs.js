@@ -33,6 +33,7 @@ import { capStr, capTrim } from '../util/capStr.js';
 import { signJob } from './signing.js';
 import { rmaPasswordFor } from './agentSecrets.js';
 import { DU_TOP_MAX_OUTPUT } from './commands.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const jobs = new Map();            // reqId -> job
 const pendingByAgent = new Map();  // agentLower -> Set<reqId>
@@ -46,10 +47,10 @@ export const DONE_TTL = 30 * 60_000;      // 완료 잡 결과 보존(UI 가 결
 const UNDONE_TTL = 15 * 60_000;           // 대기/진행 잡 보존 — RMA 가 영영 안 오면 정리
 const MAX_PENDING = 20;                   // 법인당 대기 상한
 const MAX_CLAIMS = 1;                     // ⚠ 비멱등 — 재인출 금지
-const ACK_GRACE_MS = Number(process.env.RMA_ACK_GRACE_MS) || 30_000;
+const ACK_GRACE_MS = envPositive(process.env.RMA_ACK_GRACE_MS, 30_000);
 const HISTORY_MAX = 300;
 const HISTORY_OUTPUT_MAX = 16 * 1024;     // 이력에는 출력 앞부분만(잡 본체는 DONE_TTL 동안 전문 보존)
-export const HEARTBEAT_STALE_MS = Number(process.env.RMA_HEARTBEAT_STALE_MS) || 90_000; // 롱폴 20s·재시도 백오프 여유
+export const HEARTBEAT_STALE_MS = envPositive(process.env.RMA_HEARTBEAT_STALE_MS, 90_000); // 롱폴 20s·재시도 백오프 여유
 /**
  * v2.605(CEN2605-05·TIM2605-03): 하트비트 보관 상한. 예전에는 삭제 경로가 _resetRma 뿐이라 인스턴스 이름을 바꿔 가며 폴링하면
  * (또는 호스트명이 바뀐 인스턴스가) 프로세스 수명 내내 쌓였고, 정책 문자열 길이도 무제한이라 원소 4,000자 × 200개로 인스턴스당
@@ -58,8 +59,8 @@ export const HEARTBEAT_STALE_MS = Number(process.env.RMA_HEARTBEAT_STALE_MS) || 
  * 항목은 정리한다.
  */
 export const HEARTBEAT_ELEM_MAX = 200;
-export const HEARTBEAT_MAX_INSTANCES = Math.max(2, Number(process.env.RMA_MAX_INSTANCES_PER_AGENT) || 32);
-export const HEARTBEAT_PURGE_MS = Math.max(HEARTBEAT_STALE_MS * 2, Number(process.env.RMA_HEARTBEAT_PURGE_MS) || 7 * 86_400_000);
+export const HEARTBEAT_MAX_INSTANCES = Math.max(2, envPositive(process.env.RMA_MAX_INSTANCES_PER_AGENT, 32));
+export const HEARTBEAT_PURGE_MS = Math.max(HEARTBEAT_STALE_MS * 2, envPositive(process.env.RMA_HEARTBEAT_PURGE_MS, 7 * 86_400_000));
 let _hbSweptAt = 0;
 const _hbRefuseLogAt = new Map();
 /**
@@ -345,7 +346,7 @@ export function releaseAllWaiters() {
 //   **조용히** 실패했다(saveHistoryRow 가 false 만 돌려준다). 개별 토큰 엣지가 자기 잡에만 할 수 있는 일이지만,
 //   화면을 죽이는 값은 수신 지점에서 막는다(v2.598 CENTRAL 규약 — 정제는 저장 함수 안에).
 //   글자 상한은 엣지 출력 상한(RMA_MAX_OUTPUT 기본 256KB)보다 넉넉히 두고, 잘랐으면 truncated 로 밝힌다.
-const RESULT_TEXT_MAX = Math.max(256 * 1024, Number(process.env.RMA_MAX_OUTPUT) || 0) * 2;
+const RESULT_TEXT_MAX = Math.max(256 * 1024, envPositive(process.env.RMA_MAX_OUTPUT, 0)) * 2;
 const REASON_MAX = 2000;
 const ARGV_MAX = 64; const ARGV_ITEM_MAX = 1000;
 // v2.607(TIM2607-01·LEFT2607-05): capStr — `.slice` 는 결과 본문(최대 수 MB) 원문을 붙잡는다.
@@ -460,6 +461,7 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
       serviceUnits: arr('serviceUnits', 100), allowReboot: !!info.policy.allowReboot, fileRoots: arr('fileRoots', 20),
     } : null,
     scheduleVersion: Number(info.scheduleVersion) || 0, scheduledTests: Number(info.scheduledTests) || 0, outbox: Number(info.outbox) || 0,
+    scheduleSigRejected: Math.max(0, Number(info.scheduleSigRejected) || 0),   // 결정(56~75) 64 F7: 서명 없음/불일치로 멈춘 script · ssh 점검 수(옛 엣지 0)
     ip,
   };
   if (safe.policy && invalid.length) safe.policy.policyInvalid = invalid;

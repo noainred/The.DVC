@@ -1174,3 +1174,21 @@ export function directorAgentAdviceText(a) {
   if (a.kind === 'mixed') return `묶인 vCenter 를 수집하는 엣지가 여럿입니다(${a.edges.join(', ')}) — 법인 · vCenter · Bareos 1:1:1 과 다릅니다. vCenter 묶기를 확인하세요.`;
   return '';
 }
+
+/**
+ * 52회차 D1(사용자 결정 — 2026-11-17): 서비스 1 = vCenter 1 + Bareos 1 — Director 하나에 vCenter 하나. 서버 `bareos/settings.js directorBindIssue` 와 같은 규칙:
+ *   이 Director 에 다른 vCenter 가 이미 묶였으면(편집 중 포함) 새 vCenter 를 더 묶지 않는다. 이미 저장된 짝(옛 설정 — 둘 이상 묶인 채 저장된 것)은 그대로 둔다.
+ * @param {string} vcId  @param {Set<string>} bound 편집 중 묶인 vCenter  @param {Set<string>} saved 이 Director 에 저장된 vCenter
+ */
+export function bindAllowed(vcId, bound, saved, peerSaved = new Set()) {
+  if (bound.has(vcId)) return true;   // 이미 켜져 있다(끄기는 언제나 된다)
+  // 반증 C1: 서버와 같은 판정 — 켠 뒤 묶인 vCenter 가 둘 이상이면 그 전부가 이미 저장된 짝이어야 한다(저장된 것을 끄고 새것을 켠 뒤 다시 켜기 우회를 막는다)
+  // 104회차 D1 우회: peerSaved = 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록에 저장된 vCenter(서버가 준 sameEndpoint — 판정은 서버 directorEndpointPeers 하나).
+  //   그 묶음은 같은 Director 라 이 등록에 새 vCenter 를 켜면 둘째 vCenter 가 된다(서버 directorBindIssue 와 같은 답 — 시험이 대조).
+  const next = [...new Set([...bound, vcId, ...peerSaved])];
+  return next.length < 2 || next.every((x) => saved.has(x) || peerSaved.has(x));
+}
+export const BIND_ONE_TEXT = '이 Director 에는 이미 다른 vCenter 가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다(그 vCenter 는 자기 서비스의 Director 에 묶으세요).';
+/** 104회차: 같은 Director 를 가리키는 다른 등록 때문에 막힐 때(콘솔 이름만 다른 등록으로 둘째 vCenter 를 묶는 우회). */
+export const BIND_PEER_TEXT = '같은 Director(같은 주소 · 포트 · 담당)를 가리키는 다른 등록에 이미 vCenter 가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다(콘솔 이름만 다른 등록으로 같은 Director 에 vCenter 를 더 묶지 않습니다).';
+export const SHARED_DIRECTOR_TEXT = 'vCenter 가 둘 이상 묶인 Director 입니다(예전 설정 — 그대로 둡니다). 서비스 하나 = vCenter 하나 + Bareos 하나 규칙에 맞추려면 vCenter 마다 자기 Director 로 옮기세요.';

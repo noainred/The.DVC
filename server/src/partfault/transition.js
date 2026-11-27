@@ -26,7 +26,7 @@
  * `scan.deviceOk`·`scan.kindFailed` 의 키도 **`agent|deviceId`** 다(`scan.js devKeyOf`).
  */
 
-import { PART_STATE, HOLD_REASON, isBad } from './types.js';
+import { PART_STATE, HOLD_REASON, KEY_KIND, isBad } from './types.js';
 
 /**
  * v2.744(감사 EDGE-01): 보류 사유 '수집 서버가 그 장비군 등록부를 읽지 못함'. 등록부가 손상되면 그 장비군 장비가 보고에서
@@ -59,6 +59,11 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
   // v2.744(EDGE-01): 'agent|scope' → 사유 — 그 agent 가 그 장비군 등록부를 읽지 못했다(중앙 로컬은 agent '').
   const scopeUnreadable = scan.scopeUnreadable && typeof scan.scopeUnreadable === 'object' ? scan.scopeUnreadable : {};
   const scopeHeld = (o) => Object.hasOwn(scopeUnreadable, `${t(o.agent)}|${t(o.scope)}`);
+  // 8a단계 ②: 정비 창(전이 보류) 안 장비 — 'agent|deviceId'(agent 소문자). 이 장비는 이번 주기에 열기 · 바꾸기 · 닫기 전이를 하지 않는다(보류 · 이력에는 남긴다).
+  //   새 장애는 열지 않고 세기만 한다(maintDeferred) — 창 끝 뒤 첫 주기에 평소 규칙으로 다시 판정한다(그때 아직 나쁘면 그때 연다).
+  const maintHold = scan.maintHold instanceof Set ? scan.maintHold : null;
+  const inMaint = (p) => !!maintHold && maintHold.has(`${t(p.agent).toLowerCase()}|${t(p.deviceId)}`);
+  const maintDeferred = [];
   const REFINE = { 'edge-stale': HOLD_REASON.edgeStale, 'edge-legacy': HOLD_REASON.edgeLegacy };
   const failedHold = (dk) => REFINE[deviceReason[dk]] || HOLD_REASON.deviceFailed;
   const openBy = new Map();
@@ -118,6 +123,13 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
     seen.add(k);
     const prev = openBy.get(k);
 
+    if (inMaint(p)) {
+      // ② 보류 — 열린 장애는 그대로 두고 사유만(관측 상태는 기록) · 새 장애는 열지 않는다.
+      if (prev) held.push({ ...prev, lastSeenAt: now, holdReason: HOLD_REASON.maintenance, rawState: p.rawState, maintObserved: p.state });
+      else if (isBad(p.state)) maintDeferred.push({ ...p, observedAt: now });
+      continue;
+    }
+
     if (isBad(p.state)) {
       const old = !prev ? migrateFrom(p) : null;
       if (old) {
@@ -162,14 +174,65 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
     }
   }
 
+  /*
+   * 전체 점검 33회차 F2(재현): **시리얼 키 부품의 교체**. iDRAC PSU · 디스크는 시리얼 우선 키라, 고장 부품을 새 부품으로 바꾸면 새 시리얼이
+   *   다른 키로 관측되고 옛 장애는 관측 목록에서 빠져 ④ 의 'missing' 보류로 **영원히** 남았다(사람이 하나씩 수동 닫기). 같은 자리
+   *   (agent · 장비 · 장비군 · 종류 · 이름)에 시리얼이 다른 부품이 **딱 하나** 읽혔고(못 읽음 제외) 그 자리의 안 보인 옛 장애도 **딱 하나**이며
+   *   장비 수집 성공 · 그 종류 컬렉션 성공이면 옛 장애를 '제거됨(removed — 교체 중일 수 있음)' 으로 닫는다(사실이다 — 그 시리얼은 빠졌다).
+   *   새 부품이 나쁘면 그것은 위의 관측 루프가 이미 새 장애로 열었다(다른 부품의 장애다). 모호하면(이름이 겹침 · 이름 없음) 닫지 않는다.
+   */
+  const labelSlotOf = (p) => `${t(p.agent)}|${t(p.deviceId)}|${t(p.scope)}|${t(p.kind)}|${t(p.label)}`;
+  const kindSlotOf = (p) => `${t(p.agent)}|${t(p.deviceId)}|${t(p.scope)}|${t(p.kind)}`;
+  const obsByLabel = new Map();
+  /*
+   * 35회차 R3(반증 — 재현): 이름이 **부품마다 같은 장비**(예: 베이와 무관하게 같은 이름을 주는 BMC)에서는 '교체' 와 '고장 부품이 목록에서 빠짐'
+   *   을 가를 수 없어, 남은 다른 부품을 교체품으로 보고 진행 중 장애를 닫았다(다음 주기에 다시 열리고 알림 재발송). 그래서 이 규칙은 그 장비 ·
+   *   종류에서 이번에 **두 개 이상** 읽혔고 이름이 **모두 다를 때**(이름이 슬롯 구실을 할 때)만 쓴다 — 한 개만 읽혔거나 이름이 겹치면 예전처럼 보류.
+   */
+  const kindStat = new Map();   // kindSlot -> { n, labels:Set, dup }
+  for (const p of byKey.values()) {
+    const ks = kindSlotOf(p);
+    const st = kindStat.get(ks) || { n: 0, labels: new Set(), dup: false };
+    st.n += 1;
+    const lb = t(p.label);
+    if (!lb || st.labels.has(lb)) st.dup = true; else st.labels.add(lb);
+    kindStat.set(ks, st);
+    if (!lb) continue;
+    const ls = labelSlotOf(p);
+    obsByLabel.set(ls, [...(obsByLabel.get(ls) || []), p]);
+  }
+  const unseenByLabel = new Map();
+  for (const [k, o] of openBy) {
+    if (seen.has(k) || migrated.has(k) || !t(o.label)) continue;
+    const ls = labelSlotOf(o);
+    unseenByLabel.set(ls, (unseenByLabel.get(ls) || 0) + 1);
+  }
+  const replacementOf = (o) => {
+    if (o.keyKind !== KEY_KIND.serial || !t(o.label)) return null;
+    const ks = kindStat.get(kindSlotOf(o));
+    if (!ks || ks.n < 2 || ks.dup) return null;   // 35회차 R3: 이름이 슬롯 구실을 할 때만
+    const ls = labelSlotOf(o);
+    if (unseenByLabel.get(ls) !== 1) return null;
+    const obs = obsByLabel.get(ls) || [];
+    if (obs.length !== 1) return null;
+    const p = obs[0];
+    if (p.keyKind !== KEY_KIND.serial || p.state === PART_STATE.unknown || t(p.partId) === t(o.partId)) return null;
+    return p;
+  };
+
   // ④ 관측 목록에 없던 열린 장애 — 닫지 않는다. 사유를 나눠 적는다(조치가 다르다).
   for (const [k, o] of openBy) {
     if (seen.has(k) || migrated.has(k)) continue;
     const dk = dkey(o);
     const dOk = deviceOk[dk];
     const kf = Array.isArray(kindFailed[dk]) && kindFailed[dk].includes(o.kind);
+    if (!inMaint(o) && dOk === true && !kf) {
+      const rep = replacementOf(o);
+      if (rep) { closed.push({ ...o, closedAt: now, closeReason: 'removed', replacedBy: rep.partKey }); continue; }
+    }
     let holdReason;
-    if (dOk === false) holdReason = failedHold(dk);
+    if (inMaint(o)) holdReason = HOLD_REASON.maintenance;
+    else if (dOk === false) holdReason = failedHold(dk);
     else if (dOk === true) holdReason = kf ? HOLD_REASON.collectionFailed : HOLD_REASON.missing;
     // 장비가 이번 판정 대상에 아예 없다(C5): 그 agent 가 보고는 했는데 이 장비가 빠졌으면 재배정·등록 삭제
     // (unassigned), 보고 자체가 없으면 no-report. 구 호출부(agentsReported 없음)는 예전대로 장비 실패.
@@ -181,8 +244,10 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
   }
 
   return {
-    opened, updated, closed, held,
+    opened, updated, closed, held, maintDeferred,
     stats: {
+      heldMaintenance: held.filter((h) => h.holdReason === HOLD_REASON.maintenance).length,   // 8a단계 ②
+      maintDeferred: maintDeferred.length,
       observed: observed.length,
       opened: opened.length,
       closed: closed.length,

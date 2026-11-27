@@ -125,10 +125,27 @@ export function ipBlockReason(hostOrIp) {
   const g = expandIPv6(host);
   if (g) return ipv6BlockReason(g);
   // 잘 알려진 루프백 이름은 해석 없이도 막는다(DNS 조회가 불가한 동기 경로 대비).
-  if (!allowLoopback() && (host === 'localhost' || host.endsWith('.localhost'))) {
+  // 108회차 A2(재현): 끝 점 하나('localhost.' — FQDN 표기)도 같은 이름이다. IPv4 쪽(toDottedIPv4)은 끝 점을 떼는데 이름 쪽은
+  //   떼지 않아 `http://localhost./` 가 동기 검사를 지나갔다(리졸버는 127.0.0.1 로 푼다).
+  const name = host.endsWith('.') ? host.slice(0, -1) : host;
+  if (!allowLoopback() && (name === 'localhost' || name.endsWith('.localhost'))) {
     return '루프백 이름(localhost)은 사용할 수 없습니다(필요하면 SSRF_ALLOW_LOOPBACK=true).';
   }
   return null;
+}
+
+/**
+ * 108회차 A1(재현): '://' 가 없는 글자는 'host:port' 로 보고 http:// 를 붙여 읽는다. 그런데 WHATWG URL(= fetch · new URL)은
+ *   special 스킴(http · https) 뒤 슬래시가 **하나뿐이거나 없어도**, 역슬래시여도, 사이에 탭 · 줄바꿈이 끼어도 authority 로 읽는다 —
+ *   `http:/169.254.169.254/x` · `https:\\127.0.0.1` 은 fetch 가 그 IP 로 가는데 여기서는 호스트 'http' 로 읽어 통과시켰다
+ *   (IP 리터럴은 lookup 훅도 타지 않는다 — LLM 주소 · 번들 받는 곳 · 웹훅 저장 검사를 그대로 지나갔다).
+ *   그런 글자는 **fetch 가 실제로 갈 호스트도** 본다. 더 막기만 한다 — 예전에 막던 것(형식 오류 포함)은 그대로 막는다.
+ * @returns {URL|null} '://' 없이도 http(s) URL 로 읽히면 그 URL, 아니면 null
+ */
+function asFetchedUrl(urlStr) {
+  const s = String(urlStr);
+  if (/:\/\//.test(s)) return null;   // 이미 그 글자 그대로 읽었다
+  try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:' ? u : null; } catch { return null; }
 }
 
 /**
@@ -143,7 +160,11 @@ export function ssrfBlockReason(urlStr) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'http/https URL만 허용됩니다.';
   const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!host) return 'URL의 호스트가 올바르지 않습니다.';
-  return ipBlockReason(host);
+  const reason = ipBlockReason(host);
+  if (reason) return reason;
+  const alt = asFetchedUrl(urlStr);   // 108회차 A1
+  const altHost = alt ? alt.hostname.replace(/^\[|\]$/g, '').toLowerCase() : '';
+  return altHost ? ipBlockReason(altHost) : null;
 }
 
 /**
@@ -156,16 +177,22 @@ export function ssrfBlockReason(urlStr) {
 export async function ssrfBlockReasonResolved(urlStr) {
   const sync = ssrfBlockReason(urlStr);
   if (sync) return sync;
-  let host = '';
-  try { host = new URL(/:\/\//.test(String(urlStr)) ? urlStr : `http://${urlStr}`).hostname.replace(/^\[|\]$/g, ''); }
+  const hosts = [];
+  try { hosts.push(new URL(/:\/\//.test(String(urlStr)) ? urlStr : `http://${urlStr}`).hostname.replace(/^\[|\]$/g, '')); }
   catch { return 'URL 형식이 올바르지 않습니다.'; }
-  if (toDottedIPv4(host) || expandIPv6(host)) return null; // 이미 IP 리터럴 → 위에서 검사 완료
-  let addrs = [];
-  try { addrs = await dns.promises.lookup(host, { all: true, verbatim: true }); }
-  catch { return null; }
-  for (const a of addrs) {
-    const r = ipBlockReason(a.address);
-    if (r) return `${r} (DNS 해석: ${host} → ${a.address})`;
+  // 108회차 A1: '://' 없이도 http(s) 로 읽히는 글자(`http:/이름/…`)는 fetch 가 실제로 갈 이름도 해석해 본다.
+  const alt = asFetchedUrl(urlStr);
+  const altHost = alt ? alt.hostname.replace(/^\[|\]$/g, '') : '';
+  if (altHost && !hosts.includes(altHost)) hosts.push(altHost);
+  for (const host of hosts) {
+    if (toDottedIPv4(host) || expandIPv6(host)) continue; // 이미 IP 리터럴 → 위에서 검사 완료
+    let addrs = [];
+    try { addrs = await dns.promises.lookup(host, { all: true, verbatim: true }); }
+    catch { continue; }
+    for (const a of addrs) {
+      const r = ipBlockReason(a.address);
+      if (r) return `${r} (DNS 해석: ${host} → ${a.address})`;
+    }
   }
   return null;
 }

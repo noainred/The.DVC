@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 버전 준수 — EOS 버그 · CVE 노출 · 단종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP › 변경 · 준수</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">버전 준수</h1>
+<span style="display: inline-flex; align-items: center; min-height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;">③ 새 수집 필요 — CVP 의 준수 판정(조회 경로 미확인)</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">어느 스위치가 알려진 버그 · 보안 취약점에 노출돼 있고, 어느 모델이 곧 지원이 끝나는지 봅니다. 판정은 CVP 가 한 것을 그대로 가져옵니다 — 포탈이 따로 판정하지 않습니다.</div>
+</div>
+
+<div style="padding: 10px 14px; border-radius: 10px; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6; font-size: 12.5px; overflow-wrap: anywhere;">CVP 의 버그 · 보안 권고 목록이 <b>24일 전(2026-10-30)</b> 것입니다 — 그 뒤에 나온 권고는 아래에 없습니다. CVP 에서 목록을 새로 받으면 다음 수집부터 반영됩니다.</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 12px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+<div style="font-size: 12px; color: #a9b6cc;">{{t.label}}</div>
+<div style="{{t.val}}">{{t.n}}</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{t.meta}}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;">
+<div style="display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;">
+<sc-for list="{{views}}" as="m" hint-placeholder-count="3"><button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}">{{m.label}}</button></sc-for>
+</div>
+<label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #a9b6cc;">법인
+<select style="height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font: inherit;"><option>전체(28)</option><option>KR1</option><option>PL-WRO</option><option>US-EAST</option></select></label>
+<button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12.5px; cursor: pointer;">CSV</button>
+</div>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="{{tableLabel}}" style="min-width: 980px; font-size: 12.5px;">
+<div role="row" style="{{headStyle}}">
+<sc-for list="{{heads}}" as="h" hint-placeholder-count="6"><div role="columnheader" style="{{h.style}}">{{h.label}}</div></sc-for>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div role="row" style="{{rowStyle}}">
+<sc-for list="{{r.cells}}" as="c" hint-placeholder-count="6"><div role="cell" style="{{c.style}}"><span style="{{c.inner}}">{{c.text}}</span></div></sc-for>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{note}}</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #c9d5e6;">
+<div style="overflow-wrap: anywhere;">· 이 시안의 권고 번호 · 날짜 · 모델은 전부 예시입니다. 실제 화면은 CVP 가 준 값만 보이고, 값이 없으면 ‘—’ 로 둡니다(지원 종료일을 지어내지 않습니다).</div>
+<div style="overflow-wrap: anywhere;">· ‘노출’ 은 CVP 가 장비의 모델 · EOS 버전으로 따진 것입니다. 그 기능을 실제로 쓰는지까지는 보지 않으므로 ‘조치 필요’ 가 아니라 ‘확인 대상’ 입니다.</div>
+<div style="overflow-wrap: anywhere;">· CVP 서버가 여러 대면 서버마다 목록 날짜가 다를 수 있습니다 — 가장 오래된 날짜를 위 띠에 보입니다.</div>
+<div style="overflow-wrap: anywhere;">· 새 노출이 생기면 알림을 보낼 수 있습니다(기본 꺼짐 — 한 권고가 수십 대에 걸리므로 권고당 1건).</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":830}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const view = st.view || 'bugs';
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const SEV = { hi: pill + 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;', mid: pill + 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;', lo: pill + 'background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;', ok: pill + 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;' };
+const td = 'padding: 7px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;';
+const c = (text, kind) => ({ text: text, style: kind === 'r' ? td + ' text-align: right; ' + MONO : kind === 'm' ? td + ' ' + MONO : kind === 'b' ? td + ' color: #e6edf6; font-weight: 600; ' + MONO : td, inner: SEV[kind] || '' });
+const th = (label, right) => ({ label: label, style: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;' + (right ? ' text-align: right;' : '') });
+const V = {
+bugs: {
+cols: '150px 90px 90px minmax(240px, 1.6fr) 100px 150px 130px',
+heads: [th('권고(예시)'), th('종류'), th('심각도'), th('요약'), th('노출 장비', true), th('영향 버전'), th('고친 버전')],
+rows: [
+[c('SA-예시-0101', 'b'), c('보안'), c('높음', 'hi'), c('관리 인터페이스 인증 우회(예시 문구)'), c('38', 'r'), c('4.28.0 ~ 4.28.8', 'm'), c('4.28.9M 이상', 'm')],
+[c('SA-예시-0097', 'b'), c('보안'), c('보통', 'mid'), c('특정 패킷으로 프로세스 재시작(예시 문구)'), c('112', 'r'), c('4.28 · 4.30 전체', 'm'), c('4.31.2F 이상', 'm')],
+[c('BUG-예시-55231', 'b'), c('버그'), c('보통', 'mid'), c('MLAG 재수렴 뒤 MTU 가 기본값으로(예시 문구)'), c('38', 'r'), c('4.28.6M', 'm'), c('4.28.10M 이상', 'm')],
+[c('BUG-예시-48810', 'b'), c('버그'), c('낮음', 'lo'), c('광신호 값이 간헐적으로 비어 보임(예시 문구)'), c('61', 'r'), c('4.30.1F', 'm'), c('4.30.4M 이상', 'm')],
+[c('SA-예시-0088', 'b'), c('보안'), c('높음', 'hi'), c('노출 장비 없음 — 모든 장비가 고친 버전'), c('0', 'r'), c('4.26 이하', 'm'), c('4.27.0F 이상', 'm')]
+],
+note: '5건 표시 · 노출 장비 수를 누르면 그 장비 목록(EOS 버전 칩이 걸린 장비 탭)으로 갑니다.',
+label: '버그 · 보안 권고 노출'
+},
+eol: {
+cols: 'minmax(170px, 1.2fr) 70px 130px 150px 150px minmax(170px, 1fr)',
+heads: [th('모델(예시)'), th('대수', true), th('판매 종료'), th('소프트웨어 지원 종료'), th('하드웨어 지원 종료'), th('남은 기간')],
+rows: [
+[c('모델 A(예시)', 'b'), c('14', 'r'), c('[CVP 값]', 'm'), c('[CVP 값]', 'm'), c('[CVP 값]', 'm'), c('12개월 안', 'hi')],
+[c('모델 B(예시)', 'b'), c('22', 'r'), c('[CVP 값]', 'm'), c('[CVP 값]', 'm'), c('[CVP 값]', 'm'), c('24개월 안', 'mid')],
+[c('모델 C(예시)', 'b'), c('96', 'r'), c('—', 'm'), c('—', 'm'), c('—', 'm'), c('공지 없음', 'ok')],
+[c('모델 D(예시)', 'b'), c('41', 'r'), c('—', 'm'), c('—', 'm'), c('—', 'm'), c('값을 못 읽음', 'lo')]
+],
+note: '날짜 칸은 CVP 가 준 값만 채웁니다. ‘공지 없음’ 과 ‘값을 못 읽음’ 은 다릅니다 — 못 읽은 모델을 안전하다고 쓰지 않습니다.',
+label: '모델별 지원 종료'
+},
+eos: {
+cols: 'minmax(140px, 1fr) 80px 110px 110px minmax(220px, 1.6fr)',
+heads: [th('EOS 버전'), th('대수', true), th('보안 노출', true), th('버그 노출', true), th('읽는 법')],
+rows: [
+[c('4.31.2F', 'b'), c('64', 'r'), c('0', 'r'), c('0', 'r'), c('노출 없음', 'ok')],
+[c('4.30.1F', 'b'), c('61', 'r'), c('1', 'r'), c('1', 'r'), c('보통 1 · 낮음 1', 'mid')],
+[c('4.28.6M', 'b'), c('38', 'r'), c('2', 'r'), c('1', 'r'), c('높음 1 포함 — 먼저 올릴 후보', 'hi')],
+[c('(버전 미상)', 'b'), c('10', 'r'), c('—', 'r'), c('—', 'r'), c('판정 못 함', 'lo')]
+],
+note: '버전별로 묶어 ‘어느 버전부터 올릴지’ 를 봅니다. 버전을 못 읽은 장비는 노출 0 으로 세지 않습니다.',
+label: 'EOS 버전별 노출'
+}
+};
+const cur = V[view];
+const grid = 'display: grid; grid-template-columns: ' + cur.cols + '; align-items: center;';
+const segBtn = (on) => 'height: 32px; padding: 0 12px; border: 0; border-right: 1px solid #243049; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'background: #2563eb; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #a9b6cc;');
+const views = [['bugs', '버그 · 보안 권고'], ['eol', '단종(지원 종료)'], ['eos', 'EOS 버전별']].map((m) => ({ label: m[1], on: view === m[0], style: segBtn(view === m[0]), pick: () => this.setState({ view: m[0] }) }));
+const big = (col) => MONO + ' font-size: 24px; font-weight: 600; color: ' + col + ';';
+const tiles = [
+{ label: '보안 권고에 노출된 장비', n: '112 / 173', meta: '높음 38 · 보통 74', val: big('#fca5a5') },
+{ label: '버그에 노출된 장비', n: 99, meta: '권고 2건', val: big('#fbbf24') },
+{ label: '지원 종료 12개월 안', n: '14대', meta: '모델 1종', val: big('#e6edf6') },
+{ label: '판정 못 함', n: 10, meta: '버전 · 모델을 못 읽음 — 안전으로 세지 않음', val: big('#a9b6cc') }
+];
+return { views: views, tiles: tiles, heads: cur.heads, rows: cur.rows.map((r) => ({ cells: r })), headStyle: grid + ' background: #0f1626; color: #a9b6cc;', rowStyle: grid + ' border-top: 1px solid #1f2a40; min-height: 40px;', note: cur.note, tableLabel: cur.label };
+}
+}
+</script>
+</body>
+</html>

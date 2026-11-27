@@ -7,6 +7,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling, postJson } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 128회차: 409(취소할 실행 없음 · 이미 보냄 · 돌고 있지 않음) 본문을 ‘취소를 보냈습니다’ 로 읽지 않는다
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -136,8 +137,8 @@ function AllView({ data, corps, counts, filter, setFilter, q, setQ, onOpen }) {
         <Kpi label="실행 중" main={t.running ?? 0} color={TONE.run} sub={`법인 ${t.active ?? 0}곳`} />
         <Kpi label="대기" main={t.waiting ?? 0} sub="스토리지·차례 대기" />
         <Kpi label="지금 처리 속도(합계)" main={t.running ? rateText(t.rateNow) : '—'} color={CYAN} sub={t.rateUnknownCorps ? `모름 ${t.rateUnknownCorps}곳 제외` : '실행 중 잡의 최근 속도 합'} />
-        <Kpi label="오늘 끝난 백업" main={<><span style={{ color: TONE.ok }}>{(t.today?.ok ?? 0) + (t.today?.warn ?? 0)}</span> <span className="muted" style={{ fontSize: 15 }}>/ 실패</span> <span style={{ color: t.today?.fail ? TONE.bad : undefined }}>{t.today?.fail ?? 0}</span></>} sub={`경고 ${t.today?.warn ?? 0} · 취소 ${t.today?.canceled ?? 0}`} />
-        <Kpi label="오늘 저장한 양" main={sizeText(t.today?.bytes)} sub={t.today?.bytesUnknown ? `모름 ${t.today.bytesUnknown}건 제외 · VM 별 마지막 실행 기준` : 'VM 별 마지막 실행 기준'} />
+        <Kpi label="오늘 끝난 백업" main={<><span style={{ color: TONE.ok }}>{(t.today?.ok ?? 0) + (t.today?.warn ?? 0)}</span> <span className="muted" style={{ fontSize: 15 }}>/ 실패</span> <span style={{ color: t.today?.fail ? TONE.bad : undefined }}>{t.today?.fail ?? 0}</span></>} sub={`경고 ${t.today?.warn ?? 0} · 취소 ${t.today?.canceled ?? 0}${t.resultsUnknownCorps ? ` · 결과 모르는 법인 ${t.resultsUnknownCorps}곳 제외` : ''}`} />
+        <Kpi label="오늘 저장한 양" main={sizeText(t.today?.bytes)} sub={`${t.today?.bytesUnknown ? `모름 ${t.today.bytesUnknown}건 제외 · ` : ''}VM 별 마지막 실행 기준${t.resultsUnknownCorps ? ` · 결과 모르는 법인 ${t.resultsUnknownCorps}곳 제외` : ''}`} />
       </section>
       <div style={ROW}>
         <b style={{ fontSize: 15 }}>법인 {corps.length}곳</b>
@@ -185,7 +186,7 @@ function CorpCard({ c, onOpen }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, fontSize: 12 }}>
         <div><div className="muted">실행</div><b style={{ fontSize: 15, color: TONE.run }}>{c.running}</b></div>
         <div><div className="muted">대기</div><b style={{ fontSize: 15 }}>{c.waiting}</b></div>
-        <div><div className="muted">오늘 성공/실패</div><b style={{ fontSize: 15 }}>{c.today.ok + c.today.warn}</b> <span style={{ color: TONE.bad, fontWeight: 700 }}>{c.today.fail || ''}</span></div>
+        <div><div className="muted">오늘 성공/실패</div>{c.resultsKnown === false ? <b style={{ fontSize: 15 }} title="Director 조회 실패 — 결과 모름">—</b> : <><b style={{ fontSize: 15 }}>{c.today.ok + c.today.warn}</b> <span style={{ color: TONE.bad, fontWeight: 700 }}>{c.today.fail || ''}</span></>}</div>
       </div>
       {c.live && !c.live.ok && <div style={{ fontSize: 11.5, color: TONE.bad }}>{liveCodeText(c.live.code)} · {shortTs(c.live.at)}</div>}
       {c.live?.ok && <div className="muted" style={{ fontSize: 11.5 }}>상태 조회 {shortTs(c.live.at)}{c.rateUnknown ? ` · 속도 모름 ${c.rateUnknown}건` : ''}</div>}
@@ -222,7 +223,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
   const sendCancel = async () => {
     const r = cancelRow; setSending(true); setSendErr('');
     try {
-      const out = await postJson(`/tools/bareos-backup/jobs/${encodeURIComponent(r.id)}/cancel`, { jobid: r.jobid }, withRelayWait({}, relayDir, limits, 'cancel'));
+      const out = requireChanged(await postJson(`/tools/bareos-backup/jobs/${encodeURIComponent(r.id)}/cancel`, { jobid: r.jobid }, withRelayWait({}, relayDir, limits, 'cancel')));
       setCancelRow(null);
       setNote({ ok: true, text: out?.note || `‘${r.vmName}’ 실행(jobid ${r.jobid})에 취소를 보냈습니다 — Director 가 멈추면 결과가 ‘취소’ 로 남습니다(수 초~수 분).` });
       onChanged();
@@ -234,7 +235,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
   const sendStop = async (body) => {
     const g = stopGroup; setSending(true); setSendErr('');
     try {
-      const out = await postJson(`/tools/bareos-backup/groups/${encodeURIComponent(g.id)}/cancel`, body);
+      const out = requireChanged(await postJson(`/tools/bareos-backup/groups/${encodeURIComponent(g.id)}/cancel`, body));
       setStopGroup(null); setNote({ ok: true, text: cancelAcceptedText(out, g.name) }); onChanged();
     } catch (e) { setSendErr(e?.body?.reason || e.message); } finally { setSending(false); }
   };
@@ -257,7 +258,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
           <Spark hist={c.hist} w={200} h={34} label={`${c.vcName} 최근 처리 속도 흐름`} />
         </Kpi>
         <Kpi label="대기" main={c.waiting} sub={c.waiting ? `가장 오래 ${oldestWait ? elapsedText(oldestWait.elapsed) : '—'} · 사유 ${groups.length}가지` : '대기 없음'} />
-        <Kpi label="오늘 성공 / 실패" main={<><span style={{ color: TONE.ok }}>{c.today.ok + c.today.warn}</span> <span className="muted" style={{ fontSize: 15 }}>/</span> <span style={{ color: c.today.fail ? TONE.bad : undefined }}>{c.today.fail}</span></>} sub={`경고 ${c.today.warn}${c.today.canceled ? ` · 취소 ${c.today.canceled}` : ''} · 저장 ${sizeText(c.today.bytes)}`} />
+        <Kpi label="오늘 성공 / 실패" main={c.resultsKnown === false ? '—' : <><span style={{ color: TONE.ok }}>{c.today.ok + c.today.warn}</span> <span className="muted" style={{ fontSize: 15 }}>/</span> <span style={{ color: c.today.fail ? TONE.bad : undefined }}>{c.today.fail}</span></>} sub={`경고 ${c.today.warn}${c.today.canceled ? ` · 취소 ${c.today.canceled}` : ''} · 저장 ${sizeText(c.today.bytes)}`} />
         <Kpi label="최근 24시간 평균 속도" main={c.rateSamples ? rateText(c.rateMedian) : '—'} sub={c.rateSamples ? `끝난 성공 ${c.rateSamples}건 · VM 별 마지막 끝난 실행의 중앙값` : '최근 24시간 끝난 성공 기록 없음'} />
       </section>
 
@@ -506,8 +507,8 @@ function SpeedView({ corps, onOpen }) {
               <tr key={c.vcenterId}>
                 <td><b>{c.vcName}</b></td>
                 <td className="right" data-sort={c.running + c.waiting}>{c.running} · {c.waiting}</td>
-                <td className="right" data-sort={c.today.ok + c.today.warn}>{c.today.ok + c.today.warn}</td>
-                <td className="right" data-sort={c.today.fail} style={{ color: c.today.fail ? TONE.bad : undefined }}>{c.today.fail}</td>
+                <td className="right" data-sort={c.resultsKnown === false ? '—' : c.today.ok + c.today.warn}>{c.resultsKnown === false ? '—' : c.today.ok + c.today.warn}</td>
+                <td className="right" data-sort={c.resultsKnown === false ? '—' : c.today.fail} style={{ color: c.resultsKnown !== false && c.today.fail ? TONE.bad : undefined }}>{c.resultsKnown === false ? '—' : c.today.fail}</td>
                 <td className="right" data-sort={c.rateMedian ?? ''}>{c.rateSamples ? rateText(c.rateMedian) : '—'}</td>
                 <td className="right" data-sort={c.today.bytes}>{sizeText(c.today.bytes)}</td>
                 <td style={{ fontSize: 12.5, color: c.live && !c.live.ok ? TONE.bad : 'var(--text-dim)' }}>{c.live ? (c.live.ok ? shortTs(c.live.at) : liveCodeText(c.live.code)) : '—'}</td>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지금 — v2.973 목 서버 캡처(호스트 상세 모달)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.wrap{padding:20px 24px;display:flex;flex-direction:column;gap:16px;min-width:0;min-height:900px;box-sizing:border-box}
+.row{display:grid;grid-template-columns:minmax(0, 5fr) minmax(0, 5fr) minmax(0, 3fr);gap:16px;min-width:0;align-items:start}
+.shot{background:#141b2d;border:1px solid #243049;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.shot img{display:block;width:100%;height:auto;border-bottom:1px solid #243049}
+.cap{padding:10px 14px;display:flex;flex-direction:column;gap:3px}
+.cap b{font-size:13.5px}
+.cap span{font-size:12px;color:#8b9bb4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;margin-right:6px}
+.tag.old{background:rgba(245,158,11,.16);color:#fcd34d}
+.list{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+ol{margin:0;padding-left:20px;display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:6px 28px;font-size:12.5px}
+ol b{color:#e6edf6}
+</style>
+</helmet>
+<div class="wrap">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <b style="font-size:16px">지금 모습 — main v2.973.0 · 목 서버 · Chromium</b>
+    <span class="muted" style="font-size:12.5px">vCenter › 호스트 및 클러스터에서 호스트 이름을 누르면 열리는 ‘호스트 상세’ 모달. VM 은 v2.913 부터 드로어인데 호스트만 옛 모달입니다.</span>
+  </div>
+  <div class="row">
+    <div class="shot">
+      <img src="/_blob/f70b423363180a6fe7c47c4c9a2c5de3" alt="1440px 에서 본 호스트 상세 모달의 위쪽 — 값 16개가 두 열로 나열되고 그 아래 구성·보안 확인 항목 4개가 이어진다">
+      <div class="cap"><b><span class="tag old">모달 · 위</span>1440px — 열자마자 보이는 부분</b><span>components/EntityDetail.jsx type='host' · 가운데 640px · 트리가 가려짐. CPU 99% 는 위에서 일곱째 줄.</span></div>
+    </div>
+    <div class="shot">
+      <img src="/_blob/7f4f04eee90dd6b4d6959e31d6138322" alt="같은 모달을 끝까지 스크롤한 모습 — 경합, 클러스터, HBA 표, 전력 안내 뒤 맨 아래에 단추 세 개">
+      <div class="cap"><b><span class="tag old">모달 · 아래</span>1440px — 끝까지 스크롤</b><span>성능 그래프 · 통합 성능 모니터링 · 개체 보기 단추는 맨 아래에 있습니다.</span></div>
+    </div>
+    <div class="shot">
+      <img src="/_blob/a90fa7055d380072c8fcd37b478aa885" alt="400px 에서 본 같은 모달 — 값이 한 열로 16줄 이어지고 확인 항목은 화면 아래로 밀린다">
+      <div class="cap"><b><span class="tag old">모달</span>400px</b><span>한 열 16줄 뒤에야 확인 항목이 시작됩니다.</span></div>
+    </div>
+  </div>
+  <div class="list">
+    <b style="font-size:13.5px">캡처에서 읽은 것(코드로 확인)</b>
+    <ol>
+      <li><b>값 16개가 같은 무게로 나열</b>(iDRAC 실측이 있으면 17개) — 이름 · 상태 · vCenter · 전원 · 모델 · 사용률이 한 격자에 섞여, 지금 높은 값(CPU 99%)이 눈에 띄지 않습니다.</li>
+      <li><b>확인할 것이 본문 중간에</b> — 구성·보안 확인 항목은 그 16개 아래, 그 뒤로 읽은 값 25줄이 다시 이어집니다. 호스트 목록 · 전체 페이지에 있는 사유 배지(CPU 초과 · 업링크 끊김 · 백업 없음)는 이 창에 없습니다.</li>
+      <li><b>단추가 맨 아래</b> — 성능 그래프 · 개체 보기로 가려면 끝까지 스크롤해야 합니다. ‘VM 10대 보기’ 만 이름 옆에 따로 있습니다.</li>
+      <li><b>목록이 가려지고 이전/다음이 없음</b> — 호스트를 차례로 보려면 닫고 다시 눌러야 합니다. VM 드로어는 ‹ › · ↑↓ 로 넘깁니다.</li>
+      <li><b>24시간 추이 · 온도 · 업타임이 없음</b> — 인벤토리 한 행에 이미 있는 온도 · 부팅 시각을 이 창은 쓰지 않고, 추이는 성능 화면으로 가야 보입니다.</li>
+      <li><b>VM 과 다른 문법</b> — 같은 트리에서 VM 은 오른쪽 드로어, 호스트는 가운데 모달이 열립니다.</li>
+    </ol>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -189,6 +189,8 @@ function prepare(db) {
     del: db.prepare('DELETE FROM part_state WHERE agent=? AND part_key=?'),
     openList: db.prepare('SELECT * FROM part_state ORDER BY first_seen DESC LIMIT ?'),
     openByScope: db.prepare('SELECT * FROM part_state WHERE scope=? ORDER BY first_seen DESC LIMIT ?'),
+    // v3.50 접수 자료 묶음 — 장비 한 대의 열린 장애(수집 주체 · 장비 키 대조는 SQL 에서 · 대소문자 무시). 전량을 JS 로 읽어 거르지 않는다(반증 A14)
+    openOfDevice: db.prepare("SELECT * FROM part_state WHERE scope=? AND LOWER(agent)=? AND ((?<>'' AND UPPER(device_key)=?) OR (?<>'' AND device_id=?)) ORDER BY first_seen DESC LIMIT ?"),
     openAll: db.prepare('SELECT * FROM part_state'),
     event: db.prepare(`INSERT INTO part_event
       (at,agent,part_key,scope,device_id,device_key,device_key_kind,device_name,kind,label,key_kind,event,state,prev_state,raw_state,close_reason)
@@ -297,6 +299,18 @@ export async function openFaults({ scope = '', limit = 20_000 } = {}) {
   return rows.map(rowToPart);
 }
 
+/**
+ * 장비 한 대의 열린 장애 — 수집 주체(agent, '' = 이 노드) · 서비스 태그(대소문자 무시) 또는 노드 로컬 id. 같은 태그가 다른 수집 주체(다른 법인 엣지)에
+ * 나타나도 그쪽 기록은 싣지 않는다(케이스 · 묶음의 법인 경계 — v3.50 반증 A2 와 같은 위협).
+ */
+export async function openFaultsOfDevice({ scope = 'idrac', agent = '', key = '', id = '', limit = 20 } = {}) {
+  const k = String(key || '').trim().toUpperCase(); const d = String(id || '').trim();
+  if (!k && !d) return [];
+  const h = await open();
+  if (!h) return [];
+  return h.st.openOfDevice.all(String(scope), String(agent || '').trim().toLowerCase(), k, k, d, d, Math.max(1, Math.min(200, Number(limit) || 20))).map(rowToPart);
+}
+
 function rowToPart(r) {
   return {
     partKey: r.part_key, scope: r.scope, deviceId: r.device_id,
@@ -339,10 +353,16 @@ export async function applyTransition(tr, { now = Date.now() } = {}) {
       // 같은 상태가 이어지는 것은 **이벤트가 아니다** — 이벤트로 남기면 전이 테이블이 전량 적재가 된다.
       if (!p.sameState) ev('change', p, { prevState: p.prevState });
     }
+    let closedN = 0;
     for (const p of tr.closed || []) {
-      st.del.run(agentOf(p), p.partKey);
+      // 96회차 ⓒ(93회차 P2 — 재현): 관리자 수동 닫기와 폴러 전이가 같은 열린 행(둘 다 openFaults 를 먼저 읽는다)을 닫으면 close 이벤트가
+      //   두 번 남았다(사건 묶음 · 이력에 같은 닫힘 두 줄). 행을 **실제로 지운 쪽만** 이벤트를 남긴다 — 이미 닫힌 행은 조용히 지나간다.
+      const r = st.del.run(agentOf(p), p.partKey);
+      if (Number(r?.changes ?? 1) === 0) continue;
+      closedN += 1;
       ev('close', p, { state: null, prevState: p.state, closeReason: p.closeReason || 'ok' });
     }
+    tr = { ...tr, _closedN: closedN };
     // 유지(held)는 **이벤트를 만들지 않는다** — 사유만 갱신해 화면이 '왜 아직 열려 있나' 를 말한다.
     for (const p of tr.held || []) st.touch.run(p.lastSeenAt || p.lastHeldAt || now, p.holdReason || null, p.rawState || null, agentOf(p), p.partKey);
     db.exec('COMMIT');
@@ -359,7 +379,7 @@ export async function applyTransition(tr, { now = Date.now() } = {}) {
   return {
     saved: true,
     opened: (tr.opened || []).length,
-    closed: (tr.closed || []).length,
+    closed: tr._closedN ?? (tr.closed || []).length,   // 96회차 ⓒ: 실제로 닫은 수(이미 닫힌 행은 세지 않는다)
     changed: (tr.updated || []).filter((u) => !u.sameState).length,
   };
 }

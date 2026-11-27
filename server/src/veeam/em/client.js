@@ -148,16 +148,23 @@ export function vmQuery(type, page = 1) {
  */
 export async function readVmBackups(c, { since, signal = null, budgetMs = vmBudgetMs(), clock = Date.now } = {}) {
   const until = clock() + budgetMs;
-  const out = { tasks: [], points: [], complete: true, errors: {} };
+  // 전체 점검 12회차(V-30): capFloor = 상한 · 예산으로 잘린 유형이 실제로 읽은 가장 오래된 시각(유형이 여럿이면 늦은 쪽) · windowMs = 첫 채움 창 —
+  //   기록이 기준 시각(since)을 정할 때 쓴다(잘린 채 since 를 고정하면 새것부터 읽는 질의가 그 앞에 끝내 닿지 못하고 창만 날마다 커졌다)
+  const out = { tasks: [], points: [], complete: true, errors: {}, capFloor: null, windowMs: VM_WINDOW_MS };
   for (const [type, key, conv] of [['BackupTaskSession', 'tasks', vmTasksOf], ['VmRestorePoint', 'points', vmPointsOf]]) {
+    let oldest = null;
     try {
       for (let p = 1; ; p++) {
         if (signal?.aborted) throw new Error('수집 시한이 지났습니다');
-        if (p > VM_MAX_PAGES || clock() > until) { out.complete = false; break; }
+        if (p > VM_MAX_PAGES || clock() > until) {
+          out.complete = false;
+          if (oldest != null) out.capFloor = out.capFloor == null ? oldest : Math.max(out.capFloor, oldest);
+          break;
+        }
         const list = firstArray(await c.get(vmQuery(type, p)));
         let older = false;
         const fresh = [];
-        for (const x of list) { const t = rowTimeOf(x); if (t != null && t < since) { older = true; continue; } fresh.push(x); }
+        for (const x of list) { const t = rowTimeOf(x); if (t != null && t < since) { older = true; continue; } if (t != null && (oldest == null || t < oldest)) oldest = t; fresh.push(x); }
         for (const x of conv(fresh)) out[key].push(x);
         if (older || list.length < VM_PAGE) break;
       }
@@ -235,7 +242,8 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
     }
     if (rawSessions?.replicaErr) notes.push(`복제 작업 세션은 읽지 못했습니다(백업 세션만): ${rawSessions.replicaErr}`);
     if (rawSessions?.truncated) notes.push(`세션이 많아 유형별 ${SESSION_PAGE * SESSION_MAX_PAGES}건까지만 읽었습니다(새것부터)`);
-    if (vmRows && !vmRows.complete) notes.push(`VM 별 기록은 일부만 읽었습니다(새것부터 — 시간·페이지 상한${vmRows.errors.tasks ? ' · 작업 결과 실패' : ''}${vmRows.errors.points ? ' · 복원 지점 실패' : ''}) — 다음 수집이 같은 기준으로 다시 읽습니다`);
+    // 전체 점검 12회차(V-30): 잘린 구간은 다음 수집도 닿지 못한다(새것부터 읽는다) — '같은 기준으로 다시 읽는다' 고 말하지 않는다
+    if (vmRows && !vmRows.complete) notes.push(`VM 별 기록은 일부만 읽었습니다(새것부터 — ${vmRows.capFloor != null ? '시간·페이지 상한' : '질의 실패'}${vmRows.errors.tasks ? ' · 작업 결과 실패' : ''}${vmRows.errors.points ? ' · 복원 지점 실패' : ''}) — ${vmRows.capFloor != null ? '읽은 가장 오래된 기록보다 앞은 건너뜁니다(다음 수집은 그 뒤부터)' : `다음 수집이 다시 시도합니다(최대 ${Math.round(VM_WINDOW_MS / 86_400_000)}일 창)`}`);
     const jobs = jobsBody ? jobsWithResults(jobsBody, sessions, { now }) : null;
     const digest = rawSessions ? sessionDigest(sessions, { now }) : null;
     return {

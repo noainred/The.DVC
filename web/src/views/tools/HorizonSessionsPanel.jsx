@@ -27,7 +27,7 @@ import { Card } from './shared.jsx';
 import { unitText } from '../unitText.js';
 import {
   agoText, intervalText, kindTone, kindAdvice, authStopNote, backoffNote, collectStateNote, connectedText,
-  unionNote, lowerBoundPrefix, stateUnknownNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
+  unionNote, lowerBoundPrefix, stateUnknownNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE, hzPersistentNote,
 } from './horizonSessionText.js';
 import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
 import HorizonUsagePanel from './HorizonUsagePanel.jsx';   // v2.684 앱·데스크톱별 사용 현황
@@ -150,6 +150,9 @@ export default function HorizonSessionsPanel() {
           meta={`읽지 못함 ${total.serversFailed ?? 0}대${data?.pending?.length ? ` · 수집 전 ${data.pending.length}대` : ''}`} />
       </div>
 
+      {!picked && hzPersistentNote(data?.poller?.lastResult) && (
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'normal' }}><BoldText text={hzPersistentNote(data?.poller?.lastResult)} /></div>
+      )}
       {!picked && unionNote(total) && (
         <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'normal' }}><BoldText text={unionNote(total)} /></div>
       )}

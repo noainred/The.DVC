@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>DNS 정합성 — 역DNS 이름을 정방향으로 다시 확인</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.chip{padding:7px 12px;border-radius:8px;cursor:pointer;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.btn{padding:7px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;padding:10px 12px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid #243049}
+tbody td{padding:8px 12px;border-bottom:1px solid rgba(36,48,73,.5);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+.ip{color:#3b82f6;font-weight:700;background:none;border:none;padding:0;font:inherit;font-weight:700;cursor:pointer}
+.new{outline:2px dashed rgba(34,211,238,.6);outline-offset:4px}
+.rule{font-size:12px;color:#8b9bb4;line-height:1.7}
+.rule b{color:#e6edf6;font-weight:600}
+.box{box-sizing:border-box;min-width:0;border:1px solid #243049;border-radius:12px;background:#0f1626;padding:12px 14px;display:flex;flex-direction:column;gap:7px}
+.box h3{margin:0;font-size:13px;font-weight:700;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.q{font-size:12px;display:flex;flex-direction:column;gap:2px}
+.q .a{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.q .k{color:#8b9bb4;flex:0 0 44px}
+.mrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 12px;border-top:1px solid rgba(36,48,73,.5);font-size:12.5px}
+.mrow:first-child{border-top:none}
+.mrow .lb{flex:0 0 84px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">DNS 정합성 — 역DNS 가 답한 이름이 정말 그 IP 를 가리키는가</span>
+    <div class="muted" style="font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="display:inline-block;width:22px;height:12px;border:2px dashed rgba(34,211,238,.6);border-radius:3px"></span>
+      <span>청록 표시 = 새로 생기는 것 · 주소 · 이름은 가상</span>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+    <div class="box">
+      <h3><span class="badge green">일치</span></h3>
+      <div class="q"><div class="a"><span class="k">역</span><span class="mono">10.210.5.1</span></div><div class="a"><span class="k"></span><span>gw-b1.corp.example</span></div></div>
+      <div class="q"><div class="a"><span class="k">정</span><span>gw-b1.corp.example</span></div><div class="a"><span class="k"></span><span class="mono">10.210.5.1</span></div></div>
+      <div class="rule">주소가 여러 개면 그 안에 이 IP 가 <b>하나라도 있으면</b> 일치입니다.</div>
+    </div>
+    <div class="box">
+      <h3><span class="badge amber">다른 IP</span></h3>
+      <div class="q"><div class="a"><span class="k">역</span><span class="mono">10.210.5.60</span></div><div class="a"><span class="k"></span><span>fs-old.corp.example</span></div></div>
+      <div class="q"><div class="a"><span class="k">정</span><span>fs-old.corp.example</span></div><div class="a"><span class="k"></span><span class="mono">10.210.7.12</span></div></div>
+      <div class="rule">역방향 레코드가 <b>옛 장비 이름</b>으로 남았거나 정방향이 옮겨 갔습니다.</div>
+    </div>
+    <div class="box">
+      <h3><span class="badge amber">정방향 없음</span></h3>
+      <div class="q"><div class="a"><span class="k">역</span><span class="mono">10.210.5.31</span></div><div class="a"><span class="k"></span><span>bmc-r3-07.corp.example</span></div></div>
+      <div class="q"><div class="a"><span class="k">정</span><span>bmc-r3-07.corp.example</span></div><div class="a"><span class="k"></span><span class="muted">그런 이름 없음</span></div></div>
+      <div class="rule">이름을 지웠는데 역방향 레코드만 남은 경우입니다.</div>
+    </div>
+    <div class="box">
+      <h3><span class="badge gray">확인 못 함</span></h3>
+      <div class="q"><div class="a"><span class="k">역</span><span class="mono">10.210.5.44</span></div><div class="a"><span class="k"></span><span>app-07.corp.example</span></div></div>
+      <div class="q"><div class="a"><span class="k">정</span><span class="muted">시한 초과 · 예산 소진</span></div><div class="a"><span class="k"></span><span class="muted">—</span></div></div>
+      <div class="rule">답을 받지 못한 것은 <b>일치에도 불일치에도 넣지 않습니다</b>.</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,700fr) minmax(0,460fr);gap:16px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <b style="font-size:13px">대장 목록</b>
+        <button class="chip">호스트명 없음(스캔 IP) (3)</button>
+        <button class="chip new">DNS 불일치 (2)</button>
+        <span class="new" style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;padding:3px 8px;border-radius:8px;font-size:12px">
+          <span class="muted">정방향 확인</span> <b>4</b><span class="muted">/ 5</span>
+          <span class="badge amber">불일치 2</span><span class="badge gray">확인 못 함 1</span>
+        </span>
+      </div>
+      <div style="overflow-x:auto;border-radius:12px;border:1px solid #243049;min-width:0">
+        <table style="min-width:660px">
+          <thead><tr><th>IP 주소 ▲</th><th>호스트명</th><th>확인 방식</th><th>소유 자원</th></tr></thead>
+          <tbody>
+            <tr><td><button class="ip">10.210.5.1</button></td><td>gw-b1.corp.example <span class="badge blue" style="font-size:10px">역DNS</span></td><td><span class="badge" style="background:rgba(20,184,166,.16);color:#2dd4bf">Ping스캔</span></td><td class="muted" style="font-size:12px">SSH,HTTPS</td></tr>
+            <tr><td><button class="ip">10.210.5.31</button></td><td>bmc-r3-07.corp.example <span class="badge blue" style="font-size:10px">역DNS</span> <span class="badge amber new" style="font-size:10px;outline-offset:2px" title="이 이름은 DNS 에 정방향 주소가 없습니다">정방향 없음</span></td><td><span class="badge" style="background:rgba(20,184,166,.16);color:#2dd4bf">Ping스캔</span></td><td class="muted" style="font-size:12px">HTTPS,IPMI/BMC</td></tr>
+            <tr><td><button class="ip">10.210.5.60</button></td><td>fs-old.corp.example <span class="badge blue" style="font-size:10px">역DNS</span> <span class="badge amber" style="font-size:10px">이름 다름</span> <span class="badge amber new" style="font-size:10px;outline-offset:2px" title="fs-old.corp.example 의 정방향 주소는 10.210.7.12 입니다">DNS 다른 IP</span></td><td><span class="badge" style="background:rgba(20,184,166,.16);color:#2dd4bf">Ping스캔</span></td><td class="muted" style="font-size:12px">SMB</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="rule">일치는 표시를 달지 않습니다(대부분이 일치라 표가 시끄러워집니다) — 어긋난 것만 달고, 수는 위 요약 줄에 적습니다. CSV 에는 ‘dns_forward’ 열(일치 · 다른 IP · 없음 · 빈칸)이 늘어납니다.</div>
+    </div>
+
+    <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0">
+      <b style="font-size:13px">IP 사용 이력 — 10.210.5.60 <span class="muted" style="font-weight:400">· 방식별 결과</span></b>
+      <div style="border:1px solid #243049;border-radius:10px;overflow:hidden">
+        <div class="mrow"><span class="lb"><span class="badge blue">역DNS</span></span><span style="flex:1 1 160px;min-width:0">fs-old.corp.example</span><span class="muted">11-13 10:05</span>
+          <div class="new" style="flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:4px 0 2px;padding:6px 8px;border-radius:8px;background:#0f1626;font-size:12px">
+            <span class="muted">정방향</span><span class="mono">10.210.7.12</span><span class="badge amber" style="font-size:10px">이 IP 아님</span><span class="muted">11-13 04:05 확인</span>
+          </div>
+        </div>
+        <div class="mrow"><span class="lb"><span class="badge green">mDNS</span></span><span class="muted" style="flex:1 1 160px">응답 없음</span></div>
+        <div class="mrow"><span class="lb"><span class="badge purple">NetBIOS</span></span><span style="flex:1 1 160px;min-width:0">NAS-BACKUP <span class="muted">· WORKGROUP</span></span><span class="muted">11-13 10:05</span></div>
+      </div>
+      <div class="rule">정방향 확인 시각이 스캔 시각과 다를 수 있습니다 — 결과를 하루 동안 다시 쓰기 때문입니다(기간은 설정값).</div>
+    </div>
+  </div>
+
+  <div class="card new" style="padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <b style="font-size:14px">추천 › DNS 정합성</b>
+        <span class="badge green">일치 1,412</span><span class="badge amber">다른 IP 9</span><span class="badge amber">정방향 없음 23</span><span class="badge gray">확인 못 함 31</span><span class="badge gray">역DNS 이름 없음 1,532</span>
+      </div>
+      <span class="muted" style="font-size:12px">지금의 카드 16 ‘DNS 레코드 제안’ 이 이 카드가 됩니다 · 레코드 초안은 아래에 그대로</span>
+    </div>
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid #243049;min-width:0">
+      <table style="min-width:980px">
+        <thead><tr><th>판정</th><th>IP 주소 ▲</th><th>역DNS 이름</th><th>정방향 주소</th><th>대장이 아는 이름</th><th>확인한 때</th><th>에이전트</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge amber">다른 IP</span></td><td><button class="ip">10.210.5.60</button></td><td>fs-old.corp.example</td><td class="mono">10.210.7.12</td><td class="muted">NAS-BACKUP (NetBIOS)</td><td>11-13 04:05</td><td>central</td></tr>
+          <tr><td><span class="badge amber">정방향 없음</span></td><td><button class="ip">10.210.5.31</button></td><td>bmc-r3-07.corp.example</td><td class="muted">그런 이름 없음</td><td class="muted">—</td><td>11-13 04:05</td><td>central</td></tr>
+          <tr><td><span class="badge amber">다른 IP</span></td><td><button class="ip">10.230.4.18</button></td><td>erp-app-03.corp.example</td><td class="mono">10.230.4.81</td><td>erp-app-03 <span class="muted">(VM)</span></td><td>11-12 22:40</td><td>edge-site-a</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start">
+    <div class="box">
+      <h3>지금 있는 정방향 확인과의 관계</h3>
+      <div class="rule">v2.993 은 <b>물리서버 등록부의 이름</b>을 DNS 에 물어 그 IP 가 나오면 이름을 붙입니다(‘정방향 DNS’ · ‘정방향 DNS 일치’ · ‘이름이 서로 다름’ 배지). 이번 것은 반대로 <b>역DNS 가 답한 이름</b>을 다시 묻습니다. 묻는 함수 · 시한 · 동시 수 · 차단기는 그대로 쓰고, 배지는 겹치지 않게 둘을 한 자리에서 정합니다(구현 때 표로 고정).</div>
+    </div>
+    <div class="box">
+      <h3>비용과 순서</h3>
+      <div class="rule">이름 확인 단계 뒤, <b>물리서버 이름을 먼저</b> 묻고 남은 예산으로 역DNS 이름을 묻습니다. 한 번 확인한 결과는 하루 동안 다시 쓰고, 오래된 것부터 묻습니다. 예산을 넘긴 이름은 ‘확인 못 함’ 으로 남고 다음 스캔이 이어 갑니다. 묻는 곳은 <b>스캔을 돌린 쪽</b>(법인 엣지 → 법인 DNS)입니다.</div>
+    </div>
+    <div class="box">
+      <h3>알지 못하는 것</h3>
+      <div class="rule">스캐너가 쓰는 DNS 의 답입니다 — <b>안팎이 다른 DNS</b>(분할 DNS)에서는 다른 곳의 답과 다를 수 있습니다. 운영체제 이름 풀이를 쓰므로 hosts 파일의 항목도 답에 섞입니다. NetBIOS · mDNS 이름이 DNS 에 등록돼 있는지는 도메인 접미사를 알아야 해서 <b>기본 범위에서 뺐습니다</b>(컨펌 질문).</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1160}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

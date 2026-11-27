@@ -11,7 +11,7 @@
  *   host.perfc = { at, samples, diskMaxMs:{avg,max}|null, ds:[{uuid, readMs:{avg,max}|null, writeMs:{avg,max}|null}] }
  *  - 못 읽은 값은 null(0 이 아니다 — 0 은 '경합 없음' 이라는 값이다).
  */
-import { xmlUnescape } from '../vcenter/soapParse.js';
+import { xmlUnescape, returnvalBodies, perfIdMarks } from '../vcenter/soapParse.js';
 
 /** 카운터 키('group.name.rollup') — 이름만 선언하고 id 는 그 vCenter 카탈로그에서 찾는다(없으면 그 값만 null). */
 export const VM_COUNTERS = Object.freeze({
@@ -35,23 +35,28 @@ export const HOST_DS_MAX = 64;
  * 다중 엔티티 QueryPerf 응답 → Map<ref, Map<counterId, Map<instance, number[]>>>(결측 -1 은 버린다).
  * 계열 경계는 `<id>` 블록이다(표본도 `<value>` 라 컨테이너와 태그가 같다 — perfBatch.js 의 같은 함정).
  */
+/*
+ * 74회차 F4(32회차가 남긴 '<id> 지연 정규식' — 측정): `/<returnval\b[^>]*>([\s\S]*?)<\/returnval>/g` 와 `/<id>([\s\S]*?)<\/id>/g` 는
+ *   닫는 태그가 없는 여는 태그가 많으면 시작 위치마다 끝까지 다시 훑어 O(n²) 였다(160KB 응답 — 닫히지 않은 <id> 0.96초 · <returnval> 2.0초,
+ *   정상 응답 같은 크기 9ms). 같은 뜻(여는 태그 다음의 '가장 가까운' 닫는 태그 · 짝 없는 여는 태그부터는 더 찾지 않는다)을 indexOf 로 한 번에 훑는다.
+ */
+// 75회차: 두 훑기는 vcenter/soapParse.js(returnvalBodies · perfIdMarks) 한 벌을 쓴다 — perfBatch · nicPerf · soapClient 에 남은 같은 정규식도 함께 옮겼다.
+
 export function parsePerfInstances(xml, entityType) {
   const out = new Map();
   if (typeof xml !== 'string') return out;
-  const re = /<returnval\b[^>]*>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = re.exec(xml))) {
-    const blk = m[1];
-    const ent = new RegExp(`<entity type="${entityType}">([^<]+)</entity>`).exec(blk)?.[1];
+  const entRe = new RegExp(`<entity type="${entityType}">([^<]+)</entity>`);
+  for (const blk of returnvalBodies(xml, { wordBoundary: true })) {
+    const ent = entRe.exec(blk)?.[1];
     if (!ent) continue;
     const byCounter = new Map();
-    const marks = [...blk.matchAll(/<id>([\s\S]*?)<\/id>/g)];
+    const marks = perfIdMarks(blk);
     for (let i = 0; i < marks.length; i++) {
-      const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i][1])?.[1];
+      const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i].inner)?.[1];
       if (!cid) continue;
-      const inst = xmlUnescape(/<instance>([^<]*)<\/instance>/.exec(marks[i][1])?.[1] || '');
-      const from = marks[i].index + marks[i][0].length;
-      const to = i + 1 < marks.length ? marks[i + 1].index : blk.length;
+      const inst = xmlUnescape(/<instance>([^<]*)<\/instance>/.exec(marks[i].inner)?.[1] || '');
+      const from = marks[i].end;
+      const to = i + 1 < marks.length ? marks[i + 1].start : blk.length;
       const vals = [...blk.slice(from, to).matchAll(/<value>(-?\d+)<\/value>/g)].map((x) => Number(x[1])).filter((v) => Number.isFinite(v) && v >= 0);
       if (!byCounter.has(cid)) byCounter.set(cid, new Map());
       byCounter.get(cid).set(inst, vals);

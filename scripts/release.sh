@@ -35,7 +35,10 @@ PYPORTAL_SUMMARY=""
 BULLETS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --pyportal) PYPORTAL_SUMMARY="${2:-}"; shift 2 ;;
+    --pyportal)
+      # 109회차: 값이 없으면 'shift 2' 가 실패해 아무 말 없이 1 로 끝났다 — 이유를 말하고 끝낸다.
+      [[ $# -ge 2 && -n "${2:-}" ]] || { echo "--pyportal 뒤에 요약 문구가 필요합니다." >&2; exit 1; }
+      PYPORTAL_SUMMARY="$2"; shift 2 ;;
     *) BULLETS+=("$1"); shift ;;
   esac
 done
@@ -58,20 +61,34 @@ else
   NOTES_JSON="$(printf '%s\n' "${BULLETS[@]}" | jq -R . | jq -s .)"
 fi
 
+# 109회차 C-1(재현): 예전에는 'jq … > f.tmp && mv f.tmp f' 였다 — '&&' 목록의 마지막이 아닌 명령(jq)의 실패는 set -e 가 잡지 않아,
+#   jq 가 실패해도(깨진 JSON 등) 다음 파일로 넘어가 '✅ 준비 완료' · exit 0 으로 끝났고 빈 .tmp 가 남았다(일부 파일만 버전이 오른 채).
+#   이제 ① 전부 .tmp 로 먼저 만들고(하나라도 실패하면 여기서 끝 — 원본은 그대로) ② 그 뒤에 한꺼번에 바꾼다. .tmp 는 끝날 때 지운다.
+PKGS=(package.json server/package.json web/package.json)
+RN="server/src/release-notes.json"
+vp_release_cleanup() { rm -f -- package.json.tmp server/package.json.tmp web/package.json.tmp "$RN.tmp" pyportal/ver.txt.tmp; }
+trap vp_release_cleanup EXIT
+
 echo "==> package.json 3종 버전 인상: $CUR -> $VER"
-for f in package.json server/package.json web/package.json; do
-  jq --arg v "$VER" '.version=$v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+for f in "${PKGS[@]}"; do
+  jq --arg v "$VER" '.version=$v' "$f" > "$f.tmp"
 done
 
 echo "==> release-notes.json 항목 추가(최신 먼저)"
-RN="server/src/release-notes.json"
 jq --arg v "$VER" --arg d "$DATE" --arg t "$TITLE" --argjson n "$NOTES_JSON" \
-  '.notes |= ([{version:$v, date:$d, title:$t, notes:$n}] + .)' "$RN" > "$RN.tmp" && mv "$RN.tmp" "$RN"
+  '.notes |= ([{version:$v, date:$d, title:$t, notes:$n}] + .)' "$RN" > "$RN.tmp"
 
 if [[ -n "$PYPORTAL_SUMMARY" ]]; then
   echo "==> pyportal/ver.txt 항목 추가(단독 배포 버전 표시의 진실의 원천)"
-  printf '%s (%s) %s\n' "$VER" "$DATE" "$PYPORTAL_SUMMARY" | cat - pyportal/ver.txt > pyportal/ver.txt.tmp \
-    && mv pyportal/ver.txt.tmp pyportal/ver.txt
+  printf '%s (%s) %s\n' "$VER" "$DATE" "$PYPORTAL_SUMMARY" | cat - pyportal/ver.txt > pyportal/ver.txt.tmp
+fi
+
+# 여기까지 왔으면 모든 .tmp 가 온전하다 — 한꺼번에 바꾼다.
+for f in "${PKGS[@]}" "$RN"; do
+  mv "$f.tmp" "$f"
+done
+if [[ -n "$PYPORTAL_SUMMARY" ]]; then
+  mv pyportal/ver.txt.tmp pyportal/ver.txt
 fi
 
 cat <<EOF

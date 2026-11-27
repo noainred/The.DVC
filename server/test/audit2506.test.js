@@ -5,7 +5,7 @@
  *
  * 여기서 고정하는 것은 '기능이 동작한다' 가 아니라 **되돌리면 다시 뚫리는 경계**다.
  */
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,11 +13,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2506-'));
+process.env.CONFIG_DIR = tmpDir('audit2506-');
 
 let PERM; let LOOKUP;
 before(async () => {
@@ -102,7 +109,7 @@ test('① 가산 마이그레이션(순수) — operator 는 기능을 잃지 �
 
 test('① 파일 왕복 — 구버전 파일 로드·저장이 실제로 그렇게 동작한다(별도 프로세스)', () => {
   // config.js 는 싱글톤이라 한 프로세스에서 CONFIG_DIR 을 바꿔 재확인할 수 없다 → 자식 프로세스로.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2506-mig-'));
+  const dir = tmpDir('audit2506-mig-');
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({
     matrix: {
       operator: ['dashboard', 'inv.hosts', 'tools', 'insights', 'remote.access'],
@@ -424,7 +431,7 @@ test('③ 거부는 실제로 403 을 만든다 — 실 express 앱 + 실 permis
   // "규칙이 문서에만 있는" v2.480 실패와 같은 종류다. 그래서 실제 미들웨어(toolGate)를
   // express 앱에 마운트하고 실제 permissions.json 을 읽혀 **상태코드와 본문**을 본다.
   // 자식 프로세스인 이유: config.js 는 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolgate-'));
+  const dir = tmpDir('toolgate-');
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({
     schemaVersion: 2,
     matrix: { toolsDenied: { operator: ['ipam', 'aisearch', 'daily-health'], viewer: [] } },

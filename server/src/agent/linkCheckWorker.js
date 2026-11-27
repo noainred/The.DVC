@@ -26,6 +26,10 @@ import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6
 
 const gzipAsync = promisify(gzip);
 const FALLBACK_MS = 5 * 60_000;
+// 85회차 I1: 중앙 저장 범위(linkcheck/settings.js MIN_INTERVAL_MS · MAX_INTERVAL_MS · concurrency 상한)와 같은 값 — 엣지가 중앙 설정 모듈을 끌어오지 않게 상수로 둔다.
+export const LINK_INTERVAL_MIN_MS = 60_000;
+export const LINK_INTERVAL_MAX_MS = 6 * 3_600_000;
+export const LINK_CONCURRENCY_MAX = 32;
 let _timer = null;
 let _running = false;
 let _last = null;
@@ -102,7 +106,10 @@ export async function runLinkCheckWorkerOnce() {
     }
     if (!r.ok) throw Object.assign(new Error(`link-check-config <- HTTP ${r.status}`), { status: r.status });
     const cfg = await r.json().catch(() => ({}));
-    if (Number.isFinite(Number(cfg?.intervalMs)) && Number(cfg.intervalMs) > 0) _intervalMs = Number(cfg.intervalMs);
+    // 85회차 I1: 중앙이 내린 주기 · 동시성도 엣지가 다시 자른다(중앙 linkcheck/settings.js 저장 범위와 같은 값 — 주기 1분~6시간 · 동시성 1~32).
+    //   예전에는 양수면 그대로 써서 옛 중앙 · 손상 설정이 1초 주기나 수백 동시 점검을 내리면 그대로 돌았다.
+    const iv = Number(cfg?.intervalMs);
+    if (Number.isFinite(iv) && iv > 0) _intervalMs = Math.min(LINK_INTERVAL_MAX_MS, Math.max(LINK_INTERVAL_MIN_MS, iv));
 
     /*
      * ⚠⚠ **0건·꺼짐이어도 중앙에 상태를 올린다**(v2.554 에 고친 v2.552 결함 — 사용자 실화면으로 확정).
@@ -132,7 +139,8 @@ export async function runLinkCheckWorkerOnce() {
     }
 
     const ctx = { centralUrl: base, centralToken: config.agent.centralToken, agentName: agent };
-    const results = await pool(links, Number(cfg.concurrency) || 4, (l) => runLink(l, { timeouts: cfg.timeouts || {}, ctx, byNode: agent }));
+    const conc = Math.trunc(Number(cfg.concurrency));
+    const results = await pool(links, Number.isFinite(conc) && conc >= 1 ? Math.min(LINK_CONCURRENCY_MAX, conc) : 4, (l) => runLink(l, { timeouts: cfg.timeouts || {}, ctx, byNode: agent }));
     const measured = results.filter((x) => x && x.verdict);
     const skipped = results.filter((x) => x && x.skipped);
 

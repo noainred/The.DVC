@@ -121,6 +121,10 @@ test('준비: Director · 매핑 · 대상 3대(vc-a 2 · vc-b 1)', async () => 
   assert.equal(r.s, 201, r.t);
   const DIR = r.j.director.id;
   ID.dir = DIR;
+  (await import('../src/bareos/settings.js'))._seedLegacySitesForTest([
+    { vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' },
+    { vcenterId: 'vc-b', directorId: DIR, vcserver: 'vc-b.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-b.ini' },
+  ]);   // 52회차 D1: 옛 설정(Director 하나에 vCenter 여럿 — 업그레이드 전 파일)으로 준비 · 이 시험은 한 Director 로 여러 vCenter 흐름을 본다
   r = await call('admin', 'PUT', '/settings', { sites: [
     { vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' },
     { vcenterId: 'vc-b', directorId: DIR, vcserver: 'vc-b.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-b.ini' },

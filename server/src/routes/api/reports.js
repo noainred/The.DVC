@@ -12,9 +12,11 @@ import { computeRightsizing } from '../../reports/rightsizing.js';
 import { computeCompliance } from '../../reports/compliance.js';
 import { filterChangeEvents, CHANGE_CATEGORIES } from '../../reports/changes.js';
 import { computeUnprotected, mergeSnapRows } from '../../reports/unprotected.js';
+import { setPeriodicProvider, SYSTEM_REQ } from '../../periodic/providers.js';
 import { loadLogSettings } from '../../logs/settings.js';
 import { vmStatsFor, vmStatsMeta } from '../../reports/vmStats.js';
 import { certStatus } from '../../security/certMonitor.js';
+import { visibleNsxManagers } from '../../nsx/scope.js';   // 결정(56~75) 72: NSX 인증서 귀속 판정은 /nsx 와 같은 함수
 import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
@@ -58,18 +60,78 @@ export function withDemoForecast(r, snap, vcFilter = '') {
   return { ...r, datastores: rows.slice(0, 100), soon: rows.filter((x) => x.daysToLimit <= 30).slice(0, 30), synthesized: rows.length > 0 };
 }
 
-// 인증서 목록도 scope 적용 — vCenter 항목은 허용 집합으로 거르고, NSX는 범위 제한 계정에는 숨긴다.
+// 인증서 목록도 scope 적용 — vCenter 항목은 허용 집합으로 거르고, NSX 는 귀속 vCenter 로 거른다.
+// 결정(56~75 남긴 것) 72: 예전에는 범위 계정 · vCenter 필터 조회에 NSX 인증서를 **전부** 숨겼다. v2.929 부터 항목에 vcenterId 가 있어
+//   nsx/scope.js visibleNsxManagers(/nsx 화면과 같은 판정 하나)로 거른다 — 범위 계정에는 귀속 vCenter 가 허용 집합 안인 매니저만,
+//   **무귀속(vcenterId 없음)은 숨김 유지**(인증서 항목에는 지역이 없어 지역 귀속은 쓰지 않는다). vCenter 필터 조회는 그 vCenter 귀속분만.
+//   일일 보고(reports/dailyReport.js — 알림 채널로 보내는 전 함대 보고)는 사용자 범위가 없어 그대로다.
+export function scopedCertItems(items, allowed, vcenterId = '', vcenters = []) {
+  return (Array.isArray(items) ? items : []).filter((it) => {
+    if (!it) return false;
+    if (it.kind === 'vcenter') return (!allowed || allowed.has(it.id)) && (!vcenterId || it.id === vcenterId);
+    if (it.kind !== 'nsx') return !allowed && !vcenterId;   // 모르는 종류는 예전 규칙(전체 범위 · 필터 없음에서만)
+    const vc = typeof it.vcenterId === 'string' ? it.vcenterId : '';
+    if (vcenterId && vc !== vcenterId) return false;
+    return visibleNsxManagers([{ vcenterId: vc, region: '' }], vcenters, allowed).length > 0;
+  });
+}
 function scopedCerts(user, snap, vcenterId) {
   const c = certStatus();
   const allowed = scopedVcenterIds(user, snap);
-  const items = (c.items || []).filter((it) => {
-    if (it.kind === 'vcenter') return (!allowed || allowed.has(it.id)) && (!vcenterId || it.id === vcenterId);
-    return !allowed && !vcenterId; // nsx: 전체 범위 조회에서만
-  });
-  return { ...c, items };
+  return { ...c, items: scopedCertItems(c.items, allowed, typeof vcenterId === 'string' ? vcenterId : '', snap?.vcenters || []) };
+}
+
+/**
+ * 미보호 VM 계산(라우트 · 정기 점검 보고 공급자가 같이 쓴다 — v3.32). req.user 로 범위를 먼저 자른다(시스템 계정이면 전체).
+ * @param {{user:object}} req @param {object} snap @param {{vcenterId?:string, lookbackDays?:number|string, patterns?:string}} q
+ */
+export async function unprotectedData(req, snap, q = {}) {
+  const db = await getLogsDb();
+  {
+    const scoped = scopeSlice(snap, req.user, q.vcenterId);
+    const lookbackDays = Math.min(90, Math.max(1, Number(q.lookbackDays) || 7));
+    const patterns = String(q.patterns || ''); // v2.606 SEC2606-02: computeUnprotected 가 최대 32개·64자로 자르고 버린 개수를 config.patternsOmitted 로 밝힌다
+    // 'Snapshot' 선필터(type LIKE)로 창 내 스냅샷 이벤트만 가져온다. scope 는 post-filter 대신 SQL 로
+    // 밀어넣어, 범위 밖 vCenter 스냅샷이 20k 창을 밀어내 in-scope VM 이 '미보호'로 오탐되지 않게 한다.
+    const vcParam = q.vcenterId || '';
+    const allowed = scopedVcenterIds(req.user, snap);
+    const now = Date.now();
+    const lf = { vcenterId: vcParam, q: 'Snapshot', since: now - lookbackDays * 86_400_000 };
+    if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
+    const ROW_LIMIT = 20_000;
+    // v2.732(점검 2회차 B6-03): 'Snapshot' 4열 LIKE 를 조회 창 전체에 한 문장으로 돌려(합성 7일 80만 행 · 431ms, 범위 계정 693ms 정지 — 재현)
+    //   60초 폴링·사용자·조건마다 이벤트 루프를 멈췄다. 같은 결과를 1시간 조각(최신부터) + 조각 사이 시간 기준 양보로 읽는다
+    //   (logs/db.js queryAsync — 한 문장 판과 행 순서·내용이 같다. 테스트가 대조한다).
+    // v2.763(V4-1): 한국어 검색어도 · 상한은 검색어마다
+    const read = (q) => (db.queryAsync ? db.queryAsync({ ...lf, q }, ROW_LIMIT) : db.query({ ...lf, q }, ROW_LIMIT, 0));
+    const parts = [await read('Snapshot'), await read('스냅샷')];
+    const rows = mergeSnapRows(parts);
+    const truncated = parts.some((x) => x.length >= ROW_LIMIT);
+    // v2.622(감사 DATA-05): 조회 창 안에 이벤트(종류 무관)가 1건이라도 저장된 vCenter 만 '판정 가능' 이다 — 엣지 위임·
+    //   수집 실패로 이벤트가 없는 vCenter 의 VM 을 미보호로 세면 거짓 백업 공백이다. (vcenterId, ts) 인덱스 LIMIT 2 조회라 가볍다.
+    const coveredVcenterIds = new Set();
+    // v2.732(점검 2회차 B4-01 후속): 중앙이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임)는 창 안에 옛 이벤트가 남아 있어도
+    //   '판정 가능' 이 아니다 — 수집을 멈춘 뒤의 스냅샷 이벤트가 없으므로 그 VM 을 미보호로 세면 거짓 백업 공백이다(로그 폴러가 2.732 부터 그 셋을 건너뛴다).
+    // v2.733(점검 3회차 C1-01): 판정은 logs/coverage.js 하나(형제 리포트와 같다). mock 모드는 로그 폴러가 스냅샷 vCenter 전부를 모으므로 빈 맵이다.
+    //   id → 사유 맵을 그대로 넘겨 summary.notCollectedVcenters 가 사유를 함께 싣는다.
+    const ncMap = eventNotCollectedMap();
+    const notCollectedVcenterIds = new Map();
+    for (const vc of scoped.vcenters || []) {
+      const why = ncMap.get(String(vc.id));
+      if (why) { notCollectedVcenterIds.set(String(vc.id), why); continue; }
+      if (db.countCapped({ vcenterId: vc.id, since: lf.since }, 1).total > 0) coveredVcenterIds.add(String(vc.id));
+    }
+    // v2.772(Z4-1): 수집은 하지만 완결 시각이 허용치보다 낡은 vCenter(따라잡기 중 포함) — 보호 근거가 없는 VM 은 미보호가 아니라
+    //   판정 불가('collect-lag'). 판정은 logs/coverage.js 한 벌(VM 가용성의 측정 끝과 같은 코어 · 같은 허용치). 범위는 이미 거른 scoped.vcenters.
+    //   판정을 못 하면(null — 등록부·폴러를 못 읽음) 예전처럼 판정한다(근거 없이 '판정 불가' 로 몰지 않는다). memo 30초라 지연 변화는 30초 안에 반영된다.
+    const lag = await eventLagForView({ db, now, only: (scoped.vcenters || []).map((v) => String(v.id)), notCollected: ncMap });
+    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, truncated, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds, laggingVcenters: Array.isArray(lag) ? lag : undefined });
+  }
 }
 
 export function registerReports(api) {
+// v3.32 정기 점검 보고 — 미보호 VM 은 이 계산 하나(시스템 계정 = 전체 범위)를 리더가 공급자로 부른다(periodic/providers.js).
+setPeriodicProvider('unprotected', (q = {}) => unprotectedData(SYSTEM_REQ, store.get(), q));
 
 // ① 일일 헬스체크 리포트(vCheck 스타일) — 화면 조회용(발송은 /admin/report/daily).
 api.get('/tools/report/health', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-health', (snap) => {
@@ -119,7 +181,9 @@ api.get('/tools/report/certs', requirePerm('tools'), (req, res) => {
 // ⑤ VM 라이트사이징 — 관측 평균/피크(vmStats 누적) 기반 축소 추천.
 api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-rightsizing', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-  return { ...computeRightsizing(scoped.vms, vmStatsFor), stats: vmStatsMeta() };
+  // 72회차 F1: 범위 계정 · vCenter 를 고른 조회의 누적 메타는 그 VM 들만(함대 전체 추적 수를 싣지 않는다).
+  const narrowed = !!scopedVcenterIds(req.user, snap) || !!req.query.vcenterId;
+  return { ...computeRightsizing(scoped.vms, vmStatsFor), stats: vmStatsMeta(narrowed ? (scoped.vms || []).map((v) => v.id) : undefined) };
 }, { extraKey: scopeKey(req.user, store.get()), ttlMs: 30_000 }));
 
 // ⑥ 용량 고갈 예측 — 기존 forecastCapacity(선형회귀) 재사용(특수기능 진입점).
@@ -216,50 +280,9 @@ api.get('/tools/report/changes', requirePerm('tools'), async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
+
 // ⑩ 미보호 VM(백업 공백) — 백업 계정 패턴의 스냅샷 이벤트가 관측되지 않은 가동 VM.
 // v2.503 성능: 이 라우트는 로그 DB 에서 **2만 행을 동기로** 읽어 VM 전량과 대조하는데 memo 가
 // 없었다(형제 리포트는 전부 memoJson). 화면은 60초마다 폴링한다 — 사용자 수만큼 그대로 반복됐다.
-api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-unprotected', async (snap) => {
-  const db = await getLogsDb();
-  {
-    const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-    const lookbackDays = Math.min(90, Math.max(1, Number(req.query.lookbackDays) || 7));
-    const patterns = String(req.query.patterns || ''); // v2.606 SEC2606-02: computeUnprotected 가 최대 32개·64자로 자르고 버린 개수를 config.patternsOmitted 로 밝힌다
-    // 'Snapshot' 선필터(type LIKE)로 창 내 스냅샷 이벤트만 가져온다. scope 는 post-filter 대신 SQL 로
-    // 밀어넣어, 범위 밖 vCenter 스냅샷이 20k 창을 밀어내 in-scope VM 이 '미보호'로 오탐되지 않게 한다.
-    const vcParam = req.query.vcenterId || '';
-    const allowed = scopedVcenterIds(req.user, snap);
-    const now = Date.now();
-    const lf = { vcenterId: vcParam, q: 'Snapshot', since: now - lookbackDays * 86_400_000 };
-    if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
-    const ROW_LIMIT = 20_000;
-    // v2.732(점검 2회차 B6-03): 'Snapshot' 4열 LIKE 를 조회 창 전체에 한 문장으로 돌려(합성 7일 80만 행 · 431ms, 범위 계정 693ms 정지 — 재현)
-    //   60초 폴링·사용자·조건마다 이벤트 루프를 멈췄다. 같은 결과를 1시간 조각(최신부터) + 조각 사이 시간 기준 양보로 읽는다
-    //   (logs/db.js queryAsync — 한 문장 판과 행 순서·내용이 같다. 테스트가 대조한다).
-    // v2.763(V4-1): 한국어 검색어도 · 상한은 검색어마다
-    const read = (q) => (db.queryAsync ? db.queryAsync({ ...lf, q }, ROW_LIMIT) : db.query({ ...lf, q }, ROW_LIMIT, 0));
-    const parts = [await read('Snapshot'), await read('스냅샷')];
-    const rows = mergeSnapRows(parts);
-    const truncated = parts.some((x) => x.length >= ROW_LIMIT);
-    // v2.622(감사 DATA-05): 조회 창 안에 이벤트(종류 무관)가 1건이라도 저장된 vCenter 만 '판정 가능' 이다 — 엣지 위임·
-    //   수집 실패로 이벤트가 없는 vCenter 의 VM 을 미보호로 세면 거짓 백업 공백이다. (vcenterId, ts) 인덱스 LIMIT 2 조회라 가볍다.
-    const coveredVcenterIds = new Set();
-    // v2.732(점검 2회차 B4-01 후속): 중앙이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임)는 창 안에 옛 이벤트가 남아 있어도
-    //   '판정 가능' 이 아니다 — 수집을 멈춘 뒤의 스냅샷 이벤트가 없으므로 그 VM 을 미보호로 세면 거짓 백업 공백이다(로그 폴러가 2.732 부터 그 셋을 건너뛴다).
-    // v2.733(점검 3회차 C1-01): 판정은 logs/coverage.js 하나(형제 리포트와 같다). mock 모드는 로그 폴러가 스냅샷 vCenter 전부를 모으므로 빈 맵이다.
-    //   id → 사유 맵을 그대로 넘겨 summary.notCollectedVcenters 가 사유를 함께 싣는다.
-    const ncMap = eventNotCollectedMap();
-    const notCollectedVcenterIds = new Map();
-    for (const vc of scoped.vcenters || []) {
-      const why = ncMap.get(String(vc.id));
-      if (why) { notCollectedVcenterIds.set(String(vc.id), why); continue; }
-      if (db.countCapped({ vcenterId: vc.id, since: lf.since }, 1).total > 0) coveredVcenterIds.add(String(vc.id));
-    }
-    // v2.772(Z4-1): 수집은 하지만 완결 시각이 허용치보다 낡은 vCenter(따라잡기 중 포함) — 보호 근거가 없는 VM 은 미보호가 아니라
-    //   판정 불가('collect-lag'). 판정은 logs/coverage.js 한 벌(VM 가용성의 측정 끝과 같은 코어 · 같은 허용치). 범위는 이미 거른 scoped.vcenters.
-    //   판정을 못 하면(null — 등록부·폴러를 못 읽음) 예전처럼 판정한다(근거 없이 '판정 불가' 로 몰지 않는다). memo 30초라 지연 변화는 30초 안에 반영된다.
-    const lag = await eventLagForView({ db, now, only: (scoped.vcenters || []).map((v) => String(v.id)), notCollected: ncMap });
-    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, truncated, logSettings: loadLogSettings(), coveredVcenterIds, notCollectedVcenterIds, laggingVcenters: Array.isArray(lag) ? lag : undefined });
-  }
-}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-unprotected', async (snap) => unprotectedData(req, snap, req.query), { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

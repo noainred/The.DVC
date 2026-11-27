@@ -17,7 +17,7 @@ describe('P-B3 prunePlan', () => {
     expect(p.keys).toEqual(['ghost1', 'ghost2']);
     expect(p.confirm).toContain('유령 키 2개');
     expect(p.confirm).toContain('분류 태그 1건');
-    expect(p.confirm).toContain('소속 법인 1건');
+    expect(p.confirm).toContain('소속 vCenter 1건');   // v2.969: '법인' 은 법인(DataCenter) 이 됐다 — 이 저장소는 vCenter 지정이다
     expect(p.confirm).toContain('ghost1, ghost2');
   });
   it('읽지 못한 출처가 있으면(blocked) 묻지 않고 사유를 보인다', () => {

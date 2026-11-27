@@ -15,7 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F4: 읽기 오류 ≠ 손상(손상 보존은 공용 읽기가 한다)
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { parseCsvRows, csvLine, unguardCell } from '../util/csv.js';
 
@@ -66,16 +67,32 @@ function normSsh(input, prev) {
  * `server/CLAUDE.md` v2.257 M3("host 변경 시 저장 비번을 이월하지 않는다")의 직접 회귀였다.
  * 개인키/패스프레이즈는 publickey 인증이라 선로에 나가지 않지만, 같은 규칙으로 함께 끊는다(원칙 단순화).
  */
-function normNode(n, prev) {
+function normNode(n, prev, { viaMoved = false } = {}) {
   const next = { privateIp: ip(n?.privateIp), publicIp: ip(n?.publicIp), vcenterIp: ip(n?.vcenterIp) };
-  const hostChanged = !!prev && (next.privateIp !== (prev.privateIp || '') || next.publicIp !== (prev.publicIp || ''));
+  // 63회차 F1: IRS 는 중계 엣지(Edge host:중계 포트)로 접속한다(ops.js resolveNodeAccess) — Edge host 가 바뀌면
+  //   IRS 의 접속처도 바뀐다. 예전에는 IRS 자기 IP 만 비교해, Edge publicIp 만 공격자 호스트로 바꾸면 IRS 비밀번호가
+  //   그 호스트로 나갔다(재현). viaMoved = 같은 사이트 Edge 의 host 변경.
+  const hostChanged = !!prev && (viaMoved || next.privateIp !== (prev.privateIp || '') || next.publicIp !== (prev.publicIp || ''));
   return { ...next, ssh: normSsh(n?.ssh, hostChanged ? null : prev?.ssh), _secretsDropped: hostChanged && hasSecret(prev?.ssh) };
 }
 const hasSecret = (ssh) => SSH_SECRETS.some((k) => !!ssh?.[k]);
+/** 노드 host(privateIp/publicIp)가 바뀌었는가 — 저장·가져오기 공용(63회차 F1·F2). */
+const nodeHostMoved = (a, b) => (ip(a?.privateIp) !== ip(b?.privateIp) || ip(a?.publicIp) !== ip(b?.publicIp));
+/** IRS SSH 를 중계하는 서비스(순수) — 접속(ops.js resolveNodeAccess)과 비밀 이월 판정이 같은 함수를 쓴다(66회차). */
+export function irsRelayService(services, irs) {
+  const want = Number(irs?.ssh?.port || 22);
+  return (Array.isArray(services) ? services : []).find((s) => s && s.enabled !== false && s.target === 'irs' && Number(s.targetPort) === want) || null;
+}
+/** IRS 에 SSH 로 실제로 닿는 host(순수) — 중계 서비스와 Edge 주소가 있으면 Edge, 아니면 IRS 자기 주소(resolveNodeAccess 와 같은 규칙). */
+export function irsAccessHost(services, site) {
+  const edgeHost = site?.edge?.publicIp || site?.edge?.privateIp || '';
+  return irsRelayService(services, site?.irs) && edgeHost ? edgeHost : (site?.irs?.publicIp || site?.irs?.privateIp || '');
+}
 
 export function normalizeTopology(input = {}, prev = null) {
   const mainHostChanged = !!prev?.main && (ip(input.main?.privateIp) !== (prev.main.privateIp || '') || ip(input.main?.publicIp) !== (prev.main.publicIp || ''));
   const main = { name: str(input.main?.name, 40) || 'Main', privateIp: ip(input.main?.privateIp), publicIp: ip(input.main?.publicIp), portalPort: port(input.main?.portalPort, port(prev?.main?.portalPort, 4000)), ssh: normSsh(input.main?.ssh, mainHostChanged ? null : prev?.main?.ssh) };
+  const mainDropped = mainHostChanged && hasSecret(prev?.main?.ssh);   // 63회차 F2: Main 도 버린 사실을 알린다(사이트 노드와 같은 규칙)
   // v2.606(감사 WEB2606-10): 버린 서비스 행을 **조용히 지우지 않는다** — 포트 칸을 비우고 저장하면 그 행이 사라졌는데
   // 응답에 흔적이 없었다. 버린 key·사유를 servicesDropped(비열거 — 저장 파일에는 남지 않는다)로 싣고 라우트·화면이 말한다.
   const servicesDropped = [];
@@ -95,17 +112,28 @@ export function normalizeTopology(input = {}, prev = null) {
     seenPort.add(s.listenPort); uniq.push(s);
   }
   const prevSites = new Map((prev?.sites || []).map((s) => [s.dc, s]));
-  const dropped = [];   // host 가 바뀌어 저장된 비밀을 버린 노드(화면에 알린다 — 조용히 지우면 더 나쁘다)
+  const finalServices = uniq.length ? uniq : DEFAULT_SERVICES.map((x) => ({ ...x }));
+  const dropped = mainDropped ? ['Main'] : [];   // host 가 바뀌어 저장된 비밀을 버린 노드(화면에 알린다 — 조용히 지우면 더 나쁘다)
   const sites = (Array.isArray(input.sites) ? input.sites : []).map((s) => {
     const dc = str(s?.dc, 40); const p = prevSites.get(dc);
-    const edge = normNode(s?.edge, p?.edge); const irs = normNode(s?.irs, p?.irs);
+    const edge = normNode(s?.edge, p?.edge);
+    const edgeMoved = !!p?.edge && nodeHostMoved(edge, p.edge);
+    let irs = normNode(s?.irs, p?.irs, { viaMoved: edgeMoved });   // 63회차 F1
+    // 66회차(63회차 F1 덜 고침 — 재현): IRS 의 **접속 경로**(중계 엣지 경유 ↔ IRS 주소 직접)도 접속처다. 주소는 그대로 두고 IRS SSH 포트나
+    //   중계 서비스(끄기 · 대상 포트)만 바꾸면 경로가 'Edge:중계 포트' 에서 'IRS 사설 주소:새 포트'(중앙 망에서는 다른 장비일 수 있다)로 바뀌는데
+    //   비밀번호를 그대로 이었다. 실제로 닿는 host 가 바뀌면 버린다(같은 host 의 포트만 바뀐 것은 다른 노드처럼 잇는다).
+    const routeMoved = !!p?.irs && irsAccessHost(finalServices, { edge, irs }) !== irsAccessHost(prev?.services, p);
+    if (routeMoved && !irs._secretsDropped) irs = normNode(s?.irs, p.irs, { viaMoved: true });
     if (edge._secretsDropped) dropped.push(`${dc} Edge`);
-    if (irs._secretsDropped) dropped.push(`${dc} IRS`);
+    if (irs._secretsDropped) {
+      dropped.push(p?.irs && nodeHostMoved(irs, p.irs) ? `${dc} IRS`
+        : edgeMoved ? `${dc} IRS(Edge 주소 변경 — IRS 는 Edge 경유)` : `${dc} IRS(접속 경로 변경 — 중계 엣지 경유와 직접 접속이 바뀜)`);
+    }
     delete edge._secretsDropped; delete irs._secretsDropped;
     return { dc, edge, irs, sshTargetId: str(s?.sshTargetId, 64), note: str(s?.note, 200) };
   }).filter((s) => s.dc).slice(0, 200);
   const seenDc = new Set(); const uniqSites = sites.filter((s) => (seenDc.has(s.dc) ? false : (seenDc.add(s.dc), true)));
-  const out = { main, services: uniq.length ? uniq : DEFAULT_SERVICES.map((x) => ({ ...x })), sites: uniqSites };
+  const out = { main, services: finalServices, sites: uniqSites };
   if (dropped.length) Object.defineProperty(out, 'secretsDropped', { value: dropped, enumerable: false });
   // 전부 버려져 기본 서비스로 되돌아간 경우도 servicesDropped 가 그 사실을 말한다(servicesReset).
   if (servicesDropped.length) Object.defineProperty(out, 'servicesDropped', { value: servicesDropped, enumerable: false });
@@ -114,11 +142,25 @@ export function normalizeTopology(input = {}, prev = null) {
 }
 
 let _cache = null;
+/*
+ * 103회차 F4(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(사이트 · 노드 SSH 비밀 봉인본)을 `.corrupt.*` 로 옮긴 뒤 빈 토폴로지를
+ *   캐시했다 — 다음 저장(normalizeTopology(입력, 빈 이전값))이 저장 비밀을 승계하지 못해 전 노드의 SSH 비밀이 보존본에만 남았다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · 저장을 409 로 거절한다.
+ *   parse · 복호 실패는 예전과 같이 손상(보존본으로 옮김).
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => openSecretsDeep(JSON.parse(t)), tag: 'relaytopo' });
+let _readErr = null;   // { at, code }
+/** 103회차 F4: relay-topology.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function relayTopologyReadError() { loadRaw(); return _readErr ? { ..._readErr } : null; }
 function loadRaw() {
   if (!_cache) {
-    let raw = {};
-    try { if (fs.existsSync(FILE())) raw = openSecretsDeep(JSON.parse(fs.readFileSync(FILE(), 'utf8'))); } catch { preserveCorrupt(FILE()); raw = {}; }
-    _cache = normalizeTopology(raw);
+    const rr = _reader.read();
+    if (rr.kind === 'read-error') {
+      if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+      return normalizeTopology({});   // 캐시하지 않는다 — 저장은 saveTopology 가 거절한다
+    }
+    _readErr = null;
+    _cache = normalizeTopology(rr.kind === 'ok' ? rr.value : {});
   }
   return _cache;
 }
@@ -129,7 +171,10 @@ export function loadTopology() { return redactTopology(loadRaw()); }
 export function saveTopology(input = {}) {
   // v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 뒤에도 SSH 비밀 포함 토폴로지가 메모리에
   //   남아 점검·렌더·적용이 그 값을 썼다. 정규화가 붙인 비열거 필드(secretsDropped 등)는 next 에 붙어 있어 _cache = next 로 그대로 넘어간다.
-  const next = normalizeTopology(input, loadRaw());
+  // 103회차 F4: 읽기 오류 중에는 이전값(저장 비밀)이 없다 — 저장하면 원본 자리를 비밀 없는 토폴로지로 덮는다(라우트 409).
+  const prev = loadRaw();
+  if (_readErr) throw Object.assign(new Error(`중계 토폴로지 파일(relay-topology.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본(저장 비밀 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`), { status: 409, code: 'settings-unreadable', readError: true });
+  const next = normalizeTopology(input, prev);
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ...next }), null, 2), { mode: 0o600 });
   _cache = next;
   try { fs.chmodSync(FILE(), 0o600); } catch { /* 신규 생성 외 덮어쓰기에도 0600 */ }
@@ -138,7 +183,7 @@ export function saveTopology(input = {}) {
   for (const k of ['servicesDropped', 'servicesReset', 'secretsDropped']) if (_cache[k] !== undefined) Object.defineProperty(out, k, { value: _cache[k], enumerable: false });
   return out;
 }
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _readErr = null; _reader.reset(); }
 
 const redactSsh = (s) => { const out = { port: s?.port || 22, username: s?.username || '' }; for (const k of SSH_SECRETS) out[`has${k[0].toUpperCase()}${k.slice(1)}`] = !!s?.[k]; return out; };
 const redactNode = (n) => ({ ...n, ssh: redactSsh(n?.ssh) });
@@ -212,21 +257,37 @@ export function topologyToCsv(t) {
  */
 export function mergeImport(current, parsed, { replace = false } = {}) {
   const next = structuredClone(current);
-  if (parsed.main && (parsed.main.privateIp || parsed.main.publicIp)) next.main = { ...next.main, ...Object.fromEntries(Object.entries(parsed.main).filter(([k, v]) => v && ['name', 'privateIp', 'publicIp', 'portalPort'].includes(k))), ssh: { ...(next.main.ssh || {}), ...(parsed.main.ssh || {}) } };
+  // 63회차 F2: Main 도 host 가 바뀌면 저장된 비밀을 잇지 않는다 — 예전에는 현재 ssh(비밀 포함)를 그대로 펼쳐 입력에 실어,
+  //   normalizeTopology 가 host 변경을 알아도 '입력에 있는 비밀' 로 받아 새 host 로 보냈다(재현 — 사이트 노드 S1 의 형제).
+  const noSecrets = (ssh) => Object.fromEntries(Object.entries(ssh || {}).filter(([k]) => !SSH_SECRETS.includes(k)));
+  if (parsed.main && (parsed.main.privateIp || parsed.main.publicIp)) {
+    const picked = Object.fromEntries(Object.entries(parsed.main).filter(([k, v]) => v && ['name', 'privateIp', 'publicIp', 'portalPort'].includes(k)));
+    const nm = { ...next.main, ...picked };
+    const keep = nodeHostMoved(nm, next.main) ? noSecrets(next.main.ssh) : (next.main.ssh || {});
+    next.main = { ...nm, ssh: { ...keep, ...(parsed.main.ssh || {}) } };
+  }
+  const prevServices = current?.services;
+  if (parsed.services?.length) next.services = parsed.services;
+  const prevByDc = new Map((current?.sites || []).map((s) => [s.dc, s]));
   const byDc = new Map((replace ? [] : next.sites).map((s) => [s.dc, s]));
   for (const p of parsed.sites || []) {
     const cur = byDc.get(p.dc) || { dc: p.dc, edge: { privateIp: '', publicIp: '', vcenterIp: '', ssh: {} }, irs: { privateIp: '', publicIp: '', vcenterIp: '', ssh: {} }, sshTargetId: '', note: '' };
     // S1(v2.435): 가져오기로 host 가 바뀌면 저장된 비밀을 잇지 않는다(저장 경로와 같은 규칙).
-    const mergeNode = (a, b) => {
+    const mergeNode = (a, b, viaMoved = false) => {
       const privateIp = b?.privateIp || a.privateIp; const publicIp = b?.publicIp || a.publicIp;
-      const changed = (privateIp !== (a.privateIp || '') || publicIp !== (a.publicIp || ''));
-      const keep = changed ? {} : (a.ssh || {});
+      const changed = viaMoved || (privateIp !== (a.privateIp || '') || publicIp !== (a.publicIp || ''));
+      const keep = changed ? noSecrets(a.ssh) : (a.ssh || {});   // 66회차: 비밀만 뺀다(포트 · 계정은 잇는다 — Main 과 같은 규칙)
       return { privateIp, publicIp, vcenterIp: b?.vcenterIp || a.vcenterIp,
         ssh: { ...keep, ...Object.fromEntries(Object.entries(b?.ssh || {}).filter(([, v]) => v)) } };
     };
-    byDc.set(p.dc, { ...cur, edge: mergeNode(cur.edge, p.edge), irs: mergeNode(cur.irs, p.irs), note: p.note || cur.note });
+    // 63회차 F1: IRS 는 Edge 를 경유해 접속하므로 Edge host 가 바뀌면 IRS 비밀도 잇지 않는다(저장 경로 normalizeTopology 와 같은 규칙).
+    const edge = mergeNode(cur.edge, p.edge);
+    let irs = mergeNode(cur.irs, p.irs, nodeHostMoved(edge, cur.edge));
+    // 66회차: 접속 경로(중계 ↔ 직접)가 바뀌어도 잇지 않는다 — 가져온 SSH 포트 · 서비스 목록으로 경로가 바뀔 수 있다(저장 경로와 같은 판정).
+    const was = prevByDc.get(p.dc);
+    if (was && irsAccessHost(next.services, { edge, irs }) !== irsAccessHost(prevServices, was)) irs = mergeNode(cur.irs, p.irs, true);
+    byDc.set(p.dc, { ...cur, edge, irs, note: p.note || cur.note });
   }
   next.sites = [...byDc.values()];
-  if (parsed.services?.length) next.services = parsed.services;
   return next;
 }

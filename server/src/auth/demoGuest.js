@@ -35,6 +35,10 @@ export const READ_DENY = [
   '/api/admin/portal-db', '/api/admin/status', '/api/admin/emergency-stop', '/api/admin/net', '/api/admin/dir-usage',
   '/api/admin/os-scan', '/api/admin/idrac/scan-ranges', '/api/admin/veeam', '/api/admin/report', '/api/admin/logs',
   '/api/auth/ad-config', '/api/upgrade', '/api/tools/credentials', '/api/remote',
+  // v3.45: 물리서버 자산 원장(서비스 태그 · 계약 번호 · 올린 사람) · 펌웨어 기준(지정한 사람) — 전체 범위 관리자의 관리 화면이다
+  '/api/admin/bm-assets', '/api/admin/bm-assets.csv', '/api/admin/bm-fw-baseline',
+  '/api/admin/bm-advisories', '/api/admin/bm-advisories.csv',   // v3.50 보안 권고 표
+  '/api/tools/part-faults/escalation',   // v3.51 알림 단계 · 당직 설정(당직 이름 · 메일 주소 — 반증 A10)
   // v2.719(감사 R1-08): /api/tools 아래 보안 화면 — 설정 파일 평문 비밀 개수·탐지 위치(secret-scan)와
   //   전 엣지 주소·토큰 지문·길이(portal-check/tokens). 접두가 /api/admin/security 뿐이라 빠져 있었다.
   '/api/tools/secret-scan', '/api/tools/portal-check/tokens',
@@ -50,6 +54,8 @@ export const READ_DENY = [
   '/api/tools/edge-log-local',
   // v2.820: Bareos Director 설정(주소·콘솔 이름)과 Director 카탈로그(실제 Director 에 접속) — 설정 탭.
   '/api/tools/bareos-backup/settings',   // v2.823: 카탈로그·매핑 제안·자동 설정도 /settings/directors/… 아래(옛 /catalog 경로는 없앴다 — 검토 I5)
+  // v2.932(점검 D1-02): Monitoring 설정 연동 — 통신 점검(/api/tools/link-check)과 같은 카탈로그(전 시스템 이름·호스트·포트·담당 엣지)를 싣는다.
+  '/api/svcmon/settings-sync',
 ];
 
 /** v2.720(감사 R1-03·R1-06): 데모 계정이 사람이 등록한(비-mock) 장비를 수집하려 할 때 라우트·폴러가 함께 쓰는 문구. */

@@ -134,9 +134,13 @@ test('D-01: 손상된 iDRAC 스캔 배정·GPU 게스트 배포 파일 → pull 
     assert.ok(fs.readdirSync(TMP).some((n) => n.startsWith(`${f}.corrupt.`)), `${f} 보존본`);
   }
   // 관리자 저장 → 풀린다(배정된 엣지는 200 assigned:true, 배정 없는 엣지는 200 assigned:false)
+  //   전체 점검 18회차 B-3: iDRAC 스캔 배정은 한 엣지 추가 · 수정 · 삭제로는 풀리지 않는다(다른 엣지 배정이 빠져 위임 스캔이 멈췄다) —
+  //   목록 전체를 다시 정하는 바꾸기 가져오기(또는 서비스 점검 확정 · 보존본 복구)로만 푼다. GPU 게스트 배포는 예전 그대로(엣지가 로컬 값을 유지 — 파괴적이지 않다).
   const asg = await import('../src/central/assignments.js');
   const gpu = await import('../src/central/agentGpuGuestConfig.js');
-  assert.equal(asg.addAssignment({ agent: 'edge-a', ips: '10.0.0.1', username: 'root', password: 'pw-a' }).ok, true);
+  const one = { agent: 'edge-a', ips: '10.0.0.1', username: 'root', password: 'pw-a' };
+  assert.equal(asg.addAssignment(one).code, 'registry-unreadable');
+  assert.equal(asg.importAssignments([one], 'replace').ok, true);
   gpu.setAssignedGpuGuest('edge-a', { enabled: true });
   assert.equal(asg.assignmentsLoadError(), null); assert.equal(gpu.gpuGuestConfigLoadError(), null);
   const a = await (await cget('/assignment?agent=edge-a')).json();

@@ -23,6 +23,9 @@ import { unitText } from './unitText.js';
 import { forecastStaleText, FORECAST_STALE_TITLE, forecastLimitKind } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { suggestCell, heldNote } from './rightsizeText.js';
 import Select from '../components/Select.jsx';
+import { saveBlob } from '../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 // v2.727(감사 C-01): 값이 없으면(null — 못 읽은 디스크 용량) '0 GB' 가 아니라 '—'.
 const tb = (gb) => { const n = numOrNull(gb); return n == null ? '—' : (n >= 1024 ? `${(n / 1024).toFixed(1)} TB` : `${Math.round(n)} GB`); };
@@ -31,9 +34,7 @@ const tb = (gb) => { const n = numOrNull(gb); return n == null ? '—' : (n >= 1
 function exportCsv(name, head, rows) {
   const csv = [head.map(csvCell).join(','), ...rows.map((r) => r.map(csvCell).join(','))].join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `${name}-${dayStamp()}.csv`; a.click();
-  URL.revokeObjectURL(url);
+  saveBlob(blob, `${name}-${dayStamp()}.csv`);
 }
 
 const STATUS_BADGE = {
@@ -69,7 +70,13 @@ export function DailyHealth({ scope, isAdmin }) {
   }, [isAdmin]);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
+  // 112회차: 서버가 일일 리포트 설정 파일을 못 읽은 동안 sched 는 기본값(꺼짐 · 기본 시각) + loadError 다 — 그 값에 덧댄 저장이 다시 읽힌 뒤 저장된 사용 여부 · 시각을 덮었다.
+  //   읽기 오류면 저장하지 않는다(서버도 503). ‘다시 확인’ 이 sched 를 통째로 다시 받는다.
+  const schedUnread = unreadMarkOf(sched);
+  const schedLocked = saveLockedByUnread(schedUnread);
+  const reloadSched = () => fetchJson('/admin/report/daily').then((r) => { setSched(r); setSchedErr(null); }).catch((e) => setSchedErr(e));
   const saveSched = async (patch) => {
+    if (schedLocked) { setSaving('설정 파일을 읽지 못한 상태라 저장하지 않았습니다'); return; }
     setSaving('저장 중…');
     try { const r = await putJson('/admin/report/daily', { ...sched, ...patch }); setSched({ ...sched, ...r.settings }); setSaving('저장됨'); }
     catch (e) { setSaving(`실패: ${e.message}`); }
@@ -100,6 +107,7 @@ export function DailyHealth({ scope, isAdmin }) {
       {isAdmin && !sched && adminLoadErr('일일 보고 설정', schedErr)}
       {isAdmin && sched && (
         <div className="card" style={{ marginBottom: 12 }}>
+          <SettingsUnreadBanner le={schedUnread} what="일일 리포트 설정" save="사용 · 시각 저장" onRecheck={reloadSched} />
           <div className="flex wrap gap" style={{ alignItems: 'center' }}>
             <b style={{ fontSize: 13 }}>⏰ 매일 자동 발송</b>
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
@@ -187,7 +195,8 @@ export function SnapshotAge({ scope }) {
             rows.map((r) => [r.name, r.vcenterId, r.ageDays ?? '', r.oldestTs ? new Date(r.oldestTs).toISOString() : '', r.snapshotCount, r.snapshotSizeGB, r.powerState]))}>CSV</button>}
         </div>
       </div>
-      <ResultCount count={rows.length} />
+      {/* 95회차: ResultCount 에는 count 인자가 없다 — '총 0개' 로만 보였다(total 기본값 0) */}
+      <ResultCount total={rows.length} label="스냅샷 보유 VM" />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'ageDays', dir: 'desc' }} emptyText="조건에 맞는 스냅샷 보유 VM이 없습니다." />
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>생성일은 vCenter 스냅샷 트리의 createTime 기준입니다(수집 주기 내 최신).</p>
     </>
@@ -387,21 +396,24 @@ export function AlertChannels({ isAdmin, initialData = null, initialCfg = null }
   // initialData·initialCfg 는 렌더 스모크 테스트용(서버 없이 계약 모양 응답으로 그린다) — 화면은 넘기지 않는다(마운트 때 읽는다).
   const [cfg, setCfg] = useState(initialCfg);   // 관리자 전체 설정(URL 포함 — 범위 계정이면 서버가 URL 을 가려 보낸다)
   const [cfgErr, setCfgErr] = useState(null); // v2.612 WEB2612-08
+  const [cfgUnread, setCfgUnread] = useState(null);   // 112회차: 알림 설정 파일을 못 읽은 동안의 조회 표지(cfg 는 그때 기본값 — 웹훅 주소 없음)
   const [msg, setMsg] = useState('');
   const polled = usePolling('/tools/report/alerts', {}, 15_000);
   const data = polled.data ?? initialData;
   const { error, loading } = polled;
+  const loadCfg = () => fetchJson('/admin/alerts').then((r) => { setCfgUnread(unreadMarkOf(r)); setCfg(r.config); setCfgErr(null); }).catch((e) => setCfgErr(e));
   useEffect(() => {
     if (!isAdmin) return;
-    fetchJson('/admin/alerts').then((r) => { setCfg(r.config); setCfgErr(null); }).catch((e) => setCfgErr(e));
+    loadCfg();
   }, [isAdmin]);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
   // v2.732(그룹 i3): 범위 계정은 웹훅 URL 이 가려져 오고(B3-03) 저장·테스트 발송이 403 이다 — 버튼을 잠그고 사유를 미리 말한다.
   //   저장 본문에서는 가린 채널의 url 을 뺀다(빈 값을 보내면 서버가 주소를 지운다 — 심층 방어).
   const lock = cfg ? alertsLockReason(cfg) : '';
+  const cfgLocked = saveLockedByUnread(cfgUnread);   // 112회차: 읽기 오류 동안 채널 저장 잠금(서버도 409) — 기본값 폼의 저장이 웹훅 주소를 지우지 않게
   const save = async () => {
-    if (lock) return;
+    if (lock || cfgLocked) return;
     setMsg('저장 중…');
     try { const r = await putJson('/admin/alerts', alertChannelsBody(withoutHiddenUrls(cfg))); if (r && r.ok === false) throw new Error(r.reason || '저장 실패'); setMsg('저장됨'); } // v2.479: sendJson 은 400 을 throw 하지 않는다(웹 B-1)
     catch (e) { setMsg(`실패: ${e.message}`); }
@@ -428,6 +440,7 @@ export function AlertChannels({ isAdmin, initialData = null, initialCfg = null }
       {isAdmin && cfg && (
         <div className="card" style={{ marginBottom: 12 }}>
           <b style={{ fontSize: 13 }}>채널 설정 (관리자)</b>
+          <SettingsUnreadBanner le={cfgUnread} what="알림 채널 설정" save="저장" onRecheck={loadCfg} style={{ marginTop: 6 }} />
           {lock && <div className="muted" data-alert-lock="" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal' }}>{lock} 웹훅 주소는 가렸습니다 — ‘설정됨(가림)’ 은 주소가 저장돼 있다는 뜻입니다.</div>}
           {['slack', 'teams', 'webhook'].map((k) => {
             const uf = channelUrlField(cfg.channels?.[k], `${CH_LABEL[k]} incoming webhook URL`);
@@ -450,7 +463,7 @@ export function AlertChannels({ isAdmin, initialData = null, initialCfg = null }
               <input className="input" type="number" min="0" style={{ width: 80 }} value={cfg.suppressWindowMin ?? 5}
                 onChange={(e) => setCfg({ ...cfg, suppressWindowMin: e.target.value })} /* v2.607 WEB2607-04: 원문 유지, 전송 때 blankOr */ />
             </label>
-            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock || cfgLocked} title={lock || undefined}>저장</button>
             <button className="logout-btn" onClick={test} disabled={!!lock} title={lock || undefined}>테스트 발송</button>
             {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
           </div>

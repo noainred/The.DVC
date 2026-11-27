@@ -4,12 +4,12 @@ import { auditMiddleware } from '../../audit.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
-import { loadUiSettings, saveUiSettings } from '../../ui-settings.js';
+import { loadUiSettings, saveUiSettings, uiSettingsWriteRefusal } from '../../ui-settings.js';
 import { upgradeVmTools } from '../../vcenter/soapClient.js';
 import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 분해
 import { nsxStore } from '../../nsx/store.js';
-import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.js';
+import { licenseExpiryStatus } from '../../util/licenseExpiry.js';
 import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
 import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
@@ -19,7 +19,8 @@ import { visibleNsxManagers } from '../../nsx/scope.js';
 import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
-import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 라이선스 목록을 읽었는가 — 판정 한 벌
+import { vcListUnread, vcListItems, LIST_UNREAD_TEXT, vcenterLicenseRows } from '../../corelicense/analyze.js'; // v2.742(VC-06): 라이선스 목록을 읽었는가 — 판정 한 벌
+import { TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js'; // 전체 점검 32회차 E1: 요청 VM 수 상한
 
 /** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
 export function upgradeVcOf(snap) {
@@ -78,7 +79,8 @@ api.get('/tools/guest-os/vms', requirePerm('tools'), (req, res) => {
   const items = vms.map((v) => ({
     name: v.name, vcenterId: v.vcenterId, cluster: v.cluster || '', host: v.host || '',
     guestOS: v.guestOS || '', powerState: v.powerState,
-    cpu: v.cpuCount || 0, memGB: Math.round((v.memMB || 0) / 1024), diskGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(화면 '—')
+    // v3.28.1: vCPU · 메모리도 못 읽으면 null(화면 '—' · CSV 빈칸) — 예전 `v.cpuCount || 0` 은 '0 vCPU · 0 GB' VM 으로 보였다.
+    cpu: numOrNull(v.cpuCount), memGB: numOrNull(v.memMB) == null ? null : Math.round(numOrNull(v.memMB) / 1024), diskGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(화면 '—')
     ip: (v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : [])).join(' '),
   })).sort((a, b) => (a.vcenterId === b.vcenterId
     ? String(a.name || '').localeCompare(String(b.name || ''))
@@ -191,27 +193,12 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   if (allowed) vcs = vcs.filter((v) => allowed.has(v.id));
   const scoped = Boolean(req.query.vcenterId);
   if (scoped) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
-  const items = [];
   // v2.742(감사 VC-06): 라이선스를 읽지 못한 vCenter — 빈 목록을 '만료 키 없음' 으로 보이지 않게 collectionErrors 에 한 줄씩 싣는다(아래).
-  const vcUnread = [];
-  for (const vc of vcs) {
-    const u = vcListUnread(vc, 'licenses');
-    if (u) vcUnread.push({ vcenterId: vc.id, vcenterName: vc.name || vc.id, why: u.why, ...(isAdminReq(req) && u.error ? { error: u.error } : {}) });
-    for (const l of vcListItems(vc, 'licenses')) {
-      // eval 키('Evaluation Mode')는 total=0·만료 별도 표기 그대로 노출.
-      const ts = l.expires ? (Date.parse(l.expires) || null) : null;
-      const st = licenseExpiryStatus(ts);
-      items.push({
-        source: 'vCenter', where: vc.name || vc.id, vcenterId: vc.id,
-        name: l.name || l.edition || '(이름 없음)',
-        family: licenseFamilyOf(`${l.name} ${l.edition} ${l.product}`),
-        edition: l.edition || '', product: l.product || '', productVersion: l.productVersion || '',
-        key: l.key || '', total: l.total ?? null, used: l.used ?? null,
-        expires: dayKey(ts),
-        status: st.status, daysLeft: st.daysLeft,
-      });
-    }
-  }
+  // v3.42.0: 행 판정은 corelicense/analyze.js vcenterLicenseRows 하나(공개 API /compliance/licenses 와 같은 함수). 오류 원문은 관리자 판본에만.
+  const lic = vcenterLicenseRows(vcs);
+  const items = lic.items;
+  const admin = isAdminReq(req);
+  const vcUnread = lic.unread.map(({ error, ...u }) => ({ ...u, ...(admin && error ? { error } : {}) }));
   // v2.603 AUTHZ-2603-01: 예전에는 `scoped` 가 ?vcenterId 유무만 봐서 **범위 제한 계정**에도 전 함대 NSX 키·Horizon
   // 라이선스·오류(호스트명)가 나갔다. 사용자 범위(allowed)도 함께 본다 — NSX 는 형제 라우트(vcTools·health/network)와
   // 같은 visibleNsxManagers 로 거르고, Horizon 은 vCenter 귀속 축이 없으므로(v2.525) 범위 계정에는 싣지 않는다.
@@ -299,6 +286,8 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
 api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('tools'), auditMiddleware, async (req, res) => { // v2.478(감사 S15): 게스트 재부팅 유발 작업 감사
   let ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
+  // 전체 점검 32회차 E1: 한 요청의 VM 수 상한(화면이 보내는 상한과 같다) — VM 마다 순차 SOAP 왕복이라 RTT 800ms 법인이면 수천 건이 수십 분짜리 요청이 된다.
+  if (ids.length > TOOLS_IDS_MAX) return res.status(400).json({ ok: false, reason: `한 번에 ${TOOLS_IDS_MAX}대까지 요청할 수 있습니다(${ids.length}대 요청).` });
   const snap = store.get();
   // 사용자 scope 강제(쓰기 경로) — id 는 `vcId:moref`. 범위 밖 vCenter 의 VM 에는 Tools 업그레이드를
   // 실행할 수 없다(범위 제한 계정이 타 사이트 VM 을 건드리는 것 차단).
@@ -348,5 +337,8 @@ api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('to
 // Shared UI settings (e.g. dashboard map height) — same for all users.
 api.get('/ui-settings', (_req, res) => res.json(loadUiSettings()));
 // 전 사용자 공유 설정 쓰기 — viewer가 전역 UI 설정을 덮어쓰지 못하게 역할 제한(감사 C2 잔여).
-api.put('/ui-settings', requireRole('admin', 'operator'), (req, res) => res.json(saveUiSettings(req.body || {})));
+api.put('/ui-settings', requireRole('admin', 'operator'), (req, res) => {
+  { const no = uiSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
+  res.json(saveUiSettings(req.body || {}));
+});
 }

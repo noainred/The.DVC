@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정 — 서버 접속(SSH · Windows)</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sa.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 1250px; padding: 24px 28px 40px; display: flex; flex-direction: column; gap: 14px">
+
+  <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 20px">
+    <div style="min-width: 0">
+      <div class="crumb">설정 › 보안</div>
+      <h1 style="font-size: 20px">서버 접속(SSH · Windows)</h1>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px">
+      <button type="button" class="btn">지금 접속 확인</button>
+      <button type="button" class="btn">공통 계정 목록</button>
+      <button type="button" class="btn">키 폴더</button>
+      <button type="button" class="btn p">서버 추가</button>
+    </div>
+  </div>
+
+  <div class="note">계정은 법인 › OS 종류 › 서버 순으로 물려받습니다. 위 단계에 한 번 정하면 아래 서버가 따라 쓰고, 서버에서 따로 정하면 그 서버만 다르게 씁니다. 저장한 비밀번호와 개인키는 다시 보여 주지 않습니다. <span class="dim">이 시안의 법인 · 서버 · 주소 · 날짜 · 대수는 전부 그림용 가상값입니다.</span></div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+    <div class="card" style="display: flex; flex-direction: column; gap: 4px"><span class="dim" style="font-size: 12px">법인</span><span style="font-size: 22px; font-weight: 700">6</span><span class="dim" style="font-size: 12px">엣지에서 접속 4 · 중앙에서 접속 2</span></div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 4px"><span class="dim" style="font-size: 12px">서버</span><span style="font-size: 22px; font-weight: 700">276</span><span class="dim" style="font-size: 12px">Linux 212 · Windows 64</span></div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 4px"><span class="dim" style="font-size: 12px">물려받는 서버</span><span style="font-size: 22px; font-weight: 700">252</span><span class="dim" style="font-size: 12px">법인에서 70 · OS 종류에서 182</span></div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 4px"><span class="dim" style="font-size: 12px">따로 정한 서버</span><span style="font-size: 22px; font-weight: 700">22</span><span class="dim" style="font-size: 12px">이 서버만의 계정 14 · 다른 공통 계정 8</span></div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 4px; border-color: #6b2a2e"><span class="dim" style="font-size: 12px">확인 필요</span><span style="font-size: 22px; font-weight: 700; color: #fca5a5">4</span><span class="dim" style="font-size: 12px">계정 정지 1 · 호스트 키 다름 1 · 미설정 1 · 승인 대기 1</span></div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+
+    <div class="card" style="flex: 0 0 312px; padding: 8px; display: flex; flex-direction: column; gap: 2px">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px">
+        <span class="dim" style="font-size: 12px">법인 › OS 종류 › 서버</span>
+        <button type="button" class="btn" style="min-height: 26px; padding: 2px 8px; font-size: 12px">모두 접기</button>
+      </div>
+
+      <button type="button" aria-expanded="true" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M3 4.5 L6 7.5 L9 4.5"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">KR-본사</span><span class="dim" style="font-size: 12px">96</span><span class="chip c-new">정함</span></button>
+
+      <button type="button" aria-expanded="true" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px 6px 26px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M3 4.5 L6 7.5 L9 4.5"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">Linux</span><span class="dim" style="font-size: 12px">71</span><span class="chip c-mut">물려받음</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #c7d2e4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px"><span style="flex: 1; min-width: 0">kr-db-01</span><span class="dim" style="font-size: 12px">물려받음</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #c7d2e4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px"><span style="flex: 1; min-width: 0">kr-app-07</span><span style="font-size: 12px; color: #fcd34d">따로 정함</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #8b9bb4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px; font-size: 12px">69대 더 보기</button>
+
+      <button type="button" aria-expanded="true" aria-pressed="true" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: #12233f; border: 1px solid #3b82f6; border-radius: 8px; padding: 6px 8px 6px 26px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M3 4.5 L6 7.5 L9 4.5"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">Windows</span><span class="dim" style="font-size: 12px">25</span><span class="chip c-new">정함</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #c7d2e4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px"><span style="flex: 1; min-width: 0">kr-file-02</span><span style="font-size: 12px; color: #fca5a5">로그인 거부</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #c7d2e4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px"><span style="flex: 1; min-width: 0">kr-sql-01</span><span class="dim" style="font-size: 12px">물려받음</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #c7d2e4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px"><span style="flex: 1; min-width: 0">kr-win-03</span><span style="font-size: 12px; color: #fcd34d">따로 정함</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #c7d2e4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px"><span style="flex: 1; min-width: 0">kr-win-11</span><span class="dim" style="font-size: 12px">승인 대기</span></button>
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #8b9bb4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px 5px 62px; display: flex; align-items: center; gap: 6px; min-height: 30px; font-size: 12px">21대 더 보기</button>
+
+      <button type="button" style="font: inherit; text-align: left; cursor: pointer; color: #8b9bb4; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px 6px 44px; display: flex; align-items: center; gap: 6px; min-height: 32px"><span style="flex: 1; min-width: 0">OS 미지정</span><span style="font-size: 12px">0</span></button>
+
+      <button type="button" aria-expanded="false" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M4.5 3 L7.5 6 L4.5 9"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">PL-공장</span><span class="dim" style="font-size: 12px">58</span><span class="chip c-mut">비움</span></button>
+      <button type="button" aria-expanded="false" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M4.5 3 L7.5 6 L4.5 9"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">US-동부</span><span class="dim" style="font-size: 12px">44</span><span class="chip c-new">정함</span></button>
+      <button type="button" aria-expanded="false" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M4.5 3 L7.5 6 L4.5 9"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">VN-법인</span><span class="dim" style="font-size: 12px">31</span><span class="chip c-new">정함</span></button>
+      <button type="button" aria-expanded="false" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M4.5 3 L7.5 6 L4.5 9"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">DE-판매</span><span class="dim" style="font-size: 12px">27</span><span class="chip c-mut">비움</span></button>
+      <button type="button" aria-expanded="false" style="font: inherit; text-align: left; cursor: pointer; color: #e6edf6; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; min-height: 32px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="fill: none; stroke: #8b9bb4; stroke-width: 1.6; flex: none"><path d="M4.5 3 L7.5 6 L4.5 9"></path></svg><span style="font-weight: 600; flex: 1; min-width: 0">MX-공장</span><span class="dim" style="font-size: 12px">20</span><span class="chip c-new">정함</span></button>
+
+      <div class="dim" style="font-size: 12px; padding: 8px; line-height: 1.6">정함 = 이 단계에 계정을 정해 둠 · 물려받음 = 위 단계 것을 씀 · 비움 = 이 단계에는 없음(아래 단계에서 정함)</div>
+    </div>
+
+    <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px">
+        <h2 style="font-size: 16px">KR-본사 › Windows</h2>
+        <span class="chip c-mut">OS 종류 단계</span>
+        <span class="chip c-mut">서버 25대</span>
+        <span class="chip c-mut">엣지에서 접속</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; align-items: start">
+
+        <div class="card hi" style="display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+            <h2>이 단계의 계정</h2>
+            <span class="chip c-no">로그인 거부 — 정지 중</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <button type="button" class="btn">위에서 물려받기</button>
+            <button type="button" class="btn p" aria-pressed="true">여기서 정하기</button>
+          </div>
+          <div style="display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 10px; font-size: 12.5px">
+            <span class="dim">계정</span><span><span class="mono">CORP\svc-portal</span> · Windows AD</span>
+            <span class="dim">도메인</span><span class="mono">corp.example</span>
+            <span class="dim">로그인</span><span>비밀번호 · 저장됨 · 88일 전 등록</span>
+            <span class="dim">접속 방식</span><span>WinRM · 5986</span>
+            <span class="dim">닿는 서버</span><span>물려받는 서버 22대<br><span class="dim">따로 정한 서버 2대 · 승인 대기 1대는 닿지 않음</span></span>
+          </div>
+          <div class="note w" style="font-size: 12px">11-17 08:40 kr-file-02 가 로그인을 거부했습니다. 계정이 잠기지 않도록 이 계정을 물려받는 22대의 접속을 모두 멈췄습니다.</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+            <button type="button" class="btn p">비밀번호 바꾸기</button>
+            <button type="button" class="btn">다른 계정으로 바꾸기</button>
+            <button type="button" class="btn">한 대로 다시 확인</button>
+          </div>
+          <p class="dim" style="font-size: 12px">여기서 계정을 바꾸면 물려받는 22대에 함께 적용됩니다. 저장 전에 영향받는 서버를 보여 주고 한 대에서 먼저 확인합니다.</p>
+        </div>
+
+        <div class="card" style="display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+            <h2>위 단계 — KR-본사</h2>
+            <span class="chip c-mut">이 아래에는 닿지 않음</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 10px; font-size: 12.5px">
+            <span class="dim">계정</span><span><span class="mono">svc-portal</span> · Linux</span>
+            <span class="dim">로그인</span><span>키 — kr-common-2026</span>
+            <span class="dim">닿는 서버</span><span>Linux 70대</span>
+          </div>
+          <p class="dim" style="font-size: 12px">Windows 단계에서 따로 정했기 때문에 법인 단계의 계정은 Windows 서버에 쓰이지 않습니다. ‘위에서 물려받기’ 로 바꾸면 이 계정이 Windows 25대에도 닿습니다.</p>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px"><button type="button" class="btn">법인 단계 보기</button></div>
+        </div>
+
+      </div>
+
+      <div class="sec">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+          <h2>이 단계 아래 서버</h2>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+            <label class="dim" for="sv-find" style="font-size: 12px">찾기</label>
+            <input id="sv-find" class="inp" type="text" placeholder="서버 이름 · 주소" style="width: 200px">
+            <button type="button" class="btn">따로 정한 서버만</button>
+          </div>
+        </div>
+        <div class="tw">
+          <table class="t" style="min-width: 1040px">
+            <thead>
+              <tr><th>서버</th><th>주소</th><th>계정이 오는 곳</th><th>쓰는 계정</th><th>로그인</th><th>접속 방식</th><th>상태</th><th>마지막 확인</th><th>바꾸기</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="k">kr-file-02</td><td class="mono">192.0.2.62</td><td>물려받음 · Windows</td><td class="mono">CORP\svc-portal</td><td>비밀번호</td><td>WinRM 5986</td><td><span class="chip c-no">로그인 거부</span></td><td>11-17 08:40</td><td><button type="button" class="btn" style="min-height: 26px; padding: 2px 8px; font-size: 12px">따로 정하기</button></td></tr>
+              <tr><td class="k">kr-sql-01</td><td class="mono">192.0.2.63</td><td>물려받음 · Windows</td><td class="mono">CORP\svc-portal</td><td>비밀번호</td><td>WinRM 5986</td><td><span class="chip c-mut">계정 정지로 대기</span></td><td>11-17 08:31</td><td><button type="button" class="btn" style="min-height: 26px; padding: 2px 8px; font-size: 12px">따로 정하기</button></td></tr>
+              <tr><td class="k">kr-win-03</td><td class="mono">192.0.2.51</td><td><span style="color: #fcd34d">따로 정함</span> · 다른 공통 계정</td><td>로컬 <span class="mono">svc-portal</span></td><td>비밀번호</td><td>SSH 22</td><td><span class="chip c-ok">확인됨</span></td><td>11-17 09:10</td><td><button type="button" class="btn" style="min-height: 26px; padding: 2px 8px; font-size: 12px">물려받기로 되돌리기</button></td></tr>
+              <tr><td class="k">kr-win-07</td><td class="mono">192.0.2.57</td><td><span style="color: #fcd34d">따로 정함</span> · 이 서버만의 계정</td><td class="mono">admin-bk</td><td>비밀번호</td><td>WinRM 5986</td><td><span class="chip c-ok">확인됨</span></td><td>11-17 09:10</td><td><button type="button" class="btn" style="min-height: 26px; padding: 2px 8px; font-size: 12px">물려받기로 되돌리기</button></td></tr>
+              <tr><td class="k">kr-win-11</td><td class="mono">192.0.2.71</td><td>승인 대기</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip c-part">승인 대기</span></td><td class="dim">—</td><td><button type="button" class="btn" style="min-height: 26px; padding: 2px 8px; font-size: 12px">승인</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="dim">25대 가운데 5대를 보였습니다. kr-win-11 은 설정 소유자가 아닌 관리자가 더한 서버라 승인 전에는 계정을 물려받지 않습니다. 구현에서는 공용 표(제목을 눌러 정렬)이고 값이 없는 칸은 ‘—’ 로 뒤에 놓입니다.</p>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

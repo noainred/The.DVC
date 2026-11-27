@@ -11,6 +11,7 @@
  * 보내고 **마지막 청크**가 커서·커버리지를 싣는다(v2.601 EDGE2601-02 — 예전에는 청크 0). 413 은 재시도 대상이 아니므로
  * 로그에 남긴다(조용한 전량 소실 방지 — guest-disk v2.466 사고).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
@@ -22,7 +23,7 @@ import { agentHeaders, withAgentQuery, agentHostnameHeader } from './agentNameCa
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
-const CHUNK_BYTES = Math.max(100_000, Number(process.env.AGENT_VMSERIES_CHUNK_BYTES) || 700_000);
+const CHUNK_BYTES = Math.max(100_000, envPositive(process.env.AGENT_VMSERIES_CHUNK_BYTES, 700_000));
 
 let last = null; // { at, vcenterId, chunks, bytes, gzBytes, ms, error }
 

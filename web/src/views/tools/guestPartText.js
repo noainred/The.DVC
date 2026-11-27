@@ -107,7 +107,7 @@ export function historyLine(h, vcName = (id) => id) {
 export function collectNote(c) {
   if (!c) return '';
   if (!c.dbAvailable) return '게스트 디스크 DB 를 열 수 없습니다(설정 › 진단에서 확인).';
-  if (c.empty && !c.enabled) return '아직 수집된 값이 없습니다 — 주기 수집이 꺼져 있습니다(설정 › 수집 › 게스트 파티션 사용률에서 켜거나 지금 수집).';
+  if (c.empty && !c.enabled) return '아직 수집된 값이 없습니다 — 주기 수집이 꺼져 있습니다(설정 › 게스트·GPU › 게스트 파티션 사용률에서 켜거나 지금 수집).';
   if (c.empty) return '아직 수집된 값이 없습니다 — 다음 수집이 끝나면 채워집니다(업그레이드 직후라면 첫 수집 전입니다).';
   if (!c.enabled) return '주기 수집이 꺼져 있어 값이 더 갱신되지 않습니다(엣지 위임 vCenter 는 엣지가 보낸 값으로 갱신됩니다).';
   return '';
@@ -131,7 +131,7 @@ export function agoText(ts, now = Date.now()) {
  */
 export function vmPartNote(d, now = Date.now()) {
   if (!d) return { empty: '', stale: '' };
-  const where = '설정 › 수집 › 게스트 파티션 사용률';
+  const where = '설정 › 게스트·GPU › 게스트 파티션 사용률';
   const enabled = !!d.collect?.enabled;
   const iv = numOrNull(d.collect?.intervalHours);
   if (!d.dbAvailable) return { empty: '게스트 디스크 DB 를 열 수 없어 파티션 값을 보여 줄 수 없습니다(설정 › 진단에서 확인).', stale: '' };
@@ -148,4 +148,21 @@ export function vmPartNote(d, now = Date.now()) {
     return { empty: '', stale: `수집 주기(${iv}시간)의 두 배 넘게 지났습니다 — 최근 수집이 실패했을 수 있습니다.` };
   }
   return { empty: '', stale: '' };
+}
+
+/**
+ * 결정(56~75 남긴 것) 68 D1: 게스트 머리 줄의 오른쪽 값 — 판정 단위 'vm' 이면 VM 합계, 'part' 면 가장 높은 파티션.
+ *   'vm' 에서 값 모름 파티션이 있는 VM 은 서버가 합계를 만들지 않는다(pct null — 부분 합으로 판정하지 않는다) — '합계 —' 대신 그 사실을 말한다.
+ */
+export function vmSumText(v, mode) {
+  if (mode !== 'vm') return `최고 ${pctText(v?.maxPct)}`;
+  const n = numOrNull(v?.unknownParts);
+  if (n != null && n > 0) return `값 모름 ${n}개 — 판정 안 함`;
+  return `합계 ${pctText(v?.pct)}`;
+}
+
+/** 68 D1: KPI '확인 불가' 아래 줄에 붙일 'vm' 단위 판정 보류 수(파티션 단위 · 0 · 모름이면 ''). */
+export function unknownVmsText(kpi, mode) {
+  const n = mode === 'vm' ? numOrNull(kpi?.unknownVms) : null;
+  return n != null && n > 0 ? ` · 값 모름으로 판정 안 한 게스트 ${n.toLocaleString('ko-KR')}` : '';
 }

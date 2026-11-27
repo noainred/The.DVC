@@ -13,9 +13,10 @@ import { scopedNsxRollup } from './scope.js'; // v2.600: rollup 단일 소스(sc
 import { collectFromNsx } from './client.js';
 import { generateNsxSnapshot, generateNsxForManager } from './mock.js';
 import { nsxAuthGuard, isNsxAuthError } from './client.js'; // v2.590: 인증 실패 정지(정의는 client.js — 순환 방지)
+import { authStopView } from '../util/authGuard.js';
 export { nsxAuthGuard };
 import { pushAll } from '../util/pushAll.js';
-const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 표지 unread 를 떨구지 않는다)
 
 class NsxStore {
   constructor() {

@@ -14,6 +14,8 @@ import { vcPowerSkippedNote } from './readGapText.js'; // v2.733(C2-02): 지금 
 import { forecastPctText, forecastLimitKind, forecastGpuLimitKind, forecastStaleText, FORECAST_STALE_TITLE } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 import { securityBadge, anomalyKpi, anomalyFamilyBadge, incidentKindText } from './insightsBadges.js'; // v2.783(점검 Q4): 미확인·평가 못 함·재발송 표기
 
 function Kpi({ label, value, sub, color }) {
@@ -59,8 +61,12 @@ function FinOps() {
   if (err && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!d) return <Loading />;
   const cur = d.config.currency;
-  const c = (v) => `${cur}${num(v)}`;
+  const c = (v) => { const t = num(v); return t === '—' ? t : `${cur}${t}`; }; // 70회차 F2: 측정 0대면 서버가 null — '₩—' 가 아니라 '—'
+  // 112회차: 서버가 단가 설정 파일을 못 읽은 동안 cfg 는 기본 단가 + loadError 다 — 읽기 오류 동안 저장을 잠근다(서버도 503). ‘다시 확인’ 이 cfg 를 통째로 다시 받는다.
+  const cfgUnread = unreadMarkOf(cfg);
+  const cfgLocked = saveLockedByUnread(cfgUnread);
   const saveCfg = async () => {
+    if (cfgLocked) return;
     setBusy(true); setMsg(null);
     // v2.611 LEFT2611-05: 빈 숫자 칸은 보내지 않는다(blankOr) — Number('') === 0 이 CO₂ 계수 0 으로 저장됐다.
     const body = { ...cfg, tariffPerKwh: blankOr(cfg.tariffPerKwh), co2KgPerKwh: blankOr(cfg.co2KgPerKwh), pue: blankOr(cfg.pue) };
@@ -111,6 +117,7 @@ function FinOps() {
                 onClick={() => { cfgForbidden.current = false; loadCfg(); }}>다시 시도</button></div>
             </div>
           ) : (<>
+          <SettingsUnreadBanner le={cfgUnread} what="요금/탄소 단가 설정" save="저장" onRecheck={loadCfg} busy={busy} />
           <label className="muted" style={{ fontSize: 12 }}>전기요금 단가 (통화/kWh)</label>
           <input className="input" type="number" value={cfg.tariffPerKwh} onChange={(e) => setCfg({ ...cfg, tariffPerKwh: e.target.value })} style={{ width: '100%', marginBottom: 8 }} />
           <label className="muted" style={{ fontSize: 12 }}>통화 기호</label>
@@ -119,7 +126,7 @@ function FinOps() {
           <input className="input" type="number" step="0.01" value={cfg.co2KgPerKwh} onChange={(e) => setCfg({ ...cfg, co2KgPerKwh: e.target.value })} style={{ width: '100%', marginBottom: 8 }} />
           <label className="muted" style={{ fontSize: 12 }}>PUE (설비 효율, 1.0~)</label>
           <input className="input" type="number" step="0.1" value={cfg.pue} onChange={(e) => setCfg({ ...cfg, pue: e.target.value })} style={{ width: '100%', marginBottom: 10 }} />
-          <button className="login-btn" disabled={busy} onClick={saveCfg} style={{ padding: '7px 14px' }}>저장</button>
+          <button className="login-btn" disabled={busy || cfgLocked} onClick={saveCfg} style={{ padding: '7px 14px' }}>저장</button>
           {msg && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{msg}</div>}
           </>)}
         </div>

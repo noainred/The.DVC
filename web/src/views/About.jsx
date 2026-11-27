@@ -48,7 +48,7 @@ export default function About() {
         {/* 저작자 / 저작권 카드 */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginTop: 16 }}>
           <div className="card" style={cardStyle}>
-            <div className="muted" style={{ fontSize: 12, letterSpacing: '.5px', textTransform: 'uppercase' }}>저작자 · Author</div>
+            <div className="muted" style={{ fontSize: 12, letterSpacing: '.5px' }}>저작자 · AUTHOR</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
               <div style={{ width: 46, height: 46, borderRadius: '50%', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 18,
                 background: 'linear-gradient(135deg,#6366f1,#22d3ee)', color: '#0b1220' }}>박</div>
@@ -62,7 +62,7 @@ export default function About() {
           </div>
 
           <div className="card" style={cardStyle}>
-            <div className="muted" style={{ fontSize: 12, letterSpacing: '.5px', textTransform: 'uppercase' }}>저작권 · Copyright</div>
+            <div className="muted" style={{ fontSize: 12, letterSpacing: '.5px' }}>저작권 · COPYRIGHT</div>
             <div style={{ fontSize: 22, fontWeight: 800, marginTop: 12 }}>© {year} 박준호</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>All rights reserved.</div>
           </div>
@@ -70,7 +70,7 @@ export default function About() {
 
         {/* 주요 기능 */}
         <div className="card" style={{ ...cardStyle, marginTop: 14 }}>
-          <div className="muted" style={{ fontSize: 12, letterSpacing: '.5px', textTransform: 'uppercase', marginBottom: 12 }}>주요 기능 · Key Features</div>
+          <div className="muted" style={{ fontSize: 12, letterSpacing: '.5px', marginBottom: 12 }}>주요 기능 · KEY FEATURES</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 }}>
             {FEATURES.map((f) => (
               <div key={f.title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>

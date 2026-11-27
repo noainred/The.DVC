@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Agent } from 'undici';
 import { config } from '../config.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
@@ -52,17 +53,30 @@ if (HZ_TLS.mode === 'insecure') {
 export const horizonTlsInfo = () => ({ verify: HORIZON_TLS_VERIFY, mode: HZ_TLS.mode, env: 'HORIZON_TLS_VERIFY' });
 const dispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'horizon', envKey: 'HORIZON_TLS_VERIFY', envRaw: process.env.HORIZON_TLS_VERIFY, tls: { lookup: ssrfLookup } }) });
 
+/*
+ * 전체 점검 36회차 F4(재현): 손상 · 읽기 오류를 기억하고 그동안 등록 · 삭제를 거절한다 — 예전에는 빈 목록을 돌려주고 저장을 막지 않아, 손상 뒤 첫 저장이
+ *   주 파일을 그 한 건만으로 만들었다(원본은 보존본에 남지만 사람이 손으로 합쳐야 했다). 읽기 오류(EACCES · EISDIR)는 옮기지 않는다(34회차 F4 와 같은 규약).
+ */
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'Horizon 커넥션 서버 등록부 — 확정하면 빈 등록부로 시작합니다(손상 보존본은 그대로 · 자격증명은 다시 입력)', confirm: () => saveHorizon([]) });
+export function horizonLoadError() { loadHorizon(); return _loadErr.get(); }
+const UNREADABLE = { ok: false, code: 'settings-unreadable', status: 409, reason: 'Horizon 등록부(horizon.json)를 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌리고 재시작하세요(지금 저장하면 등록부가 이 한 건만 남습니다).' };
+
 export function loadHorizon() {
-  if (!fs.existsSync(FILE)) return [];
+  // 134회차: `fs.existsSync` 가드는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)를 '없음' 으로 읽어 빈 등록부를 표지 없이 줬다(저장 거절이 풀려 첫 등록이 원본을 덮는다) — ENOENT 만 없음.
+  let text;
+  try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) { if (e?.code === 'ENOENT') _loadErr.missing(); else _loadErr.readError(e); return []; }
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []); // v2.296 자격증명 복호
-  } catch { preserveCorrupt(FILE); return []; } // v2.322: 손상본 보존(Horizon 자격증명 유실 방지)
+    const parsed = JSON.parse(text);
+    const out = openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []); // v2.296 자격증명 복호
+    _loadErr.ok();
+    return out;
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE); return []; } // v2.322: 손상본 보존(Horizon 자격증명 유실 방지)
 }
 
 function saveHorizon(list) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
+  _loadErr.ok();
 }
 
 export function redactHorizon(s) { const { password, ...rest } = s; return { ...rest, hasPassword: Boolean(password) }; }
@@ -144,6 +158,7 @@ export function horizonInputIssue(body) {
 
 export function upsertHorizon(body) {
   const list = loadHorizon();
+  if (_loadErr.get()) return { ...UNREADABLE };   // 36회차 F4
   const id = String(body.id || '').trim();
   const idx = list.findIndex((s) => s.id === id);
   // 수정 시 비번을 비우면 normalize가 기존 비번을 물려받는다(신규만 password 필수 오류).
@@ -157,6 +172,7 @@ export function upsertHorizon(body) {
 
 export function removeHorizon(id) {
   const list = loadHorizon();
+  if (_loadErr.get()) return { ...UNREADABLE };   // 36회차 F4
   const next = list.filter((s) => s.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 Horizon 서버: ${id}` };
   saveHorizon(next);
@@ -335,6 +351,10 @@ export async function testHorizon(body) {
   let entry = body;
   if (!entry.password && entry.id) {
     const saved = loadHorizon().find((s) => s.id === entry.id);
+    // 91회차 ⓐ: 저장 경로(normalize — 정규화한 host · username · domain 이 바뀌면 비밀을 버린다)와 같은 판정 — 다른 계정 · 도메인 · 주소로 저장 비밀번호를 보내지 않는다.
+    if (saved && accessMoved(saved, body.host !== undefined ? { ...body, host: normalizeHorizonHost(body.host) } : body, ['host', 'username', 'domain'])) {
+      return { ok: false, reason: '접속 주소나 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.' };
+    }
     if (saved) entry = { ...saved, ...body, password: saved.password, host: saved.host }; // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
   }
   if (!entry.host || !entry.username || !entry.password || !entry.domain) {

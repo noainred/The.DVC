@@ -161,8 +161,23 @@ export function planBody(p, { pre = null, target = null } = {}) {
     pools: { fullDays: n(p.pools?.fullDays), incrDays: n(p.pools?.incrDays), maxVolumeGB: n(p.pools?.maxVolumeGB) },
     schedule: { fullDay: p.schedule?.fullDay, time: p.schedule?.time }, consoleName: String(p.consoleName || '').trim(), directorName: String(p.directorName || '').trim(),
     ...(p.reset ? { reset: { ack: !!p.reset.ack, catalog: p.reset.catalog !== false, volumes: !!p.reset.volumes, confirmName: String(p.reset.confirmName || '') } } : {}),
+    // 53회차 N4(사용자 결정): 함께 쓰는 다른 vCenter 의 잡 · 기록도 지워짐을 **따로** 확인했으면 그 목록(지금 사전 점검 기준 — 서버가 지금 목록과 대조한다)
+    ...(sharedAckMatches(p.reset?.sharedAck, pre) ? { sharedAck: { vcenterIds: sharedIdsOf(pre) } } : {}),
   };
 }
+
+/** 53회차 N4: 이 서버의 Bareos 를 함께 쓰는 다른 vCenter(사전 점검 sharedVcenters). */
+export function sharedIdsOf(pre) {
+  return (Array.isArray(pre?.sharedVcenters) ? pre.sharedVcenters : []).map((x) => String(x?.vcenterId || '')).filter(Boolean);
+}
+/** 반증 E1: 확인은 **그때 본 목록**에 묶는다(r.sharedAck = 확인한 vCenter 목록) — '다시 점검' 으로 목록이 바뀌면 확인이 풀린다. */
+export function sharedAckMatches(ack, pre) {
+  const now = sharedIdsOf(pre);
+  if (!now.length || !Array.isArray(ack)) return false;
+  const a = [...new Set(ack.map(String))].sort(); const b = [...new Set(now)].sort();
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+export const SHARED_ACK_LABEL = '이 서버의 Bareos 를 함께 쓰는 다른 vCenter 의 잡 설정 · 실행 기록도 함께 지워지는 것을 확인했습니다';
 
 /** 계획 화면에서 바로 막을 것(서버도 같은 판정을 한다 — 여기는 안내용). pre = 사전 점검 결과(실행 중 작업 확인 불가면 동의 필요 — 러너 0단계도 멈춘다). */
 export function planIssues(p, target, pre = null) {
@@ -173,6 +188,7 @@ export function planIssues(p, target, pre = null) {
   if (target?.mode === 'reinstall') {
     if (!p.reset?.ack) out.push('지울 항목을 확인했다는 표시가 필요합니다.');
     if (p.reset?.volumes && String(p.reset.confirmName || '').trim() !== String(target.vcenterName || '').trim()) out.push('백업 볼륨까지 지우려면 법인 이름을 정확히 입력하세요.');
+    if (sharedIdsOf(pre).length && !sharedAckMatches(p.reset?.sharedAck, pre)) out.push(`이 서버의 Bareos 를 함께 쓰는 다른 vCenter ${sharedIdsOf(pre).length}곳의 잡 설정 · 기록도 지워집니다 — ‘${SHARED_ACK_LABEL}’ 를 체크하세요.`);   // 53회차 N4
     if (runningUnknown(pre, target) && p.runningUnknownOk !== true) out.push(`실행 중 작업을 확인하지 못했습니다 — 직접 확인했으면 ‘${RUNNING_UNKNOWN_OK_LABEL}’ 을 체크하세요(체크하지 않으면 0단계가 아무것도 지우지 않고 멈춥니다).`);
   }
   return out;

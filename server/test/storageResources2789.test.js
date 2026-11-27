@@ -63,7 +63,8 @@ test('못 읽은 크기·사용량은 0 이 아니라 null — 사용률도 null
 
 test('수집 명령 — LUN·파일시스템은 맨 뒤 lowPriority(앞 항목을 밀어내지 않는다) · CSV 아님', () => {
   const keys = SPECS.map((s) => s.key);
-  assert.deepEqual(keys.slice(-3), ['power', 'luns', 'filesystems']);
+  // v3.35.0: 인터페이스 구성 3개(ifFc · ifEth · ifList)가 그 뒤에 붙었다 — 순서(전원 → LUN → 파일시스템 → 인터페이스)는 그대로 고정한다.
+  assert.deepEqual(keys.slice(-6), ['power', 'luns', 'filesystems', 'ifFc', 'ifEth', 'ifList']);
   for (const k of ['luns', 'filesystems']) {
     const s = SPECS.find((x) => x.key === k);
     assert.equal(s.lowPriority, true);

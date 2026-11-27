@@ -40,10 +40,11 @@ import { authStopView } from '../util/authGuard.js';
 import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { demoCurUserSettings, demoCurUserBackfillRows } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 import { pushAll } from '../util/pushAll.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 6;                       // 10분 × 6 = 1시간에 1회
-const FIRST_DELAY_MS = Number(process.env.CURUSER_FIRST_DELAY_MS) || 120_000;  // 첫 인벤토리 수집 뒤
+const FIRST_DELAY_MS = envPositive(process.env.CURUSER_FIRST_DELAY_MS, 120_000);  // 첫 인벤토리 수집 뒤
 
 let running = false;
 let tick = 0;

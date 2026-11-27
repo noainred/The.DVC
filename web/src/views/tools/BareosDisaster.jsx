@@ -277,7 +277,10 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
         </div>
         <span style={{ fontSize: 12, color: TONE.warn }}>감염 추정 시각보다 앞으로 잡으세요 — 그 뒤 백업은 감염된 상태일 수 있습니다. 시작 시각을 못 읽은 백업은 고르지 않습니다.</span>
         <span className="muted" style={{ fontSize: 12 }}>시각 기준: 입력은 이 브라우저 시간대, 백업 시각은 Director 현지 시각을 포탈 서버 시간대로 읽은 값입니다 — Director 가 다른 시간대(예: 폴란드)면 그 차이만큼 어긋나니 여유를 두고 잡으세요.</span>
-        {beforeMs === null && <Note tone="bad">기준 시각을 읽지 못했습니다 — 날짜와 시각을 다시 고르세요.</Note>}
+        {/* 전체 점검 6회차(W-4): 처음 연 빈 칸(일부러 고르게 함 — R5)은 오류가 아니다 — 안내(info) · 글자를 읽지 못했을 때만 빨간 오류 */}
+        {beforeMs === null && (String(beforeText || '').trim()
+          ? <Note tone="bad">기준 시각을 읽지 못했습니다 — 날짜와 시각을 다시 고르세요.</Note>
+          : <Note tone="info">기준 시각을 고르세요 — 그 시각 이전의 마지막 성공 백업으로 복원 지점을 고릅니다.</Note>)}
         {ptsProg && !pts && !ptsErr && <span className="muted" style={{ fontSize: 12 }}>복원 지점 읽는 중… {ptsProg.done} / {ptsProg.total}대</span>}
         {ptsErr && <ErrorBox error={ptsErr} />}
         {pts && (

@@ -7,6 +7,7 @@ import { netmonStopBadge } from './authSkipText.js'; // v2.591(감사 F5): SSH �
 import { requireChanged } from './changeResult.js'; // v2.732 B5-04: 실패 본문(200 {ok:false})을 성공으로 읽지 않는다
 import { numOrNull } from '../numOrNull.js';
 import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
+import { saveBlob } from '../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /**
  * v2.732(점검 2회차 B5-04): 연속 모니터링 '+ 모니터 추가' 를 보일지 — 목록 조회가 **권한 거부(403)** 면 저장도 같은 403 이다
@@ -76,7 +77,7 @@ function Monitors() {
   const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
   // v2.621(감사 WEB-01): 403(관리자·전체 범위 전용)이면 30초 폴링이 같은 거부를 반복하지 않게 멈춘다 — 수동 새로고침(⟳ 없음 → 탭 재진입)은 막지 않는다.
   const denied = useRef(false);
-  const load = () => { if (denied.current) return; fetchJson('/admin/net/monitors').then((r) => { setLoadErr(null); setD(r.monitors || []); }).catch((e) => { if (e?.status === 403) denied.current = true; setLoadErr(e); setD([]); }); };
+  const load = () => { if (denied.current) return; fetchJson('/admin/net/monitors').then((r) => { setLoadErr(r?.loadError?.readError ? String(r.loadError.reason || '정의 파일을 읽지 못했습니다.') : null); setD(r.monitors || []); }).catch((e) => { if (e?.status === 403) denied.current = true; setLoadErr(e); setD([]); }); };
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
   const blank = { name: '', mode: 'dual', intervalMin: 10, seconds: 10, maxPackets: 1000, iface: 'any', useSudo: true, enabled: true, hostA: { host: '', port: 22, username: 'root', password: '' }, hostB: { host: '', port: 22, username: 'root', password: '' }, peer: '' };
   // v2.732(점검 2회차 B5-04): 네 동작의 catch 가 전부 비어 있어 실패가 화면에 남지 않았다 — 저장은 실패해도 창을 닫아
@@ -245,7 +246,7 @@ function Capture() {
       const r = await postJson('/admin/net/pcap', { hostA: { host: f.host, port: Number(f.port) || 22, username: f.username, password: f.password }, peer: f.peer, iface: f.iface, seconds: Number(f.seconds), maxPackets: Number(f.maxPackets), useSudo: f.useSudo });
       if (!r.ok) { setErr(r.reason || 'pcap 실패'); return; }
       const bin = atob(r.pcapBase64); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([arr], { type: 'application/vnd.tcpdump.pcap' })); a.download = r.fileName; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      saveBlob(new Blob([arr], { type: 'application/vnd.tcpdump.pcap' }), r.fileName);
       setPcapInfo({ captured: r.captured, size: r.size, summary: r.summary });
     } catch (e) { setErr(e.message); } finally { setPcapBusy(false); }
   };
@@ -337,7 +338,7 @@ function LogIssues() {
   // 세대 가드: vCenter/기간을 빠르게 바꿀 때 느린 이전 응답이 최신을 덮어쓰지 않게.
   const genRef = useRef(0);
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/net/log-issues?days=${days}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, days]);
+  useEffect(() => { load(); }, [vc, days]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="card" style={{ padding: 16 }}>
       <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>

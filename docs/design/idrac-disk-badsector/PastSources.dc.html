@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>과거 기록 읽기 — 출처 비교와 순서</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;box-sizing:border-box}
+.h{font-size:13.5px;font-weight:700}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.6}
+td.nw{white-space:nowrap}
+.box{overflow-x:auto;border:1px solid #243049;border-radius:10px}
+.note{font-size:11.5px;color:#8b9bb4;margin-top:3px;font-weight:400}
+.ph{flex:1 1 320px;min-width:0;border:1px solid #243049;border-radius:10px;background:#0f1626;padding:12px 14px;display:flex;flex-direction:column;gap:6px;line-height:1.6}
+.ph b.n{font-size:12px;color:#93c5fd}
+.ph b.t{font-size:14px}
+.li{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.6}
+.li i{flex:none;width:6px;height:6px;border-radius:50%;background:#64748b;margin-top:7px}
+</style>
+</helmet>
+<div style="width:100%;min-height:1760px;box-sizing:border-box;background:#0a0e17;padding:20px 24px 40px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div style="max-width:1392px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="min-width:0">
+    <div style="font-size:22px;font-weight:800">과거 기록 읽기 — 출처 비교 · 장비 진단으로 갈리는 지점 · 순서</div>
+    <div class="muted">iDRAC 만으로 판단합니다. OS 로그는 이번 범위가 아닙니다.</div>
+  </div>
+
+  <div style="border:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.08);border-radius:10px;padding:10px 14px;line-height:1.6;color:#fde68a">
+    <b>장비 진단 결과를 아직 받지 못한 상태에서 만든 시안입니다.</b> ‘미확인’ 으로 적힌 칸은 실제 장비에서 되지 않을 수 있습니다. 서버 한 대의 장비 진단 화면이 오면 아래 둘째 표대로 갈래가 정해집니다.
+  </div>
+
+  <div class="card">
+    <div class="h">출처 비교</div>
+    <div class="box">
+    <table style="min-width:1280px">
+      <thead><tr>
+        <th>출처</th><th>말해 주는 것</th><th>날짜</th><th>교체되어 나간 디스크</th><th>장비에 하는 일</th><th>필요한 것</th><th>확인 수준</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="nw"><b>활성 로그</b><div class="note">지금 버전</div></td><td>최근 며칠 ~ 몇 주의 디스크 기록</td><td class="nw">있음</td><td>자리 기준으로 남음</td><td>읽기만</td><td>없음</td><td><span class="tag ok">실장비 확인</span><div class="note">1일 · 37일 두 대</div></td></tr>
+        <tr><td class="nw"><b>보관 로그 내보내기</b></td><td>그 전의 디스크 기록 — 장비가 보관해 둔 만큼</td><td class="nw">있음</td><td>자리 기준으로 남음</td><td>내보내기 요청 1회 + 파일 받기</td><td>iDRAC9 · 관리 권한 계정</td><td><span class="tag warn">일부 확인</span><div class="note">내보내기 요청 · 파일 받기는 Dell 공개 스크립트 소스로 확인. 보관분이 들어 있는지 · 전체 내보내기가 같은 방식으로 되는지는 미확인</div></td></tr>
+        <tr><td class="nw"><b>디스크 값</b></td><td>지금 꽂힌 디스크에 흔적이 있는가 — 재할당 · 보류 · 복구 불가 수</td><td class="nw">없음</td><td>볼 수 없음</td><td>읽기만</td><td>iDRAC9 4.00 이상 · Datacenter 라이선스 · 보고서가 켜져 있음</td><td><span class="tag warn">문서 요약만</span><div class="note">항목 이름은 Dell 백서의 검색 요약. 어떤 디스크까지 주는지 · 라이선스 없이 읽는 길이 있는지는 미확인</div></td></tr>
+        <tr><td class="nw"><b>시스템 이벤트 로그</b></td><td>디스크 고장 · 예측 고장 · 탈거와 장착</td><td class="nw">있음</td><td>탈거 · 장착 시각이 남음</td><td>읽기만</td><td>없음</td><td><span class="tag warn">미확인</span><div class="note">배드 섹터 기록 자체가 들어오는지 모름. 교체 시각을 아는 보조 출처로 봄</div></td></tr>
+        <tr><td class="nw" style="border-bottom:none"><b>세션 재사용</b></td><td style="border-bottom:none">과거를 읽지 못함. 앞으로 활성 로그가 덜 밀려남</td><td class="nw muted" style="border-bottom:none">—</td><td class="muted" style="border-bottom:none">—</td><td style="border-bottom:none">로그인 1회 뒤 같은 세션을 계속 씀</td><td style="border-bottom:none">iDRAC 공용 접속 코드 변경</td><td style="border-bottom:none"><span class="tag warn">추정</span><div class="note">로그인 기록이 93% 인 것은 확인. 그 로그인이 포탈 것인지는 장비 진단으로 확인</div></td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h">장비 진단 값이 정하는 것 <span class="muted" style="font-weight:400">v3.8.3 의 장비 진단 상자에 이미 들어 있는 항목</span></div>
+    <div class="box">
+    <table style="min-width:1080px">
+      <thead><tr><th>진단 항목</th><th>이렇게 나오면</th><th>그러면</th></tr></thead>
+      <tbody>
+        <tr><td class="nw" rowspan="2"><b>내보내기 동작 목록</b><div class="note mono">lcService</div></td><td>전체 내보내기가 있고, 받는 방식에 Local 이 있음</td><td>보관 로그 내보내기를 그대로 만듭니다.</td></tr>
+        <tr><td>전체 내보내기가 없거나 Local 이 없음</td><td>그 장비는 ‘지원 안 함’ 으로 두고 디스크 값 · 시스템 이벤트 로그만 봅니다. 공유 폴더로 내보내는 방식은 만들지 않습니다.</td></tr>
+        <tr><td class="nw" rowspan="2"><b>디스크 자원의 값</b><div class="note mono">drive.values · drive.smart</div></td><td>재할당 · 미디어 오류 계열 값이 보임</td><td>라이선스와 무관하게 디스크 값을 읽습니다.</td></tr>
+        <tr><td>보이지 않음</td><td>텔레메트리 보고서로만 읽습니다 — 라이선스가 있고 보고서가 켜진 서버만 해당합니다.</td></tr>
+        <tr><td class="nw" rowspan="2"><b>로그인 경로</b><div class="note mono">loginVia</div></td><td>대부분 Redfish</td><td>포탈의 접속이 원인일 가능성이 높습니다. 세션 재사용의 효과가 큽니다.</td></tr>
+        <tr><td>GUI · SSH 등 다른 경로</td><td>포탈 탓이 아닙니다. 세션 재사용은 뒤로 미룹니다.</td></tr>
+        <tr><td class="nw"><b>가장 오래된 항목</b><div class="note mono">lclogOldest</div></td><td>‘보관으로 넘김’ 을 뜻하는 문장</td><td>보관 로그가 실제로 있다는 뜻이라 내보내기의 가치가 확인됩니다.</td></tr>
+        <tr><td class="nw" style="border-bottom:none"><b>로그 설정</b><div class="note mono">logAttributes</div></td><td style="border-bottom:none">로그인 묶기가 꺼져 있음</td><td style="border-bottom:none">화면에 상태와 켜는 방법을 안내합니다. 포탈이 바꾸지는 않습니다.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h">순서 (제안)</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="ph">
+        <b class="n">1단계</b><b class="t">디스크 값 · 시스템 이벤트 로그</b>
+        <span>읽기만 합니다. 6시간 점검에 함께 넣습니다. 판정에 ‘흔적 있음 · 날짜 모름’ 과 ‘디스크 값 모름’ 이 생깁니다.</span>
+        <span class="muted">위험: 낮음. 값을 주지 않는 서버가 많으면 얻는 것이 적습니다.</span>
+      </div>
+      <div class="ph">
+        <b class="n">2단계</b><b class="t">보관 로그 내보내기</b>
+        <span>관리자가 누를 때만, 법인 노드에서 한 번에 한 대. 과거의 날짜 있는 기록을 읽는 유일한 길입니다.</span>
+        <span class="muted">위험: 보통. 이 기능이 장비에 보내는 첫 요청형 동작입니다. 파일 크기 · 시한 · 압축 해제 상한을 둡니다.</span>
+      </div>
+      <div class="ph">
+        <b class="n">3단계</b><b class="t">세션 재사용</b>
+        <span>iDRAC 를 읽는 모든 기능이 쓰는 접속 코드를 바꿉니다. 장비마다 세션 하나, 못 받으면 기존 방식으로 둡니다.</span>
+        <span class="muted">위험: 높음. 세션이 새면 장비의 세션 한도를 채워 다른 사람이 접속하지 못할 수 있습니다. 따로 검증합니다.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h">하지 않는 것</div>
+    <div class="li"><i></i><span><b>장비 설정을 포탈이 바꾸는 것</b> — 텔레메트리 보고서 켜기 · 로그인 묶기 켜기. 상태만 보여 주고 방법을 안내합니다.</span></div>
+    <div class="li"><i></i><span><b>걸러 읽기</b> — 활성 로그 안에서만 걸러지므로 과거를 읽지 못합니다. 지금 전체 읽기가 9초라 급하지 않습니다.</span></div>
+    <div class="li"><i></i><span><b>공유 폴더로 내보내기</b> — 장비가 포탈 쪽 공유에 쓰게 하려면 자격증명과 방화벽 설정이 필요합니다.</span></div>
+    <div class="li"><i></i><span><b>기술 지원용 수집(컨트롤러 로그)</b> — 장비에 주는 부담이 크고 받을 수 있는지 미확인입니다.</span></div>
+    <div class="li"><i></i><span><b>OS 로그</b> — 이번 범위 밖입니다.</span></div>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

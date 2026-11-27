@@ -276,6 +276,21 @@ export function aggregateCells(devs, periods) {
   });
 }
 
+/**
+ * 57회차 F2(재현): 두 기간 i · j 의 합계가 **같은 장비들**로 이뤄졌나 — 한쪽 기간에만 값(사용량까지 읽은 칸)이 있는 장비 수.
+ * 두 합계가 모두 '완전'(partial 아님)이어도 그 사이 새로 등록한 장비(이력이 j 에서 시작)나 꺼진 장비는 한쪽에만 들어 있다 —
+ * 합계끼리 빼면 그 장비의 사용량 전체가 '증가'(또는 감소)로 보였다(Unity 1대 +1 TB 인 주에 새 장비 300 TB 를 붙이면 '직전 주 대비 +301 TB').
+ * 0 이 아니면 합계 변화(직전 대비 · 평균 · 범위)를 내지 않는다. 웹 `storageUsageText.setChangeOf` 가 같은 규칙의 사본이다(테스트 대조).
+ */
+export function setChangeOf(devs, i, j) {
+  let n = 0;
+  for (const d of devs || []) {
+    const a = d?.cells?.[i]; const b = d?.cells?.[j];
+    if (!!(a && a.usedBytes != null) !== !!(b && b.usedBytes != null)) n += 1;
+  }
+  return n;
+}
+
 /** 두 셀(이전 → 지금)의 사용량 변화. 둘 중 하나라도 사용량이 없으면 null(0 이 아니다). */
 export function deltaOf(prev, cur) {
   const a = numOrNull(prev?.usedBytes); const b = numOrNull(cur?.usedBytes);

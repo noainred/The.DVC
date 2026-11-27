@@ -8,15 +8,16 @@
  *   기한 내 ack 없으면 reap 이 pending 으로 되돌리고(재시도 1회), 한도 소진 시
  *   onExpire 콜백으로 해당 서버들에 실패 사유를 남긴다(무한 '수집 대기' 방지).
  */
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
-const jobs = new Map();           // reqId -> { reqId, agent, servers, state, createdAt, takenAt, claims, claimDeadline, doneAt }
+const jobs = new Map();           // reqId -> { reqId, agent, servers, state, order, createdAt, takenAt, claims, claimDeadline, doneAt }
 const pendingByAgent = new Map(); // agentLower -> Set<reqId>
 
 const DONE_TTL = 5 * 60_000;
 const UNDONE_TTL = 30 * 60_000;   // 주기(기본 10분)보다 길게 — 다음 주기 전 정리로 유령 잡 방지
 const MAX_PENDING = 2;            // 에이전트당 대기 상한 — 엣지가 오래 죽어도 최신 주기 잡만 남긴다
 const MAX_CLAIMS = 2;
-const ACK_BASE_MS = Number(process.env.BMSTOR_ACK_GRACE_MS) || 60_000;
+const ACK_BASE_MS = envPositive(process.env.BMSTOR_ACK_GRACE_MS, 60_000);
 const ACK_PER_SERVER_MS = 20_000; // 서버당 SSH 접속+df 여유
 const ACK_MAX_MS = 10 * 60_000;
 
@@ -69,8 +70,9 @@ export function enqueueBmstorJob(agent, servers) {
     for (const rid of set) { const at = jobs.get(rid)?.createdAt ?? 0; if (at < oldestAt) { oldestAt = at; oldestId = rid; } }
     if (oldestId) { jobs.delete(oldestId); set.delete(oldestId); }
   }
+  const order = seq; // v3.8.1: newReqId 가 seq 를 올리기 전 값 — 잡 생성 순번(단조 증가 · '더 새 잡' 판정 전용)
   const reqId = newReqId();
-  jobs.set(reqId, { reqId, agent: String(agent || ''), servers, state: 'pending', createdAt: Date.now(), takenAt: null, claims: 0, claimDeadline: null, doneAt: null });
+  jobs.set(reqId, { reqId, agent: String(agent || ''), servers, state: 'pending', order, createdAt: Date.now(), takenAt: null, claims: 0, claimDeadline: null, doneAt: null });
   set.add(reqId); pendingByAgent.set(key, set);
   return reqId;
 }
@@ -110,6 +112,8 @@ export function ackBmstorJob(reqId) {
  *   돌려 라우트가 200 {stale:true} 로 버렸고, 중앙 화면은 수집이 끝났는데도 '회신하지 않았다' 로 남았다(엣지는 성공으로 기록).
  *   · 같은 잡의 늦은 결과는 한 번만 반영한다(재전송 중복 방지).
  *   · 그 뒤 **같은 에이전트의 더 새 잡**이 이미 정상 회신됐으면 반영하지 않는다(새 값을 옛 값으로 되돌리지 않게) — `superseded`.
+ *     v3.8.1(PR #735 이식): '더 새' 는 생성 순번(order)으로 판정한다 — createdAt(ms 벽시계)은 두 잡이 같은 ms 에 만들어지거나 시계가 조정되면
+ *     순서를 잃어 옛 늦은 결과가 새 값을 덮었다(2026-10-21 release 워크플로 1회 실패). createdAt 은 TTL · prune 용으로만 쓴다.
  * @returns {null|{agent:string, serverIds:string[], late:true}|{superseded:true}|{duplicate:true}}  null = 모르는 잡·만료가 아닌 종결
  */
 export function lateBmstorResult(reqId) {
@@ -118,7 +122,7 @@ export function lateBmstorResult(reqId) {
   if (j.lateAppliedAt) return { duplicate: true };
   const key = agentKey(j.agent);
   for (const o of jobs.values()) {
-    if (o !== j && agentKey(o.agent) === key && o.ackedAt && (o.createdAt || 0) > (j.createdAt || 0)) return { superseded: true };
+    if (o !== j && agentKey(o.agent) === key && o.ackedAt && o.order > j.order) return { superseded: true };
   }
   j.lateAppliedAt = Date.now();
   return { agent: j.agent, serverIds: j.servers.map((s) => s.id), late: true };

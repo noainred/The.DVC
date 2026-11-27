@@ -5,7 +5,7 @@
  *   ② `abc`·`/33` 같은 줄은 '저장했습니다' 뒤 조용히 버려졌다 — 이제 400 + 줄 번호·사유.
  *   ③ 웹 사본(web/src/views/tools/ipmsRangeText.js)과 같은 입력으로 같은 결과인지 대조한다(번들 경계로 두 벌이다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,11 +14,18 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { checkRangeSpec, checkRangeList, parseRangeSpec } from '../src/ipam/rangeSyntax.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function runChild(body, { env = {}, setup = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipms2637-'));
+  const dir = tmpDir('ipms2637-');
   if (setup) setup(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
@@ -100,7 +107,7 @@ test('① 빈 마스크·너무 넓은 마스크·/33·숫자 아닌 마스크�
 });
 
 test('① 적용 단계: 저장된 옛 값 `10.0.0.0/` 가 더는 IPv4 전체를 숨기거나 사설을 공인으로 바꾸지 않는다 · 뒤바뀐 옛 범위는 계속 적용', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipms2637a-'));
+  const dir = tmpDir('ipms2637a-');
   fs.writeFileSync(path.join(dir, 'ipam-settings.json'), JSON.stringify({ global: ['10.0.0.0/', '10.9.9.20-10.9.9.10'], vcenters: {}, publicRanges: ['1.2.3.0/'], privateRanges: [] }));
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const m = await import(${JSON.stringify(pathToFileURL(path.join(SRC, 'ipam/settings.js')).href)});

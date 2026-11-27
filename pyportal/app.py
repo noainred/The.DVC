@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -18,8 +19,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from hub.app import AppContext  # noqa: E402
+from hub.auth import AuthError  # noqa: E402
 from hub.config import APP_NAME, VERSION, config  # noqa: E402
 from hub.server import create_server  # noqa: E402
+
+
+def _data_dir_owner(path):
+    """데이터 폴더 소유자 (uid, 이름) — 없거나 모르면 None."""
+    try:
+        uid = Path(path).stat().st_uid
+    except OSError:
+        return None
+    try:
+        import pwd  # noqa: PLC0415 — 리눅스 전용
+        return uid, pwd.getpwuid(uid).pw_name
+    except (ImportError, KeyError):
+        return uid, str(uid)
 
 
 def main(argv=None) -> int:
@@ -41,13 +56,26 @@ def main(argv=None) -> int:
     # 파일시스템 접근 권한(=서버 운영자)이 곧 인증이다. 서비스가 켜져 있어도 안전하다:
     # users.json 은 원자적 쓰기이고, 실행 중 프로세스는 다음 로그인 때 파일을 다시 읽는다.
     if args.list_users or args.reset_password:
+        # 31회차 F3: root 로 실행하면 users.json 이 root 소유로 다시 써져 서비스 계정이 읽지 못한다(로그인 불능 — 재현).
+        #   데이터 폴더 소유자가 root 가 아니면 그 계정으로 다시 실행하라고 안내하고 멈춘다.
+        owner = _data_dir_owner(config.data_dir)
+        if owner is not None and hasattr(os, "geteuid") and os.geteuid() == 0 and owner[0] != 0:
+            print(f"✖ 데이터 폴더({config.data_dir})의 소유자는 '{owner[1]}' 입니다 — root 로 실행하면 계정 파일이 root 소유가 되어"
+                  " 서비스가 읽지 못합니다. 다음처럼 그 계정으로 실행하세요:", file=sys.stderr)
+            print(f"  sudo -u {owner[1]} python3 {Path(__file__).resolve()} --data-dir {config.data_dir} "
+                  + (f"--reset-password {args.reset_password}" if args.reset_password else "--list-users"), file=sys.stderr)
+            return 2
         ctx = AppContext(start_workers=False)
         if args.list_users:
             print(f"데이터 폴더: {config.data_dir}")
             for u in ctx.users.public_list():
                 print(f"  {u['username']:<20} role={u['role']:<7} enabled={u['enabled']}")
             return 0
-        result = ctx.users.recover(args.reset_password)
+        try:
+            result = ctx.users.recover(args.reset_password)
+        except AuthError as exc:
+            print(f"✖ 복구하지 못했습니다: {exc} — --list-users 로 계정 이름을 확인하세요.", file=sys.stderr)
+            return 1
         try:
             ctx.audit.write("user.password_reset", actor="console",
                             detail={"username": result["username"], "created": result["created"]})

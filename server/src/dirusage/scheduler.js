@@ -14,10 +14,11 @@
  *  - du 는 최대 15분이 걸릴 수 있어 결과를 **다음 틱들에서 수거**한다(한 틱을 붙잡지 않는다).
  *    잡 결과 보존은 RMA 의 DONE_TTL(30분)이므로 그 안에 반드시 가져와야 한다.
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { enqueueJob, getJob, onlineInstances, DONE_TTL } from '../rma/jobs.js';
 import { signJob } from '../rma/signing.js';
 import { rmaPasswordFor } from '../rma/agentSecrets.js';
-import { load as loadSettings } from './settings.js';
+import { load as loadSettings, settingsLoadError, RETENTION_MAX_DAYS } from './settings.js';
 import { buildScanRecord, judgeDuResult, comparableBase } from './scan.js';
 import { renderReport, renderSubject } from './report.js';
 import { getDb } from './db.js';
@@ -28,7 +29,7 @@ import { sendPortalMail } from '../mail/service.js';   // 공용 메일 발송(�
 // v2.606 LEFT2606-04: 2^31 초과면 setInterval 이 1ms 루프가 됐다 — clampIntervalMs 로 [30초, MAX_TIMER_MS].
 const TICK_MS = clampIntervalMs(Number(process.env.DIRUSAGE_TICK_MS) || 60_000, 60_000, 30_000);
 /** 잡 타임아웃(엣지가 이 안에 회신해야 한다). du 는 대용량에서 느리다. */
-const JOB_TIMEOUT_MS = Math.max(60_000, Number(process.env.DIRUSAGE_JOB_TIMEOUT_MS) || 900_000);
+const JOB_TIMEOUT_MS = Math.max(60_000, envPositive(process.env.DIRUSAGE_JOB_TIMEOUT_MS, 900_000, { max: ENV_INT_MAX }));
 
 let timer = null;
 let running = false;                 // ★ 재진입 가드 — 수동 실행과 공유한다
@@ -194,6 +195,15 @@ async function dispatchDue(cfg, now) {
   }
 }
 
+/*
+ * 71회차(68회차 P3 개선): 이력 정리 스로틀은 저장소 규약 `(++tick % N) === 0`(docs/rules/perf-db.md — 기동 첫 틱 금지)이다.
+ *   예전 `now % 6h < TICK_MS` 는 벽시계 모듈로라 ① 그 1분 창의 틱이 재진입 가드(du 수거 · 메일이 길 때)로 건너뛰어지면 그 6시간 정리가 통째로 빠졌고
+ *   ② 기동 시각이 창 안이면 첫 틱에 DELETE 스캔이 돌았다. 이제 **실제로 돈 틱** 수를 세어 6시간 분량마다 한 번 — 건너뛴 틱은 세지 않으므로 늦어질 뿐 빠지지 않는다.
+ */
+export const PRUNE_EVERY_TICKS = Math.max(1, Math.round((6 * 3600_000) / TICK_MS));
+let pruneTick = 0;
+export function pruneDue() { return (++pruneTick % PRUNE_EVERY_TICKS) === 0; }
+
 /** 한 틱. 재진입 가드는 호출부(tick/runNow)가 공유한다. */
 async function tickOnce() {
   const cfg = loadSettings();                  // ★ 매 틱 조회 — 설정 변경 즉시 반영
@@ -202,9 +212,12 @@ async function tickOnce() {
   await collectPending(cfg, now);              // 결과 수거를 먼저 — 같은 틱에 다음 잡을 걸 수 있다
   if (cfg.enabled) await dispatchDue(cfg, now);
   // 이력 prune(설정 보존일). 청크 삭제라 이벤트 루프를 막지 않는다.
-  if (now % (6 * 3600_000) < TICK_MS) {
+  if (pruneDue()) {
+    // 97회차 F14: 설정을 못 읽었으면(읽기 오류 · 손상) 보관 일수가 기본값(365일)이다 — 그 값으로 지우면 늘려 둔 기간의 스캔 이력을 잃는다.
+    //   메인 검토: 건너뛰기만 하면 못 읽는 동안 이력이 무한히 쌓인다(멈춤에도 상한 — 83 R1) → 저장 판정의 상한(RETENTION_MAX_DAYS)으로 정리한다.
+    const days = settingsLoadError() ? RETENTION_MAX_DAYS : Math.max(1, cfg.retentionDays || 365);
     const db = await getDb();
-    if (db) await db.prune(now - Math.max(1, cfg.retentionDays || 365) * 86_400_000).catch(() => {});
+    if (db) await db.prune(now - days * 86_400_000).catch(() => {});
   }
 }
 
@@ -268,4 +281,4 @@ export function startDirUsageScheduler() {
   console.log(`[dirusage] 폴더 사용량 스케줄러 시작 (틱 ${Math.round(TICK_MS / 1000)}초)`);
 }
 
-export function _resetDirUsage() { pending.clear(); lastRunAt.clear(); recent.length = 0; running = false; }
+export function _resetDirUsage() { pending.clear(); lastRunAt.clear(); recent.length = 0; running = false; pruneTick = 0; }

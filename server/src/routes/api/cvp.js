@@ -8,14 +8,17 @@
  *  - 등록부 CRUD·연결 테스트·설정: adminOnly(자격증명) + 감사로그(비밀 미기재).
  *  - 연결 테스트가 저장 비밀을 물려받으면 **host·계정·인증 방식을 저장값으로 고정**한다(v2.480 — 저장 비밀이 요청자 호스트로 가지 않게).
  */
+import { heavyJson, heavyKey } from '../../cvp/heavyGate.js';   // v3.42: 무거운 조회 동시 상한 + 같은 조회 합류
+import { createYielder } from '../../util/timeSlice.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminReq, maskPollerStatus, scrubHosts } from '../../auth/addressMask.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq } from '../../cvp/registry.js';
-import { loadSettings, saveSettings, LIMITS } from '../../cvp/settings.js';
+import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq, registryWriteRefusal, registryLoadError } from '../../cvp/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
+import { loadSettings, saveSettings, cvpSettingsLoadError, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
 import * as cdb from '../../cvp/db.js';
@@ -32,6 +35,7 @@ import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX, row
 import { cvpDeviceConfirm, cvpPartsStaleReason } from '../../cvp/confirm.js';
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
+import { buildPortMap, summaryRow, shortOf } from '../../cvp/portmap.js'; // v3.37 포트 구성도(판정 코어 — 웹은 그리기만)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
@@ -43,7 +47,7 @@ const csvPerm = requirePerm('data.csv');
  * v2.708: mock 모드에서 아직 이번 기동에 수집한 CVP 가 없으면 데모 시드 + 첫 수집을 바로 시작한다(폴러 첫 주기는 기동 45초 뒤).
  *   응답을 기다리게 하지 않는다 — 다음 새로고침부터 채워진다. 재진입은 pollCvpOnce 의 가드가 막는다.
  */
-function kickDemo() {
+export function kickDemo() {
   if (!isMockMode() || isPollerBusy()) return;
   const servers = listServers();
   if (servers.length && servers.some((x) => getStatus(x.id))) return;
@@ -54,6 +58,8 @@ const adminOnly = requireRole('admin');
 const writer = requireRole('admin', 'operator');
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
+// 6회차 A1: 파서 시험(parse-preview)만 읽기성 POST — 본문만 파싱(왕복 0 · 저장 0 · 저장 비밀 0)하는 혼자 쓰이는 진단이라 쓰기 범위 판정에서 뺀다(예외 목록 security-api.md).
+const fullScopeReadPost = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.', { readPost: true });
 const DEVICE_LIST_MAX = 5000;
 /** v2.641: CPU·메모리 '높음' 경계(%) — 웹 cvpText.SYS_HIGH_PCT 와 같은 값(테스트 대조). */
 export const SYS_HIGH_PCT = 80;
@@ -145,6 +151,8 @@ function pickStatus(st) {
     ...(st.samples && typeof st.samples === 'object' ? { samples: st.samples } : {}), // v2.640 ②: 원문 표본(라우트가 admin 에게만 싣는다)
     ...(Array.isArray(st.probes) ? { probes: st.probes } : {}), // v2.641: 경로 탐색 표본(admin 만 — stripSamples 가 뺀다)
     ...(Object.hasOwn(st, 'events') ? { events: st.events } : {}), // v2.641 ④: 이벤트 요약(null = 못 읽음)
+    // v2.940(C-③ 남긴 것 · 반증 M-1): EndpointLocation 주기 요약 — 수와 열거값뿐(주소 없음). 예전에는 이 화이트리스트에 없어 화면이 늘 '—' 였다.
+    ...(st.endpoints && typeof st.endpoints === 'object' ? { endpoints: st.endpoints } : {}),
   };
 }
 
@@ -166,6 +174,22 @@ function maskPeers(peers, admin) {
  *   cvp/overview.js rowBelongs·rowOwnerOf 하나다(Overview 카드·전체 소비 전력이 같은 함수를 쓴다 — 이 파일에 사본을 두지 말 것).
  */
 
+/**
+ * v3.42(버그 점검 1회차 A3-F1): 비관리자 MLAG 문자열(도메인 · 피어 링크 · 로컬 인터페이스) 가림 — 그 값이 실리는 응답 전부(장비 목록 · 상세 · 포트 구성도 · 이중화)가
+ *   이 함수 하나를 쓴다. 예전에는 /tools/cvp/redundancy 만 가려 형제 세 경로로 원문이 나갔다.
+ */
+export function maskMlag(ms, admin, hosts = []) {
+  if (admin || !ms || typeof ms !== 'object') return ms;
+  const mk = (v) => (v == null ? v : maskErrText(String(v), hosts));
+  return { ...ms, domain: mk(ms.domain), peerLink: mk(ms.peerLink), localIntf: mk(ms.localIntf) };
+}
+function publicInfo(info, admin) {
+  if (!info) return null;
+  if (admin) return info;
+  const { mac, ...rest } = info;   // 관리 식별자 등급
+  return rest.mlagStatus ? { ...rest, mlagStatus: maskMlag(rest.mlagStatus, false, listServers().map((x) => x.host)) } : rest;
+}
+
 function publicDevice(d, admin, confirm = null) {
   return {
     // v2.720(감사 B1-02): 화면의 필터 KPI(cvpText.totalsFromDevices)가 같은 판정을 쓰도록 서버 판정 결과를 싣는다(판정은 한 벌).
@@ -177,7 +201,7 @@ function publicDevice(d, admin, confirm = null) {
     ports: d.ports, collectedAt: d.collectedAt, telemetry: d.telemetry,
     // v2.641 ②③: CPU·메모리 최신값(못 읽으면 null) · 개요(비-admin 에는 MAC 을 뺀다 — 관리 식별자 등급)
     cpuPct: d.cpuPct ?? null, memPct: d.memPct ?? null, sysAt: d.sysAt ?? null,
-    info: d.info ? (admin ? d.info : (({ mac, ...rest }) => rest)(d.info)) : null,
+    info: publicInfo(d.info, admin),
   };
 }
 
@@ -195,8 +219,49 @@ export function maskErrText(v, hosts = []) {
   if (typeof v !== 'string' || !v) return v;
   return scrubHosts(v, hosts)
     .replace(/\bhttps?:\/\/[^\s,)'"]{1,300}/g, '(주소 가림)')
-    .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/g, '(주소 가림)')
+    // v3.42(버그 점검 2회차 A3-F1): 끝 조건은 '숫자 · 점+숫자' 가 아닐 때 — 예전 (?![\d.]) 는 문장 끝 마침표가 붙은 '10.1.1.1.' 을 가리지 않았다.
+    .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?!\d|\.\d)/g, '(주소 가림)')
     .replace(IPV6_CAND, (m) => (isIpv6Like(m) ? '(주소 가림)' : m));
+}
+
+/**
+ * v3.47(결정 D-1 — 사용자 선택 '권고'): LLDP 이웃 포트 ID 가 **MAC 모양**이면(서버 NIC MAC — 스위치는 인터페이스 이름을 준다) 비-admin 에게 가린다.
+ *   장비 MAC · chassisId 와 같은 등급. 인터페이스 이름(Ethernet1 · vmnic0 · eth0)은 그대로. 위치 찾기의 VM · 호스트 MAC 은 검색 대상이라 일부러 보인다(이 함수를 쓰지 않는다).
+ *   호스트 상세 업링크 근거(hostSan net-uplinks)도 쓰지 않는다 — 같은 화면 NIC 표가 그 호스트 NIC MAC 을 이미 보인다(같은 사용자 · 같은 값).
+ *   모든 반복에 상한(콜론 · 하이픈 6마디 · 점 3마디 · 맨 12자리) — 선형. 글자 길이도 먼저 자른다.
+ */
+// 5회차 A3(추정 → 반영): 4-4-4 하이픈(화웨이 · H3C · HPE Comware) · 콜론의 앞자리 0 생략(0:50:56:a:bb:cc)도 MAC 이다. 하이픈 2자리 표기는 앞자리 생략을 받지 않는다(판 번호 '4-27-4-1-2-3' 류를 가리지 않게).
+const MAC_TOKEN = /(?<![0-9a-f][:.-])\b(?:(?:[0-9a-f]{1,2}:){5}[0-9a-f]{1,2}|(?:[0-9a-f]{2}-){5}[0-9a-f]{2}|(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}|(?:[0-9a-f]{4}-){2}[0-9a-f]{4}|[0-9a-f]{12})\b(?![:.-][0-9a-f])/gi;   // 앞뒤로 마디가 더 붙은 것(8바이트 WWN 등)은 MAC 이 아니다
+/**
+ * 수정 검토 V5: 새 표기(4-4-4 하이픈 · 콜론 앞자리 생략)는 MAC 아닌 값과 겹친다 — 십진수만인 4-4-4('1588-1234-5678' 전화 · 날짜 꼴)와
+ *   십진수만이면서 한 자리 마디가 있는 콜론 표기('1:1:1:1:1:1' 슬롯 경로)는 MAC 으로 보지 않는다. 16진 글자가 섞인 4-4-4('dc01-a001-b002')는 MAC 과 구별할 수 없어 가린다(가리는 쪽).
+ */
+function looksMac(m) {
+  if (/^\d{4}-\d{4}-\d{4}$/.test(m)) return false;
+  if (/^[\d:]+$/.test(m) && m.includes(':') && m.split(':').some((x) => x.length === 1)) return false;
+  return true;
+}
+export function maskMacText(v) {
+  if (typeof v !== 'string' || !v) return v;
+  return v.slice(0, 4000).replace(MAC_TOKEN, (m) => (looksMac(m) ? '(MAC 가림)' : m));
+}
+/**
+ * 5회차 A3-F1 · F2: LLDP 에서 온 글자(시스템 이름 · 포트 ID · 포트 설명)는 **주소 가림 + MAC 가림** 둘 다 — 화면마다 따로 걸어 포트 구성도 · 토폴로지는 IP 모양 포트 ID 를,
+ *   포트 구성도는 MAC 모양 시스템 이름을 원문으로 냈다(전후 비교만 둘 다 걸었다). LLDP 글자를 싣는 응답은 이 함수 하나로.
+ */
+export function maskLldpText(v, hosts = []) {
+  if (typeof v !== 'string' || !v) return v;
+  return maskMacText(maskErrText(v, hosts));
+}
+/** 5회차 A3-F3: 글자 안의 MAC 가운데 own(12자리 소문자 집합)에 없는 것만 가린다 — 호스트 업링크 근거에서 그 호스트 NIC 가 아닌 MAC(이름이 겹친 다른 호스트)을 숨긴다. */
+export function maskForeignMacs(v, own = new Set()) {
+  if (typeof v !== 'string' || !v) return v;
+  return v.slice(0, 4000).replace(MAC_TOKEN, (m) => {
+    if (!looksMac(m)) return m;
+    const parts = m.toLowerCase().split(/[:.-]/);
+    const hex = parts.length === 6 ? parts.map((x) => x.padStart(2, '0')).join('') : parts.join('');
+    return own.has(hex) ? m : '(MAC 가림)';
+  });
 }
 
 /**
@@ -289,6 +354,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
     collectDrops: recentCvpCollectDrops(),
     ...(unavailable ? { dbUnavailable: true } : {}),
     ...(admin ? { db: await cdb.dbStats() } : { addressHidden: true }),
+    ...registryMark(registryLoadError()),   // 128회차
   });
 });
 
@@ -414,6 +480,85 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
   });
 });
 
+// ── v3.37 포트 구성도(docs/design/cvp-port-map) — 전면 배치 · 포트별 연결 장비(설명 + LLDP) · 사용/예비 ─────────────────
+/**
+ * 장비 한 대의 포트 구성도. 판정은 cvp/portmap.js 하나(분류 · 근거 · 배치표). 장비 · 엣지 왕복 0(중앙 DB 최신값 · v2.924 LLDP 표 · 일 롤업).
+ *   게이트는 형제 /tools/cvp/device 와 같다(tools + 전체 범위). 비-admin 은 설명 · LLDP 문자열의 주소를 가리고 chassisId(MAC)는 싣지 않는다 · MAC 모양 포트 ID 는 가린다(v3.47 D-1).
+ */
+api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
+  const admin = isAdminReq(req);
+  const cvpId = typeof req.query.cvpId === 'string' ? req.query.cvpId : '';
+  const key = typeof req.query.key === 'string' ? req.query.key : '';
+  const srv = cvpId ? getServer(cvpId) : null;
+  if (!srv || !key) return res.status(404).json({ ok: false, reason: '없는 장비입니다.' });
+  const agent = await agentFor(srv, cvpId, key);
+  if (agent === undefined) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
+  const det = await cdb.deviceDetail(agent, cvpId, key);
+  if (!det) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
+  const [ll, days, names] = await Promise.all([
+    cdb.lldpForDevice(agent, cvpId, key).catch(() => ({ rows: [], read: false, at: null, failing: false, unavailable: true })),
+    cdb.lastLinkDays(agent, cvpId, key).catch(() => ({ last: new Map(), since: null, unavailable: true })),
+    cdb.deviceNameIndex().catch(() => ({ rows: [] })),
+  ]);
+  const switchNames = new Set((names.rows || []).map((r) => shortOf(r.hostname)).filter(Boolean));   // v3.42(3회차 반증 R8): 짧은 이름은 portmap.shortOf 하나(IP 이름은 통째로)
+  const m = buildPortMap({ model: det.device.model, ports: det.ports, parts: det.device.partsList, lldp: ll.rows, lldpRead: ll.read, lastLink: days.last, switchNames });
+  const hosts = listServers().map((x) => x.host);
+  const mk = (v) => (admin || v == null ? v : maskErrText(v, hosts));
+  const mkL = (v) => (admin || v == null ? v : maskLldpText(v, hosts));
+  const corp = corpResolver(listServers(), dcList())(cvpId);
+  res.json({
+    device: { ...publicDevice(det.device, admin), corpId: corp.corpId, corpName: corp.corpName },
+    cvpName: srv.name || srv.id,
+    portsRead: m.portsRead, faceplate: m.faceplate, counts: m.counts, bySpeed: m.bySpeed,
+    // 5회차 A3-F1 · F2: LLDP 에서 온 글자는 maskLldpText 하나(주소 + MAC) — 연결 장비 이름(device)도 LLDP 시스템 이름에서 올 수 있다.
+    ports: m.ports ? m.ports.map((p) => ({ ...p, desc: mk(p.desc), device: mkL(p.device), lldp: p.lldp ? { ...p.lldp, sysName: mkL(p.lldp.sysName), portDesc: mkL(p.lldp.portDesc), portId: mkL(p.lldp.portId) } : null })) : null,
+    xcvrRead: !!m.xcvrRead, partsAt: det.device.partsAt ?? null, collectedAt: det.device.collectedAt ?? null,
+    lldp: { read: ll.read, at: ll.at, failing: !!ll.failing, ...(ll.unavailable ? { unavailable: true } : {}) },
+    linkHistory: { since: days.since, ...(days.unavailable ? { unavailable: true } : {}) },
+    ...(admin ? {} : { addressHidden: true }),
+  });
+});
+
+/** 전 스위치 포트 여유 — 장비마다 사용 · 예비 · 확인 필요 · 꺼짐(LLDP 없이 분류만). 화면은 마운트 1회 + 새로고침(폴링 없음). */
+  const PORTMAP_SUMMARY_PORTS_MAX = 200_000;
+api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
+  const admin = isAdminReq(req);
+  const servers = listServers();
+  const own = rowOwnerOf(servers);
+  return heavyJson(req, res, heavyKey('portmap-summary', admin), async (hx) => {
+    const { rows, unavailable } = await cdb.listDeviceRows();
+    hx.check();
+    if (unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
+    const devs = rows.filter(own);
+    // v3.42(반증 C5): 포트 전량 한 번의 동기 조회 대신 장비별 PK 조회 + 시간 기준 양보(cdb.portRowsOf — 새 화면 라우트와 같은 함수 · 포트를 못 읽은 장비는 뺀다).
+    const pr = await cdb.portRowsOf(devs, { limit: PORTMAP_SUMMARY_PORTS_MAX });
+    hx.check();
+    if (pr.unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
+    const byDev = new Map();
+    for (const r of pr.rows) {
+      const k = `${r.agent}\u0000${r.cvpId}\u0000${r.key}`;
+      if (!byDev.has(k)) byDev.set(k, []);
+      byDev.get(k).push({ name: r.port, oper: r.oper, admin: r.admin, desc: r.desc, speedBps: r.speedBps });
+    }
+    const corpOf = corpResolver(servers, dcList());
+    const byId = new Map(servers.map((x) => [x.id, x]));
+    // v3.42(2회차 A4-F8): 장비마다 구성도 분류(summaryRow — 500대 45~100ms)를 시간 기준 양보로 나눈다.
+    const list = []; const y = createYielder(15);
+    for (const d of devs) {
+      const ports = d.portsRead ? (byDev.get(`${d.agent}\u0000${d.cvpId}\u0000${d.key}`) || []) : null;
+      const s = summaryRow({ model: d.model, ports, parts: d.partsList });
+      const c = corpOf(d.cvpId);
+      list.push({ cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+        cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, spareSpeedUnknown: s.spareSpeedUnknown || 0, source: s.source || null });
+      await y();
+    }
+    // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
+    return { body: { devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) } };
+  });
+});
+
 // ── v2.641 ③ CPU·메모리 추이 · ④ 이벤트 · ⑤ 포트 사용량 ──────────────────────────
 /** 장비 행을 가진 agent 를 등록부 담당으로 고른다(port-series 와 같은 규칙). */
 async function agentFor(srv, cvpId, key) {
@@ -533,13 +678,14 @@ api.get('/tools/cvp/optics', toolsPerm, fullScopeOnly, async (req, res) => {
       if (!p.dom && !o) { counts.noDom++; continue; }
       counts.withDom++;
       if (o && o.judged) { counts.judged++; if (o.rxState && Object.hasOwn(counts, o.rxState)) counts[o.rxState]++; }
+      else if (o && o.lanesPartial === true) counts.lanesPartial = (counts.lanesPartial || 0) + 1;   // v3.42(2회차 반증 R7): 링크 없음과 따로
       else if (o && !o.linked) counts.notLinked++;
       const c = corpOf(d.cvpId);
       list.push({
         cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', corpId: c.corpId, corpName: c.corpName,
         intf: o?.intf || null, part: p.name, state: p.state, rx: o?.rx ?? p.dom?.rxPower ?? null, tx: o?.tx ?? p.dom?.txPower ?? null,
         temperature: p.dom?.temperature ?? null, voltage: p.dom?.voltage ?? null, txBias: p.dom?.txBias ?? null,
-        linked: o ? o.linked : null, judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt, stale: false,
+        linked: o ? o.linked : null, ...(o?.lanesPartial === true ? { lanesPartial: true } : {}), judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt, stale: false,
       });
     }
   }
@@ -712,7 +858,7 @@ api.post('/tools/cvp/faults/close', adminOnly, toolsPerm, fullScopeOnly, async (
  * v2.640 ② — 파서 시험(adminOnly): 관리자가 CVP 응답 원문을 붙여넣으면 이 포탈의 파서가 무엇을 읽는지 보여준다. **네트워크 왕복 0**,
  * 저장 0. 본문 상한은 express.json 기본(1MB) — 그보다 큰 응답은 앞부분만 붙여넣으라고 화면이 말한다(PREVIEW_TEXT_MAX 는 문자 기준).
  */
-api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeReadPost, (req, res) => {
   const b = req.body && typeof req.body === 'object' ? req.body : {};
   const kind = typeof b.kind === 'string' ? b.kind : '';
   if (!PREVIEW_KINDS.includes(kind)) return res.status(400).json({ ok: false, reason: `kind 는 ${PREVIEW_KINDS.join('·')} 중 하나여야 합니다.`, kinds: PREVIEW_KINDS });
@@ -789,7 +935,7 @@ api.post('/tools/cvp/collect', writer, toolsPerm, fullScopeOnly, async (req, res
 
 // ── 등록부(adminOnly — 자격증명) ────────────────────────────────────────────
 api.get('/tools/cvp/servers', adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
-  res.json({ servers: listServers(), agents: knownAgentNames(), datacenters: dcList() });
+  res.json({ servers: listServers(), agents: knownAgentNames(), datacenters: dcList(), ...registryMark(registryLoadError()) });   // 128회차: 표지
 });
 
 // DataCenter 목록 — 폼 드롭다운과 저장 검증이 같은 목록을 본다(v2.609).
@@ -798,6 +944,9 @@ function dcList() {
 }
 
 const saveRoute = (req, res) => {
+  // 결정(78 남긴 것 ①): 등록부 읽기 오류 중에는 409(원본은 그대로 — 읽히면 다시 열린다). 읽지 못한 빈 목록으로 agent · 법인을 고르지 않게 맨 앞에서.
+  const refused = registryWriteRefusal();
+  if (refused) return res.status(409).json(refused);
   try {
     const input = { ...(req.body && typeof req.body === 'object' ? req.body : {}), ...(req.params.id ? { id: req.params.id } : {}) };
     // 담당 엣지·DataCenter 는 기존 목록의 표기로 맞추고, 목록에 없는 새 값은 거부한다(오타 방지 — v2.609).
@@ -818,6 +967,8 @@ api.post('/tools/cvp/servers', adminOnly, toolsPerm, fullScopeOnly, (req, res) =
 api.put('/tools/cvp/servers/:id', adminOnly, toolsPerm, fullScopeOnly, (req, res) => saveRoute(req, res));
 
 api.delete('/tools/cvp/servers/:id', adminOnly, toolsPerm, fullScopeOnly, async (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): '없는 CVP 서버' 404 보다 먼저
+  if (refused) return res.status(409).json(refused);
   const srv = getServer(req.params.id);
   if (!deleteServer(req.params.id)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
   dropStatus(req.params.id);
@@ -857,9 +1008,14 @@ api.post('/tools/cvp/servers/:id/test', adminOnly, toolsPerm, fullScopeOnly, asy
 
 // ── 설정(adminOnly) ──────────────────────────────────────────────────────────
 api.get('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
-  res.json({ settings: loadSettings(), limits: LIMITS });
+  const le = cvpSettingsLoadError();   // 25회차 F-2: 손상이면 밝힌다(화면의 값은 저장값이 아니라 기본값)
+  res.json({ settings: loadSettings(), limits: LIMITS, ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200) } } : {}) });
 });
 api.put('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+  // 25회차 F-2: 손상 중 저장은 받지 않는다 — 기본값(짧은 보존)을 굳히고 표지를 풀어 이력이 정리됐다. 서비스 점검 확정 · 보존본 복구로만.
+  // 103회차 F20: 읽기 오류는 원본이 그대로라 조치가 다르다(권한 · 디스크 — 확정 불가 · 재시작 불필요).
+  if (cvpSettingsLoadError()?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: `CloudVision 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` });
+  if (cvpSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'CloudVision 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 기본값(짧은 보존)이 굳습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' });
   const before = loadSettings();
   const next = saveSettings(req.body && typeof req.body === 'object' ? req.body : {});
   logAudit({ user: req.user?.username, action: 'CVP 수집 설정 변경', target: 'cvp-settings', detail: JSON.stringify({ before, after: next }).slice(0, 500) });

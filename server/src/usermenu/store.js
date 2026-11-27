@@ -37,11 +37,11 @@
  *  · 대상 수는 **로컬 계정(users.json) 기준**이다 — AD 계정은 로그인해야 이름이 생기므로 미리 셀 수 없다(배포 메뉴는 그들에게도
  *    적용된다 · 화면이 그 사실을 적는다).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { capStr } from '../util/capStr.js';
 
 export const MENU_V = 1;
@@ -76,13 +76,28 @@ export function menuUserKey(username) {
 /** 레코드의 마지막 시각 — 대소문자만 다른 옛 키를 합칠 때 '더 최근' 을 고르는 기준. */
 const recAt = (rec) => Math.max(numOr(rec?.updatedAt) ?? 0, numOr(rec?.prev?.at) ?? 0);
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => fileOf(), { parse: (t) => t, preserve: false, tag: 'usermenu' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function userMenuWriteRefusal() {
+  load();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `사용자 메뉴 파일(${path.basename(fileOf())})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
+
 function load() {
   if (cache) return cache;
   const file = fileOf();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return empty(); }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
   let data = empty();
   try {
-    if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닙니다');
       data = {
         v: 1,
@@ -136,6 +151,7 @@ function load() {
 }
 
 function persist() {
+  { const no = userMenuWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
   atomicWriteFileSync(fileOf(), JSON.stringify(cache, null, 2), { mode: 0o600 });
 }
 
@@ -366,4 +382,4 @@ export function clearDistributed({ by } = {}) {
 }
 
 /** 테스트·재로드용 — 캐시를 버린다(다음 호출이 파일을 다시 읽는다). */
-export function invalidateUserMenus() { cache = null; }
+export function invalidateUserMenus() { cache = null; _reader.reset(); _readErr = ''; }

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>프로세스 Top-N</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.tile{border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px}
+.tile .h{font-size:11.5px;color:#8b9bb4;font-weight:600}.tile .v{font-size:20px;font-weight:800;line-height:1.1}.tile .s{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+</style>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4"><a href="Server.dc.html">bm-kr1-gp04</a> › <a href="AvgPeak.dc.html">추이</a> › <b style="color:#e6edf6">이 시점 프로세스</b> · 추천 2</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">프로세스 Top-N — 5분 샘플마다 CPU · 메모리 · I/O 상위 5 를 같이 받아, 피크 시점에 “누가 먹었나” 를 추이 팝업에서 바로 본다</h1>
+    <div class="dim" style="font-size:12px;margin-top:4px">SSH 1회 명령에 <span class="mono">##TOP</span> 구획 추가(새 포트·에이전트 없음) · CPU 는 1초 구간 값(수명 평균 아님) · 인자(args)는 읽지 않는다(비밀 노출 — 16차) · 저장 5분 × 7일 + 시간당 명령별 집계 90일 · 수치는 가상</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px;align-items:start">
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>추이 팝업 › 이 시점 프로세스 — 11-06 13:35 (CPU 피크 91%)</h2><span class="chip ok">CPU</span><span class="chip">메모리</span><span class="chip">I/O</span><span class="dim" style="font-size:12px;margin-left:auto">◀ 13:30 · 13:40 ▶ · 집중 세션이면 1분 간격</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>#</th><th>PID</th><th>사용자</th><th>명령(comm)</th><th>CPU % (1초)</th><th>RSS</th><th>상태</th><th>누적 CPU</th><th>프로파일</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="mono">41822</td><td class="mono">gpadmin</td><td class="mono">postgres</td><td class="bad">68.0</td><td>3.1 GB</td><td>R</td><td>4h12m</td><td><span class="chip">GPDB 세그먼트</span></td></tr>
+          <tr><td>2</td><td class="mono">41830</td><td class="mono">gpadmin</td><td class="mono">postgres</td><td class="warn">14.5</td><td>2.8 GB</td><td>R</td><td>3h58m</td><td><span class="chip">GPDB 세그먼트</span></td></tr>
+          <tr><td>3</td><td class="mono">2210</td><td class="mono">root</td><td class="mono">kswapd0</td><td class="warn">4.1</td><td>—</td><td>R</td><td>22m</td><td class="dim">커널 · 메모리 압박 신호(교차 판정 ③)</td></tr>
+          <tr><td>4</td><td class="mono">9931</td><td class="mono">root</td><td class="mono">node_exporter</td><td>1.2</td><td>41 MB</td><td>S</td><td>1h02m</td><td class="dim">—</td></tr>
+          <tr><td>5</td><td class="mono">1188</td><td class="mono">root</td><td class="mono">sshd</td><td>0.6</td><td>9 MB</td><td>S</td><td>3m</td><td class="dim">수집 세션 자신 포함 가능</td></tr>
+          <tr><td colspan="9" class="dim">나머지 합계 CPU 2.6% · 프로세스 수 412 · 실행 중(R) 7 · D(디스크 대기) 2 → 포화 신호 </td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">프로파일 열은 명령 이름 → 역할 매핑(⑥ 카탈로그: postgres+gpadmin → GPDB 세그먼트 · airflow scheduler/worker · celery → Airflow). 같은 PID 가 연속 샘플에 나오면 ‘지속’ 으로 묶고, PID 재사용은 시작 시각(starttime)으로 가른다.</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">시간 × 프로세스 띠 — 2시간 (CPU 상위 5 누적)</h2>
+      <svg viewBox="0 0 560 220" width="100%" style="display:block">
+        <rect x="0" y="0" width="560" height="220" fill="#0f1626" rx="8"/>
+        <g font-size="10" fill="#8b9bb4" font-family="JetBrains Mono,monospace"><text x="8" y="30">100%</text><text x="8" y="100">50%</text><text x="8" y="170">0%</text><text x="48" y="200">12:00</text><text x="248" y="200">13:00</text><text x="448" y="200">14:00</text></g>
+        <g>
+          <polygon fill="#22d3ee" opacity=".85" points="48,170 108,160 168,150 228,140 288,120 348,80 378,70 408,100 468,140 520,150 520,170"/>
+          <polygon fill="#a78bfa" opacity=".85" points="48,170 108,168 168,166 228,163 288,156 348,146 378,142 408,150 468,160 520,163 520,170"/>
+          <polygon fill="#fbbf24" opacity=".85" points="48,170 108,169 168,168 228,167 288,164 348,158 378,156 408,160 468,166 520,167 520,170"/>
+        </g>
+        <line x1="378" y1="20" x2="378" y2="178" stroke="#f87171" stroke-dasharray="3 3"/><text x="300" y="18" font-size="10" fill="#f87171">13:35 피크 91%</text>
+        <g font-size="10"><rect x="48" y="206" width="10" height="10" fill="#22d3ee"/><text x="62" y="215" fill="#8b9bb4">postgres(gpadmin)</text><rect x="178" y="206" width="10" height="10" fill="#a78bfa"/><text x="192" y="215" fill="#8b9bb4">kswapd0</text><rect x="258" y="206" width="10" height="10" fill="#fbbf24"/><text x="272" y="215" fill="#8b9bb4">기타 상위</text></g>
+      </svg>
+      <div class="dim" style="font-size:11.5px;margin:8px 0">색은 명령 이름 단위(같은 이름 PID 여러 개는 합산). 띠를 누르면 그 5분 샘플의 표(왼쪽)로. 평균·피크 추이와 시간축 동기(②-추이).</div>
+      <h2 style="margin:12px 0 8px">I/O 탭 — 읽을 수 있을 때만</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>#</th><th>PID</th><th>명령</th><th>읽기 MB/s</th><th>쓰기 MB/s</th><th>상태</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="mono">41822</td><td class="mono">postgres</td><td>212</td><td>48</td><td>R</td></tr>
+          <tr><td>2</td><td class="mono">41830</td><td class="mono">postgres</td><td>190</td><td>41</td><td>D</td></tr>
+          <tr><td colspan="6"><span class="chip warn">권한</span> <span class="dim">/proc/&lt;pid&gt;/io 는 같은 사용자 또는 CAP_SYS_PTRACE 가 필요 — 못 읽은 프로세스는 ‘—’ 로 두고 ④ 상태 ‘권한’ 과 같은 칸으로 표시(0 으로 적지 않는다)</span></td></tr>
+        </tbody></table></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">수집 방법 — <span class="mono">##TOP</span> 구획 (SSH 1회 안)</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>항목</th><th>명령 · 방법</th><th>근거</th></tr></thead>
+        <tbody>
+          <tr><td>CPU 상위 5 (1초 구간)</td><td class="mono">top -b -n 2 -d 1 -w 512 -o %CPU | awk '/^top -/{f++} f==2' | head -12</td><td>● procps-ng top(8): -n 2 의 둘째 프레임이 구간 값 · 첫 프레임은 부팅 이후 평균이라 버린다</td></tr>
+          <tr><td>대안(top 없음)</td><td class="mono">/proc/[0-9]*/stat 을 1초 간격 2회 읽어 utime+stime 차이 / CLK_TCK</td><td>● proc(5) · 기존 <span class="mono">##TICK</span> 재사용</td></tr>
+          <tr><td>메모리 상위 5</td><td class="mono">ps -eo pid,user:16,rss,stat,etimes,comm --sort=-rss | head -6</td><td>● ps(1) · RSS 는 공유 페이지 중복 포함(적어 둔다)</td></tr>
+          <tr><td>I/O 상위 5</td><td class="mono">/proc/&lt;pid&gt;/io read_bytes·write_bytes 2회 차이(CPU 상위 후보 20개에만)</td><td>● proc(5) · 권한 없으면 생략</td></tr>
+          <tr><td>실행 중 · D 상태 수</td><td class="mono">/proc/stat procs_running · ps stat 열의 D 개수</td><td>◐ USE 포화 신호</td></tr>
+          <tr><td>출력 제한</td><td>줄 상한 40 · 바이트 상한 8 KB · comm 만(인자 없음) · 사용자 이름 16자</td><td>16차 규약(출력 상한 · 비밀 노출 방지)</td></tr>
+          <tr><td>비용</td><td>1초 대기 추가 → 세션 예산 50초 안 · 1,000대 × 동시 32 주기 +0.5분 추정 · 집중 세션(1분 간격)에서는 이미 같은 방식(②-집중 ‘프로세스 상위 3’) 을 5 로 통일</td><td>○ 추정 — 수집 건강 ⑫ 로 실측</td></tr>
+        </tbody></table></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">저장 · 보존 · 정직하게 적어 둘 것</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>항목</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td>표</td><td class="mono">top_proc(agent, key, ts, kind[cpu|mem|io], rank, pid, starttime, user, comm, val, rss, state)</td></tr>
+          <tr><td>보존</td><td>5분 샘플 <b>7일</b>(월 파일 안) · 롤업 없음(프로세스는 평균을 못 낸다) · 대신 <span class="mono">top_proc_hourly(comm 별 CPU초 합 · 최대 RSS)</span> 90일</td></tr>
+          <tr><td>크기 추정 ○</td><td>1,000대 × 288 샘플 × 15행 ≈ 430만 행/일 → 7일 ≈ 3,000만 행(≈ 2~3 GB). ‘변화 있을 때만 저장’(상위 집합과 값 ±5%p 안이면 생략)으로 60~80% 줄 것으로 추정 — 실측 뒤 보존일 조정</td></tr>
+          <tr><td>안 하는 것</td><td>프로세스 인자 · 환경 · 열린 파일 · 컨테이너 이름(호스트 PID 로만 보인다 ○) · 프로세스 kill(읽기 전용)</td></tr>
+          <tr><td>RSS 의 뜻</td><td>공유 라이브러리 페이지가 프로세스마다 중복 계산 → 합계가 실제보다 크다. 정확한 값은 PSS(smaps_rollup · 느리고 권한 필요)라 쓰지 않고 ‘RSS’ 라고 적는다</td></tr>
+          <tr><td>판정 연계</td><td>집중 결론 카드 · 플레이북(‘CPU 포화 → 상위 프로세스 확인’ 런북) · 용량 예측 ⑱ 메모리 리셋형 확인 · 보안 로그 ⑮ 와는 잇지 않는다(이름만으로 판단 금지)</td></tr>
+        </tbody></table></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -16,9 +16,10 @@ import express from 'express';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
 import {
-  issueApiKey, revokeApiKey, deleteApiKey, updateApiKey, listApiKeys, DEFAULT_RPM, KEY_PREFIX,
+  issueApiKey, revokeApiKey, deleteApiKey, updateApiKey, listApiKeys, apiKeysLoadError, DEFAULT_RPM, KEY_PREFIX,
 } from '../../publicapi/keys.js';
 import { GROUPS, ENDPOINTS } from '../../publicapi/allowlist.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 export function registerApiKeys(adminRouter) {
   // v2.611 AUTHZ2611-04: 연동 키는 전 함대 조회 자격증명이다(v2.562 '백업·토큰과 같은 등급'). 범위 제한 계정(설정 소유자여도)이
@@ -36,6 +37,7 @@ export function registerApiKeys(adminRouter) {
     res.json({
       ok: true,
       keys,
+      loadError: apiKeysLoadError(),   // 97회차 F1: 키 파일 읽기 오류(원본은 그대로) — 빈 목록을 '키 없음' 으로 읽지 않게
       groups: GROUPS,
       endpoints: ENDPOINTS.map((e) => ({
         path: e.path, method: e.method, group: e.group, summary: e.summary,
@@ -64,9 +66,10 @@ export function registerApiKeys(adminRouter) {
    * 발급. **평문은 이 응답에만** 있다.
    * ⚠ 응답의 `plaintext` 를 로그·감사에 남기지 말 것.
    */
-  adminRouter.post('/api-keys', owner, (req, res) => {
-    const { key, plaintext, issues } = issueApiKey(req.body || {}, req.user?.username || '');
-    if (!key) return res.status(400).json({ ok: false, reason: issues[0] || '발급할 수 없습니다.', issues });
+  adminRouter.post('/api-keys', owner, textFields('name', 'note'), (req, res) => {
+    const { key, plaintext, issues, status, code } = issueApiKey(req.body || {}, req.user?.username || '');
+    // 97회차 F1: 키 파일 읽기 오류면 409(settings-unreadable — 원본을 덮지 않으려고 거절)
+    if (!key) return res.status(status || 400).json({ ok: false, reason: issues[0] || '발급할 수 없습니다.', issues, ...(code ? { code } : {}) });
     logAudit({
       user: req.user?.username || 'unknown',
       action: 'apikey.issue',
@@ -83,7 +86,7 @@ export function registerApiKeys(adminRouter) {
   /** 수정 — 허용 분류·범위·만료·상한만. 키 값은 바뀌지 않는다. */
   adminRouter.patch('/api-keys/:id', owner, (req, res) => {
     const r = updateApiKey(req.params.id, req.body || {});
-    if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, issues: r.issues || [] });
+    if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, issues: r.issues || [], ...(r.code ? { code: r.code } : {}) });
     logAudit({
       user: req.user?.username || 'unknown', action: 'apikey.update', target: r.key.name,
       detail: `${r.key.fp} · groups=${r.key.groups.join('|') || '(없음)'} · vcenters=${r.key.vcenters.length || '전체'}`,
@@ -94,7 +97,7 @@ export function registerApiKeys(adminRouter) {
   /** 폐기 — 행은 남기고 `revokedAt` 을 찍는다(감사 흔적). 같은 값은 다시 살아나지 않는다. */
   adminRouter.post('/api-keys/:id/revoke', owner, (req, res) => {
     const r = revokeApiKey(req.params.id, req.user?.username || '');
-    if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason });
+    if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { code: r.code } : {}) });
     logAudit({ user: req.user?.username || 'unknown', action: 'apikey.revoke', target: r.key.name, detail: r.key.fp });
     res.json({ ok: true, key: r.key });
   });
@@ -103,7 +106,7 @@ export function registerApiKeys(adminRouter) {
   adminRouter.delete('/api-keys/:id', owner, (req, res) => {
     const before = listApiKeys().find((k) => k.id === req.params.id);
     const r = deleteApiKey(req.params.id);
-    if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason });
+    if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { code: r.code } : {}) });
     logAudit({ user: req.user?.username || 'unknown', action: 'apikey.delete', target: before?.name || req.params.id, detail: before?.fp || '' });
     res.json({ ok: true });
   });

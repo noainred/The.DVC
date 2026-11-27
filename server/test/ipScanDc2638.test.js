@@ -6,7 +6,7 @@
  *      등록되지 않은 DataCenter 저장은 400 · 제안 API.
  *   ④ 웹 문구·대역 판정(ipScanDcText.js).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,6 +14,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveAgentDatacenters, agentVcenterIds, suggestAgentSubnets, ipOfHost, datacenterMapSig } from '../src/ipam/scanDatacenter.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -71,7 +78,7 @@ test('② 제안: /24 로 묶고 IP·출처를 센다 · 이름 등록은 개수
 });
 
 function runChild(body, setup) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipscandc2638-'));
+  const dir = tmpDir('ipscandc2638-');
   setup(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
@@ -171,7 +178,8 @@ test('④ 웹: 귀속 문구 · 입력된 대역 판정 · 붙이기', async () 
   assert.equal(w.coverageOf('10.1.3.0/24', rg), 'full');
   assert.equal(w.coverageOf('10.1.4.0/24', rg), '');
   assert.equal(w.coverageOf('10.1.4.0/24', w.rangesOf(['10.1.4.0-10.1.4.127', '10.1.4.128-10.1.4.255'])), 'full', '겹치지 않는 두 줄의 합');
-  const a = w.appendSubnets(['10.1.3.0/24', ''], ['10.1.3.0/24', '10.1.5.0/24', '10.1.5.0/24']);
-  assert.deepEqual(a.lines, ['10.1.3.0/24', '10.1.5.0/24']); assert.equal(a.added, 1); assert.equal(a.skipped, 2);
+  // v3.6.0: '붙이기'(appendSubnets)는 지웠다 — 담기 화면(ScanRangeAdd)이 가져오기 창과 같은 applyImport 로 넣는다(겹치는 대역은 '중복 대역' 칸 —
+  //   web ipamRedesign360 · vcRangeImportText 시험이 본다). 함수가 되살아나 두 경로가 갈라지지 않게 없음을 고정한다.
+  assert.equal(w.appendSubnets, undefined);
   assert.match(w.suggestSummaryText({ totals: { subnets: 3, vmIps: 1, hostIps: 2, idracIps: 0 }, skipped: { hostsNoIp: 1 }, omitted: 0, subnets: [] }), /이름으로 등록된 ESXi 호스트 1대/);
 });

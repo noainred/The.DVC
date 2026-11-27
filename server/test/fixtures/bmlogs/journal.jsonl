@@ -1,0 +1,7 @@
+{"__REALTIME_TIMESTAMP":"1793937761000000","PRIORITY":"3","SYSLOG_IDENTIFIER":"systemd","_PID":"1","_COMM":"systemd","MESSAGE":"postgresql.service: Failed with result 'exit-code'."}
+{"__REALTIME_TIMESTAMP":"1793937762000000","PRIORITY":"3","SYSLOG_IDENTIFIER":"systemd","_PID":"1","_COMM":"systemd","MESSAGE":"airflow-scheduler.service: Start request repeated too quickly."}
+{"__REALTIME_TIMESTAMP":"1793940120000000","PRIORITY":"4","SYSLOG_IDENTIFIER":"chronyd","_PID":"812","_COMM":"chronyd","MESSAGE":"System clock wrong by 0.912345 seconds, adjustment started"}
+{"__REALTIME_TIMESTAMP":"1793940190000000","PRIORITY":"4","SYSLOG_IDENTIFIER":"NetworkManager","_PID":"1022","_COMM":"NetworkManager","MESSAGE":"<warn>  [1762402800.1234] dhcp4 (eno2): request timed out\n    이어진 줄(한 항목의 둘째 줄 — 따로 세지 않는다)"}
+{"__REALTIME_TIMESTAMP":"1793940240000000","PRIORITY":"3","SYSLOG_IDENTIFIER":"rsyslogd","_PID":"1200","_COMM":"rsyslogd","MESSAGE":"file '/var/log/app/batch.log': write error - No space left on device [v8.2102.0]"}
+{"__REALTIME_TIMESTAMP":"1793940270000000","PRIORITY":"4","SYSLOG_IDENTIFIER":"sshd","_PID":"2210","_COMM":"sshd","MESSAGE":"error: kex_exchange_identification: Connection closed by remote host"}
+{"__REALTIME_TIMESTAMP":"1793940300000000","PRIORITY":"4","SYSLOG_IDENTIFIER":"app","_PID":"7","_COMM":"app","MESSAGE":[98,105,110,32,0,255,32,78,111,32,115,112,97,99,101,32,108,101,102,116,32,111,110,32,100,101,118,105,99,101]}

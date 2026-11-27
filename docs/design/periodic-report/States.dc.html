@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>정기 점검 보고 — 상태 8종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",monospace;font-size:12px}
+.st{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+.st .g{font-family:"JetBrains Mono",monospace;font-size:11px}
+.st.ok{color:#22c55e;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35)}
+.st.warn{color:#f59e0b;background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4)}
+.st.crit{color:#f87171;background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.45)}
+.st.unk{color:#9aa4b2;background:rgba(139,155,180,.14);border-color:rgba(139,155,180,.4)}
+.st.pend{color:#22d3ee;background:rgba(34,211,238,.12);border-color:rgba(34,211,238,.4)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.s{display:flex;flex-direction:column}
+.s .h{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40}
+.s .h .k{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;background:#1a2236;border:1px solid #243049;font-weight:800;font-size:12px;color:#22d3ee}
+.s .h h2{margin:0;font-size:14px;font-weight:800}
+.s .mock{margin:12px 14px;padding:12px;border-radius:10px;background:#0a0e17;border:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px}
+.s .rule{padding:0 14px 12px;font-size:12.5px;color:#c7d2e3}
+.rule b{color:#e6edf6}
+.band{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;font-size:12px}
+.band.info{background:rgba(37,99,235,.08);border:1px solid rgba(59,130,246,.3);color:#c7d2e3}
+.band.warn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);color:#e6edf6}
+.band.bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.4);color:#e6edf6}
+.band.unk{background:rgba(139,155,180,.08);border:1px solid rgba(139,155,180,.35);color:#c7d2e3}
+.prog{height:8px;border-radius:4px;background:#243049;position:relative;overflow:hidden}
+.prog i{position:absolute;left:0;top:0;bottom:0;background:#22d3ee;border-radius:4px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{text-align:left;font-weight:700;color:#8b9bb4;font-size:11px;padding:6px 8px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+.err{padding:14px;border-radius:10px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.35)}
+.err .t{font-weight:800;color:#f87171;margin-bottom:4px}
+.badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:6px;font-size:12px;font-weight:800;background:rgba(245,158,11,.16);color:#fcd34d;border:1px solid rgba(245,158,11,.45)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px}
+.kv dt{color:#8b9bb4;font-weight:600}.kv dd{margin:0}
+</style>
+</helmet>
+<div style="min-height:1480px;padding:22px 24px 28px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px">
+  <div>
+    <h1 style="margin:0 0 4px;font-size:20px;font-weight:800">상태 8종 — 화면이 거짓을 말하지 않게 하는 경우들</h1>
+    <div class="muted">모든 상태에서 ‘확인하지 못한 것’ 과 ‘정상’ 을 섞지 않고, 잠금은 그 대상만 걸며, 이유를 단정하지 않습니다.</div>
+  </div>
+  <div class="grid">
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓐ</span><h2>생성 중</h2><span class="st pend" style="margin-left:auto"><span class="g">◔</span>진행</span></div>
+      <div class="mock">
+        <div style="display:flex;justify-content:space-between;font-size:12.5px"><b>월간 M-2026-11 만드는 중</b><span class="mono muted">19 / 28 법인 · 27초</span></div>
+        <div class="prog"><i style="width:68%"></i></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="st ok"><span class="g">✓</span>인프라 22/22</span><span class="st pend"><span class="g">◔</span>서비스 8/13</span><span class="st unk"><span class="g">·</span>설비 대기</span></div>
+        <div style="display:flex;gap:6px"><button class="btn" type="button" disabled>지금 만들기</button><button class="btn" type="button">다른 회차 열기</button></div>
+      </div>
+      <div class="rule">잠금은 <b>만들고 있는 그 주기만</b>(다른 주기 · 열람은 그대로). 진행은 법인 · 축 단위로 보이고 ‘중단’ 은 두지 않습니다(수십 초 · 동시 1건). 조립 중에 포탈이 꺼지면 회차는 ‘실패’ 로 남고 다음 틱에 다시 만들지 않습니다 — 보관함에 실패 줄이 보이고 사람이 ‘지금 만들기’ 로 다시 합니다.</div>
+    </section>
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓑ</span><h2>엣지 미보고 법인</h2><span class="st unk" style="margin-left:auto"><span class="g">?</span>확인 불가로</span></div>
+      <div class="mock">
+        <table><thead><tr><th>법인</th><th>인프라</th><th>서비스</th><th>설비</th><th>데이터 기준</th></tr></thead>
+        <tbody><tr><td><b>PL1</b></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td><span class="st unk"><span class="g">?</span>불가 (2)</span></td><td class="mono" style="color:#f59e0b">10-29 14:10 · 3일 전</td></tr></tbody></table>
+        <div class="band warn">PL1 엣지의 마지막 push 가 기준 시각보다 3일 오래됐습니다. 엣지가 올리는 항목(SAN · PDU · 파트 장애)은 이 회차에서 <b>확인 불가</b>이고, 중앙이 직접 가진 값(인벤토리 마지막 정상값)은 ‘오래됨’ 으로 표시했습니다. → <a href="#el">엣지 로그 · 통신 점검(PL1)</a></div>
+      </div>
+      <div class="rule">미보고는 장애일 수도, 포탈 재시작일 수도 있습니다 — <b>이유를 단정하지 않고</b> 마지막 수신 시각과 확인 경로만 적습니다. 미보고 법인을 ‘정상’ 에도 ‘이상’ 에도 넣지 않고, 종합 판정에서 빼지도 않습니다(확인 불가 수로 남김). 회복되면 다음 회차에 자동 반영됩니다.</div>
+    </section>
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓒ</span><h2>전달 실패</h2><span class="st crit" style="margin-left:auto"><span class="g">×</span>메일 실패</span></div>
+      <div class="mock">
+        <div class="band bad"><span><b>D-2026-11-02 메일을 보내지 못했습니다</b> — SMTP 연결 실패(smtp.example.com:587 · ECONNREFUSED). 보고서는 보관됐고 Slack · Teams 는 성공했습니다. 다음 재시도 <span class="mono">09:15</span> (2회째 · 15 → 30 → 60분).</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" type="button">지금 다시 보내기</button><button class="btn" type="button">메일 진단 열기</button><button class="btn" type="button">보고서 열기</button></div>
+      </div>
+      <div class="rule"><b>보고서 생성과 전달을 분리</b>합니다 — 전달이 실패해도 회차는 남고 보관함에서 열립니다. 재시도는 간격을 늘려 가며(일일 리포트의 backoff 규칙) 전달만 다시 하고, 같은 보고서를 다시 만들지 않습니다. 수동 ‘지금 다시 보내기’ 는 backoff 를 기다리지 않습니다. 실패 사유 원문은 길이를 자르고 비밀을 싣지 않습니다.</div>
+    </section>
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓓ</span><h2>범위 계정</h2><span class="st info" style="margin-left:auto;color:#93c5fd;background:rgba(59,130,246,.12);border-color:rgba(59,130,246,.4)"><span class="g">⊂</span>JP1 · TH1</span></div>
+      <div class="mock">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px"><span class="st ok"><span class="g">✓</span>정상 15</span><span class="st warn"><span class="g">!</span>주의 2</span><span class="st unk"><span class="g">?</span>불가 2</span><span class="muted" style="align-self:center">— 내 범위(법인 2곳) 분량</span></div>
+        <div class="band info">전 법인 합계 · 포탈 자체 항목(포탈 DB · 자격증명 점검 · 엣지 보고 신선도 전체)은 이 계정에 보이지 않습니다. 보고서는 같은 회차의 <b>내 법인 행만</b> 담습니다.</div>
+        <div class="err"><div class="t">일정 · 전달은 전체 범위 관리자만 엽니다</div><div class="muted" style="font-size:12px">이 계정은 vCenter 범위가 지정돼 있어 전 법인 설정을 바꿀 수 없습니다(403). 필요하면 설정 소유자에게 요청하세요.</div></div>
+      </div>
+      <div class="rule">절단은 <b>응답 경로 전부</b>에서 — 보관함 목록 · 보고서 · XLSX · 메일(법인 담당자) 모두 같은 함수로 자릅니다. 귀속 없는 항목은 범위 계정에 내려보내지 않습니다. 403 은 ErrorBox 가 권한 안내로 보입니다.</div>
+    </section>
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓔ</span><h2>원천이 오래됨</h2><span class="st unk" style="margin-left:auto"><span class="g">?</span>오래됨</span></div>
+      <div class="mock">
+        <table><thead><tr><th>항목</th><th>판정</th><th>근거</th><th>원천 시각</th></tr></thead>
+        <tbody><tr><td>스토리지 어레이 사용률 · 장애</td><td><span class="st unk"><span class="g">?</span>확인 불가</span></td><td class="muted">마지막 수집이 기준 시각보다 36시간 전 — 그 기능의 stale 기준(7일 미수집 · 장비 stale) 과 별개로 ‘회차 기준 오래됨’ 을 적습니다</td><td class="mono" style="color:#f59e0b">10-30 20:40</td></tr></tbody></table>
+      </div>
+      <div class="rule">각 항목은 <b>원천의 마지막 수집 시각</b>을 함께 싣습니다. 그 기능이 이미 stale 을 판정하면 그것을 따르고, 판정이 없는 원천(예: SAN 스냅샷)은 회차 기준으로 ‘오래됨’ 을 붙입니다. 오래된 값을 최신인 것처럼 정상에 넣지 않습니다. 기준(시간)은 설정 · API 값이지 화면에 박지 않습니다.</div>
+    </section>
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓕ</span><h2>첫 회차 — 직전 회차 없음</h2></div>
+      <div class="mock">
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><span class="st ok"><span class="g">✓</span>정상 36 <span class="muted">· 9월 —</span></span><span class="st warn"><span class="g">!</span>주의 7 <span class="muted">· 9월 —</span></span><span class="st crit"><span class="g">×</span>이상 1 <span class="muted">· 9월 —</span></span></div>
+        <div class="band info">직전 회차가 없어 비교하지 않습니다. 다음 회차부터 ‘지난 회차 대비’ 가 채워집니다. 설치 전 기간은 0 이 아니라 ‘기록 없음’ 입니다.</div>
+      </div>
+      <div class="rule">대비는 <b>같은 주기의 직전 회차</b>가 있을 때만(일일은 전날 회차, 주간은 지난주). 놓친 회차가 사이에 있으면 ‘직전 실제 회차(10-12)’ 라고 적습니다. 0 과 ‘—’ 를 섞지 않습니다.</div>
+    </section>
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓖ</span><h2>원천 기능이 꺼진 항목</h2><span class="st unk" style="margin-left:auto"><span class="g">?</span>opt-in 없음</span></div>
+      <div class="mock">
+        <table><thead><tr><th>항목</th><th>판정</th><th>사유</th><th>확인하려면</th></tr></thead>
+        <tbody><tr><td>베어메탈 사용률</td><td><span class="st unk"><span class="g">?</span>확인 불가</span></td><td class="muted">법인 opt-in 없음(기본 꺼짐)</td><td><a href="#bm">설정 › 수집 › 베어메탈 사용률</a></td></tr>
+        <tr><td>중앙 ↔ 엣지 통신 점검</td><td><span class="st unk"><span class="g">?</span>확인 불가</span></td><td class="muted">기능 꺼짐(기본)</td><td><a href="#lc">설정 › 통신 점검</a></td></tr></tbody></table>
+      </div>
+      <div class="rule">꺼진 기능을 보고서가 <b>켜지 않습니다</b>(업그레이드 · 보고서가 수집을 바꾸면 안 됨). 항목은 카탈로그에 그대로 있고 ‘확인 불가 + 켜는 곳’ 으로 실립니다. 관리자가 항목 자체를 끄면(카탈로그 토글) 확인 불가 수에서도 빠지고 ‘제외 N 항목’ 으로 적습니다.</div>
+    </section>
+
+    <section class="card s">
+      <div class="h"><span class="k">ⓗ</span><h2>수동 미리보기</h2><span class="badge" style="margin-left:auto">미리보기 — 보관 · 전달 안 함</span></div>
+      <div class="mock">
+        <dl class="kv" style="margin:0"><dt>회차</dt><dd>없음(미리보기 · 10분 뒤 사라짐)</dd><dt>기준 시각</dt><dd class="mono">11-07 09:14</dd><dt>만든 사람</dt><dd>admin(수동)</dd></dl>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn primary" type="button">이대로 보관하고 보내기</button><button class="btn" type="button">XLSX 로 내려받기</button><button class="btn" type="button">닫기</button></div>
+      </div>
+      <div class="rule">‘지금 만들기(미리보기)’ 는 설정을 바꾼 뒤 결과를 바로 보려는 길입니다 — 회차 ID 를 받지 않고 보관함에 남지 않으며 전달하지 않습니다. ‘이대로 보관하고 보내기’ 를 누르면 수동 회차(만든 사람 기록)로 저장 · 전달되고, 그날 예약 회차는 그대로 또 돕니다(일일 리포트의 ‘수동은 예약을 대신하지 않음’ 규칙).</div>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1480}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -25,17 +25,18 @@
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, currentVersion, clampIntervalMs } from '../config.js';
+import { envPositive } from '../util/envNumber.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { dropSummaryOf, warnDrop } from '../agent/centralReply.js';
 import { runScan } from './scan.js';
 import { partFaultEnabled } from './settings.js';
-import { PUSH_PROTOCOL, partKeyTail, isBad } from './types.js';
+import { PUSH_PROTOCOL, PART_IDENTS_VERSION, KEY_KIND, partKeyTail, isBad } from './types.js';
 import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.PARTFAULT_PUSH_GZIP !== 'false';
 /** 한 번에 올릴 장비 상한 — 넘치면 **버리지 않고 밝힌다**(조용한 상한 금지). */
-const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_PUSH_MAX_DEVICES) || 5_000);
+const MAX_DEVICES = Math.max(100, envPositive(process.env.PARTFAULT_PUSH_MAX_DEVICES, 5_000));   // 102회차: Infinity → 기본값(상한이 꺼지지 않게)
 const intervalMs = () => clampIntervalMs(Number(process.env.PARTFAULT_PUSH_MS) || 10 * 60_000, 10 * 60_000, 60_000); // v2.600 LO2600-04: 상한(2^31 초과 → setInterval 1ms 루프)
 
 let _timer = null;
@@ -48,18 +49,30 @@ export function buildPayload(scan, { agent = config.agent.name, version = curren
   const devs = (scan.devices || []).slice(0, MAX_DEVICES).map((d) => {
     const states = { ok: [], unknown: [], absent: [] };
     const open = [];
+    // 96회차 ⓐ(93회차 F5 — 결정 권장안): 시리얼 키 파트의 이름. 키 꼬리만으로는 중앙이 keyKind 를 'name' · label 을 partId 로 되살려
+    //   33회차 F2 교체 규칙(같은 이름 자리의 시리얼이 바뀜 → 옛 장애 '제거됨')이 엣지 위임 서버에 한 번도 맞지 않았다.
+    //   **호환 확장**: 프로토콜 판(v)은 2 그대로 두고 칸만 더한다 — 옛 중앙은 모르는 칸을 버리고(정제 화이트리스트) 예전대로 돈다.
+    //   v 를 올리면 옛 중앙이 이 보고를 프로토콜 1(닫지 않는 쪽)로 접는다. 시리얼 키 파트만 싣는다(교체 규칙이 그것만 본다 — 바이트 절약).
+    const serialLabels = {};
     for (const p of d.parts || []) {
       if (isBad(p.state)) open.push({ kind: p.kind, partId: p.partId, keyKind: p.keyKind, state: p.state, rawState: p.rawState, label: p.label, detail: p.detail });
-      else if (states[p.state]) states[p.state].push(partKeyTail(p));
+      else if (states[p.state]) {
+        const tail = partKeyTail(p);
+        states[p.state].push(tail);
+        if (p.keyKind === KEY_KIND.serial && typeof p.label === 'string' && p.label.trim()) serialLabels[tail] = p.label.trim().slice(0, 200);
+      }
     }
     return {
       scope: d.scope, deviceId: d.deviceId, deviceKey: d.deviceKey || d.deviceId, deviceKeyKind: d.deviceKeyKind || 'localId',
       deviceName: d.deviceName, ok: !!d.ok, reason: d.reason || '', failedKinds: d.failedKinds || [],
       capped: !!d.capped, notCollected: d.notCollected || [], states, open,
+      ...(Object.keys(serialLabels).length ? { serialLabels } : {}),
     };
   });
   return {
     v: PUSH_PROTOCOL, agent, version, at: now,
+    // 96회차 ⓐ: 이 엣지가 시리얼 키 파트 이름(serialLabels)을 싣는 판이라는 표지 — 시리얼 키 파트가 0개인 보고도 중앙이 '지원 판' 으로 안다.
+    partIdents: PART_IDENTS_VERSION,
     devices: devs,
     omitted: Math.max(0, (scan.devices || []).length - devs.length),   // ⚠ 상한으로 뺀 장비 수를 밝힌다
     scanned: scan.scanned,

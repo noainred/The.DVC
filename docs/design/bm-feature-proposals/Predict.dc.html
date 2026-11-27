@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 기능 제안 C — 예측 · 탐지</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.dk{display:grid;grid-template-columns:150px minmax(0,1fr) 52px;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #1f2a40;font-size:12.5px}
+.dk:first-child{border-top:0}
+.dimm{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.dm{background:#141b2d;border:1px solid #243049;border-radius:8px;padding:6px 8px;display:flex;flex-direction:column;gap:2px}
+.dm .s{font-size:11px;color:#8b9bb4}
+.dm .n{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:14px;font-weight:700}
+.sp{display:grid;grid-template-columns:84px minmax(0,1fr);gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #1f2a40}
+.sp:first-child{border-top:0}
+.ded{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;align-items:baseline;padding:8px 12px;border-top:1px solid #1f2a40;font-size:12.5px}
+.ded:first-child{border-top:0}
+.ded .p{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:700;text-align:right}
+</style>
+</helmet>
+<div class="board" style="width:2064px;height:700px">
+
+  <section class="pn" aria-label="부품 수명 지표">
+    <div class="ph"><span class="no">8</span><b>부품 수명 지표 — SSD 잔여 수명 · 메모리 교정 오류</b><span class="at">서버 상세 구역</span></div>
+    <div class="pb">
+      <h3 class="sh">SSD 잔여 수명 — WAWDBGP03<span>장비가 보고한 값</span></h3>
+      <div class="card">
+        <div class="dk"><span><b>Bay 0</b> <span class="muted">· SSD 960 GB</span></span><span class="bar"><i style="width:97%;background:#3b82f6"></i></span><b class="mono" style="text-align:right">97%</b></div>
+        <div class="dk"><span><b>Bay 1</b> <span class="muted">· SSD 960 GB</span></span><span class="bar"><i style="width:94%;background:#3b82f6"></i></span><b class="mono" style="text-align:right">94%</b></div>
+        <div class="dk"><span><b>Bay 2</b> <span class="muted">· SSD 960 GB</span></span><span class="bar"><i style="width:61%;background:#f59e0b"></i></span><b class="mono" style="text-align:right;color:#fcd34d">61%</b></div>
+        <div class="dk" style="grid-template-columns:minmax(0,1fr)"><span class="note">Bay 2 는 지난 90일에 9%p 줄었습니다 — 같은 서버의 다른 SSD 보다 빠릅니다. HDD 는 이 값이 없습니다.</span></div>
+      </div>
+      <h3 class="sh">메모리 교정 오류 — 지난 30일<span>슬롯별 누적 건수</span></h3>
+      <div class="dimm">
+        <div class="dm"><span class="s">A1</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">A2</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">A3</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">A4</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">A5</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">A6</span><span class="n muted">—</span></div>
+        <div class="dm"><span class="s">B1</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">B2</span><span class="n">0</span></div>
+        <div class="dm" style="border-color:rgba(245,158,11,.6)"><span class="s">B3</span><span class="n" style="color:#fcd34d">412</span></div>
+        <div class="dm"><span class="s">B4</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">B5</span><span class="n">0</span></div>
+        <div class="dm"><span class="s">B6</span><span class="n">0</span></div>
+      </div>
+      <span class="note">장애 판정이 아니라 누적 값과 추세입니다 — 장애는 지금처럼 물리 부품 장애가 판정합니다. ‘—’ 는 못 읽은 슬롯이고 0 으로 세지 않습니다. 이 값을 장비가 주는지는 iDRAC 판본마다 다를 수 있어 구현 전에 실제 장비로 확인해야 합니다.</span>
+    </div>
+  </section>
+
+  <section class="pn" aria-label="같은 묶음 대비 이상치">
+    <div class="ph"><span class="no">9</span><b>같은 묶음 서버와 다른 서버 찾기</b><span class="at">서버 상세 구역 + 폴더 화면</span></div>
+    <div class="pb">
+      <div class="row" style="justify-content:space-between">
+        <span style="font-size:12.5px"><b>KR2_Service › SBP › DP › Airflow</b> <span class="muted">— 같은 모델 9대 · 지난 24시간 평균</span></span>
+        <span class="bd amber">묶음 밖 2</span>
+      </div>
+      <div class="card">
+        <div class="sp">
+          <div><b>CPU</b><div class="note">가운데값 34%</div></div>
+          <svg viewBox="0 0 540 46" width="100%" height="46" role="img" aria-label="CPU — 묶음 가운데값 34% · 이 서버 81% · 묶음 밖">
+            <rect x="151" y="20" width="70" height="16" rx="4" fill="rgba(139,155,180,.16)"></rect>
+            <line x1="0" x2="540" y1="28" y2="28" stroke="#243049"></line>
+            <circle cx="151.2" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="167.4" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="178.2" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="183.6" cy="24" r="4.5" fill="#8b9bb4"></circle><circle cx="183.6" cy="33" r="4.5" fill="#8b9bb4"></circle><circle cx="194.4" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="205.2" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="221.4" cy="28" r="4.5" fill="#8b9bb4"></circle>
+            <circle cx="437.4" cy="28" r="7" fill="#3b82f6" stroke="#e6edf6" stroke-width="2"></circle>
+            <text x="437" y="12" font-size="11" font-weight="700" fill="#e6edf6" text-anchor="middle">이 서버 81%</text>
+            <text x="0" y="45" font-size="10" fill="#8b9bb4">0%</text><text x="540" y="45" font-size="10" fill="#8b9bb4" text-anchor="end">100%</text>
+          </svg>
+        </div>
+        <div class="sp">
+          <div><b>전력</b><div class="note">가운데값 453 W</div></div>
+          <svg viewBox="0 0 540 46" width="100%" height="46" role="img" aria-label="전력 — 묶음 가운데값 453 W · 이 서버 462 W · 묶음 안">
+            <rect x="221" y="20" width="157" height="16" rx="4" fill="rgba(139,155,180,.16)"></rect>
+            <line x1="0" x2="540" y1="28" y2="28" stroke="#243049"></line>
+            <circle cx="221.4" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="248.4" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="259.2" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="275.4" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="297" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="313.2" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="356.4" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="378" cy="28" r="4.5" fill="#8b9bb4"></circle>
+            <circle cx="334.8" cy="28" r="7" fill="#3b82f6" stroke="#e6edf6" stroke-width="2"></circle>
+            <text x="335" y="12" font-size="11" font-weight="700" fill="#e6edf6" text-anchor="middle">이 서버 462 W</text>
+            <text x="0" y="45" font-size="10" fill="#8b9bb4">400 W</text><text x="540" y="45" font-size="10" fill="#8b9bb4" text-anchor="end">500 W</text>
+          </svg>
+        </div>
+        <div class="sp">
+          <div><b>흡기 온도</b><div class="note">가운데값 22.3℃</div></div>
+          <svg viewBox="0 0 540 46" width="100%" height="46" role="img" aria-label="흡기 온도 — 묶음 가운데값 22.3도 · 이 서버 27.0도 · 묶음 밖">
+            <rect x="216" y="20" width="72" height="16" rx="4" fill="rgba(139,155,180,.16)"></rect>
+            <line x1="0" x2="540" y1="28" y2="28" stroke="#243049"></line>
+            <circle cx="216" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="234" cy="28" r="4.5" fill="#8b9bb4"></circle><circle cx="252" cy="24" r="4.5" fill="#8b9bb4"></circle><circle cx="252" cy="33" r="4.5" fill="#8b9bb4"></circle><circle cx="270" cy="24" r="4.5" fill="#8b9bb4"></circle><circle cx="270" cy="33" r="4.5" fill="#8b9bb4"></circle><circle cx="288" cy="24" r="4.5" fill="#8b9bb4"></circle><circle cx="288" cy="33" r="4.5" fill="#8b9bb4"></circle>
+            <circle cx="432" cy="28" r="7" fill="#3b82f6" stroke="#e6edf6" stroke-width="2"></circle>
+            <text x="432" y="12" font-size="11" font-weight="700" fill="#e6edf6" text-anchor="middle">이 서버 27.0℃</text>
+            <text x="0" y="45" font-size="10" fill="#8b9bb4">15℃</text><text x="540" y="45" font-size="10" fill="#8b9bb4" text-anchor="end">30℃</text>
+          </svg>
+        </div>
+      </div>
+      <div class="row"><span class="lg"><span class="dot" style="background:#8b9bb4"></span>같은 묶음 서버</span><span class="lg"><span class="dot" style="background:#3b82f6;box-shadow:0 0 0 2px #e6edf6"></span>이 서버</span><span class="lg"><span style="display:inline-block;width:18px;height:10px;border-radius:3px;background:rgba(139,155,180,.3)"></span>묶음의 폭</span></div>
+      <span class="note">포탈의 이상 탐지는 지금 ‘그 장비의 평소 값’ 과 비교합니다(호스트 온도 · GPU · 데이터스토어). 이 안은 ‘같은 일을 하는 다른 서버’ 와 비교합니다 — 혼자만 바쁜 서버, 혼자만 뜨거운 서버를 찾습니다. 못 읽은 서버는 묶음에서 빼고 몇 대를 뺐는지 밝힙니다.</span>
+    </div>
+  </section>
+
+  <section class="pn" aria-label="서버 건강 점수">
+    <div class="ph"><span class="no">10</span><b>서버 건강 점수 — 감점 사유와 함께</b><span class="at">서버 상세 머리 + 목록 열</span></div>
+    <div class="pb">
+      <div class="card" style="padding:14px;display:flex;gap:16px;align-items:center">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:none;width:110px">
+          <span class="mono" style="font-size:44px;font-weight:800;line-height:1;color:#fcd34d">82</span>
+          <span class="bd amber">주의</span>
+        </div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:12.5px"><b>SELSBPDPS09</b> <span class="muted">— 100 에서 시작해 확인된 문제만큼 뺍니다</span></span>
+          <svg viewBox="0 0 440 54" width="100%" height="54" role="img" aria-label="지난 30일 점수 — 100 에서 94, 82 로 내려감">
+            <line x1="0" x2="440" y1="6" y2="6" stroke="#1f2a40"></line><line x1="0" x2="440" y1="42" y2="42" stroke="#243049"></line>
+            <path d="M0,6 L150,6 L150,16.8 L320,16.8 L320,38.4 L440,38.4" fill="none" stroke="#3b82f6" stroke-width="2"></path>
+            <text x="0" y="53" font-size="10" fill="#8b9bb4">30일 전</text><text x="150" y="53" font-size="10" fill="#8b9bb4" text-anchor="middle">11-08</text><text x="320" y="53" font-size="10" fill="#8b9bb4" text-anchor="middle">11-21</text><text x="440" y="53" font-size="10" fill="#8b9bb4" text-anchor="end">오늘</text>
+          </svg>
+        </div>
+      </div>
+      <h3 class="sh">감점 사유</h3>
+      <div class="card">
+        <div class="ded"><span class="p" style="color:#fca5a5">−12</span><span><b>부품 장애 1건</b> <span class="muted">— 디스크 Bay 4 · 11-21 부터</span></span></div>
+        <div class="ded"><span class="p" style="color:#fcd34d">−6</span><span><b>펌웨어 2개가 기준보다 뒤처짐</b> <span class="muted">— BIOS · Intel X710 · 11-08 부터</span></span></div>
+        <div class="ded"><span class="p muted">0</span><span><b>사용률</b> <span class="muted">— CPU 37% · 메모리 62%</span></span></div>
+        <div class="ded"><span class="p muted">—</span><span><b>온도</b> <span class="muted">— 못 읽음 · 점수에 넣지 않습니다</span></span></div>
+      </div>
+      <span class="note">점수만 보이지 않고 사유를 항상 같이 보입니다. 못 읽은 항목은 감점하지 않고 따로 표시합니다 — 못 읽어서 100 점인 서버가 생기지 않게. 감점 크기와 ‘주의’ 경계는 설정값입니다.</span>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2064,"height":700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

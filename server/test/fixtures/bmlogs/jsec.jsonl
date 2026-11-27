@@ -1,0 +1,11 @@
+{"__REALTIME_TIMESTAMP":"1793940601000000","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd","_PID":"4410","_COMM":"sshd","MESSAGE":"Invalid user admin from 198.51.100.7 port 40022"}
+{"__REALTIME_TIMESTAMP":"1793940603000000","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd","_PID":"4410","_COMM":"sshd","MESSAGE":"Failed password for invalid user admin from 198.51.100.7 port 40022 ssh2"}
+{"__REALTIME_TIMESTAMP":"1793940604000000","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd","_PID":"4410","_COMM":"sshd","MESSAGE":"Connection closed by invalid user admin 198.51.100.7 port 40022 [preauth]"}
+{"__REALTIME_TIMESTAMP":"1793940605000000","PRIORITY":"5","SYSLOG_IDENTIFIER":"sshd","_PID":"4411","_COMM":"sshd","MESSAGE":"pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.45  user=root"}
+{"__REALTIME_TIMESTAMP":"1793940606000000","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd","_PID":"4411","_COMM":"sshd","MESSAGE":"Failed password for root from 203.0.113.45 port 51822 ssh2"}
+{"__REALTIME_TIMESTAMP":"1793940609000000","PRIORITY":"3","SYSLOG_IDENTIFIER":"sshd","_PID":"4411","_COMM":"sshd","MESSAGE":"error: maximum authentication attempts exceeded for root from 203.0.113.45 port 51822 ssh2 [preauth]"}
+{"__REALTIME_TIMESTAMP":"1793940609000000","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd","_PID":"4411","_COMM":"sshd","MESSAGE":"Disconnecting authenticating user root 203.0.113.45 port 51822: Too many authentication failures [preauth]"}
+{"__REALTIME_TIMESTAMP":"1793940620000000","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd","_PID":"4412","_COMM":"sshd","MESSAGE":"Disconnected from invalid user kimops 198.51.100.10 port 40000 [preauth]"}
+{"__REALTIME_TIMESTAMP":"1793940660000000","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd","_PID":"4413","_COMM":"sshd","MESSAGE":"Accepted publickey for gpadmin from 10.20.1.5 port 52210 ssh2: ED25519 SHA256:AbCdEf0123456789"}
+{"__REALTIME_TIMESTAMP":"1793940690000000","PRIORITY":"5","SYSLOG_IDENTIFIER":"sudo","_PID":"4501","_COMM":"sudo","MESSAGE":"kim.ops : TTY=pts/0 ; PWD=/home/kim.ops ; USER=root ; COMMAND=/usr/bin/systemctl restart postgresql"}
+{"__REALTIME_TIMESTAMP":"1793940720000000","PRIORITY":"1","SYSLOG_IDENTIFIER":"sudo","_PID":"4502","_COMM":"sudo","MESSAGE":"kim.ops : 3 incorrect password attempts ; TTY=pts/0 ; PWD=/home/kim.ops ; USER=root ; COMMAND=/usr/bin/cat /etc/shadow"}

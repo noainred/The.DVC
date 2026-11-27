@@ -255,7 +255,7 @@ export function pullDropCard(status) {
     title: dropped || powerDropped ? `이 엣지가 보낸 ${dropped && powerDropped ? '서버·전력' : (dropped ? '서버' : '전력')} 목록 일부를 받지 않았습니다` : '이 엣지가 보낸 서버 목록에 주의할 값이 있습니다',
     summary: dropped || powerDropped
       ? [
-        dropped ? `엣지 export 의 iDRAC 서버 원소 ${dropped}개가 형식 오류·상한 초과로 버려져 서버 분석·전력 화면에 나오지 않습니다(정상 표시는 나머지 서버 기준입니다).` : '',
+        dropped ? `엣지 export 의 iDRAC 서버 원소 ${dropped}개가 형식 오류·상한 초과로 버려져 Physical Server·전력 화면에 나오지 않습니다(정상 표시는 나머지 서버 기준입니다).` : '',
         powerDropped ? `엣지 export 의 전력 원소 ${powerDropped}개가 형식 오류·상한 초과로 버려져 그 호스트의 원격 전력이 집계되지 않습니다.` : '',
       ].filter(Boolean).join(' ')
       : '서버 목록은 모두 받았지만 아래 값은 그대로 믿기 어렵습니다.',

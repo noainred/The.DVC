@@ -9,7 +9,7 @@
  * ③ 백업 번들·엣지 설정 push 가 portal.env 의 AUTH_SECRET/SECRETS_KEY/토큰을 그대로 실었다.
  * ④ `X-Powered-By: Express` 노출.
  */
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,12 +19,19 @@ import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 const strip = stripComments;   // v2.613 TESTDOC2613-08
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'atrest2538-'));
+const CFG = tmpDir('atrest2538-');
 process.env.CONFIG_DIR = CFG;
 
 let ENV; let BK; let VAULT; let ASG; let GS; let UPG; let PKG; let GATE; let AC;
@@ -147,7 +154,7 @@ test('소스 계약: index.js 가 게이트로 감싸고 X-Powered-By 를 끈다
 
 // ── ①·④ 실제 서버 ───────────────────────────────────────────────────────────
 test('★ 실제 서버: 무토큰 3MB → 413(파싱 전 차단) · 유효 토큰 3MB → 413 아님 · X-Powered-By 없음', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atrest2538-live-'));
+  const dir = tmpDir('atrest2538-live-');
   const port = 20000 + Math.floor(Math.random() * 20000);
   const child = spawn(process.execPath, ['src/index.js'], {
     cwd: path.resolve(SRC, '..'), stdio: ['ignore', 'pipe', 'pipe'],

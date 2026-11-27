@@ -20,7 +20,7 @@ import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { listDatacenters } from '../../datacenter/store.js';
-import { listServers, getServerWithSecret, saveServer } from '../../cvp/registry.js';
+import { listServers, getServerWithSecret, saveServer, registryWriteRefusal } from '../../cvp/registry.js';
 import { testServerConnection } from '../../cvp/poller.js';
 import * as cvpBulk from '../../cvp/bulk.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
@@ -149,6 +149,9 @@ api.get(`${BASE}/import/test/:id`, csvPerm, adminOnly, toolsPerm, fullScopeOnly,
  * `droppedSecrets` 로 **따로** 밝힌다(다음 수집이 실패한다 — 조용히 넘기지 않는다).
  */
 api.post(`${BASE}/import`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+  // 결정(78 남긴 것 ①): 등록부 읽기 오류 중에는 409 — 읽지 못한 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런도 같은 이유로 막는다).
+  const refused = registryWriteRefusal();
+  if (refused) return res.status(409).json(refused);
   const p = parseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 

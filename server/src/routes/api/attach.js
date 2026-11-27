@@ -23,9 +23,10 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 import { getPage, wikiSeq, waitWikiPersist } from '../../wiki/store.js';
 import { getIssue, issuesSeq, waitIssuesPersist } from '../../issues/store.js';
 import {
-  listFor, getItem, blobOf, addAttachment, removeAttachment, attachUsage, loadAttachSettings, saveAttachSettings, attachSettingsError, writeArchive,
+  listFor, getItem, blobOf, addAttachment, removeAttachment, attachUsage, loadAttachSettings, saveAttachSettings, attachSettingsError, attachSettingsWriteRefusal, writeArchive,
   ATTACH_LIMITS, EXT, KINDS,
 } from '../../attach/store.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 123회차: 조회 응답의 읽기 오류 표지
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 
@@ -69,7 +70,9 @@ export function registerAttach(api) {
   api.get('/attach/admin/usage', adminOnly, fleetOnly, (req, res) => {
     if (!isAdminDetailUser(req.user)) return res.status(403).json({ ok: false, reason: '데모 계정은 첨부 관리를 볼 수 없습니다' });
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, usage: attachUsage(), settings: loadAttachSettings(), loadError: attachSettingsError(), limits: ATTACH_LIMITS, exts: Object.keys(EXT) });
+    // 123회차(112회차 분류표 'left' 대조): 상한 설정을 **읽지 못한 동안**(읽기 오류) settings 는 기본 상한이다 — 표지(settingsLoadError.readError)를 실어 화면이 그 기본값 칸의 저장을 잠그고,
+    //   '손상본은 옆에 보존했습니다' 라고 말하지 않게 한다(읽기 오류는 원본이 그대로다 — 보존본이 없다). loadError(글자)는 예전 그대로.
+    res.json({ ok: true, usage: attachUsage(), settings: loadAttachSettings(), loadError: attachSettingsError(), ...unreadMark(attachSettingsWriteRefusal(), 'settingsLoadError'), limits: ATTACH_LIMITS, exts: Object.keys(EXT) });
   });
   api.put('/attach/admin/settings', adminOnly, fleetOnly, fullWriteOnly, (req, res, next) => {
     if (!isAdminDetailUser(req.user)) return res.status(403).json({ ok: false, reason: '데모 계정은 첨부 설정을 바꿀 수 없습니다' });

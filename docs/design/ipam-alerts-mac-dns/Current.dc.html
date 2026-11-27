@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지금 — v2.993.1 목 서버 캡처</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+.muted{color:#8b9bb4}
+.shot{box-sizing:border-box;min-width:0;display:flex;flex-direction:column;gap:6px}
+.shot img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid #243049;background:#0f1626}
+.cap{display:flex;flex-direction:column;gap:1px}
+.cap b{font-size:13px}
+.cap span{font-size:12px;color:#8b9bb4;line-height:1.6}
+.cap span b{font-size:12px;color:#e6edf6;font-weight:600}
+.no{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#1a2236;border:1px solid #243049;font-size:11px;color:#8b9bb4;margin-right:6px;font-weight:600}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:16px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">지금 — 이 화면들에 무엇이 없는가</span>
+    <span class="muted" style="font-size:12px">v2.993.1 을 목(mock) 모드로 띄워 찍은 화면입니다 · 스캔 결과 12건은 시드 값(가상)</span>
+  </div>
+
+  <div class="shot">
+    <div class="cap"><b><span class="no">1</span>대장 목록 — ‘스캔만(수동확인)’</b>
+      <span>호스트명 열은 v2.991 에 생겼습니다. <b>MAC · 제조사는 어디에도 없고</b>, 이 IP 가 언제 새로 나타났는지 · 바뀌었는지는 한 건씩 눌러 봐야 압니다.</span></div>
+    <img src="/_blob/a6d2ca5bc7bf25f75870859add355383" alt="센터별 IP 관리대장의 대장 목록. 스캔만 칩이 켜져 있고 IP 주소, 호스트명, 분류, 센터, 서버종류, 확인 방식 열이 보인다. MAC 열은 없다.">
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,660fr) minmax(0,500fr);gap:16px;align-items:start">
+    <div class="shot">
+      <div class="cap"><b><span class="no">2</span>설정 › 알림 — 임계치 / 조건 규칙</b>
+        <span>규칙은 vCenter · 데이터스토어 · 호스트 · GPU 쪽뿐입니다. <b>IP 관리가 보낸 알림은 없습니다</b> — 스캔이 무엇을 보든 화면을 열어야 압니다.</span></div>
+      <img src="/_blob/3541b03237a5139646b7dd61feb84d92" alt="설정의 알림 화면. 임계치 조건 규칙 카드에 위험 알람, vCenter 수집 실패, 데이터스토어 사용률 등의 체크박스가 있다. IP 관리 항목은 없다.">
+    </div>
+    <div class="shot">
+      <div class="cap"><b><span class="no">3</span>IP 사용 이력 창</b>
+        <span>방식별 이름 · 이름 변경 이력은 있습니다. <b>MAC 은 NetBIOS 가 답했을 때만</b> 한 줄로 보이고, 역DNS 이름을 정방향으로 다시 확인하지 않습니다.</span></div>
+      <img src="/_blob/03d9648e5b551678923e894ef6520bf7" alt="IP 사용 이력 창. 10.210.5.60 의 호스트명과 역DNS, mDNS, NetBIOS 방식별 결과, 호스트명 변경 이력이 보인다.">
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start">
+    <div class="shot">
+      <div class="cap"><b><span class="no">4</span>추천 › 미등록 IP</b>
+        <span>‘지금 몇 개’ 만 압니다. <b>언제 새로 생겼는지는 남지 않고</b> 알리지도 않습니다.</span></div>
+      <img src="/_blob/f2dbe72171ccf6395177dd6b751493d8" alt="추천 카드 06 미등록 IP. 12개라고 표시되고 IP 목록이 나열된다.">
+    </div>
+    <div class="shot">
+      <div class="cap"><b><span class="no">5</span>추천 › DNS 레코드 제안</b>
+        <span>호스트명과 IP 의 짝을 세어 초안을 만들 수 있다고만 합니다. <b>DNS 에 실제로 물어 보지 않습니다</b>.</span></div>
+      <img src="/_blob/28aeffe70be0e9513dea04142269c5be" alt="추천 카드 16 DNS 레코드 제안. 3007개 매핑이라고 표시되고 IP 와 이름 짝이 나열된다.">
+    </div>
+    <div class="shot">
+      <div class="cap"><b><span class="no">6</span>추천 › 신규 IP(최근 7일)</b>
+        <span>스캔 이력의 ‘처음 본 때’ 가 7일 안인 IP 수입니다. <b>대역을 새로 넣으면 전부 ‘신규’</b>가 되고(기준선 없음), 알리지 않습니다.</span></div>
+      <img src="/_blob/fe62182da6952989d270661fc32dcd64" alt="추천 카드 17 신규 IP 최근 7일. 0개라고 표시된다.">
+      <span class="muted" style="font-size:12px;line-height:1.7;padding-top:6px">v2.993 의 정방향 DNS(물리서버 이름 → IP)는 물리서버 등록부가 있을 때만 배지가 달려 이 캡처에는 보이지 않습니다 — 보드 ⑦에서 글로 설명합니다.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

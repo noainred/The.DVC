@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from './droppedSecretText.js';
-import { readFailText, installerState } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
-import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder } from './pkgSettingsText.js';
+import { readFailText, installerState, deployTargetsUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
+import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder, pkgFormUnread } from './pkgSettingsText.js';
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 128회차: 못 읽은 동안의 빈 폼(지정 없음)으로 저장하지 않는다(112회차 규약)
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
@@ -28,10 +31,12 @@ export default function AgentDeploy() {
   // v2.733(C5-02): 조회 실패는 따로 든다 — 예전에는 catch 가 대상을 '(0)·없습니다', 설치 패키지를 '찾을 수 없습니다'(틀린 원인 + 배포 잠금)로 그렸다.
   const [targetsErr, setTargetsErr] = useState(null);
   const [targetsLoaded, setTargetsLoaded] = useState(false); // 한 번이라도 성공했는가(직전 값 유지 판단)
+  const [targetsLoadErr, setTargetsLoadErr] = useState(null); // 87회차 ⓐ: 서버가 등록부를 읽지 못함(읽기 오류 · 손상) — 빈 목록 ≠ 대상 없음
   const [installerErr, setInstallerErr] = useState(null);
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
+  const [pkgSeedLe, setPkgSeedLe] = useState(null);   // 133회차: 폼(pkgCfg)을 채운 조회의 읽기 오류 표지(없으면 null)
   // status(에이전트 현황·기본) | add(에이전트 추가) | bulk(대량 배포) | packages(설치 패키지 자동 다운로드)
   // 3단 해시(#/settings/agent-deploy/<키>)로 새로고침에도 유지한다(v2.438) — 배포 작업 중
   // 새로고침이 잦은 화면이라 매번 현황 탭으로 되돌아가는 것이 특히 번거로웠다.
@@ -47,15 +52,22 @@ export default function AgentDeploy() {
   // v2.621(감사 WEB-07): 폼은 웹 지정값만 채운다(기본값은 placeholder) — 유효값으로 채워 두 칸을 다 보내면 저장 경로만
   //   바꿔도 환경변수 기본 URL 이 웹 지정값으로 굳었다. 판정은 pkgSettingsText.js 하나.
   // v2.736.3: 서버가 저장소 versions.json 을 최대 60초(UPGRADE_CHECK_TIMEOUT_MS) 기다린다 — 기본 GET 시한 20초 × 재시도면 그 사이 같은 조회가 3번 겹친다.
-  const loadPkg = () => fetchJson('/admin/packages', {}, undefined, { timeoutMs: 130_000, retries: 0 }).then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); }).catch(() => setPkg(null));
+  const loadPkg = () => fetchJson('/admin/packages', {}, undefined, { timeoutMs: 130_000, retries: 0 }).then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); setPkgSeedLe(unreadMarkOf(p)); }).catch(() => setPkg(null));
+  // 128회차: 패키지 저장소 설정 파일을 못 읽은 동안 조회는 ‘웹 지정 없음’(빈 칸 둘)을 준다 — 이 폼은 두 칸을 함께 보내므로(빈 칸 = 지정 해제), 다시 읽힌 뒤
+  //   저장 경로만 적어 저장해도 저장돼 있던 사내 미러 주소가 지워졌다. 폼을 채운 조회가 읽기 오류였으면 저장을 잠근다(‘다시 확인’ 이 폼을 다시 채운다).
+  //   133회차: 잠금은 **폼을 채운 조회**의 표지를 본다 — ‘다시 확인’ 이 실패하면 pkg 는 비지만(null) 폼은 못 읽은 동안의 빈 칸 그대로라, 표지가 사라졌다고 저장을 열면 안 된다.
+  const pkgUnread = pkgFormUnread(pkg, pkgSeedLe);
+  const pkgSaveLocked = saveLockedByUnread(pkgUnread);
   const savePkgCfg = async () => {
+    if (pkgSaveLocked) return;
     const r = await putJson('/admin/packages/settings', pkgSavePayload(pkgCfg)).catch((e) => ({ ok: false, reason: e.message }));
-    setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason });
+    const tokenNote = r.ok ? droppedSecretNote(r) : '';   // 133회차: 저장소 주소가 바뀌어 저장된 토큰을 폐기했으면 말한다(v2.607 규약)
+    setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason, ...(tokenNote ? { warn: tokenNote } : {}) });
     await loadPkg();
   };
   // v2.733(C5-02): 실패면 직전 목록을 지우지 않고(있으면) 사유를 말한다 — 빈 목록 '(0)' 으로 그리지 않는다.
   const loadTargets = () => fetchJson('/admin/agent-deploy/targets')
-    .then((d) => { setTargets(Array.isArray(d?.targets) ? d.targets : []); setTargetsLoaded(true); setTargetsErr(null); })
+    .then((d) => { setTargets(Array.isArray(d?.targets) ? d.targets : []); setTargetsLoadErr(d?.loadError && typeof d.loadError === 'object' ? d.loadError : null); setTargetsLoaded(true); setTargetsErr(null); })
     .catch((e) => setTargetsErr(e || new Error('배포 대상 조회 실패')));
   // 실행 중 서버의 중앙 토큰/기본값을 읽어 폼에 자동 입력.
   const [showCentralToken, setShowCentralToken] = useState(false);   // v2.500: 중앙 토큰 가리기 토글
@@ -126,7 +138,6 @@ export default function AgentDeploy() {
     setDl((d) => ({ ...d, busy: true })); setResult(null);
     const results = [];
     for (const k of kinds) {
-      // eslint-disable-next-line no-await-in-loop
       const r = await postJson('/admin/packages/download', { kind: k, version: dl.version || undefined }).catch((e) => ({ ok: false, reason: e.message }));
       results.push({ ...r, kind: k });
     }
@@ -160,7 +171,7 @@ export default function AgentDeploy() {
   const removeTarget = async (t) => {
     if (!window.confirm(`'${t.host}' 대상을 삭제할까요?`)) return;
     // v2.611 WEB2611-08: 삭제 실패를 삼키지 않는다.
-    try { await delJson(`/admin/agent-deploy/targets/${t.id}`); } catch (e) { setResult({ kind: 'remove', ok: false, reason: `대상 삭제 실패(${t.host}): ${e?.message || e}` }); }
+    try { requireChanged(await delJson(`/admin/agent-deploy/targets/${t.id}`)); } catch (e) { setResult({ kind: 'remove', ok: false, reason: `대상 삭제 실패(${t.host}): ${e?.message || e}` }); }
     await loadTargets();
   };
   const deployTarget = async (t) => {
@@ -219,6 +230,7 @@ export default function AgentDeploy() {
         </div>
         {pkgCfg && (
           <div className="card" style={{ margin: '0 0 10px', padding: '10px 12px', background: 'rgba(255,255,255,.02)' }}>
+            <SettingsUnreadBanner le={pkgUnread} what="패키지 저장소 설정" save="저장" onRecheck={loadPkg} />
             <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
               <label style={{ flex: 2, minWidth: 320, fontSize: 12 }}>저장소 URL (versions.json 위치)
                 <input className="input" value={pkgCfg.baseUrl} onChange={(e) => setPkgCfg({ ...pkgCfg, baseUrl: e.target.value })} placeholder={pkgPlaceholder(pkg, 'baseUrl', 'https://mirror.corp/vmware-portal/download')} />
@@ -226,7 +238,7 @@ export default function AgentDeploy() {
               <label style={{ flex: 1, minWidth: 220, fontSize: 12 }}>저장 경로
                 <input className="input" value={pkgCfg.dir} onChange={(e) => setPkgCfg({ ...pkgCfg, dir: e.target.value })} placeholder={pkgPlaceholder(pkg, 'dir', '/etc/vmware-portal/packages')} />
               </label>
-              <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={savePkgCfg}>저장</button>
+              <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={pkgSaveLocked} onClick={savePkgCfg}>저장</button>
               <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={loadPkg}>새로고침</button>
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
@@ -396,7 +408,7 @@ export default function AgentDeploy() {
       {subtab === 'status' && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
-            <b style={{ fontSize: 14 }}>저장된 대상 ({targetsLoaded ? targets.length : '—'})</b>
+            <b style={{ fontSize: 14 }}>저장된 대상 ({targetsLoaded && !targetsLoadErr ? targets.length : '—'})</b>
             <span className="flex gap" style={{ alignItems: 'center' }}>
               {csvOk && <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="저장된 배포 대상을 CSV 로 내려받기(기본 비밀값 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>}
               {csvOk && <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="CSV 로 배포 대상 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>}
@@ -426,8 +438,9 @@ export default function AgentDeploy() {
           {targetsFail && (
             <div className="banner warn" style={{ marginBottom: 8 }}>{targetsFail} <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={loadTargets}>다시 읽기</button></div>
           )}
+          {targetsLoadErr && <div className="banner warn" style={{ marginBottom: 8 }}>{deployTargetsUnreadableText(targetsLoadErr)}</div>}
           {targets.length === 0
-            ? (targetsLoaded ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span> : null)
+            ? (targetsLoaded && !targetsLoadErr ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span> : null)
             : <div className="table-wrap">
             <STable>
               <thead><tr>
@@ -478,6 +491,7 @@ export default function AgentDeploy() {
             {result.warn && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {result.warn}</div>}
             {result.glibc && result.kind !== 'test' && result.ok === false && <div style={{ color: 'var(--amber)', marginTop: 4 }}>glibc: {result.glibc}</div>}
             {result.active && <div>서비스 상태: <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.active}</b>{result.version ? ` · 버전 ${result.version}` : ''}{result.installer ? ` · 설치 패키지 ${result.installer}` : ''}{result.detail ? ` · ${result.detail}` : ''}</div>}
+            {result.kind === 'deploy' && result.targetSaved === false && result.targetSaveReason && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ 배포 대상 저장 안 됨 — {result.targetSaveReason}</div>}
             {result.collector && (result.collector.registered
               ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ 중앙 '수집 서버'에 {result.collector.updated ? '갱신' : '자동 등록'}됨 — id <code>{result.collector.id}</code> · <code>{result.collector.url}</code></div>
               : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ 수집 서버 자동 등록 건너뜀{result.collector.reason ? ` — ${result.collector.reason}` : ''}</div>)}

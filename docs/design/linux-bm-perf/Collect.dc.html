@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>수집 건강 보드 (메타 모니터링)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 12px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer;font-size:12px}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px;line-height:1.5;white-space:nowrap}
+.kpi .label{color:#8b9bb4;font-size:12px;font-weight:600;letter-spacing:.5px}.kpi .value{font-size:26px;font-weight:800;margin-top:6px;line-height:1;text-align:center}.kpi .meta{font-size:12px;color:#8b9bb4;margin-top:8px}
+.bar{height:8px;border-radius:4px;background:#1a2236;overflow:hidden;min-width:80px}.bar span{display:block;height:100%;border-radius:4px}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4">특수 기능 › 서버 분석 › <a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › <b style="color:#e6edf6">수집 건강</b> · 추천 C</div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">수집 건강 보드 — 수집 자체가 병목인지, 저장이 커지는지, 샘플러가 서버에 부담인지</h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">법인(엣지)별 · 관리자와 운영자 · 값은 엣지 봉투의 ‘상태’ 부분(기존 `bmUsageStatus` + 추가 필드) · 수치는 가상</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <div class="seg" role="group" aria-label="기간"><button class="on" type="button">지금</button><button type="button">24시간</button><button type="button">7일</button></div>
+    <button class="btn" type="button">통신 점검 열기</button><button class="btn" type="button">CSV</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:14px">
+    <div class="card kpi"><div class="label">켠 법인 · 대상</div><div class="value">6<small style="font-size:14px;color:#8b9bb4;font-weight:600"> / 213대</small></div><div class="meta">주기 5분 · 동시성 32(기본) · 집중 슬롯 5/법인</div></div>
+    <div class="card kpi"><div class="label">마지막 주기 성공률</div><div class="value" style="color:#4ade80">97%</div><div class="meta">207/213 · 시한 초과 2 · SSH 거부 1 · iDRAC 401 2 · 미도달 1</div></div>
+    <div class="card kpi"><div class="label">주기 소요 (최대 법인)</div><div class="value" style="color:#fbbf24">4.1<small style="font-size:14px;color:#8b9bb4;font-weight:600"> 분 / 5</small></div><div class="meta">KR-SEL 1,000대 가정 · 동시 32 · 여유 18% — 5분을 넘기면 재진입 가드가 다음 주기를 건너뛴다</div></div>
+    <div class="card kpi"><div class="label">엣지 DB 크기(합)</div><div class="value">38<small style="font-size:14px;color:#8b9bb4;font-weight:600"> GB</small></div><div class="meta">KR-SEL 9.4GB · 월 파일 3개 · 상한 20GB(설정) · 추정 아님 — 파일 크기 실측</div></div>
+    <div class="card kpi"><div class="label">샘플러(옵션 B) 켠 서버</div><div class="value">48</div><div class="meta">서버 CPU 부담 중앙값 0.3% · 최대 1.1% · 로컬 파일 7일 평균 310MB</div></div>
+    <div class="card kpi"><div class="label">집중 모니터링</div><div class="value">2<small style="font-size:14px;color:#8b9bb4;font-weight:600"> 진행 · 대기 0</small></div><div class="meta">오늘 자동 4 · 수동 1 · 하루 상한 10</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(620px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>법인별 수집 — 주기 소요 · 성공률 · 동시성 사용 · DB</h2><span class="dim" style="font-size:12px">행을 누르면 그 법인의 실패 서버 목록</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>법인</th><th>대상</th><th>주기 소요 / 예산</th><th>성공률</th><th>실패 사유</th><th>동시성 사용</th><th>SSH 중앙값 / p95</th><th>DB · 월 파일</th><th>상태</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">KR-SEL</td><td>1,000</td><td class="warn">4.1 / 5분</td><td class="ok">98%</td><td>시한 12 · 거부 3 · iDRAC 5</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:94%;background:#fbbf24"></span></div>30/32</div></td><td>4.2s / 38s</td><td>9.4GB · 3</td><td><span class="chip warn">여유 적음 — 주기 15분 또는 동시 48 검토</span></td></tr>
+          <tr><td class="mono">PL-WAW</td><td>212</td><td class="ok">1.9 / 5분</td><td class="ok">99%</td><td>시한 2</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:60%;background:#4ade80"></span></div>19/32</div></td><td>7.8s / 41s</td><td>2.1GB · 3</td><td><span class="chip ok">정상 · RTT 820ms</span></td></tr>
+          <tr><td class="mono">US-EAST</td><td>340</td><td class="ok">2.6 / 5분</td><td class="warn">91%</td><td class="bad">iDRAC 401 28 (텔레메트리 계정 만료)</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:72%;background:#4ade80"></span></div>23/32</div></td><td>6.1s / 44s</td><td>3.3GB · 3</td><td><span class="chip bad">인증 정지 28대 — 등록부 자격증명</span></td></tr>
+          <tr><td class="mono">JP-TYO</td><td>58</td><td class="ok">0.6 / 5분</td><td class="ok">100%</td><td class="dim">—</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:25%;background:#4ade80"></span></div>8/32</div></td><td>2.9s / 9s</td><td>0.5GB · 3</td><td><span class="chip ok">정상</span></td></tr>
+          <tr><td class="mono">DE-FRA</td><td>120</td><td class="dim">—</td><td class="dim">—</td><td class="dim">엣지 무응답 23분</td><td class="dim">—</td><td class="dim">—</td><td class="dim">보관분</td><td><span class="chip warn">오래됨 — 통신 점검</span></td></tr>
+          <tr><td class="mono">BR-SAO</td><td>0</td><td class="dim">—</td><td class="dim">—</td><td class="dim">켰으나 대상 0 (OS 계정 · iDRAC 등록 없음)</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip">등록부 먼저</span></td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">‘주기 소요’ 는 그 법인 폴러가 한 주기에 전 서버를 도는 데 걸린 벽시계 시간(엣지가 기록). 예산(주기)에 가까우면 **재진입 가드**가 다음 주기를 건너뛰어 실제 간격이 늘어난다 — 이 보드가 그 전에 알려 준다(설정 ‘주기 소요 80% 경고’).</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+      <div class="card">
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:6px"><h2>주기 소요 추이 — KR-SEL 7일 (동시성 4 → 32 적용 전후)</h2><span class="dim" style="font-size:12px">v2.916 적용 11-06</span></div>
+        <svg viewBox="0 0 640 170" role="img" aria-label="7일간 KR-SEL 한 주기 소요: 11-05 까지 동시 4 에서 21분 안팎으로 주기 예산 5분을 크게 넘겼고, 11-06 동시 32 적용 뒤 4분대로 내려왔다" style="width:100%;height:auto;display:block">
+          <line x1="40" y1="10" x2="40" y2="140" stroke="#243049"></line><line x1="40" y1="140" x2="630" y2="140" stroke="#243049"></line>
+          <line x1="40" y1="112" x2="630" y2="112" stroke="#f87171" stroke-dasharray="3 4" opacity=".7"></line><text x="626" y="108" fill="#f87171" font-size="11" text-anchor="end">예산 5분</text>
+          <text x="34" y="144" fill="#8b9bb4" font-size="11" text-anchor="end">0</text><text x="34" y="30" fill="#8b9bb4" font-size="11" text-anchor="end">25분</text>
+          <polyline fill="none" stroke="#fbbf24" stroke-width="2" points="40,30 120,28 200,32 280,29 360,31 440,30 520,60 540,118 630,117"></polyline>
+          <line x1="520" y1="10" x2="520" y2="140" stroke="#c084fc" stroke-dasharray="2 3"></line><text x="516" y="22" fill="#c084fc" font-size="11" text-anchor="end">동시 32 적용</text>
+          <text x="40" y="160" fill="#8b9bb4" font-size="11">10-30</text><text x="630" y="160" fill="#8b9bb4" font-size="11" text-anchor="end">11-06</text>
+        </svg>
+      </div>
+      <div class="card">
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>실패 사유 · 조치 (KR-SEL 마지막 주기)</h2><span class="dim" style="font-size:12px">‘왜 없는지’ 를 서버 단위로 — 기존 상태 9종과 같은 분류</span></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>사유</th><th>서버</th><th>며칠째</th><th>조치</th></tr></thead>
+          <tbody>
+            <tr><td><span class="chip warn">SSH 시한 초과</span></td><td>12</td><td>1~3</td><td>서버 부하 또는 네트워크 — 집중 모니터링 후보 · 시한(60초) 설정 확인</td></tr>
+            <tr><td><span class="chip bad">SSH 거부(인증 정지)</span></td><td>3</td><td>6</td><td>등록부 OS 계정 수정 → 다음 주기 자동 재개</td></tr>
+            <tr><td><span class="chip bad">iDRAC 401</span></td><td>5</td><td>2</td><td>iDRAC 등록부 자격증명 · 텔레메트리 계정 만료 확인</td></tr>
+            <tr><td><span class="chip">리포트 없음</span></td><td>14</td><td>—</td><td>Datacenter 라이선스 없음 — iDRAC 면은 센서·전력만(정상)</td></tr>
+            <tr><td><span class="chip">PSI 없음</span></td><td>41</td><td>—</td><td>커널 4.20 미만 — 포화는 런큐·스왑·대기열로(정상)</td></tr>
+          </tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">저장 · 샘플러 · 규칙</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px;font-size:12.5px">
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div style="font-weight:700;margin-bottom:4px">엣지 DB(KR-SEL)</div><div class="dim">메인 0.4GB · 2026-09 2.7GB · 2026-10 3.1GB · 2026-11 3.2GB(진행) · 장치별 포함 · 상한 20GB · 가장 오래된 월 파일 삭제 예정 12-01 · 일 롤업 5년 0.3GB</div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div style="font-weight:700;margin-bottom:4px">샘플러(옵션 B) 부담</div><div class="dim">48대 · 서버 CPU 중앙값 0.3% · 최대 1.1%(bm-kr1-gp03 — 코어 48 중 1개 상시) · 로컬 파일 7일 310MB · 수거 실패 2대(디스크 가득 — 공간 B 표 연결)</div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div style="font-weight:700;margin-bottom:4px">중앙 pull</div><div class="dim">봉투 크기 KR-SEL 1.9MB(gzip 0.3MB) · 당김 소요 1.2s · 상한 400대/봉투 → 1,000대 법인은 3개로 나눠 당김(truncated 명시)</div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div style="font-weight:700;margin-bottom:4px">규칙</div><div class="dim">이 보드의 값은 엣지가 매 주기 쓰는 상태(무음 실패 금지 — 0건이어도 올린다) · ‘주기 소요 80%’ · ‘성공률 90% 미만’ · ‘DB 상한 90%’ 는 알림 규칙(⑨)에 ‘수집 건강’ 행으로 추가 · 중앙은 다시 판정하지 않는다</div></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

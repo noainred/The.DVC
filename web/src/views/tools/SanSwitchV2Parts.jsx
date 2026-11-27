@@ -13,12 +13,12 @@ const LVL_COLOR = { bad: 'var(--red)', warn: 'var(--amber)', ok: 'var(--green)',
 const levelColor = (pct) => LVL_COLOR[capacityLevel(pct)] || 'var(--text-dim)';
 
 /** 포트 용량 — aggregate(shown) 값을 그대로 쓴다(서버 판정 규칙 불변). */
-export function CapacityCard({ agg, scopeLabel }) {
+export function CapacityCard({ agg, scopeLabel, registryUnread = false }) {
   const lic = agg.licensed || 0;
   const w = (n) => (lic > 0 ? `${Math.max(0, Math.min(100, (n / lic) * 100))}%` : '0%');
   const usedW = w(agg.online); const disW = w(Math.min(agg.disabled, Math.max(0, lic - agg.online)));
   const side = [
-    { lab: '스위치', val: agg.switches, meta: switchesMeta(agg), color: agg.failed ? 'var(--red)' : undefined },
+    { lab: '스위치', val: agg.switches, meta: switchesMeta(agg, { unread: registryUnread }), color: agg.failed ? 'var(--red)' : undefined },
     { lab: '물리 포트', val: agg.total.toLocaleString(), meta: `라이선스 ${lic.toLocaleString()}` },
     { lab: '여유 포트', val: agg.free.toLocaleString(), meta: '라이선스 − 사용 중(증설 가능분)',
       color: capacityLevel(agg.usedPct) === 'bad' ? 'var(--red)' : capacityLevel(agg.usedPct) === 'warn' ? 'var(--amber)' : undefined },
@@ -101,6 +101,8 @@ export function TrafficCard({ datacenterIds = [], selected = 0, isAdmin = false 
       <div className="flex wrap" style={{ alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
         <div className="san2-title">
           스토리지 트래픽 · {selected ? '선택 법인' : '전체'}
+          {/* v2.948: 어레이 · 디렉터 · 컨트롤러별은 독립 도구에서(같은 합계 함수 — 두 숫자가 다르면 결함) */}
+          <a className="san2-link" href="#/tools/san-storage" style={{ fontSize: 12, letterSpacing: 0 }} title="어레이별 · 디렉터 · 컨트롤러별 처리량 · 1년 트렌드 · 성능 점검">SAN 스토리지 성능 →</a>
           {badge.text && badge.live ? <span className="san2-badge-live">● {badge.text}</span> : null}
           {badge.text && !badge.live ? <span style={STALE_BADGE} title="지금 조회가 실패하고 있습니다 — 아래 값은 마지막 성공 시점의 것입니다">{badge.text}</span> : null}
         </div>

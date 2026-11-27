@@ -20,7 +20,7 @@ import { describeError } from '../util/errors.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { isMockMode, mockIdracPollTick } from '../mock/seed.js';
 import { onSnapshotRefreshed } from '../partfault/hooks.js'; // v2.548: 인벤토리 갱신 직후 파트 장애 판정/push 트리거
-import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
+import { createAuthGuard, isAuthFailureText, authStopView } from '../util/authGuard.js';
 
 /**
  * iDRAC·OME 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로).
@@ -44,7 +44,7 @@ export function isIdracAuthError(err) {
   return isAuthFailureText(err.message || '');
 }
 
-const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 표지 unread 를 떨구지 않는다)
 
 /**
  * 이 서버가 인증 실패로 주기 수집이 멈췄는가 — **다른 수집기용 읽기 전용**(베어메탈 사용률이 같은 iDRAC 계정을
@@ -73,7 +73,9 @@ export function idracAuthStops(registry = null) {
   if (!list) { try { list = loadRegistry(); } catch { list = []; } }
   for (const s of list || []) {
     if (!s?.id) continue;
-    const rec = authGuard.authStopFor(s);
+    // 130회차(127 반증): 보기만 한다(peekAuthStop) — 이 함수는 폴러 상태 · 목록 조회가 등록부 **전체**에 부른다. authStopFor 면 못 읽는 창에서 이번 주기에
+    //   수집하지 않는 서버가 자격 지문의 탐침을 받아 가 결과가 오지 않았다(시한 10분씩 지연). 주기 수집의 문(pollOnce)은 그대로 authStopFor 다.
+    const rec = authGuard.peekAuthStop(s);
     if (rec) out.set(String(s.id), stopView(rec));
   }
   return out;

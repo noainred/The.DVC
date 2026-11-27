@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 배드 섹터 — 범위를 골라 한 번에 점검</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0;box-sizing:border-box}
+.cap{font-size:12px;font-weight:700;color:#8b9bb4}
+.h{font-size:15px;font-weight:800}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.opt{display:flex;align-items:flex-start;gap:10px;border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;cursor:pointer;line-height:1.5}
+.opt.on{border-color:#3b82f6;background:rgba(59,130,246,.10)}
+.opt input{margin:3px 0 0;accent-color:#3b82f6;width:15px;height:15px;flex:none}
+.opt b{display:block}
+.opt span{font-size:12px;color:#8b9bb4}
+.corp{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #1f2a40;cursor:pointer}
+.corp input{accent-color:#3b82f6;width:15px;height:15px;flex:none;margin:0}
+.corp .n{margin-left:auto;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.grp{padding:6px 10px;font-size:11.5px;font-weight:700;color:#8b9bb4;background:#0f1626;border-bottom:1px solid #1f2a40}
+.field{min-height:32px;box-sizing:border-box;width:100%;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+.chip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;background:rgba(59,130,246,.18);color:#bfdbfe;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.run{background:rgba(59,130,246,.18);color:#bfdbfe}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+th button{all:unset;cursor:pointer}
+th.r,td.r{text-align:right}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px;line-height:1.45;white-space:nowrap}
+.box{overflow-x:auto;border:1px solid #243049;border-radius:10px}
+.bar{height:8px;border-radius:999px;background:#0f1626;border:1px solid #1f2a40;overflow:hidden;min-width:120px}
+.bar i{display:block;height:100%;background:#3b82f6}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px}
+.kv div{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:9px 12px;min-width:0}
+.kv b{display:block;font-size:20px;font-weight:800;line-height:1.2}
+.kv span{font-size:11.5px;color:#8b9bb4}
+</style>
+</helmet>
+<div style="width:100%;min-height:1240px;box-sizing:border-box;background:#0a0e17;padding:20px 24px 40px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div style="max-width:1392px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px 16px;flex-wrap:wrap">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">디스크 배드 섹터 — 지금 점검</div>
+      <div class="muted">범위를 골라 한 번에 점검합니다. 점검은 각 법인의 엣지가 그 법인 서버를 읽고, 결과만 올립니다.</div>
+    </div>
+    <a class="btn" href="Fleet.dc.html" style="text-decoration:none">분석 화면으로</a>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+
+    <section class="card" style="flex:1 1 400px;max-width:100%">
+      <div class="cap">1 · 범위 고르기</div>
+      <fieldset style="border:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0">
+        <legend class="h" style="padding:0 0 8px">어디를 점검할까요</legend>
+        <label class="opt"><input type="radio" name="scope"><span style="color:#e6edf6"><b>전체 — 모든 법인의 서버</b><span>법인 28곳 · 서버 1,140대 (HPE iLO 등 17대 제외) · 법인마다 따로 돌고, 도는 중에도 법인별로 다시 점검 · 중단할 수 있습니다</span></span></label>
+        <label class="opt on"><input type="radio" name="scope" checked><span style="color:#e6edf6"><b>법인을 골라서</b><span>고른 법인의 서버만 점검합니다</span></span></label>
+      </fieldset>
+
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+        <label for="corp-q" class="muted" style="font-size:12px">법인 찾기</label>
+        <input id="corp-q" class="field" type="search" placeholder="국가 · 법인 이름">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="chip">PL 바르샤바</span><span class="chip">US 동부</span><span class="chip">IN 첸나이</span>
+        </div>
+        <div style="border:1px solid #243049;border-radius:10px;max-height:296px;overflow:auto">
+          <div class="grp">미국</div>
+          <label class="corp"><input type="checkbox" checked>US 동부<span class="n mono">80대</span></label>
+          <label class="corp"><input type="checkbox">US 서부<span class="n mono">58대</span></label>
+          <div class="grp">인도</div>
+          <label class="corp"><input type="checkbox" checked>IN 첸나이<span class="n mono">52대</span></label>
+          <div class="grp">폴란드</div>
+          <label class="corp"><input type="checkbox" checked>PL 바르샤바<span class="n mono">64대</span></label>
+          <div class="grp">한국</div>
+          <label class="corp"><input type="checkbox">KR 본사<span class="n mono">214대</span></label>
+          <label class="corp" style="border-bottom:none"><input type="checkbox">KR 평택<span class="n mono">96대</span></label>
+        </div>
+      </div>
+
+      <fieldset style="border:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0">
+        <legend class="h" style="padding:0 0 8px">어떻게 읽을까요</legend>
+        <label class="opt on"><input type="radio" name="mode" checked><span style="color:#e6edf6"><b>새 로그만 이어 읽기</b><span>지난번 읽은 곳 뒤부터 읽습니다. 처음 점검하는 서버는 전체를 읽습니다</span></span></label>
+        <label class="opt"><input type="radio" name="mode"><span style="color:#e6edf6"><b>처음부터 다시 읽기</b><span>서버마다 로그 전체를 다시 읽습니다. 오래 걸립니다</span></span></label>
+      </fieldset>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid #1f2a40;padding-top:12px">
+        <div style="line-height:1.5"><b>법인 3곳 · 서버 196대</b><div class="muted" style="font-size:12px">이미 점검 중인 법인은 고를 수 없습니다</div></div>
+        <button class="btn primary" type="button">점검 시작</button>
+      </div>
+    </section>
+
+    <section class="card" style="flex:999 1 560px;max-width:100%">
+      <div class="cap">2 · 진행 (전체 점검의 예) — 법인마다 따로 돌고, 법인별로 다시 점검 · 중단할 수 있습니다</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="line-height:1.5"><span class="h">전체 점검 중 — 법인 28곳 중 19곳 끝남 · 서버 1,140대 중 742대</span><div class="muted" style="font-size:12px">2026-11-14 07:10 시작 · 새 로그만 이어 읽기 · 시작한 사람 admin · 읽는 중 7곳 · 시작 못 함 2곳</div></div>
+        <button class="btn" type="button">전체 중단</button>
+      </div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="1140" aria-valuenow="742" aria-label="전체 진행"><i style="width:65.1%"></i></div>
+
+      <div class="box">
+      <table style="min-width:860px">
+        <thead><tr>
+          <th><button type="button">국가 · 법인</button></th>
+          <th><button type="button">상태</button></th>
+          <th><button type="button">서버 진행</button></th>
+          <th class="r"><button type="button">못 읽음</button></th>
+          <th class="r"><button type="button">새 기록</button></th>
+          <th class="r"><button type="button">걸린 시간</button></th>
+          <th class="r">이 법인만</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>폴란드 · PL 바르샤바</td><td><span class="tag ok">끝남</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:100%"></i></div><span class="mono">64 / 64</span></div></td><td class="r mono">3</td><td class="r mono"><b>2</b></td><td class="r mono">6분 12초</td><td class="r"><button class="btn" type="button">다시 점검</button></td></tr>
+          <tr><td>한국 · KR 본사</td><td><span class="tag ok">끝남</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:100%"></i></div><span class="mono">214 / 214</span></div></td><td class="r mono">2</td><td class="r mono"><b>0</b></td><td class="r mono">3분 05초</td><td class="r"><button class="btn" type="button">다시 점검</button></td></tr>
+          <tr><td>한국 · KR 평택</td><td><span class="tag ok">끝남</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:100%"></i></div><span class="mono">96 / 96</span></div></td><td class="r mono">0</td><td class="r mono"><b>1</b></td><td class="r mono">1분 48초</td><td class="r"><button class="btn" type="button">다시 점검</button></td></tr>
+          <tr><td>독일 · DE 프랑크푸르트</td><td><span class="tag run">읽는 중</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:66.7%"></i></div><span class="mono">30 / 45</span></div></td><td class="r mono">1</td><td class="r mono"><b>0</b></td><td class="r mono">3분 20초째</td><td class="r"><button class="btn" type="button">중단</button></td></tr>
+          <tr><td>미국 · US 동부</td><td><span class="tag run">읽는 중</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:51.3%"></i></div><span class="mono">41 / 80</span></div></td><td class="r mono">2</td><td class="r mono"><b>1</b></td><td class="r mono">4분 40초째</td><td class="r"><button class="btn" type="button">중단</button></td></tr>
+          <tr><td style="border-bottom:none">인도 · IN 첸나이</td><td style="border-bottom:none"><span class="tag bad">엣지 응답 없음</span></td><td style="border-bottom:none"><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:0%"></i></div><span class="mono">0 / 52</span></div></td><td class="r mono" style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">—</td><td class="r" style="border-bottom:none"><button class="btn" type="button">다시 보내기</button></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div><button class="btn" type="button">나머지 22곳 더 보기</button></div>
+      <div class="muted" style="font-size:12px;line-height:1.6">IN 첸나이는 엣지가 작업을 받아 가지 않아 시작하지 못했습니다(엣지 마지막 보고 05:41). 엣지가 돌아오면 이 작업을 이어 받습니다 — 기다리는 시한이 지나면 ‘시작 못 함’ 으로 닫습니다. 이 창을 닫아도 점검은 계속됩니다.</div>
+
+      <div class="cap" style="padding-top:6px;border-top:1px solid #1f2a40">3 · 끝난 뒤 — 지난 점검 결과 (2026-11-14 02:00 · 전체 · 자동 — 6시간마다)</div>
+      <div class="kv">
+        <div><b>1,096</b><span>읽은 서버 (1,140대 중)</span></div>
+        <div><b>44</b><span>못 읽은 서버</span></div>
+        <div><b>5</b><span>새로 찾은 기록</span></div>
+        <div><b>2</b><span>새로 ‘아직 사용 중’ 이 된 디스크</span></div>
+        <div><b>38분</b><span>걸린 시간 (가장 느린 법인 기준)</span></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <a class="btn" href="Fleet.dc.html" style="text-decoration:none">새 기록 5건 보기</a>
+        <button class="btn" type="button">못 읽은 서버 44대 — 이유별로 보기</button>
+        <button class="btn" type="button">못 읽은 서버만 다시 점검</button>
+      </div>
+      <div class="muted" style="font-size:12px;line-height:1.6">로그인에 실패한 서버는 ‘다시 점검’ 에 넣지 않습니다(계정 잠금 방지) — 등록 정보를 고친 뒤 그 서버에서 따로 조회합니다.</div>
+    </section>
+
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

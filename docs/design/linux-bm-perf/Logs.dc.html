@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>로그 분석 — 성능 · 보안 · 이슈 · 장애</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.chip.pur{color:#c084fc;border-color:rgba(168,85,247,.35);background:rgba(168,85,247,.1)}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #243049}
+.tabs a{padding:10px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;border-bottom:2px solid transparent;min-height:40px;box-sizing:border-box;display:inline-flex;align-items:center}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 12px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer;font-size:12px}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.sel{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+.inp{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;width:260px}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+.kpi .label{color:#8b9bb4;font-size:12px;font-weight:600;letter-spacing:.5px}.kpi .value{font-size:26px;font-weight:800;margin-top:6px;line-height:1;text-align:center}.kpi .meta{font-size:12px;color:#8b9bb4;margin-top:8px}
+.sample{display:block;background:#0a0e17;border:1px solid #243049;border-radius:6px;padding:4px 8px;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;color:#8b9bb4;max-width:420px}
+h2{margin:0;font-size:15px;font-weight:700}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › KR-SEL › <b style="color:#e6edf6">bm-kr1-db01</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;display:flex;flex-wrap:wrap;align-items:center;gap:10px">bm-kr1-db01 — 로그 분석 <span class="chip bad">장애 1</span> <span class="chip warn">보안 2 · 성능 3 · 이슈 2</span></h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">출처: journald(우선순위 warning 이상 · 커서 증분) · dmesg · /var/log/secure(sshd · sudo) · auditd(있을 때) · 용도 로그(GPDB pg_log · Airflow scheduler) · iDRAC SEL/LC · 마지막 읽음 13:35 · 원문은 법인 밖으로 나가지 않는다</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <div class="seg" role="group" aria-label="기간"><button type="button">1시간</button><button class="on" type="button">24시간</button><button type="button">7일</button></div>
+    <button class="btn" type="button">지금 읽기</button><button class="btn" type="button">CSV</button>
+  </div>
+  <nav class="tabs" aria-label="서버 상세 탭"><a href="Server.dc.html">요약</a><a href="Server.dc.html">자원 (USE)</a><a href="Server.dc.html">하드웨어 (iDRAC)</a><a href="Faults.dc.html">장애 기록</a><a href="Tuning.dc.html">튜닝</a><a href="Profiles.dc.html">용도</a><a href="Server.dc.html">진단 스냅샷</a><a href="AvgPeak.dc.html">추이</a><a href="Focus.dc.html">집중</a><a class="on" href="Logs.dc.html" aria-current="page">로그</a></nav>
+
+  <!-- 분류 KPI 4 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:14px">
+    <div class="card kpi" style="border-color:rgba(239,68,68,.4)"><div class="label">장애</div><div class="value" style="color:#f87171">1</div><div class="meta">MCE · EDAC · PSU · 커널 패닉 흔적 · 디스크 I/O 오류 — 패턴 1 · 줄 1</div></div>
+    <div class="card kpi"><div class="label">성능</div><div class="value" style="color:#fbbf24">3</div><div class="meta">I/O timeout · OOM · soft lockup · NIC 링크 플랩 · 스로틀링 — 패턴 3 · 줄 41</div></div>
+    <div class="card kpi"><div class="label">보안</div><div class="value" style="color:#fbbf24">2</div><div class="meta">SSH 실패 집중 · sudo · 새 계정/권한 · SELinux 거부 · auditd — 패턴 2 · 줄 318</div></div>
+    <div class="card kpi"><div class="label">이슈</div><div class="value">2</div><div class="meta">서비스 실패/재시작 · 패키지 오류 · 시각 점프 · 파일시스템 경고 — 패턴 2 · 줄 6</div></div>
+    <div class="card kpi"><div class="label">읽은 양</div><div class="value">2.1k<small style="font-size:14px;color:#8b9bb4;font-weight:600"> 줄</small></div><div class="meta">24시간 · 상한 5,000줄/주기 · 잘림 0 · 분류 안 됨 1,730(보관 안 함)</div></div>
+  </div>
+
+  <!-- 타임라인 + 패턴 표 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(620px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:6px"><h2>시간대별 발생 — 분류 4 (시간당 패턴 매칭 수)</h2><span class="dim" style="font-size:12px">추이 탭·집중 세션과 같은 시간축 · 막대 클릭 = 그 시간 패턴</span></div>
+      <svg viewBox="0 0 640 190" role="img" aria-label="24시간 시간당 로그 패턴 매칭 수를 분류별 누적 막대로: 보안(SSH 실패)이 새벽 3시대에 180건으로 가장 높고, 성능(I/O timeout)이 13시에 집중, 장애 1건이 11시 4분" style="width:100%;height:auto;display:block">
+        <line x1="40" y1="10" x2="40" y2="150" stroke="#243049"></line><line x1="40" y1="150" x2="630" y2="150" stroke="#243049"></line>
+        <text x="34" y="154" fill="#8b9bb4" font-size="11" text-anchor="end">0</text><text x="34" y="30" fill="#8b9bb4" font-size="11" text-anchor="end">200</text>
+        <rect x="50" y="146" width="18" height="4" fill="#fbbf24"></rect><rect x="74" y="144" width="18" height="6" fill="#fbbf24"></rect><rect x="98" y="146" width="18" height="4" fill="#fbbf24"></rect>
+        <rect x="122" y="140" width="18" height="10" fill="#fbbf24"></rect><rect x="146" y="130" width="18" height="20" fill="#fbbf24"></rect>
+        <rect x="170" y="150" width="18" height="0" fill="#fbbf24"></rect>
+        <rect x="194" y="70" width="18" height="80" fill="#c084fc"></rect><rect x="218" y="30" width="18" height="120" fill="#c084fc"></rect><rect x="242" y="60" width="18" height="90" fill="#c084fc"></rect><rect x="266" y="120" width="18" height="30" fill="#c084fc"></rect>
+        <rect x="290" y="146" width="18" height="4" fill="#fbbf24"></rect><rect x="314" y="148" width="18" height="2" fill="#fbbf24"></rect>
+        <rect x="338" y="140" width="18" height="10" fill="#67e8f9"></rect><rect x="338" y="134" width="18" height="6" fill="#fbbf24"></rect>
+        <rect x="362" y="146" width="18" height="4" fill="#67e8f9"></rect>
+        <rect x="386" y="148" width="18" height="2" fill="#fbbf24"></rect>
+        <rect x="410" y="142" width="18" height="8" fill="#f87171"></rect>
+        <rect x="434" y="146" width="18" height="4" fill="#fbbf24"></rect><rect x="458" y="138" width="18" height="12" fill="#fbbf24"></rect>
+        <rect x="482" y="110" width="18" height="40" fill="#f59e0b"></rect><rect x="482" y="104" width="18" height="6" fill="#67e8f9"></rect>
+        <rect x="506" y="120" width="18" height="30" fill="#f59e0b"></rect><rect x="530" y="146" width="18" height="4" fill="#fbbf24"></rect><rect x="554" y="148" width="18" height="2" fill="#fbbf24"></rect>
+        <text x="40" y="170" fill="#8b9bb4" font-size="11">13시 어제</text><text x="230" y="170" fill="#c084fc" font-size="11" text-anchor="middle">02~05시 SSH 실패 집중</text><text x="491" y="170" fill="#f59e0b" font-size="11" text-anchor="middle">13시 I/O timeout</text><text x="630" y="170" fill="#8b9bb4" font-size="11" text-anchor="end">13시</text>
+        <text x="40" y="186" fill="#8b9bb4" font-size="10">■ 보안(보라) ■ 성능(주황) ■ 이슈(청록) ■ 장애(빨강) ■ 보안 소량(노랑)</text>
+      </svg>
+    </div>
+
+    <div class="card" style="border-color:rgba(168,85,247,.35)">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>보안 — 누가 · 어디서 · 몇 번</h2><span class="chip pur">패턴 2</span><span class="dim" style="font-size:12px;margin-left:auto">/var/log/secure · journald sshd · sudo · useradd · auditd(있으면)</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>항목</th><th>24시간</th><th>상위</th><th>판정</th></tr></thead>
+        <tbody>
+          <tr><td>SSH 로그인 실패</td><td class="bad">312</td><td class="mono">203.0.113.45 → root 288 · 198.51.100.7 → admin 19 · 내부 10.20.1.5 → gpadmin 5</td><td><span class="chip bad">외부 IP 집중 — 02~05시 · 기존 로그인 실패 패턴 판정 재사용</span></td></tr>
+          <tr><td>SSH 성공</td><td>14</td><td class="mono">kim.ops 10.20.3.11 ×9 · gpadmin(키) 10.20.1.5 ×4 · root 10.20.1.5 ×1</td><td><span class="chip warn">root 직접 로그인 1 (정책: 금지)</span></td></tr>
+          <tr><td>sudo</td><td>6</td><td class="mono">kim.ops: systemctl restart postgresql ×1 · vi /etc/sysctl.d/99-gp.conf ×1 · dnf ×4</td><td><span class="chip ok">정상 · 변경 이벤트 띠와 일치(11-05 18:20 sysctl)</span></td></tr>
+          <tr><td>계정 · 권한 변경</td><td>0</td><td class="dim">useradd · usermod · passwd · 키 추가 없음</td><td><span class="chip ok">—</span></td></tr>
+          <tr><td>SELinux 거부(AVC)</td><td class="dim">—</td><td class="dim">SELinux disabled (GPDB 요구) — 해당 없음</td><td><span class="chip">해당 없음</span></td></tr>
+          <tr><td>auditd</td><td class="dim">—</td><td class="dim">미설치 — 경로 없음</td><td><span class="chip">경로 없음</span></td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">IP·계정은 상위 N 만 보관하고 원문 줄은 비밀 가림(`redact`) 뒤 샘플 1줄만. ‘외부 IP 집중’ 판정은 설정 임계(5분 20회 · 설정값). 조치는 알림 규칙(⑨) ‘보안’ 행과 이슈 자동 등록으로 — 포탈이 차단하지 않는다.</div>
+    </div>
+  </div>
+
+  <!-- 패턴 표 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px"><h2>패턴(서명)별 — 같은 메시지는 한 행 · 횟수 · 첫/마지막 · 분류 · 심각도 · 연계</h2><select class="sel" aria-label="분류"><option>분류 전체</option><option>장애</option><option>성능</option><option>보안</option><option>이슈</option></select><input class="inp" placeholder="메시지 · 유닛 · 규칙 id 검색" aria-label="검색"><span class="dim" style="font-size:12px;margin-left:auto">행 클릭 = 샘플 5줄(가림) · 원문 전체는 서버에서(복사용 journalctl 명령)</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>분류</th><th>심각</th><th>횟수</th><th>첫 / 마지막</th><th>출처 · 유닛</th><th>서명(정규화 — 숫자·IP·PID 치환)</th><th>샘플(가림)</th><th>규칙 · 근거</th><th>연계</th></tr></thead>
+      <tbody>
+        <tr style="background:rgba(239,68,68,.06)"><td><span class="chip bad">장애</span></td><td class="bad">critical</td><td>1</td><td>11:04 / 11:04</td><td>kernel · dmesg</td><td class="mono">mce: [Hardware Error]: Machine check events logged · EDAC MC# CE memory read error on CPU_SrcID#0_Ha#0_Chan#2_DIMM#1</td><td><code class="sample">[11-06 11:04:12] mce: [Hardware Error]: Machine check events logged
+EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#2_DIMM#1 (channel:2 slot:1 page:0x3e2a1f offset:0x400 grain:32 syndrome:0x0 - … )</code></td><td class="mono">HW-MCE-01 <span class="ev b">◐</span></td><td>교차 ③ · 장애 기록 DIMM A3 · SEL W 11-04 · 플레이북 ③</td></tr>
+        <tr><td><span class="chip warn">성능</span></td><td class="warn">warning</td><td>38</td><td>13:02 / 13:41</td><td>kernel · dmesg</td><td class="mono">nvme nvme&lt;N&gt;: I/O &lt;N&gt; QID &lt;N&gt; timeout, completion polled</td><td><code class="sample">[11-06 13:02:41] nvme nvme1: I/O 1024 QID 7 timeout, completion polled</code></td><td class="mono">PERF-NVME-TIMEOUT <span class="ev c">○</span></td><td>교차 ② · 집중 세션 13:38 · 플레이북 ②</td></tr>
+        <tr><td><span class="chip warn">성능</span></td><td class="warn">warning</td><td>2</td><td>11:40 / 11:41</td><td>kernel · dmesg</td><td class="mono">TCP: out of memory -- consider tuning tcp_mem</td><td><code class="sample">[11-06 11:40:03] TCP: out of memory -- consider tuning tcp_mem</code></td><td class="mono">PERF-TCPMEM <span class="ev c">○</span></td><td>큐·버퍼 표 ‘소켓 메모리’ · 튜닝 탭</td></tr>
+        <tr><td><span class="chip warn">성능</span></td><td class="warn">warning</td><td>1</td><td>03:12 / 03:12</td><td>kernel · dmesg</td><td class="mono">watchdog: BUG: soft lockup - CPU#&lt;N&gt; stuck for &lt;N&gt;s! [&lt;proc&gt;:&lt;PID&gt;]</td><td><code class="sample">[11-06 03:12:09] watchdog: BUG: soft lockup - CPU#21 stuck for 23s! [postgres:48112]</code></td><td class="mono">PERF-SOFTLOCKUP <span class="ev c">○</span></td><td>CPU 코어별 불균형(추이) · 집중 세션 후보</td></tr>
+        <tr><td><span class="chip pur">보안</span></td><td class="bad">high</td><td>288</td><td>02:14 / 04:51</td><td>sshd · secure</td><td class="mono">Failed password for root from &lt;IP&gt; port &lt;N&gt; ssh2</td><td><code class="sample">[11-06 02:14:31] sshd[&lt;PID&gt;]: Failed password for root from 203.0.113.45 port 51822 ssh2</code></td><td class="mono">SEC-SSH-FAIL-BURST <span class="ev a">●</span></td><td>알림 ‘보안’ · 이슈 #1850 자동 등록 · 포탈 로그인 실패 패턴 모듈 재사용</td></tr>
+        <tr><td><span class="chip pur">보안</span></td><td class="warn">medium</td><td>1</td><td>09:02 / 09:02</td><td>sshd · secure</td><td class="mono">Accepted password for root from &lt;IP&gt;</td><td><code class="sample">[11-06 09:02:10] sshd[&lt;PID&gt;]: Accepted password for root from 10.20.1.5 port 44012 ssh2</code></td><td class="mono">SEC-ROOT-LOGIN <span class="ev c">○</span></td><td>정책(설정) ‘root 직접 로그인 금지’ 위반</td></tr>
+        <tr><td><span class="chip info">이슈</span></td><td class="warn">warning</td><td>4</td><td>22:05 / 22:06</td><td>dnf · journald</td><td class="mono">Transaction &lt;N&gt; … kernel-&lt;ver&gt; installed — needs reboot</td><td><code class="sample">[11-05 22:05:51] dnf[&lt;PID&gt;]: Installed: kernel-5.14.0-427.el9.x86_64 …</code></td><td class="mono">ISS-PKG-KERNEL <span class="ev a">●</span></td><td>변경 이벤트 띠 11-05 22:05 · 점검 소모품 ‘재부팅 필요’</td></tr>
+        <tr><td><span class="chip info">이슈</span></td><td class="warn">warning</td><td>2</td><td>13:42 / 13:42</td><td>chronyd · journald</td><td class="mono">System clock wrong by &lt;N&gt; seconds, adjustment started</td><td><code class="sample">[11-06 13:42:00] chronyd[&lt;PID&gt;]: System clock wrong by 0.9 seconds, adjustment started</code></td><td class="mono">ISS-CLOCK-STEP <span class="ev c">○</span></td><td>점검 소모품 ‘시각 동기’ · 집중 세션 13:42 결측과 같은 분</td></tr>
+        <tr><td><span class="chip info">이슈</span></td><td class="dim">info</td><td>1</td><td>13:43 / 13:43</td><td>postgresql · pg_log</td><td class="mono">checkpoint complete: wrote &lt;N&gt; buffers … sync=&lt;N&gt; s</td><td><code class="sample">[11-06 13:43:20] LOG: checkpoint complete: wrote 48112 buffers (18.4%); … sync=21.9 s</code></td><td class="mono">APP-PG-CHECKPOINT-SLOW <span class="ev c">○</span> (용도 프로파일 규칙)</td><td>교차 ② · 집중 결론 ‘checkpoint 겹침’</td></tr>
+      </tbody></table></div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">서명 = 메시지에서 숫자·IP·PID·경로 가변부를 치환한 문자열(해시로 저장). 같은 서명은 한 행에 횟수만 올리고 샘플 5줄(가림)만 둔다 — 로그를 통째로 저장하지 않는다. ‘분류 안 됨’ 줄은 횟수만 세고 버린다(필요하면 ‘지금 읽기’ 로 그 시각 원문 명령을 복사).</div>
+  </div>
+
+  <!-- 규칙 카탈로그 + 수집 방식 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>규칙 카탈로그 — 분류는 규칙이 정하고 규칙은 근거를 갖는다</h2><span class="dim" style="font-size:12px">포탈 자체 로그 분석 엔진(loganalysis: 정규식 · 표본 검증 · id)을 서버 로그에 재사용</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>분류</th><th>규칙 id</th><th>패턴(요지)</th><th>심각도</th><th>근거</th><th>등급</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip bad">장애</span></td><td class="mono">HW-MCE-01 · HW-EDAC-UE · HW-PSU · HW-PANIC</td><td>mce: Hardware Error · EDAC UE · PSU lost · kernel panic/oops</td><td>critical</td><td>커널 EDAC/MCE 메시지 형식 · iDRAC SEL 과 대조</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td><span class="chip warn">성능</span></td><td class="mono">PERF-NVME-TIMEOUT · PERF-OOM · PERF-SOFTLOCKUP · PERF-LINKFLAP · PERF-THROTTLE · PERF-TCPMEM</td><td>I/O timeout · Out of memory: Killed process · soft lockup · Link is Down/Up 반복 · clock throttled · TCP: out of memory</td><td>warning</td><td>Netflix 60초(dmesg 먼저) · USE(OOM = dmesg) · 커널 메시지 원문</td><td><span class="ev b">◐</span>/<span class="ev c">○</span></td></tr>
+          <tr><td><span class="chip pur">보안</span></td><td class="mono">SEC-SSH-FAIL-BURST · SEC-ROOT-LOGIN · SEC-SUDO · SEC-ACCOUNT · SEC-AVC · SEC-AUDIT-*</td><td>Failed password 집중(임계 설정) · Accepted … root · sudo: COMMAND · useradd/usermod/passwd · avc: denied · auditd 주요 키</td><td>high~info</td><td>기존 포탈 로그인 실패 패턴 모듈(`logs/loginFailPattern.js`) 판정 재사용 · sshd/sudo 로그 형식</td><td><span class="ev a">●</span>(기존 모듈)/<span class="ev c">○</span></td></tr>
+          <tr><td><span class="chip info">이슈</span></td><td class="mono">ISS-UNIT-FAIL · ISS-RESTART-LOOP · ISS-PKG-KERNEL · ISS-CLOCK-STEP · ISS-FS-RO · ISS-DISKFULL</td><td>systemd: Failed with result · start request repeated · dnf kernel installed · chronyd clock wrong · Remounting read-only · No space left</td><td>warning</td><td>systemd · dnf · chrony 로그 형식 · 점검 소모품(⑧)과 같은 항목</td><td><span class="ev c">○</span></td></tr>
+          <tr><td><span class="chip">용도</span></td><td class="mono">APP-PG-* · APP-GP-* · APP-AF-*</td><td>pg_log checkpoint/deadlock/FATAL · GPDB segment failure · Airflow scheduler heartbeat/task failed</td><td>프로파일별</td><td>용도 프로파일(⑥) checks 와 같은 문서(G3 · A1)</td><td><span class="ev a">●</span></td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">규칙 = 파일 하나(정규식 · 분류 · 심각도 · 근거 번호 · 표본 1줄) · 카탈로그 테스트가 표본이 정규식에 맞는지 검사(기존 loganalysis 와 같은 방식) · 현장에서 규칙을 더하면 ‘사용자 규칙’ 으로 표시 · 분류를 못 하는 줄은 세기만 한다(지어내지 않는다).</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">수집 방식 · 규칙</h2>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px" class="dim">
+        <li><b style="color:#e6edf6">증분 읽기</b>: 5분 주기 SSH 1회 안에 구획 <span class="mono">##JOURNAL</span>(`journalctl -p warning --since <마지막 커서> -o short-iso --no-pager | head -N`) · <span class="mono">##DMESG</span> · <span class="mono">##SECURE</span>(`/var/log/secure` 는 읽기 권한이 있을 때 — 없으면 ‘권한 없음’) · 용도 로그는 프로파일이 경로를 안다. 커서(journal cursor · 파일 offset+inode)를 엣지가 기억해 같은 줄을 두 번 읽지 않는다. 주기당 줄 상한(기본 5,000 · 설정)과 ‘잘림 n줄’ 표시.</li>
+        <li><b style="color:#e6edf6">엣지에서 분류·집계·가림</b>: 정규식 매칭 → 서명 해시 → `log_pattern(agent,key,sig,class,severity,count,first,last,rule_id)` + 샘플 5줄(가림) · 시간당 집계 `log_hour(class,count)` · 보안 상위 N(IP · 계정). 원문 전체는 저장하지 않고 법인 밖으로 보내지 않는다 — 중앙은 집계·샘플만 봉투로.</li>
+        <li><b style="color:#e6edf6">비밀 가림</b>: 샘플은 기존 `edgelog/redact.js` 규칙(토큰·비밀번호 키) + 로그용 추가(`password=`, `Authorization:`, 카드번호 꼴)를 거친다. 가림은 ‘[가림]’ 표식으로 남긴다.</li>
+        <li><b style="color:#e6edf6">연계</b>: 패턴 행마다 교차 판정 · 장애 기록 · 집중 세션 · 변경 이벤트 · 점검 소모품 · 플레이북 링크 — 같은 시각 ±5분 매칭(인과 아님). 알림 규칙(⑨)에 ‘로그 — 장애/보안 high’ 행 추가(기본 꺼짐).</li>
+        <li><b style="color:#e6edf6">함대 보기</b>: 보드 KPI ‘로그 장애·보안 n대’ → 법인 · 분류 · 규칙 필터 표(같은 규칙이 여러 서버에서 동시에 뜨면 ‘공통 원인 후보’ 표시 — 예: 같은 외부 IP 의 SSH 실패).</li>
+        <li><b style="color:#e6edf6">정직하게</b>: 커널·sshd·systemd 메시지 형식은 배포판·버전마다 조금씩 다르다(○ 규칙은 실장비 표본으로 좁힌다) · auditd·SELinux 는 설치·활성일 때만(‘경로 없음’) · `/var/log/secure` 읽기 권한은 계정에 따라 없다 · 로그가 많은 서버는 상한 때문에 ‘잘림’ 이 생기고 그 수를 적는다 · 보안 판정은 알림까지만, 차단·계정 잠금은 포탈이 하지 않는다.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2200}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>점검 소모품 지표</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.tile{border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px}
+.tile .h{font-size:11.5px;color:#8b9bb4;font-weight:600}.tile .v{font-size:20px;font-weight:800;line-height:1.1}.tile .s{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4"><a href="Server.dc.html">bm-kr1-db01 › 요약</a> › <b style="color:#e6edf6">점검 소모품</b> · 추천 7</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">점검 소모품 지표 — 요약 탭에 들어가는 카드 (장애 분석 때 가장 먼저 보는 것들)</h1>
+    <div class="dim" style="font-size:12px;margin-top:4px">전부 기존 SSH 1회 명령의 구획 안에서 읽는다(새 명령 없음) · 기준은 설정값 · 공식 권고가 없는 항목은 ○ 로 두고 ‘관행’ 이라고 적는다</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px"><h2>점검 소모품 — 8칸</h2><span class="chip warn">주의 2</span><span class="chip ok">정상 5</span><span class="chip">확인 불가 1</span><span class="dim" style="font-size:12px;margin-left:auto">OS 13:35 읽음</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:10px">
+      <div class="tile"><div class="h">시각 동기 (chrony)</div><div class="v ok">+0.8 ms</div><div class="s">chronyc tracking · 소스 ntp.kr1 · 마지막 동기 13:34 · 기준 ±100ms(설정) · GPDB 는 동기 필수(G1 ●)</div></div>
+      <div class="tile"><div class="h">실패 유닛 (systemd)</div><div class="v ok">0</div><div class="s">systemctl --failed · 마지막 실패 10-28 bareos-fd(해소) ○ 관행</div></div>
+      <div class="tile"><div class="h">OOM kill 누적 (부팅 이후)</div><div class="v ok">0</div><div class="s">/proc/vmstat oom_kill · 5분 증가분 0 · 발생하면 dmesg 줄을 같이 (USE ◐)</div></div>
+      <div class="tile"><div class="h">커널 오류 메시지율</div><div class="v warn">1 / 24h</div><div class="s">dmesg --level=err,warn 24시간 1건: nvme1 I/O timeout 13:02 · 기준 0(설정) ○ 관행</div></div>
+      <div class="tile"><div class="h">가동 시간 · 재부팅 필요</div><div class="v warn">41일 · 재부팅 필요</div><div class="s">/proc/uptime · needs-restarting -r: 커널 427 설치됨, 실행 362 (11-05 22:05 dnf) — Rocky 9.4 노트 ‘dnf upgrade’ 경로 R3 ●</div></div>
+      <div class="tile"><div class="h">파일 디스크립터 · conntrack</div><div class="v ok">3% · 5%</div><div class="s">/proc/sys/fs/file-nr 대 file-max · nf_conntrack_count 대 max · GPDB nofile 524288 요구(G1 ●)</div></div>
+      <div class="tile"><div class="h">인증서 만료 (해당 시)</div><div class="v">—</div><div class="s">서버에 TLS 서비스가 등록돼 있지 않음 → 확인 불가(해당 없음과 구분) · 있으면 기존 성능점검 cert 점검 재사용</div></div>
+      <div class="tile"><div class="h">TuneD · SELinux · firewalld</div><div class="v ok">throughput-performance · disabled · inactive</div><div class="s">tuned-adm active · getenforce · systemctl is-active — GPDB 프로파일 요구와 일치(G1 ●)</div></div>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:10px">카드 한 칸 = 값 + 읽는 곳 + 기준(설정) + 근거 등급. 주의·이상 칸은 알림 규칙 ‘점검 소모품’ 에 묶이고(기본 꺼짐), 보드 KPI 에는 ‘소모품 주의 n대’ 로 센다. 수치는 가상.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">읽는 곳 · 구획 (SSH 1회 안)</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>칸</th><th>명령 · 파일</th><th>구획</th><th>기준(설정 기본)</th><th>근거</th></tr></thead>
+        <tbody>
+          <tr><td>시각 동기</td><td class="mono">chronyc -c tracking</td><td class="mono">##CHRONY</td><td>±100ms · 소스 없음 = 주의</td><td><span class="ev a">●</span> GPDB ‘Synchronize system clocks’</td></tr>
+          <tr><td>실패 유닛</td><td class="mono">systemctl --failed --no-legend</td><td class="mono">##UNITS</td><td>0</td><td><span class="ev c">○</span> 관행</td></tr>
+          <tr><td>OOM</td><td class="mono">/proc/vmstat oom_kill · dmesg</td><td class="mono">##VMSTAT · ##DMESG</td><td>5분 증가 0</td><td><span class="ev b">◐</span> USE: OOM killer = dmesg</td></tr>
+          <tr><td>커널 오류율</td><td class="mono">dmesg -T --level=err,warn | tail -N</td><td class="mono">##DMESG</td><td>24시간 0</td><td><span class="ev b">◐</span> Netflix 60초: dmesg 먼저</td></tr>
+          <tr><td>가동 시간 · 재부팅 필요</td><td class="mono">/proc/uptime · needs-restarting -r</td><td class="mono">##CHANGES</td><td>재부팅 필요 = 주의</td><td><span class="ev a">●</span> Rocky 9.4 노트 업그레이드 경로</td></tr>
+          <tr><td>FD · conntrack</td><td class="mono">/proc/sys/fs/file-nr · nf_conntrack_count/max</td><td class="mono">##SYSCTL</td><td>80% 주의</td><td><span class="ev a">●</span> GPDB nofile 524288</td></tr>
+          <tr><td>인증서</td><td>기존 성능점검(svcmon) cert 점검</td><td class="dim">—</td><td>30일 전 주의</td><td class="dim">기존 모듈</td></tr>
+          <tr><td>TuneD · SELinux · firewalld</td><td class="mono">tuned-adm active · getenforce · systemctl is-active firewalld</td><td class="mono">##SYSCTL</td><td>프로파일 요구값과 대조</td><td><span class="ev a">●</span> GPDB G1</td></tr>
+        </tbody></table></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">함대 — 소모품 주의 서버 (보드 KPI 클릭)</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>서버</th><th>법인</th><th>주의 칸</th><th>내용</th><th>며칠째</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">bm-kr1-db01</td><td class="dim">KR-SEL</td><td>재부팅 필요 · dmesg</td><td>커널 427 미부팅 · nvme timeout 1</td><td>1일</td></tr>
+          <tr><td class="mono">bm-pl1-web04</td><td class="dim">PL-WAW</td><td>시각 동기</td><td class="bad">chrony 소스 없음 · 오프셋 +12.4s</td><td>6일</td></tr>
+          <tr><td class="mono">bm-us1-app07</td><td class="dim">US-EAST</td><td>실패 유닛</td><td class="mono">node_exporter.service failed</td><td>3일</td></tr>
+          <tr><td class="mono">bm-kr1-gp04</td><td class="dim">KR-SEL</td><td>OOM</td><td class="bad">oom_kill +2 (postgres 세그먼트)</td><td>오늘</td></tr>
+          <tr><td class="mono">bm-pl1-db02</td><td class="dim">PL-WAW</td><td>dmesg</td><td class="bad">MCE 1 · EDAC 정정 오류 212</td><td>2일</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">‘며칠째’ 는 처음 주의가 된 주기부터(전이 기록). 정상이 되면 행이 사라지고 이력은 변경 이벤트 띠에 남는다.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

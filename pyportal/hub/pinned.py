@@ -159,4 +159,7 @@ def build_pinned_opener(pinned_ip, *, tls_context, extra_handlers=(), deadline=N
             return self.do_open(_pinned_connection_factory(pinned_ip, https=True, on_socket=on_socket),
                                 req, context=tls_context)
 
-    return urllib.request.build_opener(*extra_handlers, _PinnedHTTPHandler(), _PinnedHTTPSHandler(context=tls_context))
+    # 31회차 F9(재현): 빈 ProxyHandler 로 환경 프록시(http_proxy 등)를 끈다 — 핀 연결은 검사한 IP 에 직접 붙는 것이 전제라,
+    #   프록시가 끼면 '대상 IP : 프록시 포트' 로 접속해 정상 대상을 '응답 없음' 으로 판정했다(build_opener 는 기본 ProxyHandler 를 넣는다).
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), *extra_handlers,
+                                       _PinnedHTTPHandler(), _PinnedHTTPSHandler(context=tls_context))

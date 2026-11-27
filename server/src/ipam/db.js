@@ -16,6 +16,7 @@ import { COLUMNS, toRecord } from './record.js';
 import { createLockRetry, openSqlite, withOpenCleanup } from '../util/sqliteOpen.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { createYielder } from '../util/timeSlice.js';
+import { envPositive, envNonNegative, ENV_INT_MAX } from '../util/envNumber.js';
 const saveWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 });
 
 const DB_PATH = config.ipam.dbPath;
@@ -24,7 +25,9 @@ let impl = null;
 let ready = null;
 
 // 이 행 수 미만은 워커로 넘기지 않는다 — 전송 오버헤드가 인라인 적재보다 커서 역효과.
-const MIN_OFFLOAD_ROWS = Number(process.env.IPAM_WRITE_MIN_ROWS || 500);
+// 102회차: '0' = 항상 오프로드(의미)는 지키고, 숫자 아님(예전 NaN → `행 수 < NaN` 이 거짓이라 1행까지 워커로) · 음수 · Infinity(대량 적재도 인라인 —
+//   끄는 키는 IPAM_WRITE_WORKER=0)는 기본값.
+const MIN_OFFLOAD_ROWS = envNonNegative(process.env.IPAM_WRITE_MIN_ROWS, 500, { max: ENV_INT_MAX });
 // 0 이면 오프로딩 완전 비활성(항상 인라인).
 const OFFLOAD_ENABLED = process.env.IPAM_WRITE_WORKER !== '0';
 
@@ -47,7 +50,8 @@ export function _setWriteReplyDeadlineForTest(ms) { _writeReplyDeadlineMs = Numb
 //   틀린 원인). 이제 ① table_info 로 **없는 열만** ALTER 하고 ② 'duplicate column name' 만 삼키며 ③ 잠금이면 다시 던져
 //   getImpl 이 래치하지 않고 잠시 뒤 다시 연다(util/sqliteOpen.js 규약 — ipam.db 는 외부 리더 공유라 WAL 전환은 하지 않는다).
 export const MIGRATE_COLUMNS = ['scope', 'server_type', 'os_name', 'os_version', 'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner',
-  'label', 'device_type', 'first_seen', 'last_seen', 'usage_status', 'applied_by', 'range_policy_spec'];
+  'label', 'device_type', 'first_seen', 'last_seen', 'usage_status', 'applied_by', 'range_policy_spec',
+  'purpose', 'requester', 'assigner']; // v3.5.0: 옛 ipam.db 에 없는 열 — 없는 것만 ALTER 로 더한다
 
 /** 없는 열만 추가한다. 잠금·그 밖의 오류는 던진다('이미 있음' 경합만 삼킨다). @returns {string[]} 추가한 열 */
 export function migrateIpRecordColumns(db) {
@@ -61,7 +65,8 @@ export function migrateIpRecordColumns(db) {
   return added;
 }
 
-const lockRetry = createLockRetry(Number(process.env.IPAM_DB_LOCK_RETRY_MS) > 0 ? Number(process.env.IPAM_DB_LOCK_RETRY_MS) : 30_000);
+// 102회차 F8(재현): 예전 `> 0` 검사는 Infinity 를 통과시켜 잠금 오류 한 번에 retryAt 이 Infinity — **재시작 전까지 IP 관리 DB 를 다시 열지 않았다**.
+const lockRetry = createLockRetry(envPositive(process.env.IPAM_DB_LOCK_RETRY_MS, 30_000, { max: ENV_INT_MAX }));
 
 function initSqlite() {
   // 시도가 실패하면 그 시도에서 연 핸들을 닫는다(withOpenCleanup — 잠금 재시도가 핸들을 쌓지 않게).

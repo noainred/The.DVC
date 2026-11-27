@@ -12,6 +12,7 @@
  */
 
 import fs from 'node:fs';
+import { deferredOf } from './pushDeferred.js';   // 51회차 #3
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -23,6 +24,7 @@ import { readBytesCapped } from '../util/readBytesCapped.js'; // v2.607 SEC2607-
 import { recordOutbound } from '../util/outboundStats.js'; // v2.727(감사 D-06): 전역 fetch 경로라 직접 기록(collector/upgradePush.js 와 같은 형태)
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
 import { readTextCapped } from '../util/readCapped.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';   // 86회차 F4: 받은 번들은 임시 파일 + rename
 // v2.730(검토 S-10·I-08): 배포자 서명 판정 하나(signature.js) · 메타데이터 상한·형식(versionsDoc.js)
 import {
   decideSignature, signatureSummary, manifestPathForArchive, archiveVersionOf, readManifestFile, encodeManifestHeader, MANIFEST_HEADER,
@@ -270,13 +272,33 @@ export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgN
   } catch (err) {
     return { ok: false, reason: `failed to read archive: ${err.message}`, signature: signatureSummary(sig) };
   }
+  const rel = archiveRelInInstall(archivePath, installDir);   // 86회차 F1: 스왑 전에(둘 다 있을 때) 잰다
   const res = applyIfNewer(members, installDir, currentVersion, { signedVersion: sig.verified ? sig.version : null });
   res.signature = signatureSummary(sig);
   // 적용된 아카이브 경로를 노출 — manager.pushToEdges가 이 경로로 엣지에 같은 번들을 푸시한다.
   // (이전엔 res.appliedArchive가 항상 undefined라, watchDir 없는 remoteBase-only 중앙은 엣지
   //  업그레이드 푸시가 조용히 no-op이 되어 버전이 갈라졌다.)
-  if (res.ok) res.appliedArchive = archivePath;
+  // 86회차 F1(재현): 기본 downloadDir(<앱>/server/.upgrade-cache)은 설치 디렉터리 **안**이라 스왑이 받은 번들을 백업(<설치>.bak.<ts>)으로
+  //   옮긴다 — 예전에는 옮기기 전 경로를 돌려줘 적용 직후 보관(keepBundle) · 엣지 push · 수집 서버 push 가 전부 ENOENT 로 실패했다
+  //   (수집 서버 화면 '번들을 다시 확인하지 못해 수집 서버에 보내지 않았습니다'). 옮겨진 경로를 돌려준다(옆의 manifest 도 같이 옮겨졌다).
+  if (res.ok) res.appliedArchive = movedArchivePath(archivePath, rel, res.backup);
   return res;
+}
+
+/** 번들이 설치 디렉터리 안에 있으면 그 상대 경로(실경로 기준 — 심볼릭 링크 설치 경로 포함), 아니면 null. */
+export function archiveRelInInstall(archivePath, installDir) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  for (const [a, d] of [[real(archivePath), real(installDir)], [path.resolve(archivePath), path.resolve(installDir)]]) {
+    const rel = path.relative(d, a);
+    if (rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return rel;
+  }
+  return null;
+}
+/** 스왑 뒤 번들 경로 — 원래 자리에 있으면 그대로, 설치 디렉터리와 함께 백업으로 옮겨졌으면 그 경로. */
+export function movedArchivePath(archivePath, rel, backup) {
+  if (fs.existsSync(archivePath) || !rel || !backup) return archivePath;
+  const moved = path.join(backup, rel);
+  return fs.existsSync(moved) ? moved : archivePath;
 }
 
 /**
@@ -311,22 +333,40 @@ export function upgradeFromBundleBytes(data, installDir, currentVersion, pkgName
   return res;
 }
 
-function applyIfNewer(members, installDir, currentVersion, { allowSame = false, signedVersion = null } = {}) {
+/**
+ * 51회차 #3(사용자 결정): 설치하지 않고 확인만 — 서명 · 번들 읽기 · 버전 비교(설치 직전과 같은 판정 — `newerIssue` 하나).
+ * 중앙이 민 번들을 진행 중 작업이 끝날 때까지 들고 있을 때(upgrade/pushHold.js), 거부할 번들을 들고 있지 않게 받을 때 먼저 본다.
+ * @returns {{ok:true, version:string, from:string}|{ok:false, reason:string}}
+ */
+export function preverifyBundleBytes(data, currentVersion, pkgName, { allowSame = false, manifestText = null, trust, where = 'push' } = {}) {
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const sig = decideSignature({ manifestText, bytes, kind: 'bundle', where, trust });
+  if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
+  let members;
+  try { members = readBundleBytes(bytes, pkgName); } catch (err) { return { ok: false, reason: `failed to read bundle: ${err.message}`, signature: signatureSummary(sig) }; }
+  const issue = newerIssue(members, currentVersion, { allowSame, signedVersion: sig.verified ? sig.version : null });
+  if (issue.fail) return { ...issue.fail, signature: signatureSummary(sig) };
+  return { ok: true, version: vstr(issue.newV), from: vstr(issue.cur), signature: signatureSummary(sig) };
+}
+
+/** 설치 전 판정(설치 · 미리 확인 공용) — 실패면 { fail }, 아니면 { newV, cur }. */
+function newerIssue(members, currentVersion, { allowSame = false, signedVersion = null } = {}) {
   const newV = membersVersion(members);
-  if (!newV) return { ok: false, reason: 'no valid vmware-portal package/version in archive' };
-  // v2.730(S-10): 서명된 버전과 번들 안의 버전이 같아야 한다(서명 항목은 바이트를 묶지만, 그 바이트가 다른 버전을 담고 있으면
-  //   이름표와 내용이 어긋난 릴리스다 — 설치하지 않는다).
+  if (!newV) return { fail: { ok: false, reason: 'no valid vmware-portal package/version in archive' } };
   if (signedVersion && vstr(newV) !== signedVersion) {
-    // v2.740(감사 B-10): version 은 번들 **내용**의 버전이다 — 설치하려던 대상(서명된 버전)은 target 으로 따로 싣는다.
-    //   failureMoot 가 version 을 대상으로 읽으면 내용이 지금 버전인 옛 번들(이름만 새 버전)의 실패를 '이미 설치된 지난 일' 로 숨겼다.
-    return { ok: false, code: 'content-version-mismatch', reason: `번들 안의 버전(${vstr(newV)})이 서명된 manifest 버전(${signedVersion})과 다릅니다 — 설치를 거부합니다`, version: vstr(newV), target: signedVersion };
+    return { fail: { ok: false, code: 'content-version-mismatch', reason: `번들 안의 버전(${vstr(newV)})이 서명된 manifest 버전(${signedVersion})과 다릅니다 — 설치를 거부합니다`, version: vstr(newV), target: signedVersion } };
   }
   const cur = parseVersion(currentVersion) || [0, 0, 0];
   const c = cmpVersionTuple(newV, cur);
-  if (c < 0 || (c === 0 && !allowSame)) {
-    // v2.736.2(리뷰 F1): '설치할 것이 없음' 은 실패가 아니다 — upToDate 로 밝힌다(엣지가 원격으로 먼저 올라간 뒤 중앙 push 로 같은 번들을 받는 경우).
-    return { ok: false, reason: `not newer (${vstr(newV)} <= ${vstr(cur)})`, version: vstr(newV), upToDate: true };
-  }
+  if (c < 0 || (c === 0 && !allowSame)) return { fail: { ok: false, reason: `not newer (${vstr(newV)} <= ${vstr(cur)})`, version: vstr(newV), upToDate: true } };
+  return { newV, cur };
+}
+
+function applyIfNewer(members, installDir, currentVersion, { allowSame = false, signedVersion = null } = {}) {
+  // v2.730(S-10) 서명 버전 = 내용 버전 · v2.740(B-10) version 은 번들 내용의 버전 · v2.736.2(F1) '설치할 것 없음' 은 upToDate — 판정은 newerIssue 하나(51회차 #3 미리 확인과 공용)
+  const chk = newerIssue(members, currentVersion, { allowSame, signedVersion });
+  if (chk.fail) return chk.fail;
+  const { newV, cur } = chk;
   try {
     const backup = applyPackage(members, installDir);
     return { ok: true, version: vstr(newV), from: vstr(cur), backup };
@@ -602,7 +642,9 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
     if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
     fs.mkdirSync(destDir, { recursive: true });
     const dest = path.join(destDir, name);
-    fs.writeFileSync(dest, buf);
+    // 86회차 F4(재현 — ENOSPC): 임시 파일 + rename(실패하면 임시 파일을 지운다). 예전 writeFileSync 는 디스크가 차면 반쯤 쓴 번들을
+    //   정식 이름으로 남겨(다음 확인 주기까지) 찬 디스크를 그대로 두었다(applyPackage 스테이징 정리 v2.591 P7 과 같은 이유).
+    atomicWriteFileSync(dest, buf, { mode: 0o644 });
     const manPath = manifestPathForArchive(dest);
     if (manText && manPath) { try { fs.writeFileSync(manPath, String(manText)); } catch { /* push 가 manifest 를 못 싣게 될 뿐 — 수신측이 '없음' 으로 거부한다 */ } }
     return { ok: true, path: dest, size: buf.length, signature: signatureSummary(sig), manifestText: manText ?? null };
@@ -706,7 +748,7 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = process.en
     // v2.727(감사 D-06): 성패·시각을 outboundStats 에 남긴다(토큰·본문은 싣지 않는다 — 키는 origin + 경로, 쿼리는 버린다).
     recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: data.length, method: 'POST', error: ok ? '' : reason, tag: 'upgrade-edge' });
     // v2.865: 엣지의 '이미 최신(not newer)' 은 실패가 아니다 — upToDate 로 밝힌다(엣지 자동 업그레이드 동기화가 성공으로 본다).
-    return { edge: edge.url, ok, status: res.status, ...(reason ? { reason } : {}), ...(str(body.version, 32) ? { version: str(body.version, 32) } : {}), ...(body.upToDate === true ? { upToDate: true } : {}) };
+    return { edge: edge.url, ok, status: res.status, ...(reason ? { reason } : {}), ...(str(body.version, 32) ? { version: str(body.version, 32) } : {}), ...(body.upToDate === true ? { upToDate: true } : {}), ...(ok ? deferredOf(body) : {}) };   // 51회차 #3
   } catch (err) {
     // v2.731(G2b A4-01): undici 는 원인을 err.cause 에 둔다 — 'fetch failed' 만 남기면 인증서 거부·연결 거부·시한을 가를 수 없다
     //   (사설 CA 엣지가 실패해도 화면에는 'fetch failed' 뿐이었다). 원인 문구를 덧붙인다(토큰·본문은 원인에 들어 있지 않다).

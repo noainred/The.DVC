@@ -16,8 +16,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readApiSource } from './lib/apiSource.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sec-m1m2-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('sec-m1m2-');
 
 const { store } = await import('../src/store.js');
 const { nlSearch } = await import('../src/llm/nlSearch.js');
@@ -165,7 +173,7 @@ test('M2 정적(2차): /agent-config 저장 키가 req.centralAuth.agent', () =>
 });
 
 /* ── 정적 검증: M2 central 저장 키 바인딩 ── */
-const centralSrc = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+const centralSrc = centralSource();
 const centralRoute = (marker, next) => {
   const i = centralSrc.indexOf(marker);
   assert.ok(i >= 0, `central 라우트 없음: ${marker}`);

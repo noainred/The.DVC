@@ -37,6 +37,8 @@ import {
   shortStamp, fullStamp,
 } from './partFaultText.js';
 import Select from '../../components/Select.jsx';
+import PartFaultEscalation from './PartFaultEscalation.jsx';   // v3.51 알림 단계 올리기 · 당직(⑪)
+import { escMarkView } from './partFaultEscText.js';
 
 const stateColor = toneVar;
 
@@ -135,6 +137,27 @@ export function PartFaults() {
     finally { setBusy(false); }
   }
 
+  /** v3.51 알림 단계 올리기 확인(⑪) — 그 장애의 단계 알림을 멈춘다(운영자 이상 · 감사). 행의 확인 열쇠로 보낸다(키를 싣지 않는다). */
+  //   결과는 그 행에 보인다(표를 내려가 누른 실패가 화면 밖 맨 위 상자에만 나오지 않게 — 반증 B4). 성공 · 실패 모두 목록을 다시 읽는다(404 = 열쇠가 바뀜).
+  async function ackRow(p) {
+    const id = p?.esc?.ackId;
+    if (!id) return;
+    setBusy(true); setAckMsg(null);
+    try {
+      const r = await postJson('/tools/part-faults/ack', { ackId: id });
+      setAckMsg({ id, ok: !!r.ok, text: r.ok ? (r.changed ? '확인했습니다 — 단계 올리기를 멈췄습니다(감사 로그에 남습니다).' : '이미 확인한 장애입니다.') : `확인하지 못했습니다 — ${r.reason || '사유 모름'}` });
+    } catch (e) { setAckMsg({ id, ok: false, text: `확인하지 못했습니다 — ${e.message}` }); }
+    finally { setBusy(false); }
+    await load();
+  }
+  const [escOpen, setEscOpen] = useState(false);
+  const [ackMsg, setAckMsg] = useState(null);   // { id, ok, text } — 그 행에 보인다
+  const escDirty = React.useRef(false);
+  const toggleEsc = () => {
+    if (escOpen && escDirty.current && !window.confirm('알림 단계 · 당직에 저장하지 않은 변경이 있습니다. 닫을까요?')) return;
+    setEscOpen(!escOpen);
+  };
+
   /** 관리자 수동 닫기(v2.548 C5). 사유는 감사 로그·이벤트(close/manual)에 남는다. */
   async function closeRow(p) {
     const reason = window.prompt(`'${p.deviceName} · ${p.label}' 을(를) 수동으로 닫습니다 — 장비가 고쳐졌다는 뜻이 아니라 "다시 관측되지 않을" 장애를 정리하는 것입니다. 사유(재배정·등록 삭제 등)를 적어 주세요.`, '');
@@ -183,6 +206,8 @@ export function PartFaults() {
   return (
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       {error && <div className="banner warn">갱신 실패 — {String(error?.message || error)}</div>}
+      {/* 96회차(93회차 F4): 설정 파일 읽기 오류 — 스위치 · 보존일은 저장값이 아니라 기본값(꺼짐)이고 저장은 거절된다. */}
+      {data?.settingsUnreadable && <div className="banner warn" style={{ whiteSpace: 'normal' }}>{`파트 장애 설정을 읽지 못했습니다 — ${String(data.settingsUnreadable.reason || '읽기 오류')} 아래 스위치 · 보존일은 저장된 값이 아니라 기본값(꺼짐)입니다.`}</div>}
 
       {/* ① 이 목록을 믿어도 되는가 — 가장 위. */}
       <div className="card" style={{ padding: 12, borderLeft: `3px solid ${stateColor(isEdge ? (pn?.tone || 'muted') : diag.tone)}` }}>
@@ -192,7 +217,7 @@ export function PartFaults() {
             {!isEdge && <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>{lastRunText(poller)}</span>}
             {settings && !isEdge && (
               <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }} title="켜면 중앙 점검이 다음 주기부터 돕니다. 엣지는 설정 pull 뒤에 따라옵니다.">
-                <input type="checkbox" checked={!!settings.enabled} disabled={saving} onChange={(e) => toggleEnabled(e.target.checked)} /> 기능 켜기
+                <input type="checkbox" checked={!!settings.enabled} disabled={saving || !!data?.settingsUnreadable} onChange={(e) => toggleEnabled(e.target.checked)} /> 기능 켜기
               </label>
             )}
             <button className="btn" onClick={runScan} disabled={busy}>{busy ? '실행 중…' : (isEdge ? '지금 push' : '지금 점검')}</button>
@@ -310,6 +335,13 @@ export function PartFaults() {
             </div>
           )}
 
+          {tab === 'open' && !isEdge && settings ? (
+            <div className="flex wrap gap" style={{ alignItems: 'center' }}>
+              <button type="button" className="btn btn-sm" aria-expanded={escOpen} onClick={toggleEsc}>{escOpen ? '알림 단계 · 당직 닫기' : '알림 단계 · 당직'}</button>
+              <span className="muted" style={{ fontSize: 12 }}>단계 올리기 {data?.escalation?.enabled ? '켜짐' : '꺼짐'}{data?.escalation?.stateError ? ` · ${data.escalation.stateError}` : ''}</span>
+            </div>
+          ) : null}
+          {tab === 'open' && !isEdge && settings && escOpen ? <PartFaultEscalation onSaved={load} onDirty={(v) => { escDirty.current = v; }} /> : null}
           {tab === 'open' && (
             <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
               <STable minWidth={820} wrap={false}>
@@ -328,6 +360,17 @@ export function PartFaults() {
                       <tr key={`${p.agent}|${p.partKey}`}>
                         <td data-sort={p.state === 'fault' ? '0' : '1'}>
                           <span style={{ color: stateColor(labels.tone?.[p.state]), fontWeight: 700, whiteSpace: 'nowrap' }}>{labels.state?.[p.state] || p.state}</span>
+                          {(() => {
+                            const ev = escMarkView(p.esc, { canAck: !!data?.canAck, enabled: !!data?.escalation?.enabled });
+                            const am = ackMsg && p.esc?.ackId === ackMsg.id ? ackMsg : null;
+                            return ev || am ? (
+                              <div className="pf-esc" title={ev?.title || ''}>
+                                {ev ? <span className={`pf-esc-t ${ev.tone}`}>{ev.text}</span> : null}
+                                {ev?.canAck ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => ackRow(p)}>확인</button> : null}
+                                {am ? <span className={`pf-esc-msg ${am.ok ? '' : 'bad'}`} role={am.ok ? 'status' : 'alert'}>{am.text}</span> : null}
+                              </div>
+                            ) : null;
+                          })()}
                         </td>
                         <td style={{ maxWidth: 200, whiteSpace: 'normal' }}>
                           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }} title={`${p.deviceId} · 키 ${p.deviceKey || p.deviceId}(${labels.deviceKeyKind?.[p.deviceKeyKind] || p.deviceKeyKind || ''})`}>{p.deviceName}</div>

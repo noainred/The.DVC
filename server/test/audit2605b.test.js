@@ -11,7 +11,7 @@
  * ⚠ AUTHZ 는 v2.536 하니스와 같다 — **실제 `api` 라우터를 express 에 마운트하고 상태로** 본다(소스 grep 아님).
  *   자식 프로세스인 이유: config.js 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,12 +19,19 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 /** 자식 프로세스에서 실제 api 라우터를 띄우고 body(스크립트 본문)를 돌린다. `@@` 줄의 JSON 을 돌려준다. */
 function runChild(body, { env = {}, setup = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2605b-'));
+  const dir = tmpDir('audit2605b-');
   if (setup) setup(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
@@ -240,7 +247,7 @@ test('AUTHZ2605-04: maskSnapAddress 가 sections 문자열의 주소(스킴·포
 /* ── LEFT2605-05 · RECENT2605-01(bmusage) ──────────────────────────────────── */
 
 test('RECENT2605-01: 호스트 미수집 vCenter 보류는 WITHHOLD_MAX_MS 뒤에 끝난다(무기한 제외 금지)', async () => {
-  process.env.CONFIG_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'audit2605b-bm-'));
+  process.env.CONFIG_DIR ||= tmpDir('audit2605b-bm-');
   const { withholdUnreadBareMetal } = await import('../src/bmusage/poller.js');
   const { WITHHOLD_MAX_MS } = await import('../src/agent/inventoryPush.js');
   const snap = { vcenters: [{ id: 'vcA', status: 'ok' }, { id: 'vcD', status: 'unreachable' }], hosts: [{ id: 'h1', vcenterId: 'vcA' }] };

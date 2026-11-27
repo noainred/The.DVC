@@ -16,9 +16,10 @@ import { VmConsoleButton } from '../../components/VmConsole.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { vcHash } from '../vcd/vcdRoute.js';
-import { VM_OBJ_TABS, toolsStatusBadge } from '../vcd/objTabs.js';
+import { VM_OBJ_TABS, POWER_TAB, toolsStatusBadge } from '../vcd/objTabs.js';
+import { usePowerHistory, PowerCard, PowerDetail } from './PowerHistory.jsx'; // v3.39.0 '전원 상태' 카드 → 상세(시안 ⑤)
 import { neighborOf, signalText, usageTone, pctText, fmtN, TONE_COLOR, TONE_TEXT } from './vmHubText.js';
-import { useDaySeries, Spark } from './vmSeries.jsx';
+import { useDaySeries, Spark, useVmSignals } from './vmSeries.jsx';
 import { numOrNull } from '../../numOrNull.js';
 import './vmHub.css';
 
@@ -50,19 +51,28 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
   const [showReport, setShowReport] = useState(false);
   const on = vm?.powerState === 'POWERED_ON';
   const series = useDaySeries(vm?.id, on);
+  // v2.963: 목록 없이 연 드로어(알람 · 탐색 · Platform 검색 · VmLink · 호스트 전체 페이지)는 신호가 없다 — 열 때 1회 /vms/lookup 으로 받는다(훅은 조기 return 위).
+  const fetched = useVmSignals(vm?.id, !!vm && !Array.isArray(vm.signals));
+  // v3.39.0: 전원 기록 — 드로어를 열 때 1회(VM 을 넘기면 새로 · 늦은 이전 응답은 useOnce 가 버린다). 카드와 상세가 같은 응답을 쓴다.
+  const power = usePowerHistory(vm?.id, !!vm);
+  const [powerView, setPowerView] = useState(false);
+  const bodyRef = useRef(null);
+  // 카드 → 상세(또는 되돌아옴) 때 본문을 맨 위로 — 400px 에서 상세의 '← VM 상세' 줄이 화면 밖에 남았다(v3.39.0 Chromium 확인).
+  useEffect(() => { try { bodyRef.current?.scrollTo?.({ top: 0 }); } catch { /* 시험 환경 */ } }, [powerView]);
   // 열 때 포커스를 드로어로(키보드 ↑↓·Esc) · 닫을 때 원래 자리로.
   useEffect(() => {
     backRef.current = typeof document !== 'undefined' ? document.activeElement : null;
     rootRef.current?.focus({ preventScroll: true });
     return () => { try { backRef.current?.focus?.({ preventScroll: true }); } catch { /* 사라진 요소 */ } };
   }, []);
-  useEffect(() => { setShowReport(false); }, [vm?.id]);
+  useEffect(() => { setShowReport(false); setPowerView(false); }, [vm?.id]);
   if (!vm) return null;
 
   const nb = neighborOf(rows, vm.id);
   const now = Date.now();
   const [dotColor, dotLabel] = POWER_DOT[vm.powerState] || ['var(--text-faint)', vm.powerState || '전원 모름'];
-  const sigs = Array.isArray(vm.signals) ? vm.signals : null;
+  const sigs = Array.isArray(vm.signals) ? vm.signals : (Array.isArray(fetched.signals) ? fetched.signals : null);
+  const sigDays = days ?? fetched.days ?? null;   // 기준 일수: 목록 응답(prop) 우선 · 없으면 lookup 응답
   const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
   const cpu = on ? numOrNull(vm.cpuUsagePct) : null;
   const mem = on ? numOrNull(vm.memUsagePct) : null;
@@ -94,7 +104,7 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
           </div>
           {/* 신호 배지는 이름 아래 줄 — 400px 에서 이름 칸을 줄이지 않게(v2.909 Chromium 확인: 'app-ap-...' 로 잘렸다) */}
           {sigs && sigs.length > 0 && (
-            <div className="vmh-sig">{sigs.map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</div>
+            <div className="vmh-sig">{sigs.map((k) => { const x = signalText(k, { days: sigDays }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</div>
           )}
           <div className="vmh-crumb">
             <StateBadge state={vm.powerState} />
@@ -116,7 +126,8 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
             onClick={() => setShowReport(true)} title="이 VM 의 CPU·메모리를 줄여도 되는지 기간별 추이·근거로 확인합니다">📊 축소 근거 리포트</button>
         </div>
 
-        <div className="vmh-db">
+        <div className="vmh-db" ref={bodyRef}>
+          {powerView ? <PowerDetail vm={vm} q={power} onBack={() => setPowerView(false)} onClose={onClose} /> : <>
           <section className="vmh-sec" aria-label="한눈에">
             <div className="sh"><h3>한눈에{on ? ' · 24시간 추이는 열 때 1회 조회' : ' · 꺼진 VM 은 사용률이 없습니다'}</h3></div>
             <div className="vmh-dtiles">
@@ -147,14 +158,22 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
             </div>
           </section>
 
+          <section className="vmh-sec" aria-label="전원 상태">
+            <div className="sh"><h3>전원 상태</h3><span className="muted">누르면 구간별 기록이 열립니다</span></div>
+            <PowerCard q={power} onOpen={() => setPowerView(true)} />
+          </section>
+
           <section className="vmh-sec" aria-label="신호">
             <div className="sh"><h3>신호 {sigs ? sigs.length : '—'} — 봐야 할 것</h3><a href={vcHash(vm.vcenterId, { type: 'vm', id: vm.id, tab: 'monitor' })} onClick={onClose}>개체 보기 › 모니터</a></div>
-            {!sigs ? <div className="muted" style={{ fontSize: 12 }}>이 목록은 신호를 함께 받지 않았습니다.</div>
+            {!sigs ? <div className="muted" style={{ fontSize: 12 }}>{fetched.loading ? '신호 확인 중…'
+              : fetched.error ? `신호를 읽지 못했습니다 — ${fetched.error}`
+                : fetched.missing ? '이 VM 을 지금 인벤토리에서 찾지 못해 신호를 계산하지 못했습니다(지워졌거나 조회 범위 밖일 수 있습니다).'
+                  : '이 목록은 신호를 함께 받지 않았습니다.'}</div>
               : !sigs.length ? <div className="muted" style={{ fontSize: 12 }}>신호 없음 — 과부하 · 사용률 미수집 · Tools 업그레이드 · 오래된 스냅샷 모두 해당하지 않습니다. 구성 점검 · 경합 · 클러스터 항목은 아래에 있습니다.</div>
                 : (
                   <div className="vmh-sigrows">
                     {sigs.map((k) => {
-                      const s = signalText(k, { days });
+                      const s = signalText(k, { days: sigDays });
                       return (
                         <div key={k} className="vmh-sigrow">
                           <span className="vmh-dot" style={{ background: s.tone === 'crit' ? 'var(--red)' : s.tone === 'warn' ? 'var(--amber)' : 'var(--text-faint)' }} aria-hidden="true" />
@@ -199,11 +218,12 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
           <section className="vmh-sec" aria-label="경합"><PerfcSection item={vm} isVm /></section>
           <section className="vmh-sec" aria-label="클러스터"><ClusterCfgSection item={vm} isVm /></section>
           <section className="vmh-sec" aria-label="태그"><VmTagsSection vm={vm} /></section>
+          </>}
         </div>
 
         <nav className="vmh-df" aria-label="개체 보기 탭으로 바로 가기">
           <span className="muted">개체 보기:</span>
-          {VM_OBJ_TABS.map((t) => <a key={t.k} href={vcHash(vm.vcenterId, { type: 'vm', id: vm.id, tab: t.k })} onClick={onClose}>{t.label}</a>)}
+          {[...VM_OBJ_TABS, POWER_TAB].map((t) => <a key={t.k} href={vcHash(vm.vcenterId, { type: 'vm', id: vm.id, tab: t.k })} onClick={onClose}>{t.label}</a>)}
           <span className="muted-key">Esc 닫기 · ↑↓ 이전/다음 VM</span>
         </nav>
         {showReport && <Lazy><RightsizeReport vm={vm} onClose={() => setShowReport(false)} /></Lazy>}

@@ -7,6 +7,7 @@
 import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason, skipCategoryOf } from './diff.js';
 import { commitSnapshot, loadRoster, rosterKnownEmpty, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration, vmtrackGeneration, snapsBoundary, dsChangesBoundary, slotsSince, readDsChangesOfSlot, parseSkipDetail } from './db.js';
 import { createYielder } from '../util/timeSlice.js';
+import { scopeSig } from '../util/scopeSig.js';
 
 /**
  * 스냅샷 1회 — 현재 store 스냅샷 기준.
@@ -162,7 +163,9 @@ function createGenMemo(max) {
   memo.clear = () => m.clear();
   return memo;
 }
-const scopeKeyOf = (scopeIds) => (scopeIds ? `s:${[...scopeIds].map(String).sort().join(',')}` : '*');
+// 범위 서명 — **단사여야 한다**(dbg3231 2회차: 예전 `join(',')` 은 등록부가 허용하는 쉼표 id 로 충돌해 ['KR,Seoul'] 과 ['KR','Seoul'] 이
+//   같은 기억을 받았다 — 범위 밖 vCenter 의 합계 · id 가 범위 계정에 나갔다). routes/api/shared.js scopeKey 와 같은 꼴: 's:' + JSON(정렬 배열) · 무제한 '*'.
+const scopeKeyOf = (scopeIds) => scopeSig(scopeIds);   // v3.23.2: 규칙은 util/scopeSig.js 하나
 const _seriesMemo = createGenMemo(6);
 const _changeLogMemo = createGenMemo(6);   // v2.744(감사 DB-01): 스토리지 변경 이력 — 시각별
 /** 테스트용 — 기억 크기·비우기. */
@@ -272,6 +275,39 @@ async function computeSeries({ sinceTs, vcenterId = '', scopeIds = null }) {
     bySlotVc: groupBySlot(perVcRows),
     scoped: true,
   };
+}
+
+/**
+ * v3.21.0 VM 분석 화면 요약(`/tools/vm-track?summary=1` — docs/design/vm-insight §10) — 법인(vCenter)별 수집 점 시계열.
+ *   vmtrackSeries 의 결과(세대 기억 공유 — 같은 조회를 두 번 하지 않는다)의 슬롯별 vCenter 분해(bySlotVc)를 vCenter 별로 다시 묶는다(새 계산 없음).
+ *   current = 마지막 점 · base = 창 안 첫 점(도구 화면의 '기간 순증감' 이 처음 점과 마지막 점을 비교하는 것과 같다).
+ *   points 는 최근 maxPoints 개(길이 상한) — 잘랐으면 pointsOmitted. 쌓인 이력이 없는 법인은 빈 배열(지어내지 않는다).
+ *   slots = 창 안 전체 합계 행의 슬롯(최근 maxPoints 개) — 화면이 고른 법인을 슬롯마다 더할 때, 어떤 법인의 점이 없는 슬롯은 부분 합으로 표시하라고 준다.
+ */
+export const VMTRACK_SUMMARY_POINTS_MAX = 62;
+export async function vmtrackSeriesByVc({ days = 30, scopeIds = null, maxPoints = VMTRACK_SUMMARY_POINTS_MAX } = {}) {
+  const s = await vmtrackSeries({ days, scopeIds });
+  const per = new Map();
+  for (const [slot, list] of Object.entries(s.bySlotVc || {})) {
+    for (const r of list) {
+      let a = per.get(r.vcenterId);
+      if (!a) { a = []; per.set(r.vcenterId, a); }
+      a.push({ slot, ts: slotStartMs(slot), total: r.total, onCount: r.onCount, added: r.added, removed: r.removed, baseline: r.baseline });
+    }
+  }
+  const cap = Math.max(1, Math.min(VMTRACK_SUMMARY_POINTS_MAX, Number(maxPoints) || VMTRACK_SUMMARY_POINTS_MAX));
+  const rows = [...per.entries()].map(([vcenterId, pts]) => {
+    pts.sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
+    const first = pts[0] || null; const last = pts[pts.length - 1] || null;
+    return {
+      vcenterId,
+      current: last ? { slot: last.slot, total: last.total, onCount: last.onCount } : null,
+      base: first ? { slot: first.slot, total: first.total } : null,
+      points: pts.slice(-cap), pointsOmitted: Math.max(0, pts.length - cap),
+    };
+  }).sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
+  const slots = (s.points || []).map((p) => p.slot).filter((x) => typeof x === 'string').slice(-cap);
+  return { days, slots, maxPoints: cap, rows };
 }
 
 /** 슬롯별 vCenter 분해(표의 'vCenter별' 열·증감 클릭 대상 id 확보용). */

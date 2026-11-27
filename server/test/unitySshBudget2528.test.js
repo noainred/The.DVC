@@ -95,9 +95,13 @@ test('세션 예산 기본값이 장비 시한보다 작다 — 같거나 크면
   const here = path.dirname(url.fileURLToPath(import.meta.url));
   const cli = fs.readFileSync(path.join(here, '..', 'src', 'storage', 'collectors', 'cliSsh.js'), 'utf8');
   const poll = fs.readFileSync(path.join(here, '..', 'src', 'storage', 'poller.js'), 'utf8');
-  const budget = Number(/STORAGE_CLI_SESSION_BUDGET_MS\|\| (\d[\d_]*)/.exec(cli.replace(/\s+/g, ' '))?.[1]?.replace(/_/g, '')
+  // 결정(56~75 남긴 것) 57 — 정규식 갱신: 두 env 는 이제 `envPositive(process.env.X, 기본, { max: ENV_INT_MAX })` 로 읽는다(Infinity · 2^31 초과 · 음수는 기본값).
+  //   기본값 산수(세션 예산 < 장비 시한)는 그대로 고정한다 — 옛 `Number(env) || 기본` 꼴도 계속 읽는다.
+  const budget = Number(/STORAGE_CLI_SESSION_BUDGET_MS,\s*([\d_]+)/.exec(cli)?.[1]?.replace(/_/g, '')
+    || /STORAGE_CLI_SESSION_BUDGET_MS\|\| (\d[\d_]*)/.exec(cli.replace(/\s+/g, ' '))?.[1]?.replace(/_/g, '')
     || /SESSION_BUDGET_MS = Math\.max\([\d_]+, Number\(process\.env\.STORAGE_CLI_SESSION_BUDGET_MS\) \|\| ([\d_]+)\)/.exec(cli)?.[1]?.replace(/_/g, ''));
-  const devTimeout = Number(/STORAGE_DEVICE_TIMEOUT_MS\) \|\| ([\d_]+)/.exec(poll)?.[1]?.replace(/_/g, ''));
+  const devTimeout = Number(/STORAGE_DEVICE_TIMEOUT_MS,\s*([\d_]+)/.exec(poll)?.[1]?.replace(/_/g, '')
+    || /STORAGE_DEVICE_TIMEOUT_MS\) \|\| ([\d_]+)/.exec(poll)?.[1]?.replace(/_/g, ''));
   assert.ok(Number.isFinite(budget), '세션 예산 기본값을 읽지 못했다');
   assert.ok(Number.isFinite(devTimeout), '장비 시한 기본값을 읽지 못했다');
   assert.ok(budget < devTimeout, `세션 예산(${budget}) 이 장비 시한(${devTimeout}) 보다 작아야 한다`);

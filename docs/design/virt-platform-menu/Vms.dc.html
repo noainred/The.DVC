@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>가상화 플랫폼 — 허브 · VM 탭</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.ic{width:16px;height:16px;flex:none}
+.tb{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049;flex:none}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px;color:#e6edf6;text-decoration:none}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px;font-family:"JetBrains Mono",monospace}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.srch{display:flex;align-items:center;gap:8px;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#5d6b85;font-size:12px;padding:0 10px;box-sizing:border-box}
+.kbd{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;border:1px solid #243049;border-radius:4px;padding:0 5px;color:#8b9bb4}
+.ava{width:26px;height:26px;border-radius:50%;background:#1d4ed8;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;display:flex;flex-direction:column;padding:10px 8px 0;box-sizing:border-box}
+.sb a{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px;min-height:36px;box-sizing:border-box}
+.sb a .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600;font-family:"JetBrains Mono",monospace}
+.sb a.grp.on{background:#141b2d;color:#22d3ee;box-shadow:inset 3px 0 0 #22d3ee}
+.sb a.sub{padding:6px 12px 6px 28px;color:#8b9bb4;font-weight:500;font-size:12.5px;min-height:30px;position:relative}
+.sb a.sub::before{content:"";position:absolute;left:14px;top:50%;width:5px;height:5px;border-radius:50%;background:#5d6b85;transform:translateY(-50%)}
+.sb a.sub.on{background:#1a2236;color:#22d3ee}.sb a.sub.on::before{background:#22d3ee}
+.sb .foot{margin-top:auto;border-top:1px solid #1f2a40;padding:10px 0 12px}
+.stb{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid #243049;background:#0f1626;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4;flex:none}
+.stb div{padding:9px 12px;text-align:center;border-right:1px solid #1f2a40}.stb div:last-child{border-right:0}.stb b{color:#e6edf6;margin-left:6px}
+.fb{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;padding:12px 24px 0}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box}
+select.input{appearance:none;padding-right:26px;background-image:linear-gradient(45deg,transparent 50%,#8b9bb4 50%),linear-gradient(135deg,#8b9bb4 50%,transparent 50%);background-position:calc(100% - 14px) 14px,calc(100% - 9px) 14px;background-size:5px 5px;background-repeat:no-repeat}
+.chk{display:inline-flex;align-items:center;gap:6px;color:#e6edf6;font-size:12.5px}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}.btn.ghost{background:transparent}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.bar{height:6px;background:#0f1626;border-radius:3px;overflow:hidden}.bar i{display:block;height:100%;border-radius:3px}
+.et{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.et a{display:flex;flex-direction:column;gap:7px;padding:14px 16px 13px;border-radius:12px;background:#141b2d;border:1px solid #243049;color:#e6edf6;text-decoration:none;min-width:0}
+.et a.on{border-color:#3b82f6;background:#1a2236;box-shadow:inset 0 -3px 0 #3b82f6}
+.et .lb{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#8b9bb4}
+.et a.on .lb{color:#93c5fd}
+.et .val{font-size:30px;font-weight:800;line-height:1;font-family:"JetBrains Mono",monospace}
+.et .sub{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:#8b9bb4}.et .sub b{color:#e6edf6;font-weight:600}
+.et .cnt{margin-left:auto;font-size:11px;font-weight:800;border-radius:999px;padding:1px 7px;font-family:"JetBrains Mono",monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.chip i{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block}
+.chip.on{border-color:#3b82f6;color:#93c5fd}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:3px solid transparent;margin-bottom:-1px;min-height:40px;box-sizing:border-box}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .sep{width:1px;align-self:stretch;background:#243049;margin:8px 6px}
+.tabs .cnt{font-size:11px;font-weight:800;background:rgba(239,68,68,.16);color:#fca5a5;border-radius:999px;padding:1px 7px;font-family:"JetBrains Mono",monospace}
+.tabs .tool{color:#6f7f9a;font-weight:500;padding:10px 10px}
+.chip b{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;color:#fca5a5}
+.tile{padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.tile .lb{font-size:12px;font-weight:600;color:#8b9bb4;display:flex;justify-content:space-between;gap:8px}
+.tile .val{font-size:30px;font-weight:800;line-height:1;font-family:"JetBrains Mono",monospace}
+.tile .val small{font-size:13px;font-weight:600;color:#8b9bb4;margin-left:4px}
+.tile .sub{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:4px 10px}
+.panel{padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pt{font-size:13px;font-weight:700}
+.thr{display:inline-flex;gap:4px;font-size:11.5px;color:#8b9bb4;align-items:center}
+.thr button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:11.5px;padding:2px 7px;border-radius:6px;cursor:pointer}
+.thr button b{color:#fcd34d}.thr button.crit b{color:#fca5a5}
+.bars{position:relative;height:84px;display:flex;align-items:flex-end;gap:2px}
+.bars i{flex:1;display:block;background:#22d3ee;border-radius:2px 2px 0 0;min-height:1px}
+.bars i.w{background:#f59e0b}.bars i.c{background:#ef4444}
+.axis{display:flex;justify-content:space-between;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4}
+.seg{display:flex;height:10px;border-radius:5px;overflow:hidden;background:#0f1626}.seg i{display:block;height:100%}
+.lg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:#8b9bb4}.lg b{color:#e6edf6;font-weight:600}
+.os{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:3px 8px;align-items:center;font-size:11.5px}
+.os .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aebbd0}
+.os .ob{height:8px;background:#0f1626;border-radius:4px;overflow:hidden;grid-column:1/3}.os .ob i{display:block;height:100%;background:#22d3ee;border-radius:4px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr:hover td{background:rgba(59,130,246,.06)}
+.r{text-align:right}
+.ub{display:flex;align-items:center;gap:8px;min-width:120px}.ub .bar{flex:1}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.note{font-size:11.5px;color:#5d6b85}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+
+  <header class="tb">
+    <button class="btn ghost" type="button" aria-label="메뉴 접기" style="border:0;padding:0 4px;min-height:28px"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <a class="logo" href="#"><span class="v">V</span>The Davinci</a>
+    <span class="ver">v2.915.0</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <label class="srch" for="gsearch"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#5d6b85" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="gsearch" placeholder="장비 · 기능 찾기 — 이름 · IP · 시리얼" style="flex:1;border:0;background:transparent;color:#e6edf6;font:inherit;outline:0;min-width:0"><span class="kbd">Ctrl K</span></label>
+    <span style="flex:1"></span>
+    <span class="mono muted" style="font-size:12px">28/28 vCenter <b style="color:#86efac">OK</b> · 오전 10:38:45</span>
+    <span style="display:inline-flex;align-items:center;gap:8px"><span class="ava">A</span><span style="display:flex;flex-direction:column;line-height:1.15"><b style="font-size:12.5px">Anonymous</b><span class="muted" style="font-size:11px">관리자</span></span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display:flex;flex:1;min-width:0">
+  <aside class="sb" aria-label="메뉴">
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Overview</a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Summary</a>
+    <a href="#" class="grp on" aria-current="true"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>서버 <span class="n">4 ▴</span></a>
+    <a href="Main.dc.html" class="sub on" aria-current="page">가상화 플랫폼</a>
+    <a href="#" class="sub">물리 서버</a>
+    <a href="#" class="sub">Backup</a>
+    <a href="#" class="sub">알람</a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>스토리지 <span class="n">7 ▾</span></a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5V12m0 0-5.5 5M12 12l5.5 5"/></svg>네트워크 <span class="n">6 ▾</span></a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>자원관리 <span class="n">3 ▾</span></a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-6"/></svg>자원 최적화 <span class="n">2 ▾</span></a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m4 20 9-9M13 11l3-3m-5 1 2-2m5 1 2-2M11 8l5 5"/></svg>특수 기능</a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 21V4h12l-2 4 2 4H5"/></svg>이슈</a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 4h12a2 2 0 0 1 2 2v14H6a2 2 0 0 0-2 2z"/><path d="M4 18a2 2 0 0 1 2-2h12"/></svg>위키</a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"/></svg>게시판</a>
+    <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.5-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.5 2 1.5A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.5-2-1.5A7 7 0 0 0 19 12z"/></svg>설정 <span class="n">2 ▾</span></a>
+    <div class="foot">
+      <a href="#" style="font-weight:600"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m4 20 4-1L19 8l-3-3L5 16z"/></svg>메뉴 편집 <span class="n">포탈 기본 메뉴</span></a>
+      <a href="#" style="font-weight:600"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>접기</a>
+    </div>
+  </aside>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+
+  <!-- 공용 필터 바: ② vCenter 탭과 같다(사용자 요청 2026-11-07). 탭 고유 조건(전원 · 메모 · IPMS)은 아래 조건 줄로 -->
+  <div class="fb" aria-label="범위">
+    <label for="region" class="muted" style="font-size:12px">범위</label>
+    <select id="region" class="input" style="min-width:118px"><option>전체 리전</option><option>북미</option><option>유럽</option><option>아시아</option></select>
+    <select id="vcsel" class="input" style="min-width:184px" aria-label="vCenter"><option>전체 vCenter(28)</option><option>vcenter-us-east-01</option><option>vcenter-eu-central-01</option></select>
+    <label for="q" class="muted" style="font-size:12px">검색</label>
+    <input id="q" class="input" placeholder="vCenter · 호스트 · VM 이름 · IP" style="width:260px">
+    <span class="note" style="margin-left:4px">범위 · 검색은 vCenter · 호스트 · VM 탭에 함께 적용됩니다</span>
+    <span style="flex:1"></span>
+    <span class="mono muted" style="font-size:12px">스냅샷 오전 10:38:45</span>
+  </div>
+
+  <main style="padding:12px 24px 24px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+    <header style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+      <h1 style="margin:0;font-size:20px;font-weight:800">가상화 플랫폼</h1>
+      <span class="muted" style="font-size:12.5px">전체 범위 · 28 vCenter</span>
+      <span style="flex:1"></span>
+      <span class="note">마지막으로 본 탭을 기억합니다</span>
+    </header>
+
+    <nav class="et" role="tablist" aria-label="가상화 플랫폼 보기">
+      <a href="Main.dc.html">
+        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>vCenter <span class="muted" style="font-weight:500">· 법인</span><span class="cnt tag warn" style="height:auto">낡은 값 1</span></span>
+        <span class="val">28</span>
+        <span class="sub"><span>연결 <b style="color:#86efac">27</b></span><span>불가 <b>0</b></span><span>REST 폴백 <b>2</b></span><span>엣지 위임 <b>6</b></span><span title="REST 폴백으로 수집된 vCenter 2곳은 경보를 조회하지 않아 합계에 없습니다">알람 <b style="color:#fca5a5">58</b> <small style="color:#5d6b85">(미조회 2곳 제외)</small></span></span>
+      </a>
+      <a href="Hosts.dc.html">
+        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="5" rx="1.5"/><rect x="3" y="14" width="18" height="5" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>ESXi 호스트<span class="cnt tag warn" style="height:auto">확인 대상 52</span></span>
+        <span class="val">658</span>
+        <span class="sub"><span>연결 <b>640</b></span><span>점검 <b style="color:#fcd34d">11</b></span><span>끊김 <b style="color:#fca5a5">5</b></span><span>미수집 <b>2</b></span><span>클러스터 <b>61</b></span></span>
+      </a>
+      <a href="Vms.dc.html" class="on" aria-current="page">
+        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>가상화 서버 · VM<span class="cnt tag crit" style="height:auto">조치 필요 641</span></span>
+        <span class="val">5,850</span>
+        <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>사용률 미수집 <b>37</b></span><span>템플릿 <b>42</b></span></span>
+      </a>
+    </nav>
+
+    <!-- 바로가기(② vCenter 탭과 같은 줄): 칩을 누르면 허브 범위가 그 vCenter 로 바뀌어 이 탭의 목록이 걸러진다. 찾기는 이 탭 안에서 vCenter · VM 이름 -->
+    <section class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center" aria-label="바로가기">
+      <span class="muted" style="font-size:12px;font-weight:600;margin-right:4px">바로가기</span>
+      <a class="chip" href="#" title="VM 탭을 이 vCenter 범위로 · 숫자 = 조치 필요 VM"><i></i>vc-us-east <b>52</b></a><a class="chip" href="#"><i></i>vc-us-west <b>31</b></a><a class="chip" href="#"><i></i>vc-br-sao <b>18</b></a><a class="chip" href="#"><i></i>vc-eu-central <b>96</b></a><a class="chip" href="#"><i></i>vc-eu-west <b>44</b></a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae <b>12</b></a><a class="chip" href="#"><i></i>vc-ap-northeast <b>61</b></a><a class="chip" href="#"><i></i>vc-ap-southeast <b>27</b></a><a class="chip" href="#"><i></i>vc-ap-south <b>23</b></a><a class="chip" href="#"><i></i>vc-cn-east <b>58</b></a><a class="chip" href="#"><i></i>vc-cn-north <b>49</b></a><a class="chip" href="#"><i></i>vc-pl-waw <b>21</b></a>
+      <a class="chip" href="#" style="color:#8b9bb4">+16 더</a>
+      <span class="note">숫자 = 그 vCenter 의 조치 필요 VM · 고른 법인은 파랗게</span>
+      <span style="flex:1"></span>
+      <button class="btn sm ghost" type="button" aria-label="바로가기 접기">접기 ▴</button>
+      <label for="vq" class="muted" style="font-size:12px">찾기</label><input id="vq" class="input" placeholder="vCenter · VM 이름" style="width:200px;min-height:30px">
+    </section>
+
+    <!-- VM 탭 본문 = 지금 가상화 서버 허브(v2.909 승인 시안) 그대로. 제목 줄 h1 만 빠지고 탭 줄 · 타일 · 분포 · 표는 그대로 -->
+    <nav class="tabs" aria-label="가상화 서버 보기">
+      <a href="Vms.dc.html" class="on" aria-current="page">현황</a>
+      <a href="#">법인별</a>
+      <a href="#">조치 필요 <span class="cnt">641</span></a>
+      <span class="sep"></span>
+      <a href="#" class="tool">VM 정밀 검색</a>
+      <a href="#" class="tool">Guest OS</a>
+      <a href="#" class="tool">VMware Tools</a>
+      <a href="#" class="tool">수량 추이</a>
+      <a href="#" class="tool">현재 사용자</a>
+      <a href="#" class="tool">실제 OS 확인</a>
+      <span style="flex:1"></span>
+      <select id="pw" class="input" style="min-width:110px;min-height:30px;margin-bottom:4px" aria-label="전원"><option>전체 전원</option><option>On</option><option>Off</option></select>
+      <label class="chk" style="margin:0 0 4px 10px"><input type="checkbox">메모 포함</label>
+      <label class="chk" style="margin:0 0 4px 10px"><input type="checkbox">IPMS 포함</label>
+    </nav>
+
+    <section style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:12px" aria-label="글로벌 가상머신 요약">
+      <div class="card tile" style="border-color:rgba(239,68,68,.45)">
+        <div class="lb"><span>조치 필요</span><a href="#" style="font-weight:700">조치 필요 탭 ▸</a></div>
+        <div class="val" style="color:#f87171">641</div>
+        <div class="seg"><i style="width:19%;background:#ef4444"></i><i style="width:6%;background:#5d6b85"></i><i style="width:33%;background:#f59e0b"></i><i style="width:42%;background:#fbbf24"></i></div>
+        <div class="sub"><span style="color:#fca5a5">과부하 124</span><span>미수집 37</span><span style="color:#fcd34d">Tools 구버전 212</span><span style="color:#fcd34d">스냅샷 오래됨 268</span></div>
+      </div>
+      <div class="card tile">
+        <div class="lb"><span>평균 CPU 사용량</span><span>구동중 VM 기준</span></div>
+        <div class="val" style="color:#3b82f6">51.1<small>%</small></div>
+        <div class="bar"><i style="width:51%;background:#3b82f6"></i></div>
+        <div class="sub"><span>할당 vCPU <b style="color:#e6edf6">41,650</b></span><span style="color:#fca5a5">90%↑ 124대</span></div>
+      </div>
+      <div class="card tile">
+        <div class="lb"><span>평균 메모리 사용률</span><span>구동중 VM 기준</span></div>
+        <div class="val" style="color:#a855f7">58.9<small>%</small></div>
+        <div class="bar"><i style="width:59%;background:#a855f7"></i></div>
+        <div class="sub"><span>할당 <b style="color:#e6edf6">112,480 GB</b> ≈ 109.8 TB</span><span style="color:#fcd34d">75%↑ 812대</span></div>
+      </div>
+      <div class="card tile">
+        <div class="lb"><span>평균 디스크 사용률</span><span>프로비저닝 대비</span></div>
+        <div class="val" style="color:#22d3ee">82.1<small>%</small></div>
+        <div class="bar"><i style="width:82%;background:#22d3ee"></i></div>
+        <div class="sub"><span>할당 <b style="color:#e6edf6">1,206 TB</b></span><span>용량 미상 12대 제외</span></div>
+      </div>
+      <div class="card tile">
+        <div class="lb"><span>GPU 할당 VM</span><a href="#" style="font-weight:700">누르면 거르기 ▸</a></div>
+        <div class="val" style="color:#22c55e">133</div>
+        <div class="seg"><i style="width:80%;background:#22c55e"></i><i style="width:20%;background:#34e0b4"></i></div>
+        <div class="sub"><span>vGPU 107</span><span>패스쓰루 26</span></div>
+      </div>
+    </section>
+
+    <section class="card" style="padding:0;overflow:hidden" aria-label="가상머신 상세">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 16px;border-bottom:1px solid #1f2a40">
+        <b style="font-size:15px">가상머신 상세</b><span class="tag blue" style="height:24px;font-size:12px">5,850대</span>
+        <span style="flex:1"></span>
+        <span class="muted" style="font-size:12px">이름·IP·OS 검색은 위 필터 바에서 합니다</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:12px;padding:14px 16px">
+        <div class="panel card" style="background:#0f1626">
+          <div class="ph"><span class="pt">CPU 사용률 분포</span><span class="thr"><button type="button" class="crit">90%↑ <b>124</b></button><button type="button">75%↑ <b>519</b></button></span></div>
+          <div class="bars" aria-label="CPU 사용률 5% 칸 20개"><i style="height:9%"></i><i style="height:5%"></i><i style="height:22%"></i><i style="height:16%"></i><i style="height:14%"></i><i style="height:18%"></i><i style="height:24%"></i><i style="height:30%"></i><i style="height:26%"></i><i style="height:22%"></i><i style="height:33%"></i><i style="height:41%"></i><i style="height:48%"></i><i style="height:56%"></i><i style="height:100%"></i><i class="w" style="height:46%"></i><i class="w" style="height:20%"></i><i class="w" style="height:10%"></i><i class="c" style="height:9%"></i><i class="c" style="height:8%"></i></div>
+          <div class="axis"><span>0</span><span>50</span><span style="color:#fcd34d">75</span><span style="color:#fca5a5">90</span></div>
+          <div class="note">구동 중이고 사용률을 읽은 5,083대 · 구동 중이 아닌 730대는 분포 밖</div>
+        </div>
+        <div class="panel card" style="background:#0f1626">
+          <div class="ph"><span class="pt">메모리 사용률 분포</span><span class="thr"><button type="button" class="crit">90%↑ <b>132</b></button><button type="button">75%↑ <b>812</b></button></span></div>
+          <div class="bars" aria-label="메모리 사용률 5% 칸 20개"><i style="height:3%"></i><i style="height:4%"></i><i style="height:8%"></i><i style="height:12%"></i><i style="height:14%"></i><i style="height:16%"></i><i style="height:26%"></i><i style="height:34%"></i><i style="height:36%"></i><i style="height:38%"></i><i style="height:40%"></i><i style="height:44%"></i><i style="height:52%"></i><i style="height:56%"></i><i style="height:70%"></i><i class="w" style="height:100%"></i><i class="w" style="height:62%"></i><i class="w" style="height:24%"></i><i class="c" style="height:10%"></i><i class="c" style="height:9%"></i></div>
+          <div class="axis"><span>0</span><span>50</span><span style="color:#fcd34d">75</span><span style="color:#fca5a5">90</span></div>
+          <div class="note">구동 중이고 사용률을 읽은 5,083대 · 구동 중이 아닌 730대는 분포 밖</div>
+        </div>
+        <div class="panel card" style="background:#0f1626">
+          <div class="ph"><span class="pt">전원 · GPU 구성</span></div>
+          <div class="lg"><span>전원</span><span style="margin-left:auto" class="mono">5,850</span></div>
+          <div class="seg"><i style="width:88%;background:#22c55e"></i><i style="width:12%;background:#5d6b85"></i></div>
+          <div class="lg"><span><i class="dot" style="background:#22c55e"></i>구동 <b>5,120</b></span><span><i class="dot" style="background:#5d6b85"></i>꺼짐 <b>730</b></span></div>
+          <div class="lg" style="margin-top:6px"><span>GPU 할당</span><span style="margin-left:auto" class="mono">133</span></div>
+          <div class="seg"><i style="width:1.8%;background:#a855f7"></i><i style="width:0.5%;background:#22d3ee"></i><i style="width:97.7%;background:#243049"></i></div>
+          <div class="lg"><span><i class="dot" style="background:#a855f7"></i>vGPU <b>107</b></span><span><i class="dot" style="background:#22d3ee"></i>패스쓰루 <b>26</b></span><span>없음 <b>5,717</b></span></div>
+        </div>
+        <div class="panel card" style="background:#0f1626">
+          <div class="ph"><span class="pt">Guest OS 상위 5</span></div>
+          <div class="os">
+            <span class="nm">Windows Server 2022</span><span class="mono r" style="color:#e6edf6">1,204</span><span class="ob"><i style="width:100%"></i></span>
+            <span class="nm">Ubuntu Server 22.04</span><span class="mono r" style="color:#e6edf6">1,131</span><span class="ob"><i style="width:94%"></i></span>
+            <span class="nm">Red Hat Enterprise Linux 9</span><span class="mono r" style="color:#e6edf6">988</span><span class="ob"><i style="width:82%"></i></span>
+            <span class="nm">Windows Server 2019</span><span class="mono r" style="color:#e6edf6">842</span><span class="ob"><i style="width:70%"></i></span>
+            <span class="nm">SUSE Linux Enterprise 15</span><span class="mono r" style="color:#e6edf6">611</span><span class="ob"><i style="width:51%"></i></span>
+          </div>
+          <div class="note">그 밖 1,074대 · OS 종류 9가지</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40">
+        <span class="muted" style="font-size:12px">막대·개수·전원·GPU·OS 를 누르면 그 구간의 VM 만 표에 남습니다</span>
+        <span style="flex:1"></span>
+        <a href="#" style="font-weight:700;font-size:12.5px;text-decoration:none">↓ CPU 사용을 높은 순</a>
+      </div>
+      <div style="padding:10px 16px;font-size:12px" class="muted">1,000개 표시 (순서상 1–1,000번째 / 5,850) · 전체 5,850개 · 아직 4,850개가 더 있습니다 — 다음 페이지로 이어 보세요</div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>VM</th><th>vCenter</th><th>Guest OS</th><th>IP</th><th class="r">vCPU · RAM</th><th>GPU</th><th>CPU</th><th>메모리</th><th class="r">디스크</th><th>호스트</th></tr></thead>
+        <tbody>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">db-cn-north-004</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag crit">CPU·메모리 90%↑</span><span class="tag warn">Tools 구버전</span></div></td><td class="muted">vc-cn-north</td><td>RHEL 9</td><td class="mono">10.42.8.14</td><td class="r mono">16 · 64 GB</td><td class="muted">—</td><td><span class="ub"><span class="bar"><i style="width:97%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">97%</span></span></td><td><span class="ub"><span class="bar"><i style="width:93%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">93%</span></span></td><td class="r mono">1.2 TB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-cn-north-07</a></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">ai-kr1-gpu-02</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag crit">CPU 90%↑</span></div></td><td class="muted">vc-ap-northeast</td><td>Ubuntu 22.04</td><td class="mono">10.20.31.8</td><td class="r mono">32 · 256 GB</td><td><span class="tag purple">vGPU ×2</span></td><td><span class="ub"><span class="bar"><i style="width:96%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">96%</span></span></td><td><span class="ub"><span class="bar"><i style="width:71%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">71%</span></span></td><td class="r mono">4.0 TB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-kr1-12</a></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">web-eu-central-023</a></td><td class="muted">vc-eu-central</td><td>Windows Server 2022</td><td class="mono">10.60.4.23</td><td class="r mono">8 · 32 GB</td><td class="muted">—</td><td><span class="ub"><span class="bar"><i style="width:94%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">94%</span></span></td><td><span class="ub"><span class="bar"><i style="width:62%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">62%</span></span></td><td class="r mono">300 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-eu-central-11</a></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">erp-pl-waw-001</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag warn">스냅샷 41일↑</span></div></td><td class="muted">vc-pl-waw</td><td>Windows Server 2019</td><td class="mono">10.70.2.11<br>10.70.9.11</td><td class="r mono">12 · 96 GB</td><td class="muted">—</td><td><span class="ub"><span class="bar"><i style="width:91%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">91%</span></span></td><td><span class="ub"><span class="bar"><i style="width:88%;background:#f59e0b"></i></span><span class="mono" style="width:34px;text-align:right">88%</span></span></td><td class="r mono">2.0 TB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-pl-waw-05</a></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">app-us-east-108</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag gray">사용률 미수집</span><span class="tag warn">백업 없음</span></div></td><td class="muted">vc-us-east</td><td>SUSE 15</td><td class="mono">10.10.14.108</td><td class="r mono">4 · 16 GB</td><td class="muted">—</td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">120 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-us-east-03</a></td></tr>
+          <tr><td><span class="dot" style="background:#5d6b85"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">tmp-br-sao-017</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag warn">IP 없음</span><span class="tag warn">백업 없음</span></div></td><td class="muted">vc-br-sao</td><td>CentOS Stream 9</td><td class="muted">—</td><td class="r mono">2 · 8 GB</td><td class="muted">—</td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">40 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-br-sao-02</a></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid #1f2a40">
+        <button class="btn sm" type="button" disabled>⏮ 처음</button>
+        <button class="btn sm" type="button" disabled>◀ 이전 페이지</button>
+        <span class="muted" style="font-size:12px">1페이지 · 1,000대 표시</span>
+        <button class="btn sm" type="button">다음 페이지 불러오기 ▶</button>
+        <span style="flex:1"></span>
+        <span class="note"><b style="color:#aebbd0">VM 이름을 누르면 개체 보기(브레드크럼)</b> — 드로어(‹ › 이동 · 빠른 확인)는 행 끝 버튼 · 호스트 이름을 누르면 호스트 탭을 그 호스트로 · ‘백업 없음’ = Veeam · Bareos 둘 다 없음</span>
+      </div>
+    </section>
+
+  </main>
+  </div>
+  </div>
+
+  <footer class="stb" aria-label="상태바">
+    <div>서버 Uptime<b>2분</b></div><div>전체 호스트<b>658</b></div><div>전체 VM<b>5,850 <span class="muted">(5,120 On)</span></b></div><div>활성 알람<b style="color:#f87171">58</b></div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1540}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

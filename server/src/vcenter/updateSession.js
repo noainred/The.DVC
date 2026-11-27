@@ -95,17 +95,33 @@ async function destroy(st) {
   try { await st.client.logout(); } catch { /* best effort */ }
 }
 
+/**
+ * 쓰지 않은 세션 정리. 89회차 F3: 정리(DestroyPropertyCollector · Logout)를 **기다리지 않는다** — sweep 은 어느 vCenter 의 수집 안에서 불리는데,
+ *   예전 `await destroy(st)` 는 **다른** vCenter(점검중 · 위임 전환 · 인증 정지로 수집이 멈춘 곳 — 응답이 느리거나 없을 수 있다)의 정리 왕복
+ *   (그 vCenter 의 건별 시한 × 2, 최대 20분)을 이 vCenter 의 수집 데드라인 안에서 기다렸다(느린 1곳이 다른 곳 수집을 막는다 — 운영 환경 규약).
+ *   맵에서는 먼저 지우므로 같은 세션을 두 번 정리하지 않는다.
+ */
 async function sweep(now) {
   for (const [id, st] of sessions) {
-    if (!st.busy && st.client && now - st.lastUsed > IDLE_MS) { sessions.delete(id); await destroy(st); }
+    if (!st.busy && st.client && now - st.lastUsed > IDLE_MS) { sessions.delete(id); destroy(st).catch(() => {}); }
   }
 }
 
-async function openSession(vc, types, specs, now, makeClient) {
+/*
+ * 91회차 ⓑ(89회차가 남긴 추정 — 재현): 세션을 여는 동안(로그인 · 수집기 · 뷰 · 필터 — 왕복 넷)은 ① 수집 데드라인 신호를 몰랐고(client.signal 이
+ *   열린 뒤에야 붙었다 — 데드라인을 넘겨도 건별 시한까지 계속 열었다) ② 맵에 없어 다음 주기가 같은 vCenter 에 세션을 하나 더 열었다. 늦게 끝난
+ *   옛 열기가 새 세션 자리를 덮어쓰고, 데드라인으로 실패한 옛 호출의 catch 가 맵의 **새** 세션을 지워 그 세션은 로그아웃 없이 vCenter 유휴 만료까지
+ *   남았다(closeAllUpdateSessions 도 모른다). 이제 신호를 로그인부터 싣고, 여는 동안 맵에 '여는 중' 표지를 두며, 맵 자리가 자기 것일 때만 바꾼다.
+ *   로그인 뒤 수집기 생성이 실패해도 로그아웃한다(예전에는 그 왕복이 던지면 로그인한 세션이 남았다).
+ */
+async function openSession(vc, types, specs, now, makeClient, signal = null) {
   const client = makeClient(vc);
+  client.signal = signal;
   await client.login();
   const pc = client.sc.propertyCollector;
-  const cx = await client.callRaw(`<CreatePropertyCollector xmlns="urn:vim25"><_this type="PropertyCollector">${esc(pc)}</_this></CreatePropertyCollector>`);
+  let cx;
+  try { cx = await client.callRaw(`<CreatePropertyCollector xmlns="urn:vim25"><_this type="PropertyCollector">${esc(pc)}</_this></CreatePropertyCollector>`); }
+  catch (err) { await client.logout(); throw err; }
   const collector = /<returnval type="PropertyCollector">([^<]+)<\/returnval>/.exec(cx)?.[1];
   if (!collector) { await client.logout(); throw new Error('CreatePropertyCollector 응답을 읽지 못했습니다'); }
   const st = { client, collector: xmlUnescape(collector), version: '', objs: new Map(), specKey: specKeyOf(types, specs), credHash: accessKey(vc),
@@ -136,6 +152,7 @@ export async function inventoryViaUpdates(vc, types, specs, { makeClient, signal
   let st = sessions.get(vc.id);
   if (st?.failUntil && now < st.failUntil && st.credHash === accessKey(vc)) throw new Error(st.lastError || '증분 수집 세션을 잠시 쉽니다');
   if (st?.busy) throw new Error('증분 수집 세션이 사용 중입니다');
+  if (st?.opening) throw new Error('증분 수집 세션을 여는 중입니다');   // 91회차 ⓑ: 앞 주기의 열기가 아직 끝나지 않았다 — 이 주기는 전체 조회
   // v2.720(S1-02): 직전 실패 기록에서 연속 실패를 이어 센다(아래에서 실패 기록을 지우기 전에 읽는다). 접속처·계정이 바뀌면 처음부터.
   const prevFailCount = st && st.credHash === accessKey(vc) ? (st.failCount || 0) : 0;
   const key = specKeyOf(types, specs);
@@ -144,11 +161,18 @@ export async function inventoryViaUpdates(vc, types, specs, { makeClient, signal
   }
   if (!st) {
     const failCount = prevFailCount;
-    try { st = await openSession(vc, types, specs, now, makeClient); }
+    const opening = { opening: true, credHash: accessKey(vc), lastUsed: now, failCount };   // 91회차 ⓑ: 여는 동안 자리를 잡는다
+    sessions.set(vc.id, opening);
+    try { st = await openSession(vc, types, specs, now, makeClient, signal); }
     catch (err) {
-      sessions.set(vc.id, { failUntil: now + FAIL_BACKOFF_MS, lastError: String(err?.message || err).slice(0, 300), credHash: accessKey(vc), lastUsed: now, failCount: failCount + 1 });
+      // 수집 데드라인으로 끊긴 열기는 이 세션의 실패로 세지 않는다(아래 주 catch 와 같은 규칙). 자리가 바뀌었으면(정리 · 종료) 건드리지 않는다.
+      const aborted = !!signal?.aborted;
+      if (sessions.get(vc.id) === opening) {
+        sessions.set(vc.id, { ...(aborted ? {} : { failUntil: now + FAIL_BACKOFF_MS }), lastError: String(err?.message || err).slice(0, 300), credHash: accessKey(vc), lastUsed: now, failCount: failCount + (aborted ? 0 : 1) });
+      }
       throw err;
     }
+    if (sessions.get(vc.id) !== opening) { destroy(st).catch(() => {}); throw new Error('증분 수집 세션 자리가 그 사이 바뀌었습니다'); }
     st.failCount = failCount;
     sessions.set(vc.id, st);
   }
@@ -191,13 +215,13 @@ export async function inventoryViaUpdates(vc, types, specs, { makeClient, signal
     st.lastError = null; st.failCount = 0;
     return [...st.objs.values()].map((o) => ({ type: o.type, ref: o.ref, props: { ...o.props } }));
   } catch (err) {
-    sessions.delete(vc.id);
+    const mine = sessions.get(vc.id) === st;   // 91회차 ⓑ: 맵 자리가 이 세션일 때만 바꾼다(다른 세션을 지우지 않는다)
     const aborted = !!signal?.aborted;   // 수집 데드라인으로 끊겼다 — 이 세션의 실패로 세지 않는다
     const failCount = (st.failCount || 0) + (aborted ? 0 : 1);
     const e = { lastError: String(err?.message || err).slice(0, 300), lastUsed: now, credHash: st.credHash, failCount };
     if (err?.authFailed) e.failUntil = now + FAIL_BACKOFF_MS;   // 세션 로그인이 거부됐으면 쉬기
     else if (!aborted && softBackoffMs(failCount)) e.failUntil = now + softBackoffMs(failCount);   // v2.720(S1-02)
-    sessions.set(vc.id, e);
+    if (mine) sessions.set(vc.id, e);
     await destroy(st);
     throw err;
   } finally {
