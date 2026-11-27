@@ -275,7 +275,34 @@ export function diffCountText(c) {
 export const DIFF_OP_LABEL = Object.freeze({ add: '추가', remove: '삭제', move: '이동', change: '수정' });
 export const DIFF_TYPE_LABEL = Object.freeze({ site: '데이터센터', room: '전산실', rack: '랙', place: '장비' });
 const FIELD_LABEL = { kind: '종류', label: '이름', model: '모델', serial: '시리얼', extraSerials: '추가 시리얼', note: '메모', ratedW: '정격 전력', opW: '운전 전력', weightKg: '무게', name: '이름', row: '줄', typeId: '랙 종류', heightU: '높이', role: '용도', pduA: 'PDU A', pduB: 'PDU B', roomId: '전산실', siteId: '데이터센터' };
-export const fieldsText = (fields) => (fields || []).map((f) => FIELD_LABEL[f] || f).join(' · ');
+// 바뀐 칸이 하나도 없이 온 '수정' 항목 = 이 계정에 보이지 않는 칸(메모 — 관리자 전용)만 바뀐 변경이다(서버가 그 칸 이름을 빼고 보낸다).
+export const fieldsText = (fields) => ((fields || []).length ? fields.map((f) => FIELD_LABEL[f] || f).join(' · ') : '이 계정에 보이지 않는 칸');
+
+/**
+ * 판 기록 창 '되돌리면 바뀌는 것' 자리에 미리 보기가 없을 때의 글(순수) — 조회 계정에는 서버가 싣지 않고(관리자에게만), 관리자에게 없으면 지금 원장과 비교하지 못한 것이다.
+ * 예전엔 둘 다 '—' 만 보여 '바뀌는 것 없음' 으로 읽혔다(6회차 화면 D5 · 정확성 D5).
+ */
+export function restoreMissingText(isAdmin) {
+  return isAdmin ? '지금 원장과 비교하지 못했습니다(원장을 읽지 못했거나 이 판을 되살릴 수 없습니다).' : '되돌리기 미리 보기는 관리자에게만 보입니다.';
+}
+
+/**
+ * 미배치 서버 패널에 무엇을 그릴까(순수) — 목록(등록부 서버 이름 · 태그)은 관리자 응답에만 실린다(서버 `unplacedListed`).
+ * 'count' 면 대수만 그린다 — 목록 · 검색 결과 · '앞 N대만 받았습니다' 안내를 그리지 않는다(받지 않은 것을 '받다 말았다' 로 읽히게 하지 않는다).
+ * @returns {'list'|'count'}
+ */
+export function unplacedMode(view) {
+  return view && view.unplacedListed === false ? 'count' : 'list';
+}
+
+/**
+ * 연결된 서버의 이름 줄(순수) — 등록부 이름 · OS 호스트 이름은 관리자 응답에만 실린다. 두 칸이 모두 없으면(키 없음) null = 줄을 그리지 않는다.
+ * 키는 있는데 값이 비었으면 '—'(관리자에게 '이름이 없다' 를 보인다).
+ */
+export function linkNameText(l) {
+  if (!l || (l.name === undefined && l.hostname === undefined)) return null;
+  return l.hostname || l.name || '—';
+}
 
 const PART_LABEL = { psu: '전원공급장치', disk: '디스크', mem: '메모리', fan: '팬' };
 /** iDRAC 부품 롤업 → 칩. 못 읽은 부품은 '못 읽음' 으로 따로(정상으로 접지 않는다). */
@@ -293,3 +320,47 @@ export function partChips(parts) {
   return out;
 }
 export const chipColor = (state) => STATUS_COLOR[state] || STATUS_COLOR.unknown;
+
+// ───────────────────────── 가림 집계(전체 범위 관리자 — 서버 `GET /tools/rack/mask-census`) ─────────────────────────
+
+export const CENSUS_FIELD_LABEL = Object.freeze({ label: '표시 이름', model: '모델', rackName: '랙 이름', rackRow: '랙의 줄', rackRole: '랙 용도', roomName: '전산실 이름', siteName: '데이터센터 이름' });
+export const CENSUS_HIT_LABEL = Object.freeze({ addr: '주소', tag: '태그 · 시리얼', firstLabel: '등록 주소의 첫 마디', altIp: '구분자를 바꾼 IP' });
+const CENSUS_KEYS = ['total', 'addr', 'tag', 'firstLabel', 'altIp'];
+/** 수가 아니면 null(못 읽은 값을 0 으로 접지 않는다). */
+const cnt = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+/**
+ * 집계 응답 → 표의 행(칸마다) · 합계 · 타일 값(순수). 응답에 없는 칸 · 수가 아닌 값은 null 로 둔다(화면은 '—').
+ * `hidden` = 지금 조회 계정에 가려져 보이는 글(주소 + 태그) · `wider` = 검사의 폭을 넓히면 더 걸릴 글(첫 마디 + 구분자를 바꾼 IP — 한 글이 둘 다면 두 번 센다).
+ */
+export function censusRows(c) {
+  const pick = (o) => Object.fromEntries(CENSUS_KEYS.map((k) => [k, cnt(o?.[k])]));
+  const rows = Object.keys(CENSUS_FIELD_LABEL).map((f) => ({ field: f, label: CENSUS_FIELD_LABEL[f], ...pick(c?.fields?.[f]) }));
+  const sum = pick(c?.sum);
+  const add2 = (a, b) => (a == null || b == null ? null : a + b);
+  return { rows, sum, hidden: add2(sum.addr, sum.tag), wider: add2(sum.firstLabel, sum.altIp), notes: cnt(c?.notes) };
+}
+/** 걸린 종류 글 — 모르는 종류는 그대로. */
+export const censusHitsText = (hits) => (hits || []).map((h) => CENSUS_HIT_LABEL[h] || h).join(' · ');
+
+// ───────────────────────── 가림 재료 기록 관리(전체 범위 관리자 — 서버 `GET /tools/rack/mask-seen` · 연산 `mask.forget`) ─────────────────────────
+
+export const SEEN_KIND_LABEL = Object.freeze({ h: '관리 주소', t: '서비스 태그' });
+/** 기록 행 하나의 키(고르기 · 목록 키) — 종류와 값을 합친다(같은 글자가 주소와 태그 양쪽에 있을 수 있다). */
+export const seenKeyOf = (x) => `${x?.kind || ''}\u0000${x?.key || ''}`;
+/** 고른 행 → 지울 값 목록(서버 연산 본문). 목록에 없는 키는 버린다(늦게 온 응답으로 목록이 바뀐 뒤 고른 것이 남지 않게). */
+export function forgetItemsOf(stale, selected) {
+  const sel = selected instanceof Set ? selected : new Set(selected || []);
+  return (stale || []).filter((x) => sel.has(seenKeyOf(x))).map((x) => ({ kind: x.kind, key: x.key }));
+}
+/**
+ * 기록 크기 안내(순수) — 상한에 가까우면 경고. 값을 못 읽었으면 null(‘—’).
+ * @returns {{ text: string, warn: boolean } | null}
+ */
+export function seenCapText(m) {
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+  const h = n(m?.hosts); const t = n(m?.tags); const max = n(m?.max);
+  if (h == null || t == null) return null;
+  const warn = max != null && max > 0 && Math.max(h, t) >= max * 0.9;
+  const extra = [n(m?.pending) ? `파일에 쓰는 중 ${n(m.pending).toLocaleString()}` : '', n(m?.overflow) ? `메모리에만 ${n(m.overflow).toLocaleString()}` : ''].filter(Boolean).join(' · ');
+  return { text: `본 적 있는 주소 ${h.toLocaleString()} · 태그 ${t.toLocaleString()}${max != null ? `(종류마다 상한 ${max.toLocaleString()})` : ''}${extra ? ` · ${extra}` : ''}`, warn };
+}

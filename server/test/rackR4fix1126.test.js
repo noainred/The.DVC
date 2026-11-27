@@ -161,9 +161,17 @@ test('3 라우트(5회차 정확성 1): 보이지 않는 글자가 시리얼과 
   registry.importServers([srv('zw1', 'idrac-ZWT\u200b0002', 'https://192.0.2.20', 'ZWT\u200b0002')], 'merge');
   v = await room(ADMIN);
   assert.ok(v.unplaced.some((u) => u.serverId === 'zw1' && u.serviceTag === 'ZWT0002'), JSON.stringify(v.unplaced.filter((u) => u.serverId === 'zw1')));
+  // 2026-11-27: 등록부 서버 이름은 조회 계정에 싣지 않는다 — ‘가린다’ 는 그 태그가 적힌 **표시 이름**으로 본다(이 서버를 놓기 전 — 그 태그는 아직 등록부에만, 보이지 않는 글자가 낀 채로 있다).
+  const pzs = await place({ uStart: 23, kind: 'other', label: 'zwspare ZWT0002 unit' });
+  assert.equal((await room(OP_A)).places.find((x) => x.id === pzs).label, 'zwspare ••• unit', '범위 계정에게는 등록부 태그(지운 값)가 적힌 표시 이름이 가려진다');
   const pz = await place({ uStart: 22, label: 'zw', serial: 'ZWT0002' });
   assert.equal((await room(ADMIN)).places.find((x) => x.id === pz).link?.serverId, 'zw1', '지운 값의 키로 이어진다');
-  assert.equal((await room(OP_A)).places.find((x) => x.id === pz).link?.name, 'idrac-•••', '범위 계정에게는 등록부 이름의 태그도 가려진다');
+  // 예전 단언(범위 계정의 link.name === 'idrac-•••')은 성립하지 않는다 — 등록부 이름은 키째 없고, 그 이름 · 태그의 글자가 응답 어디에도 없다. 이름 원문은 관리자 판본에서 본다.
+  const sz = await room(OP_A);
+  const lz = sz.places.find((x) => x.id === pz).link;
+  assert.ok(lz && lz.serverId.startsWith('masked-') && !('name' in lz), `범위 계정: 이어져 있고 등록부 이름 키는 없다 — ${JSON.stringify(lz)}`);
+  assert.ok(!JSON.stringify(sz).replace(/\u200b/g, '').toLowerCase().includes('zwt0002'), '범위 계정 응답 어디에도 등록부 이름 · 태그(보이지 않는 글자를 지우고 봐도)가 없다');
+  assert.equal(String((await room(ADMIN)).places.find((x) => x.id === pz).link?.name).replace(/\u200b/g, ''), 'idrac-ZWT0002', '관리자 판본은 등록부 이름 그대로');
 });
 
 test('4 순수: 낱말 경계 = 글자 갈래가 바뀌는 자리 — 한글 조사는 경계 · 같은 갈래는 이어진 낱말', () => {

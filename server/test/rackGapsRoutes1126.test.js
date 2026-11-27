@@ -79,6 +79,7 @@ test('탐침 K03 · K04 · K05 · K22 · K23: 인벤토리가 있는 서버 — 
   const adm = await room(ADMIN, kr.r1);
   const al = adm.places.find((x) => x.id === p1).link;
   assert.equal(al.hostname, 'os-host-secret.corp', '관리자 판본은 그대로'); assert.equal(al.hw.host, 'os-host-secret.corp');
+  assert.equal(al.name, 'kr-inv-01', '관리자 판본: 등록 이름은 그대로');
   assert.equal(al.health, 'warn', 'K22 Warning → warn');
   assert.equal(al.serverId, 'inv1', 'K21 같은 서비스 태그가 둘이면 먼저 온(중앙 등록) 서버에 잇는다');
   assert.equal(adm.places.find((x) => x.id === p3).link.health, '', '건강 상태를 못 받았으면 빈 값');
@@ -87,29 +88,49 @@ test('탐침 K03 · K04 · K05 · K22 · K23: 인벤토리가 있는 서버 — 
   for (const user of [OP_ALL, OP_A]) {
     const v = await room(user, kr.r1);
     const l = v.places.find((x) => x.id === p1).link;
-    assert.equal(l.hostname, '', `K03 ${user.username}`); assert.equal(l.hw.host, '', `K05 ${user.username}`);
-    assert.equal(l.name, 'kr-inv-01', '등록 이름은 그대로');
-    assert.equal(v.places.find((x) => x.id === pr).link.name, '', `K04 ${user.username}: 호스트 이름으로 떨어진 이름도 비운다`);
+    // 2026-11-27: 등록부 서버 이름 · OS 호스트 이름은 조회 계정에 싣지 않는다(칸 목록 투영 `rack/project.js`) — 빈 값이 아니라 키 자체가 없고, hw 는 cpu · mem · fw 뿐이다(host · os 없음).
+    assert.ok(!('hostname' in l), `K03 ${user.username}: ${JSON.stringify(l)}`);
+    assert.ok(l.hw && !('host' in l.hw) && !('os' in l.hw), `K05 ${user.username}: ${JSON.stringify(l.hw)}`);
+    assert.deepEqual(Object.keys(l.hw).sort(), ['cpu', 'fw', 'mem'], `K05 ${user.username}: 하드웨어 요약은 적어 둔 칸만`);
+    // ‘등록 이름은 그대로’ 는 위 관리자 판본에서 본다 — 조회 계정에는 이름 키가 없다(모델 · 건강 상태 같은 수집 값은 그대로 이어져 있다)
+    assert.ok(!('name' in l) && !('mgmtHost' in l), `${user.username}: 등록 이름 · 관리 주소 키가 없다`);
+    assert.equal(l.model, 'R750', `${user.username}: 모델은 그대로`); assert.equal(l.health, 'warn', `${user.username}: 건강 상태는 그대로`);
+    const lr = v.places.find((x) => x.id === pr).link;
+    assert.ok(lr && !('name' in lr) && !('hostname' in lr), `K04 ${user.username}: 호스트 이름으로 떨어진 이름도 싣지 않는다 — ${JSON.stringify(lr)}`);
+    assert.deepEqual(v.unplaced, [], `K03 ${user.username}: 미배치 목록(inv2 의 OS 호스트 이름이 여기 있었다)은 비어 있다`); assert.equal(v.unplacedListed, false);
     const j = JSON.stringify(v);
     assert.ok(!j.includes('os-host-secret') && !j.includes('os-host-two') && !j.includes('remote-os-host'), `${user.username}: OS 호스트 이름이 응답 어디에도 없다`);
+    assert.ok(!j.includes('kr-inv-0'), `${user.username}: 등록부 이름이 응답 어디에도 없다`);
   }
   // K23: 모르는 건강 값은 '못 읽음'(정상 · 빈 값으로 접지 않는다)
   const p2 = await place(kr.a1, kr.r1, { uStart: 4, serial: 'INV0002' });
   assert.equal((await room(ADMIN, kr.r1)).places.find((x) => x.id === p2).link.health, 'unknown', 'K23');
 });
 
-test('탐침 K01 · K02: 가림 판정기는 host 와 id 를 모두 본다(이름 = DNS 주소 · id = DNS 주소)', async () => {
-  const pa = await place(kr.a1, kr.r1, { uStart: 6, serial: 'DNS0001' });
+// 2026-11-27(사용자 결정 — 칸 목록 투영 `rack/project.js`): 등록부 서버 이름(link.name)은 조회 계정에 싣지 않는다. 예전에 link.name 으로 보던 K01(판정기가 host 를 본다) · K07(짧은 태그)은
+//   조회 계정에 남은 이름 — 화면이 등록부 이름으로 채우는 **표시 이름(label)** — 으로 옮겨서 보고, link.name 쪽은 ‘키 없음’ 과 관리자 판본의 원문으로 본다.
+test('탐침 K01 · K02: 가림 판정기는 host 와 id 를 모두 본다(표시 이름 = DNS 주소 · id = DNS 주소) — 등록부 이름은 조회 계정에 키째 없다', async () => {
+  const pa = await place(kr.a1, kr.r1, { uStart: 6, serial: 'DNS0001', label: 'bmc-kr-09.corp.example' });   // 표시 이름 = 그 서버의 등록부 이름 = 관리 주소(host)
   const pb = await place(kr.a1, kr.r1, { uStart: 7, serial: 'DNS0002' });
   const v = await room(OP_ALL, kr.r1);
-  assert.ok(v.places.find((x) => x.id === pa).link.name.includes('이름 가림'), 'K01 이름이 관리 주소(host)와 같으면 가린다');
+  const la = v.places.find((x) => x.id === pa);
+  assert.match(String(la.label), /^masked-[0-9a-f]{12} \(이름 가림\)$/, `K01 이름이 관리 주소(host)와 같으면 가린다: ${la.label}`);
+  assert.ok(la.link && !('name' in la.link) && !('mgmtHost' in la.link), `K01 등록부 이름(= 관리 주소)은 키째 없다: ${JSON.stringify(la.link)}`);
   assert.ok(v.places.find((x) => x.id === pb).link.serverId.startsWith('masked-'), 'K02 id 가 주소면 토큰으로');
   assert.ok(!JSON.stringify(v.places).includes('bmc-kr-'), JSON.stringify(v.places.filter((x) => [pa, pb].includes(x.id)).map((x) => x.link)));
+  const adm = await room(ADMIN, kr.r1);
+  assert.equal(adm.places.find((x) => x.id === pa).link.name, 'bmc-kr-09.corp.example', 'K01 관리자 판본은 등록부 이름 그대로');
+  assert.equal(adm.places.find((x) => x.id === pa).label, 'bmc-kr-09.corp.example', 'K01 관리자 판본은 표시 이름 그대로');
+  assert.equal(adm.places.find((x) => x.id === pb).link.serverId, 'bmc-kr-10.corp.example', 'K02 관리자 판본은 id 원문');
 });
 
-test('탐침 K07: 짧은 서비스 태그(임계 미만)는 이름에서 걷어 내지 않는다', async () => {
-  const p = await place(kr.a1, kr.r1, { uStart: 8, serial: '가B1' });
-  assert.equal((await room(OP_A, kr.r1)).places.find((x) => x.id === p).link.name, 'lab-가B1-server');
+test('탐침 K07: 짧은 서비스 태그(임계 미만)는 이름에서 걷어 내지 않는다(표시 이름) — 등록부 이름은 조회 계정에 키째 없다', async () => {
+  const p = await place(kr.a1, kr.r1, { uStart: 8, serial: '가B1', label: 'lab-가B1-server' });   // 표시 이름 = 그 서버의 등록부 이름(짧은 태그가 들었다)
+  const s = (await room(OP_A, kr.r1)).places.find((x) => x.id === p);
+  assert.equal(s.label, 'lab-가B1-server');
+  assert.equal(s.serialHidden, true, '시리얼을 가리는 판본에서 본 것이다');
+  assert.ok(s.link && !('name' in s.link), `등록부 이름은 키째 없다: ${JSON.stringify(s.link)}`);
+  assert.equal((await room(ADMIN, kr.r1)).places.find((x) => x.id === p).link.name, 'lab-가B1-server', '관리자 판본은 등록부 이름 그대로');
 });
 
 test('탐침 K12 · K18: 서버만 서비스 태그로 잇는다 · 시리얼 없는 서버는 no-serial', async () => {

@@ -129,7 +129,16 @@ test('조회: 서비스 태그로 iDRAC 서버 연결 · 미배치 · 관리 주
   const s2 = o.body.places.find((p) => p.kind === 'server');
   assert.equal(s2.serial, ''); assert.equal(s2.serialHidden, true);
   assert.equal(s2.link.mgmtHost, undefined, '비관리자 판본에는 관리 주소 없음');
-  assert.equal(o.body.unplaced[0].serviceTag, undefined);
+  // 2026-11-27: 미배치 서버 목록은 관리자에게만 싣는다(조회 계정에는 대수만 — `rack/project.js` 칸 목록). 예전 단언(범위 비관리자의 미배치 항목에 serviceTag 가 없다)보다 강한 사실:
+  //   목록 자체가 비어 있고, 등록부 이름 · 서비스 태그 · 관리 주소가 응답 어디에도 없다.
+  assert.deepEqual(o.body.unplaced, [], '조회 계정의 미배치 목록은 비어 있다'); assert.equal(o.body.unplacedListed, false);
+  assert.equal(o.body.unplacedTotal, 1, '대수는 그대로(s2)');
+  assert.ok(s2.link.serverId.startsWith('masked-') && !('name' in s2.link) && !('hostname' in s2.link), `연결 정보에 등록부 이름 · 호스트 이름 키가 없다: ${JSON.stringify(s2.link)}`);
+  const oj = JSON.stringify(o.body);
+  for (const secret of ['DEF5678', 'ABC1234', 'abc-1234', 'kr-esx-0', '192.0.2.']) assert.ok(!oj.includes(secret), `범위 비관리자 응답에 ‘${secret}’ 가 있다`);
+  assert.equal(a.body.unplacedListed, true);
+  assert.deepEqual(a.body.unplaced.map((u) => [u.name, u.serviceTag]), [['kr-esx-02', 'DEF5678']], '관리자 판본의 미배치 목록은 등록부 이름 · 서비스 태그 원문');
+  assert.equal(srv.link.name, 'kr-esx-01', '관리자 판본의 연결 정보는 등록부 이름 그대로');
   assert.equal(o.body.canEdit, false);
   assert.ok(o.body.logs.every((l) => l.user === ''), '비관리자에게 작업자 계정명 없음');
 
@@ -249,6 +258,9 @@ test('범위: 같은 법인이라도 범위 밖 vCenter 의 서버는 범위 계
   assert.equal(mine.linkState, 'not-found'); assert.equal(mine.link, null, 'vc-c 서버의 iDRAC 정보가 vc-a 범위 계정에 새지 않는다');
   rev = (await op(ADMIN, { op: 'place.remove', id: p.body.id, rev })).body.rev;
   const o2 = (await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } })).body;
-  assert.ok(!o2.unplaced.some((u) => u.serverId === 's4'), '범위 밖 서버는 미배치 목록에도 없다');
-  assert.ok((await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body.unplaced.some((u) => u.serverId === 's4'));
+  // 2026-11-27: 조회 계정의 미배치 목록은 늘 비어 있다(관리자에게만 싣는다) — '서버 목록을 범위로 먼저 자른다' 는 이제 **대수**로 본다(예전 단언은 빈 목록에서 헛돌았다).
+  const a2 = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body;
+  assert.ok(a2.unplaced.some((u) => u.serverId === 's4'), '관리자의 미배치 목록에는 있다');
+  assert.deepEqual(o2.unplaced, []);
+  assert.equal(o2.unplacedTotal, a2.unplacedTotal - 1, `범위 밖 서버(s4)는 범위 계정의 미배치 대수에 들지 않는다: 범위 ${o2.unplacedTotal} · 관리자 ${a2.unplacedTotal}`);
 });

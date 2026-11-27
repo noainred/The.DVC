@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 가림 재설계 — 전환 전 집계와 릴리스 순서</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#9aa9c2}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.tile{flex:1 1 180px;min-width:0;background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.tile span{font-size:11px;color:#9aa9c2;font-weight:600}
+.tile b{font-size:22px;font-weight:800}
+.tile i{font-style:normal;font-size:11.5px;color:#9aa9c2}
+table{border-collapse:collapse;width:100%;min-width:960px;font-size:12.5px}
+th{text-align:left;font-size:11px;color:#9aa9c2;font-weight:700;padding:10px 12px;border-bottom:1px solid #243049;white-space:nowrap}
+th.n,td.n{text-align:right;font-variant-numeric:tabular-nums}
+td{padding:10px 12px;border-bottom:1px solid #1f2a40;vertical-align:top;line-height:1.55}
+.head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:12px 14px;border-bottom:1px solid #243049}
+.step{flex:1 1 300px;min-width:0;background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.step h3{margin:0;font-size:13px;display:flex;gap:8px;align-items:center}
+.step ul{margin:0;padding-left:18px;font-size:12.5px;line-height:1.65;color:#dbe4f2}
+.step p{margin:0;font-size:12px;color:#9aa9c2;line-height:1.55}
+.num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid #3a4866;font-size:11px;color:#aebbd0;flex:0 0 auto}
+.note{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.note b{font-size:13px}
+.note span{font-size:12.5px;line-height:1.6;color:#9aa9c2}
+</style>
+</helmet>
+<div style="min-height:1100px;box-sizing:border-box;padding:28px;display:flex;flex-direction:column;gap:14px;max-width:1440px;margin:0 auto">
+
+  <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline">
+    <h1 style="margin:0;font-size:20px;font-weight:800">릴리스 순서와 전환 전 집계</h1>
+    <span class="dim" style="font-size:12.5px">관리자 전용 · 읽기만 하는 화면 · 수치와 값은 그림용 가상값</span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:12px">
+    <div class="step" style="border-color:#b45309">
+      <h3><span class="num">1</span>닫기 — 지금 새는 것을 먼저</h3>
+      <ul>
+        <li>응답을 칸 목록으로(펼쳐 싣기 제거) — 빠진 칸은 지금 가림을 거치거나 싣지 않음</li>
+        <li>가림 재료를 원장 옆에 남김(재시작 · 엣지 끊김에도 유지)</li>
+        <li>저장할 때 전각 → 반각 · 시리얼 칸의 주소 거절</li>
+        <li>표식 시험 · 아래 집계 화면</li>
+      </ul>
+      <p>판정 방식은 그대로(찾아 지우기)입니다. 재설계가 중단돼도 남는 부분입니다.</p>
+    </div>
+    <div class="step" style="border-color:#1d6fb8">
+      <h3><span class="num">2</span>판정 전환</h3>
+      <ul>
+        <li>글마다 통째 판정(고쳐 쓰지 않음)</li>
+        <li>사람의 결정(승인 · 숨김) · 관리 메모</li>
+        <li>장비 창의 알림 · 검토 화면</li>
+      </ul>
+      <p>자료를 옮기지 않습니다. 되돌리기는 코드 교체만입니다.</p>
+    </div>
+    <div class="step">
+      <h3><span class="num">3</span>이력 구조화 · 옛 코드 제거</h3>
+      <ul>
+        <li>새 이력 · 판 차이를 구조로 저장</li>
+        <li>옛 이력은 조회 계정에 동작 · 시각만</li>
+        <li>찾아 지우는 코드 350줄 제거</li>
+      </ul>
+      <p>단계마다 변이 검증 · 5축 점검 · 반증을 거칩니다.</p>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:12px">
+    <div class="tile"><span>원장의 글 전체</span><b>1,284</b><i>서로 다른 글 기준 · 메모 제외</i></div>
+    <div class="tile"><span>전환 뒤에도 그대로 보임</span><b>1,246</b><i>걸리는 글자 없음</i></div>
+    <div class="tile" style="border-color:#b45309"><span>전환하면 숨겨질 글</span><b style="color:#fcd34d">38</b><i>승인하거나 고치기 전까지 대체 표시</i></div>
+    <div class="tile"><span>메모</span><b>412</b><i>조회 계정 응답에서 빠집니다(정해 주실 것 8)</i></div>
+  </div>
+
+  <div class="card">
+    <div class="head"><b style="font-size:13px;flex:1;min-width:0">전환하면 숨겨질 글 — 칸별 · 까닭별</b><button type="button" class="btn">CSV 내려받기</button></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>칸</th><th class="n">글 수</th><th class="n">IP · MAC 꼴</th><th class="n">등록 주소</th><th class="n">서비스 태그 · 시리얼</th><th class="n">검사 폭을 넓히면 더 걸릴 글</th></tr></thead>
+        <tbody>
+          <tr><td>표시 이름</td><td class="n">1,012</td><td class="n">9</td><td class="n">14</td><td class="n">6</td><td class="n">+212 <span class="dim">(등록 주소의 첫 마디)</span></td></tr>
+          <tr><td>모델</td><td class="n">61</td><td class="n">0</td><td class="n">0</td><td class="n">2</td><td class="n">0</td></tr>
+          <tr><td>랙의 이름 · 줄 · 용도</td><td class="n">188</td><td class="n">3</td><td class="n">1</td><td class="n">0</td><td class="n">+4</td></tr>
+          <tr><td>전산실 · 데이터센터 이름</td><td class="n">23</td><td class="n">2</td><td class="n">1</td><td class="n">0</td><td class="n">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px">
+    <div class="note"><b>이 집계로 검사의 폭을 정합니다</b><span>표시 이름을 호스트 이름으로 짓는 곳이라면, 등록 주소의 첫 마디까지 식별자로 보는 순간 서버 대부분이 숨겨집니다(위 표의 +212 같은 수). 운영 원장의 분포를 모르는 채로 폭을 정하지 않으려고 1단계에 이 화면을 넣습니다.</span></div>
+    <div class="note"><b>읽기만 합니다</b><span>이 화면은 원장을 바꾸지 않습니다. 2단계 전환도 글을 옮기거나 고치지 않습니다 — 걸린 글의 원문은 제자리에 있고, 조회 계정에 보일지만 달라집니다.</span></div>
+    <div class="note"><b>법인별로 따로 전환하지 않습니다</b><span>목록 응답 하나에 여러 법인의 이름이 함께 실리고 랙 종류 이름은 전 법인 공용이라, 법인마다 다른 방식이 섞이면 한 응답 안에서 규칙이 갈립니다. 전환은 포탈 전체가 한 번에 합니다.</span></div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

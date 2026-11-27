@@ -88,7 +88,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/demo.md` (8항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
 | `docs/rules/audits.md` (83항목) | 회차별 점검(감사) 기록 v2.583~v3.34.2(전체 점검 1~135회차 · 새 코드 점검 136~145회차 · 결정 반영 146~151회차 · 전체 소스 점검(Fable) 152~162회차 · 결정 구현 163~165회차 포함 — 1MB · 통째로 읽지 말고 `grep -n` 으로 해당 절만) — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | `docs/rules/focusmon.md` (14항목) | 서버 집중 모니터링 상세 기록(v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 · v3.11.0 디스크 점검(배드 섹터 프로그램 · sudo 예외 · 묶어 보기) · v3.12.0 더할 지표) — server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js |
-| `docs/rules/rack.md` (3항목) | 랙 실장도 점검 기록(2026-11-26 1~4회차 — 비관리자 가림 규칙 · 화면의 늦은 응답 · 자리표시 태그) — server/src/rack/ · routes/api/rack.js · web/src/views/tools/RackTool.jsx·rackView.js |
+| `docs/rules/rack.md` (4항목) | 랙 실장도 점검 기록(2026-11-26 1~4회차 — 비관리자 가림 규칙 · 화면의 늦은 응답 · 자리표시 태그) — server/src/rack/ · routes/api/rack.js · web/src/views/tools/RackTool.jsx·rackView.js |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)

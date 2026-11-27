@@ -72,7 +72,7 @@ test('B-2: 기록이 없던 원장(업그레이드 전)은 열 때 한 번 채�
   const keys = db.prepare("SELECT key FROM rack_serial_seen WHERE corp_id = 'kr'").all().map((r) => r.key);
   assert.ok(keys.includes('now0001'), '지금 원장');
   assert.ok(keys.includes('late7777'), '남아 있는 판(지금 원장에는 없는 장비)');
-  assert.equal(db.prepare("SELECT v FROM rack_meta WHERE k = 'seenKeys'").get().v, 1);
+  assert.equal(db.prepare("SELECT v FROM rack_meta WHERE k = 'seenKeys'").get().v, R.RACK_META_VERSIONS.seenKeys);   // 2026-11-27: 비교 키가 폭에 무관해져 판 번호가 올랐다
 });
 
 test('B-3: 색인을 못 채운 핸들 — 첫 쓰기가 색인을 다시 채운 뒤 거절(ROLLBACK)돼도 둘째 시도가 통과하지 않는다', async () => {

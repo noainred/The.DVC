@@ -85,18 +85,30 @@ function shapeOf(pos, a, b) {
  * 키는 글의 사영과 **같은 함수**(`projOf`)로 만든다 — ASCII 에서는 `normKey` 와 같고, 문자열 통째 소문자화가 글자마다 소문자화와 다른 글자
  * (낱말 끝 그리스 시그마 · 'İ')에서도 글과 키가 어긋나지 않는다(4회차 점검 보안 관찰 2).
  */
+function tagIndexAdd(set, shapes, t) {
+  const { proj: k, pos } = projOf(String(t ?? ''));
+  if (k.length < TAG_MASK_MIN || k.length > KEY_MAX) return;
+  set.add(k);
+  if (k.length >= TAG_FREE_MIN) return;
+  const sh = shapeOf(pos, 0, k.length);
+  if (!sh) return;
+  let g = shapes.get(k); if (!g) { g = new Set(); shapes.set(k, g); }
+  g.add(sh);
+}
 export function tagIndexOf(tags) {
   const set = new Set(); const shapes = new Map();   // shapes: 짧은 키 → 원문에 구분자가 있던 자리 모양들(머리말 '경계 규칙')
-  for (const t of tags || []) {
-    const { proj: k, pos } = projOf(String(t ?? ''));
-    if (k.length < TAG_MASK_MIN || k.length > KEY_MAX) continue;
-    set.add(k);
-    if (k.length >= TAG_FREE_MIN) continue;
-    const sh = shapeOf(pos, 0, k.length);
-    if (!sh) continue;
-    let g = shapes.get(k); if (!g) { g = new Set(); shapes.set(k, g); }
-    g.add(sh);
-  }
+  for (const t of tags || []) tagIndexAdd(set, shapes, t);
+  return { set, lens: lensOf(set), shapes, ...headsOf(set) };
+}
+/**
+ * `tagIndexOf` 와 같은 색인을 조각으로 나눠 만든다 — `pause`(util/timeSlice.js createYielder)를 512개마다 부른다.
+ * 가림 재료 전체(함대 태그 · 기록 — 수만 개)로 만드는 색인은 이것으로(2026-11-27 성능 축: 20만 개에서 한 번에 1.6초 정지).
+ */
+export async function tagIndexOfAsync(tags, pause) {
+  const set = new Set(); const shapes = new Map();
+  let i = 0;
+  for (const t of tags || []) { tagIndexAdd(set, shapes, t); if ((++i & 511) === 0 && pause) await pause(); }
+  if (pause) await pause();
   return { set, lens: lensOf(set), shapes, ...headsOf(set) };
 }
 
@@ -166,6 +178,18 @@ export function needleIndexOf(strings, { min = 1, max = 255 } = {}) {
     const s = lowSameLen(String(v ?? '').trim());
     if (s.length >= min && s.length <= max) set.add(s);
   }
+  return { set, lens: lensOf(set), ...headsOf(set) };
+}
+/** `needleIndexOf` 와 같은 색인을 조각으로 나눠 만든다(`tagIndexOfAsync` 와 같은 까닭). */
+export async function needleIndexOfAsync(strings, { min = 1, max = 255 } = {}, pause = null) {
+  const set = new Set();
+  let i = 0;
+  for (const v of strings || []) {
+    const s = lowSameLen(String(v ?? '').trim());
+    if (s.length >= min && s.length <= max) set.add(s);
+    if ((++i & 511) === 0 && pause) await pause();
+  }
+  if (pause) await pause();
   return { set, lens: lensOf(set), ...headsOf(set) };
 }
 

@@ -34,9 +34,14 @@ export const REMOTE_SERVERS_MAX = Math.max(100, envPositive(process.env.COLLECTO
 const STR_MAX = 256;
 const ARR_MAX = 256;
 
-/** 글자(또는 유한 숫자) → 글자(상한), 그 밖 → null. */
+/**
+ * 글자(또는 유한 숫자) → 글자(상한), 그 밖 → null.
+ * 잘라 낸 글은 **새 글로 만든다** — V8 의 잘린 문자열(sliced string)은 원문을 붙든다. 엣지가 보낸 큰 글(수십 KB)을 잘라 보관하면, 보관소(랙 가림 재료 기록 ·
+ * 태그 판정 기억 등)가 그 조각을 쥐고 있는 동안 원문 전체가 메모리에 남았다(2026-11-27 랙 6회차 성능 4 재현: 서버 1,000대 × 50KB × 5주기 → 239.7MB).
+ * 입구에서 끊으면 모든 보관소에 한 번에 듣는다(보관소마다 막지 않는다).
+ */
 export function remoteStr(v, max = STR_MAX) {
-  if (typeof v === 'string') return v.length > max ? v.slice(0, max) : v;
+  if (typeof v === 'string') return v.length > max ? JSON.parse(JSON.stringify(v.slice(0, max))) : v;   // 새 글(코드 단위 그대로 — 짝 잃은 서로게이트도 바꾸지 않는다)
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   return null;
 }

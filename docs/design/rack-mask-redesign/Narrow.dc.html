@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 가림 재설계 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+button,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#9aa9c2}
+.lab{font-size:11px;color:#9aa9c2;font-weight:600}
+.sel{height:40px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;min-width:0;width:100%;box-sizing:border-box}
+.btn{min-height:40px;padding:8px 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;text-align:left;line-height:1.45}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;box-sizing:border-box}
+.box{border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.6}
+.amber{border:1px solid #b45309;background:rgba(245,158,11,.12);color:#fde68a}
+.gray{border:1px dashed #3a4866;background:#0f1626;color:#aebbd0}
+.hit{background:rgba(245,158,11,.28);border-bottom:2px solid #f59e0b;border-radius:3px;padding:0 2px;color:#fff7e0;overflow-wrap:anywhere}
+.item{background:#0f1626;border:1px solid #243049;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.where{font-size:11.5px;color:#9aa9c2;overflow-wrap:anywhere}
+.name{font-size:13px;overflow-wrap:anywhere}
+.why{font-size:12px;color:#fde68a;line-height:1.5}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts .btn{min-height:36px;padding:0 10px;text-align:center}
+h2{margin:0;font-size:14px}
+</style>
+</helmet>
+<div style="width:400px;min-height:1560px;box-sizing:border-box;padding:16px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <h1 style="margin:0;font-size:17px;font-weight:800">400px 에서</h1>
+    <span class="dim" style="font-size:12px">장비 창(저장 뒤 알림)과 검토 화면 · 값은 그림용 가상값</span>
+  </div>
+
+  <div class="panel" style="border-color:#b45309">
+    <h2>장비 고치기</h2>
+    <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+      <label class="lab" for="n-name">표시 이름</label>
+      <input id="n-name" class="sel" value="bmc 10.20.30.4 rear" aria-describedby="n-warn">
+    </div>
+    <div id="n-warn" class="box amber" role="status">
+      <b>저장했습니다. 이 이름은 조회 계정에 숨겨져 있습니다.</b><br>
+      관리 주소로 보이는 글자: <span class="hit mono">10.20.30.4</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button type="button" class="btn pri">주소를 관리 메모로 옮기기 — 표시 이름은 ‘bmc rear’</button>
+      <button type="button" class="btn">직접 고치기</button>
+      <button type="button" class="btn">식별 정보가 아닙니다 — 공개(승인 기록이 남습니다)</button>
+      <button type="button" class="btn">그대로 둔다 — 숨긴 채로</button>
+    </div>
+    <div class="box gray">
+      <div class="dim" style="font-size:11px">관리자에게</div>
+      <div class="mono" style="overflow-wrap:anywhere">bmc 10.20.30.4 rear</div>
+      <div class="dim" style="font-size:11px;margin-top:6px">조회 계정에게</div>
+      <div style="overflow-wrap:anywhere">서버 · PowerEdge R760 <span class="dim">(이름 숨김)</span></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button type="button" class="btn" style="text-align:center">닫기</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+      <h2 style="flex:1;min-width:0">숨겨진 글</h2>
+      <span class="mono" style="color:#fcd34d;font-weight:700">4건</span>
+    </div>
+    <span class="dim" style="font-size:12px;line-height:1.55">좁은 화면에서는 표 대신 카드로 쌓습니다. ‘승인한 글’ · ‘공개 글 전체’ 는 위쪽 고르기 단추로 바꿉니다.</span>
+
+    <div class="item">
+      <span class="where">상암 DC › 3층 A › <span class="mono">A2 U22</span> 표시 이름</span>
+      <span class="name mono"><span class="hit">idrac-kr2-014</span> 예비</span>
+      <span class="why">등록된 서버의 관리 주소와 같습니다</span>
+      <div class="acts"><button type="button" class="btn pri">가리기(관리 메모로)</button><button type="button" class="btn">고치기</button><button type="button" class="btn">승인</button></div>
+    </div>
+
+    <div class="item">
+      <span class="where">상암 DC › 3층 A › <span class="mono">A1</span> 랙 용도</span>
+      <span class="name mono">DVC 서버 <span class="hit">fe80::1a2b</span></span>
+      <span class="why">IPv6 주소로 읽힙니다</span>
+      <div class="acts"><button type="button" class="btn">고치기</button><button type="button" class="btn">승인</button></div>
+    </div>
+
+    <div class="item">
+      <span class="where">울산 DC › 1층 › <span class="mono">B4 U3</span> 표시 이름</span>
+      <span class="name mono">점검 <span class="hit">12:30:45:00:11:22</span></span>
+      <span class="why">MAC 주소 꼴입니다 — 시각이라면 승인하세요</span>
+      <div class="acts"><button type="button" class="btn pri">가리기(관리 메모로)</button><button type="button" class="btn">고치기</button><button type="button" class="btn">승인</button></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>조회 계정의 장비 상세</h2>
+    <div class="box gray" style="display:grid;grid-template-columns:76px minmax(0,1fr);gap:6px 10px">
+      <span class="dim">표시 이름</span><span>서버 · PowerEdge R660</span>
+      <span class="dim"></span><span style="font-size:11.5px;color:#aebbd0">이름 숨김</span>
+      <span class="dim">모델</span><span>PowerEdge R660</span>
+      <span class="dim">시리얼</span><span class="dim">이 계정에는 보이지 않습니다</span>
+    </div>
+    <span class="dim" style="font-size:12px;line-height:1.55">관리 메모 · 등록 서버의 이름과 주소는 이 계정의 응답에 아예 없습니다.</span>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 가림 재설계 — 장비 창(관리자)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input,textarea{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#9aa9c2}
+.lab{font-size:11px;color:#9aa9c2;font-weight:600}
+.sel{height:36px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;min-width:0;width:100%;box-sizing:border-box}
+.area{min-height:64px;padding:8px 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;width:100%;box-sizing:border-box;resize:vertical;line-height:1.5}
+.btn{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.btn.wide{text-align:left;padding:8px 12px;line-height:1.45}
+.modal{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0;box-sizing:border-box}
+.modal h2{margin:0;font-size:15px}
+.f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.box{border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.6}
+.amber{border:1px solid #b45309;background:rgba(245,158,11,.12);color:#fde68a}
+.blue{border:1px solid #1d6fb8;background:rgba(56,189,248,.08);color:#dbeafe}
+.gray{border:1px dashed #3a4866;background:#0f1626;color:#aebbd0}
+.hit{background:rgba(245,158,11,.28);border-bottom:2px solid #f59e0b;border-radius:3px;padding:0 2px;color:#fff7e0}
+.pv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;font-size:12px;align-items:baseline}
+.pv span:nth-child(odd){color:#9aa9c2;white-space:nowrap}
+.cap{font-size:12px;color:#aebbd0;line-height:1.55;margin:0}
+.step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid #3a4866;color:#aebbd0;font-size:11px;flex:0 0 auto}
+</style>
+</helmet>
+<div style="min-height:1080px;box-sizing:border-box;padding:28px;display:flex;flex-direction:column;gap:16px;max-width:1440px;margin:0 auto">
+
+  <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline">
+    <h1 style="margin:0;font-size:20px;font-weight:800">장비 고치기 — 저장하면 조회 계정에 어떻게 보이는지 바로 안다</h1>
+    <span class="dim" style="font-size:12.5px">관리자 화면 · 같은 창의 세 가지 상태</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;align-items:start">
+
+    <div class="modal">
+      <div style="display:flex;gap:8px;align-items:center"><span class="step">a</span><h2>걸리는 글자가 없을 때</h2></div>
+      <div class="f"><label class="lab" for="e-a-name">표시 이름</label><input id="e-a-name" class="sel" value="가상화서버 #2"></div>
+      <p class="cap">이 이름은 조회 계정에도 그대로 보입니다.</p>
+      <div class="f"><label class="lab" for="e-a-note">관리 메모(관리자 전용)</label><textarea id="e-a-note" class="area" placeholder="주소 · 접속 방법처럼 조회 계정에 보이면 안 되는 것은 여기에"></textarea></div>
+      <div class="f"><label class="lab" for="e-a-ser">시리얼</label><input id="e-a-ser" class="sel mono" value="QX713K9Z"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button type="button" class="btn">취소</button><button type="button" class="btn pri">저장</button></div>
+    </div>
+
+    <div class="modal" style="border-color:#b45309">
+      <div style="display:flex;gap:8px;align-items:center"><span class="step">b</span><h2>저장했더니 식별 정보로 보이는 글자가 있을 때</h2></div>
+      <div class="f"><label class="lab" for="e-b-name">표시 이름</label><input id="e-b-name" class="sel" value="bmc 10.20.30.4 rear" aria-describedby="e-b-warn"></div>
+      <div id="e-b-warn" class="box amber" role="status">
+        <b>저장했습니다. 이 이름은 조회 계정에 숨겨져 있습니다.</b><br>
+        관리 주소로 보이는 글자: <span class="hit mono">10.20.30.4</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button type="button" class="btn pri wide">주소를 관리 메모로 옮기기 — 표시 이름은 ‘bmc rear’</button>
+        <button type="button" class="btn wide">직접 고치기</button>
+        <button type="button" class="btn wide">식별 정보가 아닙니다 — 공개(승인 기록이 남습니다)</button>
+        <button type="button" class="btn wide">그대로 둔다 — 숨긴 채로</button>
+      </div>
+      <div class="box gray">
+        <div class="pv">
+          <span>관리자에게</span><span class="mono">bmc 10.20.30.4 rear</span>
+          <span>조회 계정에게</span><span>서버 · PowerEdge R760 <span class="dim">(이름 숨김)</span></span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button type="button" class="btn">닫기</button></div>
+    </div>
+
+    <div class="modal" style="border-color:#1d6fb8">
+      <div style="display:flex;gap:8px;align-items:center"><span class="step">c</span><h2>승인하고 공개한 이름</h2></div>
+      <div class="f"><label class="lab" for="e-c-name">표시 이름</label><input id="e-c-name" class="sel" value="Unity 5.3.0.0 array"></div>
+      <div class="box blue">
+        <span class="hit mono" style="background:rgba(56,189,248,.22);border-bottom-color:#38bdf8;color:#e0f2fe">5.3.0.0</span> 은 주소 꼴이지만 <b>‘식별 정보 아님’ 으로 승인</b>된 글자입니다.<br>
+        <span class="dim">승인 admin · 2026-11-27 10:12 · 이 글에 다른 글자가 새로 걸리면 승인은 그 글자까지 덮지 않습니다 — 다시 숨겨지고 여기에 뜹니다.</span>
+      </div>
+      <div class="box gray">
+        <div class="pv">
+          <span>관리자에게</span><span class="mono">Unity 5.3.0.0 array</span>
+          <span>조회 계정에게</span><span class="mono">Unity 5.3.0.0 array</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><button type="button" class="btn">승인 취소</button><span style="display:flex;gap:8px"><button type="button" class="btn">취소</button><button type="button" class="btn pri">저장</button></span></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;align-items:start">
+    <div class="modal">
+      <h2>저장을 막지 않는 까닭</h2>
+      <p class="cap">되돌리기 · 가져오기는 사람이 글을 하나씩 보지 않으므로 막을 수 없습니다. 막는 규칙과 받는 규칙이 따로 있으면 둘이 어긋납니다 — <b>규칙은 하나</b>: 저장은 받고, 걸린 글은 조회 계정에 숨기고, 창이 알립니다.</p>
+      <p class="cap">저장을 막으면 일을 끝내려고 ‘승인’ 을 누르게 됩니다. 승인은 그 글자를 조회 계정에 공개하는 결정이라 떠밀려 누를 것이 아닙니다.</p>
+    </div>
+    <div class="modal">
+      <h2>검사가 보는 것 · 까닭을 보이는 범위</h2>
+      <p class="cap">IP(v4 · v6) · MAC · 본 적 있는 관리 주소 · 서비스 태그와 그 법인의 시리얼. 답은 ‘걸린 글자의 목록’ 뿐이고 글을 고쳐 쓰지 않습니다. 저장할 때 전각 글자는 반각으로 맞춥니다.</p>
+      <p class="cap">까닭은 <b>이 관리자가 볼 수 있는 서버</b>에 걸렸을 때만 구체적으로 적습니다. 범위 밖 서버에 걸린 글은 ‘식별 정보로 보이는 글자’ 까지만 보이고 승인은 전체 범위 관리자가 합니다.</p>
+    </div>
+    <div class="modal">
+      <h2>다른 칸</h2>
+      <p class="cap"><b>메모</b>는 관리자 전용 칸(관리 메모)으로 바꿉니다 — 조회 계정 응답에 싣지 않습니다(정해 주실 것 8).</p>
+      <p class="cap"><b>모델 · 랙의 이름 · 줄 · 용도 · 전산실 · 데이터센터 이름</b>은 표시 이름과 같은 판정을 지납니다.</p>
+      <p class="cap"><b>시리얼 칸</b>에 주소 꼴이 들어오면 저장을 거절합니다 — 시리얼에 주소가 들어갈 까닭이 없습니다.</p>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

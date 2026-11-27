@@ -11,6 +11,7 @@
  * U 는 아래가 1 이다(엑셀 실장도와 같다). 시작 U(uStart)는 장비가 차지한 **가장 아래** 줄이다.
  */
 import { normKey } from '../insights/serialKey.js';
+import { isIPv6 } from 'node:net';
 import { numOrNull } from '../util/numOrNull.js';
 
 export const FACES = Object.freeze(['full', 'front', 'rear']);
@@ -43,10 +44,20 @@ export const LIMITS = Object.freeze({
 const CTRL = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu;
 /** 보이지 않는 글자를 지운 글(가림 판정 앞에서 쓴다 — 이 정리가 생기기 전에 저장된 이름에도 같은 눈으로). */
 export const dropInvisible = (s) => (typeof s === 'string' ? s.replace(CTRL, '') : s);
-/** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
+/**
+ * 전각 ASCII(U+FF01~FF5E)와 전각 공백(U+3000)을 반각으로 — 글자 수는 그대로다(1:1 · BMP).
+ * 2026-11-27 반증 P4(재현): 전각으로 적은 주소 '１０.２０.３０.４' · 태그 'ＳＶＡ０００１' 는 눈에는 같은 값인데 가림 판정을 비켜 갔다.
+ * 새 입력은 `cleanText` 가 저장 전에 접고, 그 전에 저장된 값은 가림 판정이 같은 눈으로 본다(`routes/api/rack.js` — 조회 계정에는 접은 글이 보인다).
+ * ⚠ NFKC 전체(‘①’ → ‘1’ · ‘㈜’ → ‘(주)’)는 하지 않는다 — 사람이 적은 이름의 글자를 바꾼다. 통째 판정으로 넘어갈 때(설계 docs/design/rack-mask-redesign) 판정용 눈으로만 쓴다.
+ */
+const WIDE = /[\uff01-\uff5e\u3000]/;
+const WIDE_G = /[\uff01-\uff5e\u3000]/g;
+export const foldWidth = (s) => (typeof s === 'string' && WIDE.test(s)
+  ? s.replace(WIDE_G, (c) => (c === '\u3000' ? ' ' : String.fromCharCode(c.charCodeAt(0) - 0xfee0))) : s);
+/** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 전각 → 반각 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
 export function cleanText(v, max) {
   const s = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
-  let t = s.slice(0, max * 4).replace(CTRL, ' ').trim().slice(0, max);
+  let t = foldWidth(s.slice(0, max * 4)).replace(CTRL, ' ').trim().slice(0, max);
   // 3회차 점검 정확성 3: 자른 자리가 공백이면 끝 공백이 남았다(눈으로 같은 이름이 중복 검사를 통과 · 다시 저장하면 '바뀐 것' 으로 판정) — 자른 뒤 한 번 더 다듬는다.
   //   서로게이트 쌍의 앞 반쪽에서 잘렸으면 그 반쪽도 뺀다(깨진 글자 U+FFFD 로 저장되지 않게).
   const last = t.charCodeAt(t.length - 1);
@@ -69,8 +80,37 @@ export function nonNeg(v) {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * 시리얼 칸에 적힌 값이 주소(IPv4 · IPv6 · URL)인가(순수) — **입력 거절과 응답 비우기가 같은 이 함수 하나**를 쓴다(6회차 보안 4 · 반증 R6:
+ * 입력 · 추가 시리얼 문자열 쪼개기 · 출력 세 곳의 판정이 달라 'node.10.20.30.97' 은 저장되고 비워졌으며, 'https://…' 는 쪼개져 그대로 보였다).
+ *  · IPv4: 점으로 나뉜 1~3자리 숫자 묶음이 **4개 이상 이어짐**(라우트 가림의 `hasIpv4` 와 같은 규칙 — 앞뒤 글자와 붙어 있어도: 'bmc.10.20.30.4' · '10.20.30.4.')
+ *  · IPv6: 16진 · 콜론 낱말이 유효한 IPv6(`net.isIPv6` — '::' 또는 8마디). MAC 꼴은 주소로 보지 않는다(MAC 을 시리얼로 쓰는 장비가 있다).
+ *  · URL: '://' 또는 'http:' · 'https:' 로 시작.
+ * 글자 수 상한을 먼저 본다(시리얼 칸은 64자 · 화면이 보내는 추가 시리얼 문자열은 그보다 길 수 있어 라우트가 낱말로 나눠 부른다).
+ */
+const V4_RUN = /[0-9.]{7,}/g;
+function hasV4Run(v) {
+  for (const m of v.matchAll(V4_RUN)) {
+    let n = 0;
+    for (const part of m[0].split('.')) { n = part.length >= 1 && part.length <= 3 ? n + 1 : 0; if (n >= 4) return true; }
+  }
+  return false;
+}
+export function serialAddressLike(v) {
+  if (typeof v !== 'string' || !v) return false;
+  const s = foldWidth(v);
+  if (s.length > 512) return true;   // 이렇게 긴 시리얼은 없다 — 살피지 않고 주소로 본다(입력은 거절 · 출력은 비움)
+  if (s.includes('://') || /^https?:/i.test(s)) return true;
+  if (hasV4Run(s)) return true;
+  if (s.includes(':')) for (const tok of s.split(/[^0-9a-fA-F:.%]+/)) { const t = tok.replace(/%.*$/, ''); if (t.split(':').length > 2 && isIPv6(t)) return true; }
+  return false;
+}
+const SERIAL_ADDR_ERR = '시리얼 칸에는 주소(IP · URL)를 넣을 수 없습니다 — 주소는 메모에 적으세요(메모는 관리자에게만 보입니다).';
+
 /** 시리얼 비교 키 — 시리얼 색인(insights/serialLookup.js)과 같은 정규화(대소문자 · 공백 · `:` `-` `_` `.` 무시). */
-export const serialKeyOf = (v) => normKey(v);
+// 2026-11-27(6회차 정확성 D2): 전각으로 적힌 옛 시리얼('ＦＷ０００１２３')도 같은 키 — 새 입력은 저장 전에 접히므로(`cleanText`) 키가 폭에 따라 갈리면
+//   같은 시리얼 두 장비가 중복 검사를 통과하고 등록 서버와의 연결이 끊긴다. 키를 바꿨으므로 색인 · 키 칸은 `rack/db.js PLACE_KEYS_VER` 를 올려 다시 만든다.
+export const serialKeyOf = (v) => normKey(foldWidth(typeof v === 'string' ? v : String(v ?? '')));
 
 /** 두 면이 같은 U 에서 부딪히는가. full 은 모두와, front 와 rear 는 서로 부딪히지 않는다. */
 export function facesClash(a, b) {
@@ -149,11 +189,18 @@ export function cleanPlaceInput(body = {}, { partial = false } = {}) {
   if (!partial || has('model')) out.model = cleanText(b.model, LIMITS.model);
   if (!partial || has('serial')) out.serial = cleanText(b.serial, LIMITS.serial);
   if (!partial || has('extraSerials')) {
+    // 화면은 추가 시리얼을 문자열 하나로 보낸다('/' · 쉼표 · 공백으로 구분). '/' 로 먼저 쪼개면 'https://bmc/ui' 가 'https:' · 'bmc' · 'ui' 가 되어 주소 판정을 비켜 갔다
+    //   (6회차 정확성 D4 · 보안 4 · 화면 D2) — 공백 · 쉼표로 나눈 낱말을 먼저 판정하고 그다음 '/' 로 나눈다.
+    if (typeof b.extraSerials === 'string') {
+      const words = b.extraSerials.slice(0, LIMITS.serial * LIMITS.extraSerials * 4).split(/[\s,]+/);
+      if (words.some(serialAddressLike)) return { error: SERIAL_ADDR_ERR };
+    }
     const raw = Array.isArray(b.extraSerials) ? b.extraSerials : (typeof b.extraSerials === 'string' ? b.extraSerials.split(/[\s,/]+/) : []);
     const list = [...new Set(raw.slice(0, LIMITS.extraSerials * 4).map((x) => cleanText(x, LIMITS.serial)).filter(Boolean))];
     if (list.length > LIMITS.extraSerials) return { error: `추가 시리얼은 ${LIMITS.extraSerials}개까지입니다.` };
     out.extraSerials = list;
   }
+  if (serialAddressLike(out.serial) || (out.extraSerials || []).some(serialAddressLike)) return { error: SERIAL_ADDR_ERR };
   if (!partial || has('note')) out.note = cleanText(b.note, LIMITS.note);
   for (const [k, label] of [['ratedW', '정격 전력'], ['opW', '운전 전력'], ['weightKg', '무게']]) {
     if (partial && !has(k)) continue;

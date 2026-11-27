@@ -165,7 +165,13 @@ test('라우트: 범위 밖 404 · 쓰기 밖 403 · 비관리자에게 계정�
   const pick = a.body.versions.find((x) => x.counts.places === 32 && x.action !== 'version.restore') || a.body.versions[3];
   const d = await call('GET /tools/rack/versions/:vid', { user: OP_A, params: { vid: String(pick.id) }, query: { corp: 'kr' } });
   assert.equal(d.statusCode, 200); assert.equal(d.body.version.user, '');
-  assert.ok(d.body.restore && d.body.restore.counts);
+  // 2026-11-27: ‘되돌리면 바뀌는 것’(restore)은 되돌릴 수 없는 계정에 싣지 않는다(null — 응답 표면을 줄인다). 미리 보기는 아래 관리자 판본에서 보고, 판 차이(changes)는 조회 계정에도 간다.
+  assert.equal(d.body.restore, null, '비관리자에게는 되돌리기 미리 보기를 싣지 않는다');
+  assert.ok(d.body.readable === true && d.body.changes && d.body.changes.counts, `비관리자도 판 차이(changes)는 본다: ${JSON.stringify(Object.keys(d.body))}`);
+  const ad = await call('GET /tools/rack/versions/:vid', { user: ADMIN, params: { vid: String(pick.id) }, query: { corp: 'kr' } });
+  assert.equal(ad.statusCode, 200); assert.equal(ad.body.version.user, 'admin', '관리자 판본에는 작업자 계정명');
+  assert.ok(ad.body.restore && ad.body.restore.counts, '관리자 판본에는 되돌리기 미리 보기');
+  assert.deepEqual(d.body.changes.counts, ad.body.changes.counts, '판 차이의 수는 두 판본이 같다');
   assert.equal((await call('GET /tools/rack/versions/:vid', { user: ADMIN_B, params: { vid: String(pick.id) }, query: { corp: 'kr' } })).statusCode, 404);
   assert.equal((await call('POST /tools/rack/op', { user: OP_A, body: { op: 'version.restore', corpId: 'kr', versionId: pick.id, expectLatestId: a.body.latestId } })).statusCode, 403, '운영자는 역할 게이트에서');
   assert.equal((await call('POST /tools/rack/op', { user: ADMIN_B, body: { op: 'version.restore', corpId: 'kr', versionId: pick.id, expectLatestId: a.body.latestId } })).statusCode, 404, '범위 밖 법인');
