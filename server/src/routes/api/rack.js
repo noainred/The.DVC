@@ -38,7 +38,7 @@ import { acquireExport } from '../../util/exportBusy.js';
 import { createYielder } from '../../util/timeSlice.js';
 import { hostVariants, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
 import { tagIndexOf, stripTags, needleIndexOfAsync, replaceNeedles, charKind } from '../../rack/textMask.js';
-import { cleanTag, realTags, usableTag, fleetServers, fleetMaterial, absorbFleet, materialIndex, corpTagIndexOf, corpTagIndexOfAsync, hostIndexOf } from '../../rack/material.js';
+import { cleanTag, realTags, usableTag, fleetServers, fleetMaterial, absorbFleet, materialIndex, corpTagIndexOfAsync, hostIndexOf } from '../../rack/material.js';
 import { todayStamp } from '../../util/dayKey.js';
 import { isIPv6 } from 'node:net';
 
@@ -209,7 +209,7 @@ function hasIpv6(w) {
 }
 /**
  * 가림 함수 하나 — `ix` = 세대별 색인(`rack/material.js materialIndex` — 주소 변형 집합 · 글 속 주소 색인 · 함대 태그 색인),
- * `corpIdx` = 그 법인(들) 원장 시리얼의 작은 색인(`corpTagIndexOf`). 시리얼을 보는 판본은 태그를 가리지 않는다.
+ * `corpIdx` = 그 법인(들) 원장 시리얼의 작은 색인(`corpTagIndexOfAsync`). 시리얼을 보는 판본은 태그를 가리지 않는다.
  */
 function textMaskOf({ admin, showSerial, ix, corpIdx = null }) {
   if (admin) return PLAIN_MASK;
@@ -302,21 +302,31 @@ async function viewerOf(req) {
   const showSerial = serialsVisible(req);
   let ix;
   // 시리얼을 가리는 판본(범위 계정)은 인벤토리에서만 읽힌 태그도 **매번** 흡수한다(2회차 반증 B-1 — 그 태그는 이 판본에서만 가린다. 간격을 두면 새로 읽힌 태그가 그 사이 보인다).
-  const out = { short: 0 };
-  try { await absorbFleet(all, { forceInv: !showSerial, out }); ix = await materialIndex(); } catch (e) {
+  const out = { short: 0, shortBy: { h: 0, t: 0 } };
+  try {
+    await absorbFleet(all, { forceInv: !showSerial, out });
+    // 지금 재료를 다 담지 못했다(기록 상한 + 메모리 몫을 넘은 고장 — `rack/db.js` ⓓ) — 그 값이 든 이름이 원문으로 나가므로 닫힌 쪽으로(7회차 P7-1 · C4 대책의 끝).
+    //   **색인을 만들기 전에** 판정한다(8회차 N8-1: 503 을 내기 전에 기록 전체로 색인을 다시 만들어 요청마다 CPU 2.5초+) · 태그는 이 판본이 태그를 가릴 때만 센다(N8-4: 시리얼을 보는 판본까지 503).
+    if (out.shortBy.h || (!showSerial && out.shortBy.t)) throw new R.RackError(503, MASK_SATURATED_REASON, { code: 'maskUnavailable' });
+    ix = await materialIndex();
+  } catch (e) {
     if (e instanceof R.MaskUnavailable) throw new R.RackError(503, MASK_UNAVAILABLE_REASON, { code: 'maskUnavailable' });
     throw e;
   }
-  // 지금 재료를 다 담지 못했다(기록 상한 + 메모리 몫을 넘은 고장 — `rack/db.js` ⓓ) — 그 값이 든 이름이 원문으로 나가므로 닫힌 쪽으로(7회차 P7-1 · C4 대책의 끝).
-  if (out.short) throw new R.RackError(503, MASK_SATURATED_REASON, { code: 'maskUnavailable' });
   const cache = new Map();
+  const pause = createYielder(15);
   const forCorps = async (corpIds) => {
     // 시리얼을 보는 판본은 태그를 가리지 않는다 — 법인과 무관하게 가림 하나.
     const ids = showSerial ? [] : [...new Set((corpIds || []).map((c) => String(c || '')))].sort();
     const key = ids.join('\u0000');
     if (!cache.has(key)) {
       let corpIdx = null;
-      if (!showSerial) { const serials = []; for (const id of ids) for (const t of await R.corpSerials(id)) serials.push(t); corpIdx = corpTagIndexOf(serials); }
+      // 법인 원장 시리얼은 전산실마다 읽고 색인도 조각으로(8회차 N8-5 — 랙 종류 이름은 전 법인의 시리얼로 가려 범위 계정 목록이 법인 전부를 동기로 읽었다)
+      if (!showSerial) {
+        const serials = [];
+        for (const id of ids) for (const t of await R.corpSerials(id, { pause })) serials.push(t);
+        corpIdx = await corpTagIndexOfAsync(serials, pause);
+      }
       cache.set(key, textMaskOf({ admin: false, showSerial, ix, corpIdx }));
     }
     return cache.get(key);

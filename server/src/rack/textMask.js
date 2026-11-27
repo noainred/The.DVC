@@ -54,6 +54,9 @@ function projOf(text) {
   }
   return { proj, pos };
 }
+/** 태그의 비교 키 길이(구분자를 뺀 사영 — 색인이 키 상한 `KEY_MAX` 와 견주는 그 길이). 가림 재료 기록이 '색인에 들 수 있는 태그인가' 를 같은 눈으로 본다(8회차 N8-2). */
+export const tagKeyLength = (t) => projOf(String(t ?? '')).proj.length;
+export const TAG_KEY_MAX = KEY_MAX;
 // 구분자는 normKey 와 같은 정의 하나(3회차 점검 3: 손으로 적은 목록이라 유니코드 공백 14종 — U+2009 등 — 이 빠져, 비교 키는 같은데 가림은 못 찾았다).
 const isSep = isKeySep;
 const lensOf = (set) => { const l = new Set(); for (const s of set) l.add(s.length); return [...l].sort((a, b) => b - a); };   // 긴 것 먼저(짧은 것이 긴 것의 앞부분만 먹지 않게)

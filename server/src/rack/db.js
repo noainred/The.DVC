@@ -20,6 +20,7 @@ import { config } from '../config.js';
 import { openSqlite, createLockRetry, chmodDbFiles } from '../util/sqliteOpen.js';
 import { createYielder } from '../util/timeSlice.js';
 import { placementIssue, overflowOnResize, serialKeyOf, foldWidth, LIMITS } from './layout.js';
+import { tagKeyLength, TAG_KEY_MAX } from './textMask.js';
 import { buildSnapshot, validateSnapshot, countsOf, diffSnapshots, VERSION_KEEP, capExceeded, restorableSnapshot } from './versions.js';
 
 const lockRetry = createLockRetry();
@@ -551,21 +552,26 @@ export async function maskState() {
 /**
  * 지금 재료를 사본에 더한다(새 값만 · 그 요청부터 가린다) — 파일 쓰기는 응답 뒤로 미룬다. 돌려주는 값 = 세대.
  * @param {string[]} hosts  등록 주소(정리된 글)   @param {string[]} tags  서비스 태그(정리된 글)
- * @param {{ now?: number, out?: { short?: number } }} [o]  `out.short` = 이 흡수의 값 중 메모리 상한 때문에 담지 못한 수(0 이면 이 흡수의 값은 모두 가린다)
+ * @param {{ now?: number, out?: { short?: number, shortBy?: { h: number, t: number } },
+ *          complete?: { h?: boolean, t?: boolean } }} [o]
+ *   `out.short` = 이 흡수의 값 중 메모리 상한 때문에 담지 못한 수(0 이면 이 흡수의 값은 모두 가린다) · `out.shortBy` = 종류별.
+ *   `complete[종류]` = 이 목록이 그 종류의 **지금 값 전부**인가(기본 true). 아니면(인벤토리 태그를 빼고 모은 흡수) 메모리 몫이 넘쳐도 그 종류의 값을 버리지 않는다
+ *   — 목록에 없다고 '지금 등록부에 없는 값' 이 아니다(8회차 N8-3: 인벤토리 태그를 버렸다가 다음 흡수가 다시 넣어 세대가 한 번 더 올랐다).
  */
-export async function maskAbsorb(hosts = [], tags = [], { now = Date.now(), out = null } = {}) {
+export async function maskAbsorb(hosts = [], tags = [], { now = Date.now(), out = null, complete = null } = {}) {
   const m = await maskLoad();
   let changed = false;
-  let short = 0;
+  const shortBy = { h: 0, t: 0 };
   const lists = { h: hosts, t: tags };
   for (const k of MASK_KINDS) {
     const over = m.over[k];
-    const inOver = [];          // 이 흡수의 값 중 이미 메모리에만 있던 것 — 지금 값이다(over 를 비울 때 되돌린다)
+    const inOver = new Set();   // 이 흡수의 값 중 이미 메모리에만 있던 것 — 지금 값이다(over 를 비울 때 되돌린다)
     const toOver = new Set();   // 이 흡수의 새 값 중 파일에 쓰지 않을 것
     for (const v0 of lists[k] || []) {
       if (typeof v0 !== 'string' || !v0 || m[k].has(v0)) continue;
-      if (over.has(v0)) { inOver.push(v0); continue; }
-      if (k === 't' && v0.length > MASK_KEY_MAX.t) continue;   // 색인에 들지 않는 길이 — 재료가 아니다(ⓓ · 7회차 C5)
+      if (over.has(v0)) { inOver.add(v0); continue; }
+      // 색인에 들지 않는 태그 — 재료가 아니다(ⓓ). 길이는 색인과 같은 눈(구분자를 뺀 비교 키)으로 잰다(8회차 N8-2: 원문 길이로 자르면 'A-B-C…' 처럼 키가 64자 안인 태그를 버렸다)
+      if (k === 't' && tagKeyLength(v0) > TAG_KEY_MAX) continue;
       if (toOver.has(v0)) continue;
       const v = ownStr(v0);
       if (v.length > MASK_KEY_MAX[k] || m[k].size >= MASK_SEEN_MAX) {
@@ -579,20 +585,24 @@ export async function maskAbsorb(hosts = [], tags = [], { now = Date.now(), out 
       }
     }
     if (!toOver.size) continue;
-    if (over.size + toOver.size > MASK_OVER_MAX) {
-      // 메모리 상한 — 지금 등록부에 없는 값부터 버린다(넣기 전에 판정 — 넣는 도중에 비우면 먼저 지나간 지금 값을 잃는다 · 7회차 P7-1 · C4)
-      const dropped = over.size - inOver.length;
+    // 메모리 상한 — 지금 등록부에 없는 값부터 버린다(넣기 전에 판정 — 넣는 도중에 비우면 먼저 지나간 지금 값을 잃는다 · 7회차 P7-1 · C4).
+    //   버릴 값이 있을 때만 비운다(over 가 이미 지금 값뿐이면 비워도 자리가 나지 않는다 — 8회차 N8-1: 담지 못한 상태에서 요청마다 비우고 다시 채워 세대가 올랐다) ·
+    //   목록이 그 종류의 지금 값 전부일 때만(N8-3).
+    const full = complete?.[k] !== false;
+    if (full && over.size + toOver.size > MASK_OVER_MAX && over.size > inOver.size) {
+      const dropped = over.size - inOver.size;
       over.clear();
       for (const v of inOver) over.add(v);
+      changed = true;
       if (Date.now() - _matOverWarnAt >= 10 * 60_000) {
         _matOverWarnAt = Date.now();
         console.warn(`[rack-db] 가림 재료의 메모리 몫(${MASK_OVER_MAX})이 넘쳐 지금 등록부에 없는 값 ${dropped}건을 버렸습니다 — 그 값이 든 이름은 이제 가리지 않습니다. 재료를 보내는 쪽(엣지 · 등록부)의 고장을 확인하고 가림 집계 화면에서 기록을 정리하세요(10분에 한 번 알립니다).`);
       }
     }
-    for (const v of toOver) { if (over.size < MASK_OVER_MAX) over.add(v); else short += 1; }
-    changed = true;
+    for (const v of toOver) { if (over.size < MASK_OVER_MAX) { over.add(v); changed = true; } else shortBy[k] += 1; }
   }
-  if (out) out.short = short;
+  const short = shortBy.h + shortBy.t;
+  if (out) { out.short = short; out.shortBy = shortBy; }
   if (short && Date.now() - _matShortWarnAt >= 10 * 60_000) {
     _matShortWarnAt = Date.now();
     console.warn(`[rack-db] 가림 재료가 기록 상한과 메모리 몫을 모두 넘어 지금 값 ${short}건을 담지 못했습니다 — 조회 계정 요청은 503 으로 답합니다(10분에 한 번 알립니다).`);

@@ -86,7 +86,8 @@ export function _resetAbsorbForTest() { _invAt = 0; }
 export async function absorbFleet(all, { forceInv = false, out = null } = {}) {
   const inv = forceInv || Date.now() - _invAt >= INV_EVERY_MS;
   const m = fleetMaterial(all, { invTags: inv });
-  const gen = await R.maskAbsorb(m.hosts, m.tags, { out });   // out.short = 메모리 상한 때문에 담지 못한 지금 값의 수(라우트가 조회 계정에 503)
+  // out.shortBy = 메모리 상한 때문에 담지 못한 지금 값의 수(종류별 — 라우트가 조회 계정에 503). 태그 목록은 인벤토리까지 모았을 때만 '지금 값 전부'(8회차 N8-3).
+  const gen = await R.maskAbsorb(m.hosts, m.tags, { out, complete: { h: true, t: inv } });
   if (inv) _invAt = Date.now();   // 흡수를 마친 뒤에 간격을 시작한다(못 마친 흡수가 간격만 먹지 않게)
   return gen;
 }
