@@ -168,7 +168,7 @@ export default function HostAccessSettings() {
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             <b style={{ color: 'var(--red)' }}>방화벽 엔진을 쓸 수 없습니다</b> — {eng?.detail || eng?.reason}
             {eng?.reason === 'sudo-denied' && (<>
-              <div className="muted" style={{ marginTop: 6 }}>포탈 서비스 계정에 아래 sudoers 줄이 필요합니다(설치 스크립트 v2.485+ 가 <code>/etc/sudoers.d/vmware-portal-hostaccess</code> 로 설치). 업그레이드로 올라온 서버는 root 로 한 번 추가하세요(<code>visudo -f /etc/sudoers.d/vmware-portal-hostaccess</code>).</div>
+              <div className="muted" style={{ marginTop: 6 }}>포탈 서비스 계정에 방화벽 인자 검사 래퍼와 아래 sudoers 줄이 필요합니다 — 새 패키지의 install.sh 를 root 로 다시 실행하면 둘 다 설치됩니다(<code>/etc/sudoers.d/vmware-portal-hostaccess</code>). 래퍼 파일 없이 줄만 넣으면 sudo 가 거부합니다(수동 설치 절차는 호스트 접근 제어 문서).</div>
               <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>{data.sudoersHint}</pre>
             </>)}
           </div>

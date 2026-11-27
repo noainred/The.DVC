@@ -54,21 +54,25 @@ sudo cat /etc/vmware-portal/initial-admin-password.txt
 ### 1-3. 콘솔 OTP 재등록 — `otp-enroll.sh` (잠금 복구의 핵심)
 
 서버에 접속할 수 있는 운영자가 실행합니다. 계정의 **비밀번호를 몰라도** OTP 시크릿을 직접
-발급하므로, 이것이 "전원 잠금"의 실질적 복구 경로입니다. 오프라인 설치본 기준 경로:
+발급하므로, 이것이 "전원 잠금"의 실질적 복구 경로입니다. 오프라인 설치본은 `install.sh` 가 만든 **root 소유 래퍼** `vmware-portal-otp` 를 씁니다:
 
 ```bash
 # 계정 목록 확인
-sudo /opt/vmware-portal/app/otp-enroll.sh --list
+sudo vmware-portal-otp --list
 
 # admin 계정에 OTP 재등록(QR/시크릿 출력 → 인증 앱에 등록)
-sudo /opt/vmware-portal/app/otp-enroll.sh admin
+sudo vmware-portal-otp admin
 
 # 코드로 등록 확정
-sudo /opt/vmware-portal/app/otp-enroll.sh admin --confirm 123456
+sudo vmware-portal-otp admin --confirm 123456
 
 # 분실한 기존 OTP 비활성화(재등록 전 초기화가 필요할 때)
-sudo /opt/vmware-portal/app/otp-enroll.sh admin --disable
+sudo vmware-portal-otp admin --disable
 ```
+
+바로가기가 없으면(구버전 설치본) 새 패키지의 `install.sh` 를 root 로 다시 실행해 래퍼를 만듭니다. 앱 트리의
+`/opt/vmware-portal/app/otp-enroll.sh` 를 `sudo` 로 직접 부르지 마세요 — root 소유 래퍼가 있으면 그쪽으로 넘어가지만, 없으면
+서비스 계정이 고칠 수 있는 파일이 root 로 돕니다(v2.741 INJPKG-01 — 그 파일 머리말). 이 문서의 예전 판은 그 경로를 안내했습니다(2026-11-27 정정).
 
 이 래퍼는 **번들 Node 경로 탐색·`CONFIG_DIR` 결정·서비스 계정으로 강등 실행**을 자동 처리합니다.
 **`node` 를 직접 실행하지 마세요** — root 로 돌리면 `users.json` 이 root 소유가 되어 이후

@@ -173,8 +173,9 @@ sudo vmware-portal-otp admin                     # 설정 키 발급 → 인증 
 sudo vmware-portal-otp admin --confirm 482913    # 앱 코드로 확정
 sudo vmware-portal-otp admin --disable           # 해제(재등록용)
 
-# 바로가기가 없는 경우(구버전 설치본 등)
-sudo /opt/vmware-portal/app/otp-enroll.sh --list
+# 바로가기가 없는 경우(구버전 설치본 등): 새 패키지의 install.sh 를 root 로 다시 실행해 root 소유 래퍼를 만든 뒤 위 명령을 쓴다.
+#   앱 트리의 otp-enroll.sh 를 sudo 로 직접 부르지 말 것 — root 소유 래퍼가 있으면 그쪽으로 넘어가지만, 없으면 서비스 계정이
+#   고칠 수 있는 파일이 root 로 돈다(v2.741 INJPKG-01 · 그 파일 머리말). 암호화 설치는 래퍼가 있어야 SECRETS_KEY 도 넘어간다(M3).
 
 # git 소스/개발 환경
 npm run otp-enroll -- --list
