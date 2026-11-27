@@ -43,6 +43,13 @@ export const EDGE_SYNC_OFF_FIX = '아래 ‘중앙 포탈이 업그레이드되�
 const clock = (ts) => { const t = numOrNull(ts); return t == null ? '—' : new Date(t).toLocaleString('ko-KR'); };
 
 /**
+ * 보안 잔여 11-27 L2(반증 M-1): 서버는 '할 일 없음·밀어 넣음' 결과(idle · no-edges · pushed)에 **설정에서 뺀 옛 방식 엣지가 있을 때만** reason 을 싣는다
+ * (평문 HTTP 등 — 예전에는 이 결과들에 reason 이 없었다). 그때는 초록(성공)으로 말하지 않는다 — 엣지가 등록돼 있는데 보내지 않았다.
+ */
+const quietOutcome = (o) => o === 'idle' || o === 'no-edges' || o === 'pushed';
+const withDroppedNote = (run) => !!(run && quietOutcome(run.outcome) && typeof run.reason === 'string' && run.reason);
+
+/**
  * '엣지 자동 업그레이드' 칸 요약. 서버가 edgeSync 를 보내지 않으면(구버전) null — 지어내지 않는다.
  * @returns {null|{label:string, tone:string, next:string, last:string|null, lastTone:string, counts:string|null, rows:{id:string,name:string,version:string|null,text:string,tone:string,reason:string|null}[], fix:string|null}}
  */
@@ -66,11 +73,12 @@ export function edgeSyncSummary(status, now = Date.now()) {
   let last = null; let lastTone = 'muted';
   if (lr && typeof lr === 'object' && numOrNull(lr.at) != null) {
     const base = SYNC_OUTCOME_TEXT[lr.outcome] || SYNC_OUTCOME_TEXT.error;
-    const detail = lr.outcome === 'pushed' ? ` — ${lr.ok ?? 0}/${lr.pushed ?? 0}대 성공${lr.version ? ` (v${lr.version})` : ''}`
+    const detail = lr.outcome === 'pushed' ? ` — ${lr.ok ?? 0}/${lr.pushed ?? 0}대 성공${lr.version ? ` (v${lr.version})` : ''}${withDroppedNote(lr) ? ` · ${lr.reason}` : ''}`
       : lr.outcome === 'no-bundle' ? ` — 뒤처진 ${lr.behind ?? 0}대${lr.reason ? ` · ${lr.reason}` : ''}`
         : lr.reason ? ` — ${lr.reason}` : '';
     last = `${clock(lr.at)} (${agoText(lr.at, now)}) · ${base}${detail}${lr.restored ? ' · 재시작 전 기록' : ''}`;
-    lastTone = lr.outcome === 'pushed' && (lr.ok ?? 0) === (lr.pushed ?? 0) ? 'ok'
+    lastTone = withDroppedNote(lr) ? 'warn'
+      : lr.outcome === 'pushed' && (lr.ok ?? 0) === (lr.pushed ?? 0) ? 'ok'
       : lr.outcome === 'idle' || lr.outcome === 'no-edges' ? 'ok'
         : lr.outcome === 'skipped' || lr.outcome === 'off' ? 'muted' : lr.outcome === 'pushed' ? 'warn' : 'bad';
   }
@@ -121,10 +129,11 @@ export function syncRunText(resp) {
   if (run.outcome === 'pushed') {
     const n = numOrNull(run.pushed) ?? 0; const ok = numOrNull(run.ok) ?? 0;
     const fails = (Array.isArray(run.failed) ? run.failed : []).slice(0, 5).map((f) => `${f.name || f.id}: ${f.reason || '사유 없음'}`).join(' · ');
-    return { ok: ok === n, text: `${base} — ${ok}/${n}대 성공${run.version ? ` (v${run.version})` : ''}${fails ? ` · 실패: ${fails}` : ''}` };
+    const note = withDroppedNote(run) ? ` · ${run.reason}` : '';
+    return { ok: ok === n && !note, text: `${base} — ${ok}/${n}대 성공${run.version ? ` (v${run.version})` : ''}${fails ? ` · 실패: ${fails}` : ''}${note}` };
   }
   if (run.outcome === 'no-bundle') return { ok: false, text: `${base} — 뒤처진 ${numOrNull(run.behind) ?? 0}대${run.reason ? ` · ${run.reason}` : ''}` };
-  if (run.outcome === 'idle' || run.outcome === 'no-edges') return { ok: true, text: base };
+  if (run.outcome === 'idle' || run.outcome === 'no-edges') return withDroppedNote(run) ? { ok: false, text: `${base} — ${run.reason}` } : { ok: true, text: base };
   return { ok: false, text: `${base}${run.reason ? ` — ${run.reason}` : ''}` };
 }
 
@@ -147,6 +156,6 @@ export function edgeSyncLine(e, now = Date.now()) {
   const next = e.running ? '지금 동기화 중' : numOrNull(e.nextRunAt) != null ? `다음 ${inText(e.nextRunAt, now)}` : '';
   const lr = e.lastRun;
   const last = lr && numOrNull(lr.at) != null ? `마지막 ${agoText(lr.at, now)} ${SYNC_OUTCOME_TEXT[lr.outcome] || SYNC_OUTCOME_TEXT.error}${lr.outcome === 'pushed' ? ` ${lr.ok ?? 0}/${lr.pushed ?? 0}` : ''}${lr.restored ? '(재시작 전)' : ''}` : '';
-  const tone = !known || n('unreachable') || n('backoff') || n('no-effect') || (lr && (lr.outcome === 'no-bundle' || lr.outcome === 'error')) ? 'warn' : behind ? 'warn' : 'ok';
+  const tone = !known || n('unreachable') || n('backoff') || n('no-effect') || (lr && (lr.outcome === 'no-bundle' || lr.outcome === 'error' || withDroppedNote(lr))) ? 'warn' : behind ? 'warn' : 'ok';
   return { text: `엣지 자동 업그레이드: 켬 · ${parts.join(' · ')}${next ? ` · ${next}` : ''}${last ? ` · ${last}` : ''}`, tone, canRun: !e.running };
 }

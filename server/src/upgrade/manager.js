@@ -28,7 +28,7 @@ import { upgradeStatusFile, readUpgradeStatus, writeUpgradeStatus } from './stat
 // v2.859(사용자 요청 — 중앙이 업그레이드되면 엣지도 모두 자동 업그레이드): 적용한 번들을 패키지 폴더에 보관하고(fleetBundle), 뒤처진 엣지에
 //   주기적으로 다시 민다(edgeSync). 둘 다 설정 edgeAutoUpgrade(기본 켬)를 따른다.
 import { keepBundle } from './fleetBundle.js';
-import { EdgeSyncRunner } from './edgeSync.js';
+import { EdgeSyncRunner, legacyEdgesOf } from './edgeSync.js';   // 보안 잔여 11-27 L2: 적용 직후 push 도 동기화와 같은 목록 판정
 import { runningScans, resumeOutlookText, queuedScans } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다 · v2.742: 대기 요청
 import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';             // v2.742(TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(읽기만)
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
@@ -487,15 +487,24 @@ export class UpgradeManager {
   async pushToEdges(archivePath) {
     const s = this.settings;
     if (!s.edges?.length) return [];
+    // 보안 잔여 11-27 L2: 예전에는 s.edges 를 그대로 push 했다 — 평문 HTTP·SSRF 차단 대역·중복 판정이 하나도 없어 원격 http:// 엣지에
+    //   관리자 토큰(Bearer)과 번들이 평문으로 나갔다(동기화 경로만 legacyEdgesOf 를 탔다). 이제 같은 판정 하나를 탄다.
+    //   뺀 엣지는 '보내지 않음 — 사유' 결과로 남긴다(lastResult.edgePush.failed · 콘솔) — 번들이 없어도.
+    const { edges, dropped, duplicates } = legacyEdgesOf(s);
+    const refused = dropped.map((d) => ({ edge: d.url, ok: false, status: null, ...(d.code ? { code: d.code } : {}), reason: `보내지 않음 — ${d.reason}` }));
+    for (const d of duplicates) console.warn(`[upgrade] 엣지 업그레이드 푸시: 엣지 목록에 같은 주소(${d})가 또 있어 한 번만 보냅니다`);
     let bundle = archivePath;
     if (!bundle && s.watchDir) bundle = findNewerArchive(s.watchDir, '0.0.0')?.path;
-    if (!bundle) return [];
+    if (!bundle) {
+      for (const f of refused) console.warn(`[upgrade] 엣지 업그레이드 푸시 실패 ${f.edge}: ${f.reason}`);
+      return refused;
+    }
     // v2.741(감사 TIMING-07): 동시 개수 상한(UPGRADE_PUSH_CONCURRENCY, 기본 4) — 예전 Promise.all 은 모든 엣지에 번들(수십 MB)을 한꺼번에
     //   올려 업링크를 나눠 쓰다 개별 업로드가 시한(EDGE_PUSH_TIMEOUT_MS)을 넘길 수 있었고, 엣지마다 번들을 따로 읽어 메모리에 동시에 올렸다.
     //   결과 배열 모양·순서는 예전 그대로이고, 던진 항목(번들 파일 읽기 실패 등)은 그 엣지만 실패로 남긴다(예전에는 전체가 거부됐다).
-    const settled = await poolSettled(s.edges, pushConcurrencyOf(), (e) => pushBundleToEdge(e, bundle));
-    const results = settled.map((r, i) => (r.status === 'fulfilled' ? r.value
-      : { edge: s.edges[i]?.url, ok: false, status: null, reason: String(r.reason?.message || r.reason || '푸시 실패').slice(0, 300) }));
+    const settled = await poolSettled(edges, pushConcurrencyOf(), (e) => pushBundleToEdge({ url: e.url, token: e.token }, bundle));
+    const results = [...settled.map((r, i) => (r.status === 'fulfilled' ? r.value
+      : { edge: edges[i]?.url, ok: false, status: null, reason: String(r.reason?.message || r.reason || '푸시 실패').slice(0, 300) })), ...refused];
     const sum = summarizeEdgePush(results);
     if (results.length) console.log(`[upgrade] 엣지 업그레이드 푸시: ${sum.ok}/${sum.total} 성공`);
     for (const f of sum.failed) console.warn(`[upgrade] 엣지 업그레이드 푸시 실패 ${f.edge}: ${f.reason}`);

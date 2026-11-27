@@ -115,3 +115,34 @@ describe('엣지 자동 업그레이드 요약', () => {
     expect(EDGE_STATE_TEXT['no-effect'].tone).toBe('bad');
   });
 });
+
+// 보안 잔여 11-27 L2(반증 M-1): 평문 HTTP 등으로 뺀 옛 방식 엣지가 있으면 서버가 idle · no-edges · pushed 결과에 reason 을 싣는다 —
+//   그때 '할 일 없음' 을 초록(성공)으로 말하지 않는다(엣지가 등록돼 있는데 보내지 않았다). reason 이 없으면 예전 그대로.
+describe('뺀 옛 방식 엣지가 있는 동기화 결과(보안 잔여 11-27 L2)', () => {
+  const NOTE = '설정의 옛 방식 엣지 1곳은 보내지 않았습니다(평문 HTTP 1곳) — 사유는 ‘동기화에서 뺀 옛 방식 엣지’ 줄을 보세요';
+  const st = (lastRun) => ({ enabled: true, edgeSync: { enabled: true, total: 0, counts: {}, pending: [], lastRun, legacyDropped: [{ url: 'http://10.1.2.3:4000', code: 'insecure-http', reason: '평문 HTTP 라 보내지 않습니다' }] } });
+  it('no-edges · idle 에 사유가 있으면 마지막 동기화 줄이 경고색이고 사유를 싣는다', () => {
+    for (const outcome of ['no-edges', 'idle']) {
+      const a = edgeSyncSummary(st({ at: NOW - 60_000, outcome, reason: NOTE }), NOW);
+      expect(a.lastTone).toBe('warn');
+      expect(a.last).toContain(NOTE);
+      expect(a.dropped).toEqual(['http://10.1.2.3:4000 — 평문 HTTP 라 보내지 않습니다']);
+      // 사유가 없으면 예전 그대로 초록
+      expect(edgeSyncSummary(st({ at: NOW - 60_000, outcome }), NOW).lastTone).toBe('ok');
+    }
+  });
+  it('pushed 전부 성공이어도 사유가 있으면 경고색 · 사유를 덧붙인다', () => {
+    const a = edgeSyncSummary(st({ at: NOW - 60_000, outcome: 'pushed', ok: 1, pushed: 1, version: '3.53.1', reason: NOTE }), NOW);
+    expect(a.lastTone).toBe('warn'); expect(a.last).toMatch(/1\/1대 성공 \(v3\.53\.1\) · 설정의 옛 방식 엣지 1곳/);
+  });
+  it("'지금 동기화' 응답도 성공으로 말하지 않는다 · 수집 서버 화면 한 줄도 경고", () => {
+    expect(syncRunText({ ok: true, run: { outcome: 'no-edges', reason: NOTE } })).toEqual({ ok: false, text: `${SYNC_OUTCOME_TEXT['no-edges']} — ${NOTE}` });
+    expect(syncRunText({ ok: true, run: { outcome: 'idle', reason: NOTE } }).ok).toBe(false);
+    const p = syncRunText({ ok: true, run: { outcome: 'pushed', pushed: 1, ok: 1, failed: [], reason: NOTE } });
+    expect(p.ok).toBe(false); expect(p.text).toContain(NOTE);
+    expect(syncRunText({ ok: true, run: { outcome: 'no-edges' } })).toEqual({ ok: true, text: SYNC_OUTCOME_TEXT['no-edges'] });
+    expect(edgeSyncLine({ enabled: true, total: 0, counts: {}, lastRun: { at: NOW - 60_000, outcome: 'no-edges', reason: NOTE } }, NOW).tone).toBe('warn');
+    expect(edgeSyncLine({ enabled: true, total: 0, counts: {}, lastRun: { at: NOW - 60_000, outcome: 'no-edges' } }, NOW).tone).toBe('ok');
+    expect(JSON.stringify(syncRunText({ ok: true, run: { outcome: 'idle', reason: NOTE } })).includes('`')).toBe(false);
+  });
+});

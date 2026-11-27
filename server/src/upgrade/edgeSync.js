@@ -41,6 +41,8 @@ import { getPackageDir } from './packageSettings.js';
 import { keepBundle } from './fleetBundle.js';
 import { nextCheckAt } from './autoState.js';
 import { pushBundleToEdge } from './upgrade.js';
+import { legacyEdgeTransportIssue, legacyDroppedNote } from './legacyEdgePolicy.js';   // 보안 잔여 11-27 L2: 평문 HTTP 옛 방식 엣지 판정(S-09 와 같은 함수)
+import { INSECURE_HTTP_CODE } from '../collector/transportPolicy.js';
 import { upgradeAgent } from './upgradeAgent.js';
 import { notify as sendAlert } from '../alerts.js';
 import { currentVersion as readCurrentVersion } from '../config.js';
@@ -98,29 +100,40 @@ export const backoffCapped = (attempts, baseMs, maxMs = SYNC_BACKOFF_MAX_MS) => 
 
 const txt = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
 const originOf = (u) => { try { return new URL(String(u)).origin; } catch { return ''; } };
+// 형식 오류 항목은 origin 을 못 만들 수 있다 — 화면·상태에 실을 때 'scheme://계정:비번@' 의 계정 부분만 가린다(길이를 먼저 자른 뒤 · 반복 상한).
+const maskUserinfo = (s) => String(s).replace(/\/\/[^/@\s]{0,200}@/, '//***@');
 const LEGACY_PREFIX = 'edge:';
 export const isLegacyId = (id) => typeof id === 'string' && id.startsWith(LEGACY_PREFIX);
 
 /**
  * v2.865 B: 옛 방식 엣지 목록(설정 `edges` — url·token) → 동기화 행. origin 으로 이름·id 를 만들고 중복·형식 오류·SSRF 차단 대역은 뺀다
  * (뺀 것은 `dropped` 에 사유와 함께 — 조용히 빼지 않는다).
- * @returns {{ edges:{id:string,name:string,url:string,token?:string,kind:'edge'}[], dropped:{url:string,reason:string}[] }}
+ * 보안 잔여 11-27 L2: 평문 HTTP(원격 http:// — 허용 목록 COLLECTOR_HTTP_ALLOW 밖)도 뺀다(code 'insecure-http') — 이 행에는 엣지 관리자 토큰이 실린다.
+ *   dropped.url 은 origin 만(계정·경로·쿼리 없음). 같은 origin 의 둘째 이후 항목은 `duplicates`(origin)로 따로 돌려준다(dropped 계약은 그대로 —
+ *   첫 항목으로 이미 보낸다). 동기화·적용 직후 push(manager.pushToEdges) 둘 다 이 함수 하나를 탄다.
+ * @returns {{ edges:{id:string,name:string,url:string,token?:string,kind:'edge'}[], dropped:{url:string,reason:string,code?:string}[], duplicates:string[] }}
  */
-export function legacyEdgesOf(settings) {
-  const out = []; const dropped = []; const seen = new Set();
+export function legacyEdgesOf(settings, { env = process.env } = {}) {
+  const out = []; const dropped = []; const duplicates = []; const seen = new Set(); const droppedSeen = new Set();
   for (const e of Array.isArray(settings?.edges) ? settings.edges : []) {
     const url = typeof e?.url === 'string' ? e.url.trim() : '';
     if (!url) continue;
     const origin = originOf(url);
-    if (!origin || !/^https?:$/.test(new URL(url).protocol)) { dropped.push({ url: url.slice(0, 200), reason: 'http(s) URL 이 아닙니다' }); continue; }
+    if (!origin || !/^https?:$/.test(new URL(url).protocol)) { dropped.push({ url: maskUserinfo(url.slice(0, 200)), reason: 'http(s) URL 이 아닙니다' }); continue; }
     const ssrf = ssrfBlockReason(url);
     if (ssrf) { dropped.push({ url: origin, reason: ssrf }); continue; }
+    const tr = legacyEdgeTransportIssue(url, env);   // 보안 잔여 11-27 L2 — SSRF 사유가 먼저(차단 대역은 그 사유로 말한다)
+    if (tr) {
+      const k = `${origin}|${tr.code}`;
+      if (!droppedSeen.has(k)) { droppedSeen.add(k); dropped.push({ url: origin, code: tr.code, reason: tr.reason }); }
+      continue;
+    }
     const id = `${LEGACY_PREFIX}${origin}`;
-    if (seen.has(id)) continue;
+    if (seen.has(id)) { duplicates.push(origin); continue; }
     seen.add(id);
     out.push({ id, name: origin, url, token: typeof e.token === 'string' ? e.token : '', kind: 'edge' });
   }
-  return { edges: out, dropped };
+  return { edges: out, dropped, duplicates };
 }
 
 /**
@@ -258,11 +271,13 @@ export class EdgeSyncRunner {
   constructor({ settings = () => ({}), busy = () => false, now = () => Date.now(), currentVersion = readCurrentVersion,
     collectors = loadCollectors, statusOf = getCollectorStatus, pushFn = pushUpgradeToCollectors, pushEdgeFn = pushBundleToEdge,
     probeFn = probeEdgeVersion, notifyFn = sendAlert, resolveBundle = resolveCurrentBundle, onRun = null,
-    intervalMs = null, firstDelayMs = SYNC_FIRST_DELAY_MS, log = console } = {}) {
+    intervalMs = null, firstDelayMs = SYNC_FIRST_DELAY_MS, log = console, env = process.env } = {}) {
     this.settings = settings; this.busy = busy; this.now = now; this.currentVersion = currentVersion;
     this.collectors = collectors; this.statusOf = statusOf; this.pushFn = pushFn; this.pushEdgeFn = pushEdgeFn;
     this.probeFn = probeFn; this.notifyFn = notifyFn; this.resolveBundle = resolveBundle; this.onRun = onRun;
     this.fixedIntervalMs = intervalMs; this.firstDelayMs = firstDelayMs; this.log = log;
+    this.env = env;                // 보안 잔여 11-27 L2: 평문 HTTP 허용 목록(COLLECTOR_HTTP_ALLOW)을 읽는 곳 — 기본 process.env(살아 있는 객체)
+    this.insecureWarnKey = '';     // 보안 잔여 11-27 L2: 마지막으로 경고한 '평문 HTTP 로 뺀 origin' 집합 — 바뀔 때만 콘솔 1줄
     this.attempts = new Map();     // id → { at, ok, target, attempts, reason, okSeen?, noEffect? }
     this.legacyStatus = new Map(); // v2.865 B: 옛 방식 엣지 id → { at, ok, version, error }(마지막 health 질의)
     this.legacyDropped = [];       // v2.865 B: 설정에서 뺀 옛 방식 엣지(사유)
@@ -318,10 +333,24 @@ export class EdgeSyncRunner {
 
   /** 동기화 행 전부 — 등록 수집 서버 + 옛 방식 엣지(v2.865 B). */
   rows() {
+    const lg = this.#legacy();   // 먼저 — 등록부 읽기가 던져도 뺀 목록·경고는 갱신된다
     const cols = (this.collectors() || []).filter((c) => c && typeof c === 'object').map((c) => ({ ...c, kind: 'collector' }));
-    const lg = legacyEdgesOf(this.settings() || {});
-    this.legacyDropped = lg.dropped;
     return [...cols, ...lg.edges];
+  }
+  /**
+   * 옛 방식 엣지 목록 판정 + 뺀 목록 갱신. 보안 잔여 11-27 L2: 평문 HTTP 로 뺀 집합이 **바뀔 때만** 콘솔 경고 1줄(status() 는 화면 폴링마다
+   *   불린다 — 매번 찍지 않는다). 토큰·경로는 싣지 않는다(origin 만). 집합이 비면 키를 지워 다시 생기면 또 알린다.
+   */
+  #legacy() {
+    const lg = legacyEdgesOf(this.settings() || {}, { env: this.env });
+    this.legacyDropped = lg.dropped;
+    const insecure = lg.dropped.filter((d) => d.code === INSECURE_HTTP_CODE).map((d) => d.url).sort();
+    const key = insecure.join(' ');
+    if (key !== this.insecureWarnKey) {
+      this.insecureWarnKey = key;
+      if (key) this.log.warn?.(`[upgrade] 옛 방식 엣지 ${insecure.length}곳을 평문 HTTP 라 엣지 자동 업그레이드·적용 직후 push 에서 뺐습니다: ${insecure.slice(0, 10).join(' · ')}${insecure.length > 10 ? ` 외 ${insecure.length - 10}곳` : ''} — 엣지에 TLS 를 켜고 https:// 로 바꾸거나 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 넣으세요`);
+    }
+    return lg;
   }
   #statusOfRow(id) { return isLegacyId(id) ? (this.legacyStatus.get(id) || null) : this.statusOf(id); }
 
@@ -416,7 +445,10 @@ export class EdgeSyncRunner {
       else if (this.busy()) rec = { at, outcome: 'skipped', reason: '업그레이드 확인·적용이 진행 중' };
       else {
         const rows = this.rows();
-        if (!rows.length) rec = { at, outcome: 'no-edges' };
+        // 보안 잔여 11-27 L2(반증 M-1): 뺀 옛 방식 엣지가 있으면 '할 일 없음'(초록)으로만 끝내지 않는다 — 사유 한 줄을 싣는다(웹이 경고색으로 읽는다).
+        const droppedNote = legacyDroppedNote(this.legacyDropped);
+        const noteOf = () => (droppedNote ? { reason: droppedNote } : {});
+        if (!rows.length) rec = { at, outcome: 'no-edges', ...noteOf() };
         else {
           // v2.865 B: 옛 방식 엣지는 동기화 때마다 /api/health 로 버전을 묻는다(수집 pull 이 없다). 동시 개수는 push 와 같은 상한.
           const legacy = rows.filter((r) => r.kind === 'edge');
@@ -426,7 +458,7 @@ export class EdgeSyncRunner {
           }
           const plan = this.plan(at, rows); this.lastPlan = plan;
           await this.#closeNoEffect(plan, rows);
-          if (!plan.push.length) rec = { at, outcome: 'idle', counts: plan.counts };
+          if (!plan.push.length) rec = { at, outcome: 'idle', counts: plan.counts, ...noteOf() };
           else {
             const cur = plan.currentVersion;
             const allowRemote = this.remoteAskedAt == null || at - this.remoteAskedAt >= SYNC_REMOTE_RETRY_MS;
@@ -463,7 +495,7 @@ export class EdgeSyncRunner {
                 if (!ok) failed.push({ id: String(r.id), name: txt(r.name, 120) || String(r.id), reason: txt(r.reason, 300) || '' });
               }
               const n = results.length;
-              rec = { at, outcome: 'pushed', version: cur, source: txt(bundle.source, 20), pushed: n, ok: n - failed.length, failed: failed.slice(0, 20), counts: plan.counts };
+              rec = { at, outcome: 'pushed', version: cur, source: txt(bundle.source, 20), pushed: n, ok: n - failed.length, failed: failed.slice(0, 20), counts: plan.counts, ...noteOf() };
               this.log.log?.(`[upgrade] 엣지 자동 업그레이드: 뒤처진 엣지 ${n}대에 v${cur} 번들 push — ${rec.ok}/${n} 성공`);
               for (const f of failed) this.log.warn?.(`[upgrade] 엣지 자동 업그레이드 push 실패 ${f.name}: ${f.reason}`);
             }
@@ -479,12 +511,17 @@ export class EdgeSyncRunner {
     return this.lastRun;
   }
 
-  /** 화면용 상태 — 켜짐·다음 실행·마지막 실행·엣지별 판정(최신·중지 제외 최대 20). 꺼져 있으면 판정을 하지 않는다. */
+  /**
+   * 화면용 상태 — 켜짐·다음 실행·마지막 실행·엣지별 판정(최신·중지 제외 최대 20). 꺼져 있으면 판정을 하지 않는다.
+   * 보안 잔여 11-27 L2: 뺀 옛 방식 엣지(legacyDropped)는 **꺼져 있어도** 계산한다 — 동기화가 꺼져도 수동·자동 적용 직후 push
+   *   (manager.pushToEdges — edgeAutoUpgrade 만 본다)가 같은 목록을 쓰므로, 평문 HTTP 로 뺀 사실이 화면에 보여야 한다.
+   */
   status(now = this.now()) {
     const enabled = this.enabledNow();
     const armed = !!this.timer;
     let plan = null;
     if (enabled) { try { plan = this.plan(now); } catch { plan = null; } }
+    else { try { this.#legacy(); } catch { /* 설정 읽기 실패 — 직전 목록 유지 */ } }
     const pending = plan ? plan.edges.filter((e) => e.state !== 'up-to-date' && e.state !== 'disabled').slice(0, 20) : [];
     let nextRunAt = null;
     if (armed && this.armedAt != null) {

@@ -24,4 +24,8 @@
   백업 없는 교체가 되고 롤백이 불가능해진다. ③ 현재 cfg 읽기는 **존재 신호(`__HAS__`/`__NONE__`)를 분리**
   — 파일은 있는데 내용이 비면 중단한다(빈 문자열로 병합하면 관리 블록만 남은 cfg 가 `haproxy -c` 를
   통과해 기존 설정을 전부 날린다).
+- **원격 임시 파일은 `remoteTmpDir` 안에만**(보안 잔여 11-27 L5 — SEC2600-01 형제): `applySite` 는 `remoteTmpDir(exec,'haproxy-cfg')`
+  (mktemp 0700 · 형식 · 심링크 아님 · 소유자 확인) 안에 `umask 077; set -C` 로 쓴다. 만들지 못하면 **고정 /tmp 경로로 폴백하지 않고** 중단,
+  모든 출구에서 **세션 안 `finally`** 로 sudo 없이 `rm -rf --`(withSsh 가 돌려준 뒤에는 연결이 닫힌다), 정리 실패는 advisory 단계 + `tmpLeft`(적용 성패와 분리).
+  응답 `ok` 는 단계 판정이다 — withSsh 의 `ok:true` 를 뒤에 펼쳐 덮지 말 것(예전엔 실패한 적용도 '성공'). 회귀 `secResidual1127EdgeRelay`.
 

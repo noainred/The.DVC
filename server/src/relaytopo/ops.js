@@ -8,6 +8,7 @@
  */
 import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, withDeadline } from '../proxy/sshExec.js';
+import { remoteTmpDir } from '../agent/deploy.js';   // 보안 잔여 11-27 L5: SEC2600-01 형제 — 예측 가능한 /tmp 경로 대신 소유자 전용(0700) mktemp 디렉터리
 import { getTargetRaw, listTargetsRaw } from '../agent/deployRegistry.js';
 import { ipBlockReason } from '../collector/registry.js';
 import { loadTopologyRaw, irsRelayService } from './store.js';
@@ -195,6 +196,9 @@ function stripCfg(r) {
   return { ...r, reason: r.reason ? '(관리자만 확인)' : r.reason, edge: node(r.edge), irs: node(r.irs), rows, irsIssues: [], irsIssueCount: irsIssues.length, maskedAddress: true };
 }
 export function _resetForTest() { _last.clear(); _busy.clear(); }
+/** 테스트 전용 — applySite 의 SSH 세션을 가짜로 바꾼다(실제 명령 문자열을 잡는다). null 이면 원래 withSsh. 시험은 finally 에서 반드시 null 로 되돌릴 것. */
+let _withSsh = withSsh;
+export function _setSshForTest(fn) { _withSsh = typeof fn === 'function' ? fn : withSsh; }
 /** 테스트 전용 — 결과 1건을 심는다(비-admin 가림 회귀 고정용, v2.594). */
 export function _setResultForTest(dc, r) { _last.set(dc, r); }
 
@@ -214,8 +218,14 @@ export async function applySite(dc, { dryRun = false, timeoutMs = TIMEOUT_MS * 2
   _busy.add(dc);
   const steps = [];
   const step = (name, ok, detail = '') => steps.push({ name, ok, detail: String(detail || '').slice(0, 2000) });
+  // 보안 잔여 11-27 L5: 원격 임시 디렉터리 상태 — 세션 밖(바깥 catch)에서도 본다. 시한 초과면 withSsh 가 세션 안 finally 의 정리보다 먼저
+  //   거부되므로(Promise.race), 정리를 확인하지 못한 디렉터리는 보수적으로 '남았을 수 있음' 으로 보고한다(반증 S-2).
+  const tmpState = { dir: '', cleaned: false, reason: '' };
+  const tmpLeftOf = () => (tmpState.dir && !tmpState.cleaned ? { dir: tmpState.dir, reason: tmpState.reason || '세션이 끊겨 정리를 확인하지 못했습니다' } : null);
+  const tmpLeftStep = (left) => ({ name: '임시 디렉터리 정리', ok: false, advisory: true,
+    detail: `적용 결과와 별개 — 원격 임시 폴더 ${left.dir} 를 지우지 못했습니다(${left.reason}). 소유자 전용(0700) 폴더이고 내용은 이번에 만든 haproxy.cfg 입니다. 직접 지우세요: rm -rf ${left.dir}` });
   try {
-    const r = await withDeadline(timeoutMs, (signal) => withSsh({ ...acc.creds, signal }, async ({ exec }) => {
+    const r = await withDeadline(timeoutMs, (signal) => _withSsh({ ...acc.creds, signal }, async ({ exec }) => {
       const S = sudo(acc.creds);
       const ver = await exec('haproxy -v 2>/dev/null | head -1', 15_000);
       if (!ver.stdout.trim()) { step('haproxy 확인', false, 'haproxy 가 설치돼 있지 않습니다. dnf install -y haproxy 후 다시 시도'); return { applied: false }; }
@@ -235,51 +245,79 @@ export async function applySite(dc, { dryRun = false, timeoutMs = TIMEOUT_MS * 2
       const merged = mergeManagedBlock(before, block);
       if (merged === before) { step('변경 없음', true, '관리 블록이 이미 같습니다.'); return { applied: false, unchanged: true, merged }; }
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const tmp = `/tmp/haproxy.cfg.portal-${ts}`;
-      const b64 = Buffer.from(merged, 'utf8').toString('base64');
-      const w = await exec(`printf '%s' '${b64}' | base64 -d > ${tmp} && chmod 600 ${tmp} && echo written`, 15_000);
-      if (!/written/.test(w.stdout)) { step('임시 파일 기록', false, w.stderr || w.stdout); return { applied: false }; }
-      step('임시 파일 기록', true, tmp);
-      const chk = await exec(`${S}haproxy -c -f ${tmp} 2>&1; echo "rc=$?"`, 30_000);
-      const rc = exitCodeOf(chk.stdout);
-      if (rc !== 0) { step('haproxy -c 검증', false, chk.stdout.replace(/rc=\d+\s*$/, '')); await exec(`rm -f ${tmp}`, 5000).catch(() => {}); return { applied: false, merged }; }
-      step('haproxy -c 검증', true, chk.stdout.replace(/rc=\d+\s*$/, '').trim() || 'Configuration file is valid');
-      if (dryRun) { await exec(`rm -f ${tmp}`, 5000).catch(() => {}); step('모의 실행', true, '검증만 수행(파일 교체 없음)'); return { applied: false, dryRun: true, merged }; }
-      const bak = `${CFG}.bak-${ts}`;
-      // S5(v2.435): 예전에는 `test -f … && cp -a …; install …` 이라 **cp 가 실패해도 `;` 뒤의 install 이 진행**됐다.
-      // 디스크 풀·ro 마운트·SELinux 로 백업이 안 된 채 원본을 덮어쓰면, reload 실패 시 롤백이 없는 백업을
-      // 복사하려다 실패해 원본이 영구 유실된다. 백업 → 확인 → 교체를 `&&` 로 묶고 실패 코드를 구분한다.
-      const b = await exec(`${S}sh -c 'set -e; if [ -f ${CFG} ]; then cp -a ${CFG} ${bak} || exit 91; [ -s ${bak} ] || exit 92; fi; install -m 644 ${tmp} ${CFG} || exit 93; rm -f ${tmp}; echo replaced'; echo "rc=$?"`, 15_000);
-      const brc = exitCodeOf(b.stdout);
-      if (!/replaced/.test(b.stdout)) {
-        const why = brc === 91 ? `백업(cp -a ${CFG} → ${bak}) 실패 — 원본을 건드리지 않고 중단했습니다.`
-          : brc === 92 ? `백업 파일이 비어 있습니다(${bak}) — 원본을 건드리지 않고 중단했습니다.`
-            : brc === 93 ? `교체(install) 실패 — 백업은 ${bak} 에 있습니다.`
-              : (b.stderr || b.stdout || '알 수 없는 오류');
-        step('백업·교체', false, why);
-        return { applied: false, merged, backup: hadCfg ? bak : '' };
+      // 보안 잔여 11-27 L5: 예전 '/tmp/haproxy.cfg.portal-<시각>' 은 이름을 예측할 수 있어 대상 호스트의 다른 로컬 계정이 먼저 만들어 둘 수 있었다 —
+      //   심링크로 쓰기 대상을 바꾸거나, 검증(haproxy -c)과 설치(install — root) 사이에 내용을 바꿔 root 가 남의 cfg 를 깔게 할 수 있었다.
+      //   이제 remoteTmpDir(mktemp -d + 형식 · 디렉터리 · 심링크 아님 · 소유자 확인) 안에만 쓴다. 만들지 못하면 **고정 경로로 대신 쓰지 않고** 중단한다.
+      let dir;
+      try { dir = await remoteTmpDir((c) => exec(c, 15_000), 'haproxy-cfg'); }
+      catch (e) {
+        step('임시 디렉터리 만들기', false, `${String(e?.message || e).slice(0, 300)} — 고정 /tmp 경로로 대신 쓰지 않습니다(다른 로컬 계정이 미리 만들어 둔 경로를 root 가 쓰지 않게).`);
+        return { applied: false, merged };
       }
-      step('백업·교체', true, hadCfg ? `백업 ${bak}` : '(기존 cfg 없음 — 백업 생략)');
-      const rl = await exec(`${S}systemctl reload haproxy 2>&1 || ${S}systemctl restart haproxy 2>&1; ${S}systemctl is-active haproxy`, 30_000);
-      const ok = isActiveOut(rl.stdout);   // I1(v2.435): 'inactive' 를 성공으로 읽던 정규식 제거
-      step('reload/restart', ok, rl.stdout.trim());
-      if (!ok && hadCfg) {
-        const rb = await exec(`${S}sh -c 'cp -a ${bak} ${CFG} && (systemctl reload haproxy || systemctl restart haproxy) >/dev/null 2>&1; systemctl is-active haproxy'`, 30_000);
-        const rbOk = isActiveOut(rb.stdout);
-        step('롤백(백업 복원)', rbOk, rbOk ? `${bak} 복원 후 active` : `복원했으나 서비스가 ${rb.stdout.trim() || '미상'} 입니다 — 수동 확인 필요`);
-        return { applied: false, rolledBack: true, rollbackOk: rbOk, merged, backup: bak };
+      tmpState.dir = dir;
+      const tmp = `${dir}/haproxy.cfg`;
+      try {
+        const b64 = Buffer.from(merged, 'utf8').toString('base64');
+        // 쓰기는 sudo 없이(SSH 계정 = 디렉터리 소유자) · 0700 디렉터리 안 + umask 077 + noclobber(set -C — 이미 있는 이름이면 실패) 이중 방어.
+        const w = await exec(`umask 077; set -C; printf '%s' '${b64}' | base64 -d > ${tmp} && chmod 600 ${tmp} && echo written`, 15_000);
+        if (!/written/.test(w.stdout)) { step('임시 파일 기록', false, w.stderr || w.stdout); return { applied: false }; }
+        step('임시 파일 기록', true, tmp);
+        const chk = await exec(`${S}haproxy -c -f ${tmp} 2>&1; echo "rc=$?"`, 30_000);
+        const rc = exitCodeOf(chk.stdout);
+        if (rc !== 0) { step('haproxy -c 검증', false, chk.stdout.replace(/rc=\d+\s*$/, '')); return { applied: false, merged }; }
+        step('haproxy -c 검증', true, chk.stdout.replace(/rc=\d+\s*$/, '').trim() || 'Configuration file is valid');
+        if (dryRun) { step('모의 실행', true, '검증만 수행(파일 교체 없음)'); return { applied: false, dryRun: true, merged }; }
+        const bak = `${CFG}.bak-${ts}`;
+        // S5(v2.435): 예전에는 `test -f … && cp -a …; install …` 이라 **cp 가 실패해도 `;` 뒤의 install 이 진행**됐다.
+        // 디스크 풀·ro 마운트·SELinux 로 백업이 안 된 채 원본을 덮어쓰면, reload 실패 시 롤백이 없는 백업을
+        // 복사하려다 실패해 원본이 영구 유실된다. 백업 → 확인 → 교체를 `&&` 로 묶고 실패 코드를 구분한다.
+        const b = await exec(`${S}sh -c 'set -e; if [ -f ${CFG} ]; then cp -a ${CFG} ${bak} || exit 91; [ -s ${bak} ] || exit 92; fi; install -m 644 ${tmp} ${CFG} || exit 93; echo replaced'; echo "rc=$?"`, 15_000);
+        const brc = exitCodeOf(b.stdout);
+        if (!/replaced/.test(b.stdout)) {
+          const why = brc === 91 ? `백업(cp -a ${CFG} → ${bak}) 실패 — 원본을 건드리지 않고 중단했습니다.`
+            : brc === 92 ? `백업 파일이 비어 있습니다(${bak}) — 원본을 건드리지 않고 중단했습니다.`
+              : brc === 93 ? `교체(install) 실패 — 백업은 ${bak} 에 있습니다.`
+                : (b.stderr || b.stdout || '알 수 없는 오류');
+          step('백업·교체', false, why);
+          return { applied: false, merged, backup: hadCfg ? bak : '' };
+        }
+        step('백업·교체', true, hadCfg ? `백업 ${bak}` : '(기존 cfg 없음 — 백업 생략)');
+        const rl = await exec(`${S}systemctl reload haproxy 2>&1 || ${S}systemctl restart haproxy 2>&1; ${S}systemctl is-active haproxy`, 30_000);
+        const ok = isActiveOut(rl.stdout);   // I1(v2.435): 'inactive' 를 성공으로 읽던 정규식 제거
+        step('reload/restart', ok, rl.stdout.trim());
+        if (!ok && hadCfg) {
+          const rb = await exec(`${S}sh -c 'cp -a ${bak} ${CFG} && (systemctl reload haproxy || systemctl restart haproxy) >/dev/null 2>&1; systemctl is-active haproxy'`, 30_000);
+          const rbOk = isActiveOut(rb.stdout);
+          step('롤백(백업 복원)', rbOk, rbOk ? `${bak} 복원 후 active` : `복원했으나 서비스가 ${rb.stdout.trim() || '미상'} 입니다 — 수동 확인 필요`);
+          return { applied: false, rolledBack: true, rollbackOk: rbOk, merged, backup: bak };
+        }
+        if (!ok) { step('롤백 불가', false, '기존 cfg 가 없어 복원할 백업이 없습니다 — haproxy 상태를 직접 확인하세요.'); return { applied: false, merged }; }
+        const ss = await exec(`ss -ltnH 2>/dev/null | awk '{print $4}'`, 15_000);
+        const ports = listenPorts(ss.stdout);
+        const want = topo.services.filter((s) => s.enabled !== false && !missing.some((m) => m.key === s.key)).map((s) => s.listenPort);
+        const lacking = want.filter((p) => !ports.includes(p));
+        step('리스너 확인', lacking.length === 0, lacking.length ? `리슨 안 됨: ${lacking.join(', ')}` : `리슨 중: ${want.join(', ')}`);
+        return { applied: true, merged, listeners: ports, backup: bak };
+      } finally {
+        // 모든 출구(검증 실패 · 모의 실행 · 백업 실패 91/92 · 교체 실패 93 · reload 실패 롤백 · 예외)에서 지운다 — **세션 안에서**(withSsh 가
+        //   돌려준 뒤에는 연결이 닫힌다). SSH 계정 소유라 sudo 없이. 정리 실패는 적용 성패를 바꾸지 않는다(advisory — 아래 tmpLeft).
+        const rm = await exec(`rm -rf -- ${dir}`, 5000).catch((e) => ({ code: null, stderr: String(e?.message || e) }));
+        if (rm?.code === 0) tmpState.cleaned = true;
+        else tmpState.reason = String(rm?.stderr || rm?.stdout || '알 수 없음').trim().slice(0, 200) || '알 수 없음';
       }
-      if (!ok) { step('롤백 불가', false, '기존 cfg 가 없어 복원할 백업이 없습니다 — haproxy 상태를 직접 확인하세요.'); return { applied: false, merged }; }
-      const ss = await exec(`ss -ltnH 2>/dev/null | awk '{print $4}'`, 15_000);
-      const ports = listenPorts(ss.stdout);
-      const want = topo.services.filter((s) => s.enabled !== false && !missing.some((m) => m.key === s.key)).map((s) => s.listenPort);
-      const lacking = want.filter((p) => !ports.includes(p));
-      step('리스너 확인', lacking.length === 0, lacking.length ? `리슨 안 됨: ${lacking.join(', ')}` : `리슨 중: ${want.join(', ')}`);
-      return { applied: true, merged, listeners: ports, backup: bak };
     }), `적용 SSH 타임아웃(${dc})`);
-    delete r.log; // base64 cfg 를 담은 명령 로그는 응답에서 제외
-    return { ok: steps.every((s) => s.ok), dc, at: Date.now(), steps, block, missing: missing.map((m) => m.key), ...r };
-  } catch (e) { step('SSH', false, e.message); return { ok: false, dc, at: Date.now(), reason: e.message, steps, block, missing: missing.map((m) => m.key) }; }
+    // base64 cfg 를 담은 명령 로그는 응답에서 제외. 보안 잔여 11-27 L5(같은 줄 정정): withSsh 는 { ok: true, log, ...결과 } 를 돌려준다 —
+    //   예전에는 `...r` 를 맨 뒤에 펼쳐 그 ok:true 가 단계 판정을 덮어, 검증 실패·백업 실패도 응답·감사 로그가 ok=true(화면 '성공' 배지)였다.
+    const { ok: _sessionOk, log: _log, ...rest } = r;
+    const left = tmpLeftOf();
+    if (left) steps.push(tmpLeftStep(left));
+    return { ...rest, ok: steps.every((s) => s.ok || s.advisory), dc, at: Date.now(), steps, block, missing: missing.map((m) => m.key), ...(left ? { tmpLeft: left } : {}) };
+  } catch (e) {
+    step('SSH', false, e.message);
+    const left = tmpLeftOf();
+    if (left) steps.push(tmpLeftStep(left));
+    return { ok: false, dc, at: Date.now(), reason: e.message, steps, block, missing: missing.map((m) => m.key), ...(left ? { tmpLeft: left } : {}) };
+  }
   finally { _busy.delete(dc); }
 }
 

@@ -24,6 +24,7 @@ import { readBytesCapped } from '../util/readBytesCapped.js'; // v2.607 SEC2607-
 import { recordOutbound } from '../util/outboundStats.js'; // v2.727(감사 D-06): 전역 fetch 경로라 직접 기록(collector/upgradePush.js 와 같은 형태)
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
 import { readTextCapped } from '../util/readCapped.js';
+import { legacyEdgeTransportIssue } from './legacyEdgePolicy.js';   // 보안 잔여 11-27 L2: 토큰을 싣기 직전 마지막 관문
 import { atomicWriteFileSync } from '../util/atomicWrite.js';   // 86회차 F4: 받은 번들은 임시 파일 + rename
 // v2.730(검토 S-10·I-08): 배포자 서명 판정 하나(signature.js) · 메타데이터 상한·형식(versionsDoc.js)
 import {
@@ -711,14 +712,19 @@ export function bundleShaIssue(headerSha, bytes, { allowUnverified = String(proc
 export const EDGE_UPGRADE_RESPONSE_MAX_BYTES = 256 * 1024;
 
 export async function pushBundleToEdge(edge, archivePath, { timeout = process.env.EDGE_PUSH_TIMEOUT_MS, manifestText } = {}) {
+  // restart=true 필수 — 없으면 엣지는 설치 디렉터리만 교체하고 구버전 프로세스가 계속 돈다.
+  // (currentVersion()이 디스크의 package.json을 읽어 '새 버전'으로 보고하므로 재푸시도 거부됨.)
+  const url = `${String(edge?.url).replace(/\/+$/, '')}/api/upgrade/bundle?restart=true`;
+  // 보안 잔여 11-27 L2: 엣지 관리자 토큰(Bearer)·번들을 평문 HTTP 로 보내지 않는다 — 호출부(동기화 · 적용 직후 push)가 목록 판정(legacyEdgesOf)을
+  //   이미 하지만, 새 호출부가 그것을 건너뛰어도 여기서 막는다. **실제로 보낼 조립 URL** 을 판정한다(edge.url 이 'http:' 처럼 해석되지 않으면
+  //   판정은 통과인데 조립 문자열은 http://api/… 로 해석돼 평문으로 나갔다 — 반증 S-1). 번들 파일을 읽기 전에 — 네트워크에도 닿지 않는다.
+  const tr = legacyEdgeTransportIssue(url);
+  if (tr) return { edge: edge?.url, ok: false, status: null, code: tr.code, reason: tr.reason };
   const data = fs.readFileSync(archivePath);
   const sha = crypto.createHash('sha256').update(data).digest('hex'); // v2.480: 수신측 검증용
   // v2.730(검토 S-10): 번들 옆의 서명 manifest 를 함께 보낸다 — 엣지는 자기가 가진 신뢰 공개키로 설치 전에 검증한다.
   //   manifest 가 없으면 헤더 없이 보낸다(구버전 엣지는 서명을 보지 않고, 새 엣지는 '서명 없음' 으로 거부해 사유를 돌려준다).
   const manHeader = encodeManifestHeader(manifestText !== undefined ? manifestText : readManifestFile(manifestPathForArchive(archivePath)));
-  // restart=true 필수 — 없으면 엣지는 설치 디렉터리만 교체하고 구버전 프로세스가 계속 돈다.
-  // (currentVersion()이 디스크의 package.json을 읽어 '새 버전'으로 보고하므로 재푸시도 거부됨.)
-  const url = `${String(edge.url).replace(/\/+$/, '')}/api/upgrade/bundle?restart=true`;
   try {
     const res = await fetch(url, {
       method: 'POST',
