@@ -42,9 +42,11 @@ test('원장에서 뺀 · 시리얼을 바꾼 장비의 시리얼이 든 이름 
   // 1회차 점검(테스트 공백 축이 재현): 뺀 장비의 시리얼은 '지금 원장' 에 없어, 그 장비 이름으로 만든 옛 글에서 가려지지 않았다 — 행마다 그 장비의 시리얼(tags)로 걷어 낸다.
   assert.equal(room.serialsHidden, true);
   for (const [where, texts] of [['이력', room.logs.map((l) => l.detail)], ['판 목록', list.versions.map((v) => v.detail)], ['판 글', [d.version.detail]],
-    ['판 차이', [...(d.changes?.items || []), ...(d.restore?.items || [])].map((i) => i.name)]]) {
+    // 2026-11-27: 조회 계정에는 '되돌리면 바뀌는 것'(restore)을 싣지 않는다(null) — 그 절반은 헛돌았다. 판 차이는 항목 통째(이름 · 위치 글 · 바뀐 칸)로 본다.
+    ['판 차이', [JSON.stringify(d.changes)]]]) {
     assert.ok(!texts.some((x) => /serialx9/i.test(String(x))), `${where}: ${JSON.stringify(texts)}`);
   }
+  assert.equal(d.restore, null, '조회 계정에는 되돌리기 미리 보기를 싣지 않는다'); assert.ok(d.changes?.items?.length, '빈 판 차이를 본 것이 아니다');
   assert.ok(room.logs.some((l) => l.detail.includes('stor-•••')), '이름의 나머지는 남는다');
   assert.ok(!('tags' in room.logs[0]) && !JSON.stringify(list).includes('"tags"') && !JSON.stringify(d).includes('"tags"'), 'tags(시리얼 원문)는 응답에 싣지 않는다');
   // 관리자 · 전체 범위 계정은 원문 그대로

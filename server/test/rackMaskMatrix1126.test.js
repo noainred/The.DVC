@@ -86,10 +86,12 @@ const views = async (user) => {
   for (const v of list.versions) details.push((await call('GET /tools/rack/versions/:vid', { user, params: { vid: String(v.id) }, query: { corp: 'kr' } })).body);
   return { room, list, details };
 };
+// [r6 제안] 헛돌던 두 경로를 바꾼다 — '전산실 미배치'(비관리자에게 늘 빈 배열) · link?.name(늘 undefined) 대신 **전산실 응답 전체**를 보고,
+//   '판 차이' 는 이름만이 아니라 항목 통째(위치 글 · 칸 이름 포함)를 본다. restore 는 아래 구조 시험이 null 임을 직접 고정한다.
 const paths = (v) => ({
-  '전산실 places': JSON.stringify(v.room.places.map((p) => [p.label, p.link?.name])), '전산실 미배치': JSON.stringify(v.room.unplaced.map((u) => u.name)),
+  '전산실 places': JSON.stringify(v.room.places.map((p) => p.label)), '전산실 응답 전체': JSON.stringify({ ...v.room, limits: undefined }),
   '전산실 이력': JSON.stringify(v.room.logs.map((l) => l.detail)), '판 목록': JSON.stringify(v.list.versions.map((x) => x.detail)),
-  '판 글': JSON.stringify(v.details.map((d) => d.version.detail)), '판 차이': JSON.stringify(v.details.flatMap((d) => [...(d.changes?.items || []), ...(d.restore?.items || [])].map((i) => i.name))),
+  '판 글': JSON.stringify(v.details.map((d) => d.version.detail)), '판 차이': JSON.stringify(v.details.map((d) => [d.changes, d.restore])),
 });
 
 test('준비: 표기마다 장비 하나씩(관리자) — 랙 둘에 나눠 놓는다', async () => {
@@ -121,6 +123,21 @@ test('주소 표기 행렬: 비관리자 판본의 모든 경로에 원문 · �
   }
   const adm = paths(await views(ADMIN));
   for (const [label] of ADDR_ROWS) assert.ok(adm['전산실 places'].includes(JSON.stringify(label).slice(1, -1)), `관리자는 원문: ${label}`);
+});
+
+test('[r6 제안] 비관리자 판본의 구조 — 예전 경로(미배치 이름 · link.name · restore 이름)가 보던 칸은 키째 없다(대조: 관리자에게는 있다)', async () => {
+  for (const user of [OP_ALL, OP_A]) {
+    const v = await views(user);
+    assert.deepEqual(v.room.unplaced, []); assert.equal(v.room.unplacedListed, false);
+    const links = v.room.places.map((p) => p.link).filter(Boolean);
+    assert.ok(links.length >= 1, `${user.username}: 이어진 서버(EDG2222)가 있어야 link 경로를 본 것이다`);
+    for (const l of links) assert.ok(!('name' in l) && !('hostname' in l) && !('mgmtHost' in l), `${user.username}: ${JSON.stringify(l)}`);
+    for (const d of v.details) assert.equal(d.restore, null, `${user.username}: 판 #${d.version.id}`);
+    assert.ok(v.details.some((d) => d.changes?.items?.length), `${user.username}: 판 차이 항목이 실제로 있다`);
+  }
+  const adm = await views(ADMIN);
+  assert.equal(adm.room.places.find((p) => p.link)?.link?.name, 'edge-two', '관리자에게는 연결된 서버 이름이 있다');
+  assert.ok(adm.details.some((d) => d.restore?.items?.length), '관리자에게는 되돌리기 미리 보기가 있다');
 });
 
 test('시리얼 표기 행렬: 시리얼을 가리는 판본에는 구분자 · 공백 종류와 무관하게 없다 — 시리얼을 보는 계정은 그대로', async () => {

@@ -120,7 +120,8 @@ test('탐침 H18~H26 · H29 · H30 · H13 · H16 · H12: 비관리자 판본 —
   const d = await call('GET /tools/rack/versions/:vid', { user: OP_A, params: { vid: String(vOld.id) }, query: { corp: 'kr' } });
   assert.equal(d.statusCode, 200);
   // ⚠ version.detail 은 여기서 보지 않는다 — HEAD 에서 그 글에는 옛 시리얼이 남는다(별도 재현: rackProbeR1headLeak.test.js).
-  assert.ok(!JSON.stringify([d.body.changes, d.body.restore]).toLowerCase().includes('oldser99'), `H12 · H13 · H16 · H23: 지금 원장에 없는 옛 시리얼도 차이 이름에서 걷어 낸다 ${JSON.stringify(d.body.changes?.items)}`);
+  assert.equal(d.body.restore, null, '조회 계정에는 되돌리기 미리 보기를 싣지 않는다(2026-11-27)'); assert.ok(d.body.changes?.items?.length);
+  assert.ok(!JSON.stringify(d.body.changes).toLowerCase().includes('oldser99'), `H12 · H13 · H16 · H23: 지금 원장에 없는 옛 시리얼도 차이 이름에서 걷어 낸다 ${JSON.stringify(d.body.changes?.items)}`);
   const all = await room(OP_ALL, kr.r1);
   assert.equal(all.places.find((x) => x.id === tagged).label, 'idrac-LEDGER77', '시리얼을 보는 판본은 이름 그대로');
   const adm = await call('GET /tools/rack/versions/:vid', { user: ADMIN, params: { vid: String(vOld.id) }, query: { corp: 'kr' } });

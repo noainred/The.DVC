@@ -204,7 +204,7 @@ const views = async (user) => {
 };
 const paths = (v) => ({
   '전산실 places': JSON.stringify(v.room.places.map((p) => p.label)), '전산실 이력': JSON.stringify(v.room.logs.map((l) => l.detail)), '판 목록': JSON.stringify(v.list.versions.map((x) => x.detail)),
-  '판 글': JSON.stringify(v.details.map((d) => d.version.detail)), '판 차이': JSON.stringify(v.details.flatMap((d) => [...(d.changes?.items || []), ...(d.restore?.items || [])].map((i) => i.name))),
+  '판 글': JSON.stringify(v.details.map((d) => d.version.detail)), '판 차이': JSON.stringify(v.details.map((d) => [d.changes, d.restore])),   // 2026-11-27: 항목 통째(이름 · 위치 글 · 바뀐 칸) — 조회 계정의 restore 는 null(관리자 판본은 있다)
 });
 const labelOf = (v, label) => v.room.places.find((p) => p.id === idOf.get(label))?.label;
 

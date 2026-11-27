@@ -202,7 +202,7 @@ test('개선 2: 색인이 없던 원장(업그레이드 전)은 열 때 한 번 
   R._closeForTest();
   db = await R.openRackDb();
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rack_place_key').get().n, n0, '열 때 다시 채웠다');
-  assert.equal(db.prepare("SELECT v FROM rack_meta WHERE k = 'placeKeys'").get().v, 1);
+  assert.equal(db.prepare("SELECT v FROM rack_meta WHERE k = 'placeKeys'").get().v, R.RACK_META_VERSIONS.placeKeys);   // 2026-11-27: 비교 키가 폭에 무관해져 판 번호가 올랐다
   await assert.rejects(R.addPlace({ roomId: kr.b, rev: await rev(kr.b), user: 'a', rackId: kr.rb, input: P(37, 'dup2', { serial: 'RST-0001' }) }), (e) => e.extra?.code === 'serialDup');
   // 표식이 있으면 다시 채우지 않는다(색인을 비워 두고 다시 열어도 그대로 — 매번 원장을 훑지 않는다는 뜻)
   process.env.RACK_SELF_CHECK = '';

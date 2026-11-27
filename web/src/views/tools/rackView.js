@@ -279,6 +279,14 @@ const FIELD_LABEL = { kind: '종류', label: '이름', model: '모델', serial: 
 export const fieldsText = (fields) => ((fields || []).length ? fields.map((f) => FIELD_LABEL[f] || f).join(' · ') : '이 계정에 보이지 않는 칸');
 
 /**
+ * 판 기록 창 '되돌리면 바뀌는 것' 자리에 미리 보기가 없을 때의 글(순수) — 조회 계정에는 서버가 싣지 않고(관리자에게만), 관리자에게 없으면 지금 원장과 비교하지 못한 것이다.
+ * 예전엔 둘 다 '—' 만 보여 '바뀌는 것 없음' 으로 읽혔다(6회차 화면 D5 · 정확성 D5).
+ */
+export function restoreMissingText(isAdmin) {
+  return isAdmin ? '지금 원장과 비교하지 못했습니다(원장을 읽지 못했거나 이 판을 되살릴 수 없습니다).' : '되돌리기 미리 보기는 관리자에게만 보입니다.';
+}
+
+/**
  * 미배치 서버 패널에 무엇을 그릴까(순수) — 목록(등록부 서버 이름 · 태그)은 관리자 응답에만 실린다(서버 `unplacedListed`).
  * 'count' 면 대수만 그린다 — 목록 · 검색 결과 · '앞 N대만 받았습니다' 안내를 그리지 않는다(받지 않은 것을 '받다 말았다' 로 읽히게 하지 않는다).
  * @returns {'list'|'count'}
@@ -333,3 +341,26 @@ export function censusRows(c) {
 }
 /** 걸린 종류 글 — 모르는 종류는 그대로. */
 export const censusHitsText = (hits) => (hits || []).map((h) => CENSUS_HIT_LABEL[h] || h).join(' · ');
+
+// ───────────────────────── 가림 재료 기록 관리(전체 범위 관리자 — 서버 `GET /tools/rack/mask-seen` · 연산 `mask.forget`) ─────────────────────────
+
+export const SEEN_KIND_LABEL = Object.freeze({ h: '관리 주소', t: '서비스 태그' });
+/** 기록 행 하나의 키(고르기 · 목록 키) — 종류와 값을 합친다(같은 글자가 주소와 태그 양쪽에 있을 수 있다). */
+export const seenKeyOf = (x) => `${x?.kind || ''}\u0000${x?.key || ''}`;
+/** 고른 행 → 지울 값 목록(서버 연산 본문). 목록에 없는 키는 버린다(늦게 온 응답으로 목록이 바뀐 뒤 고른 것이 남지 않게). */
+export function forgetItemsOf(stale, selected) {
+  const sel = selected instanceof Set ? selected : new Set(selected || []);
+  return (stale || []).filter((x) => sel.has(seenKeyOf(x))).map((x) => ({ kind: x.kind, key: x.key }));
+}
+/**
+ * 기록 크기 안내(순수) — 상한에 가까우면 경고. 값을 못 읽었으면 null(‘—’).
+ * @returns {{ text: string, warn: boolean } | null}
+ */
+export function seenCapText(m) {
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+  const h = n(m?.hosts); const t = n(m?.tags); const max = n(m?.max);
+  if (h == null || t == null) return null;
+  const warn = max != null && max > 0 && Math.max(h, t) >= max * 0.9;
+  const extra = [n(m?.pending) ? `파일에 쓰는 중 ${n(m.pending).toLocaleString()}` : '', n(m?.overflow) ? `메모리에만 ${n(m.overflow).toLocaleString()}` : ''].filter(Boolean).join(' · ');
+  return { text: `본 적 있는 주소 ${h.toLocaleString()} · 태그 ${t.toLocaleString()}${max != null ? `(종류마다 상한 ${max.toLocaleString()})` : ''}${extra ? ` · ${extra}` : ''}`, warn };
+}

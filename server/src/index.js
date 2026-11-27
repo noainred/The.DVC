@@ -96,6 +96,7 @@ import { capacityRouter } from './routes/capacity.js';
 import { startCapacitySampler } from './capacity/sampler.js';
 import { startCapacityPush } from './agent/capacityPush.js';
 import { startSvcmonPoller } from './svcmon/poller.js';
+import { startMaterialWatch as startRackMaterialWatch } from './rack/material.js';
 import { startSettingsSyncDetector } from './svcmon/settingsSync.js';
 import { startSvcmonTrials } from './svcmon/trial.js';
 import { startSvcmonPush } from './agent/svcmonPush.js';
@@ -657,6 +658,7 @@ const stagger = [
   startSanSwitchPerfPush,   // 〃 엣지→중앙 중계(v2.423) — CENTRAL_URL 미설정이면 자기기동 안 함, 커서 방식
   startRelayCheckPoller,    // HAProxy 경로 점검(v2.429) — 설정 꺼짐이면 틱만 돌고 아무것도 안 함
   startBmstorPoller, // 베어메탈 스토리지(v2.340) — 30초 틱 + 재진입 가드, 등록 0대면 대기
+  startRackMaterialWatch, // 랙 실장도 가림 재료 흡수(2026-11-27) — 60초 틱 + 재진입 가드 · 원장 파일(rack.db)이 있을 때만 · 등록부만 읽는다(네트워크 왕복 0)
   startBmstorHistory, // 〃 12시간 이력(v2.635) — 60초 틱 + 재진입 가드, 슬롯당 1회(부분 합이면 새 수집마다 보강)
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
   () => startGpuAllocHistory(() => store.get()), // GPU 할당율 일 단위 이력(v2.939) — 기동 2분 뒤 첫 회 · 1시간 · 재진입 가드 · vCenter 왕복 0

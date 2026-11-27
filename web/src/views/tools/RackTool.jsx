@@ -16,7 +16,7 @@ import RackMaskCensus from './RackMaskCensus.jsx';
 import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
-  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields, unplacedMode, linkNameText,
+  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields, unplacedMode, linkNameText, restoreMissingText,
   viewAfterLoadFail, sameSpot, viewAfterMove, spotVisible, lostViewReason, modalWithRoom, conflictHint, nameTarget,
 } from './rackView.js';
 
@@ -76,9 +76,10 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
   return (
     <div style={{ width: 236, flex: '0 0 auto', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '0 2px 4px', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-        <strong style={{ ...mono, fontSize: 14 }}>{rack.name}</strong>
-        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{rack.totalsStale ? `— / ${H}U` : `${t.usedU ?? 0} / ${H}U${t.usePct != null ? ` · ${t.usePct}%` : ''}`}</span>
-        <span title={[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ') || undefined} style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ')}</span>
+        {/* 이름은 줄이고(전체는 title) 사용 U 는 늘 보이게 — 조회 계정의 가린 이름('masked-… (이름 가림)')이 머리글을 넘쳐 사용 U · 용도를 밀어냈다(6회차 화면 D3) */}
+        <strong title={rack.name} style={{ ...mono, fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', flex: '0 1 auto' }}>{rack.name}</strong>
+        <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>{rack.totalsStale ? `— / ${H}U` : `${t.usedU ?? 0} / ${H}U${t.usePct != null ? ` · ${t.usePct}%` : ''}`}</span>
+        <span title={[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ') || undefined} style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 'auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ')}</span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 10.5, color: 'var(--text-dim)', padding: '0 2px 6px' }}>
         {/* 끌어 놓기를 화면에 먼저 반영한 랙은 합계가 옛 값이다 — 다시 불러올 때까지 숫자 대신 밝힌다(2회차 반증 C6) */}
@@ -170,7 +171,7 @@ function Detail({ p, rack, onEdit, edit }) {
         <dd style={{ ...dd, ...mono }}>{p.serialHidden ? '— (범위 계정에는 보이지 않습니다)' : [p.serial, ...(p.extraSerials || [])].filter(Boolean).join(' / ') || '—'}</dd>
         <dt style={dt}>계획 전력</dt><dd style={dd}>운전 {wattText(p.opW)} · 정격 {wattText(p.ratedW)}</dd>
         <dt style={dt}>무게</dt><dd style={dd}>{p.weightKg == null ? '—' : `${p.weightKg} kg`}</dd>
-        {p.note ? <><dt style={dt}>메모(관리자 전용)</dt><dd style={dd}>{p.note}</dd></> : null}
+        {p.note ? <><dt style={dt}>관리 메모</dt><dd style={dd}>{p.note}</dd></> : null}
       </dl>
       {p.kind === 'server' ? (
         <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -338,7 +339,7 @@ function TypesModal({ types, onClose, onAdd, onRemove, busy, saving, error }) {
  * 판 기록(법인별 최근 30개) — 판을 고르면 '이 판에서 바뀐 것' 과 '되돌리면 바뀌는 것' 을 보여 주고, 권한이 있으면 그 판으로 되돌린다.
  * 되돌리기는 확인을 한 번 더 받는다(원장을 통째로 바꾼다). 판 목록은 열 때 1회 + 되돌린 뒤 다시 읽는다(폴링 없음).
  */
-function VersionsModal({ corpId, corpName, onClose, onRestored, onFailed }) {
+function VersionsModal({ corpId, corpName, isAdmin, onClose, onRestored, onFailed }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState(null);
   const [selVid, setSelVid] = useState(null);
@@ -434,7 +435,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored, onFailed }) {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <strong style={{ fontSize: 13 }}>되돌리면 바뀌는 것 <span style={{ fontWeight: 400, color: 'var(--text-dim)', fontSize: 12 }}>(지금 원장 → 판 #{detail.version.id})</span></strong>
-                    {detail.restore ? <><span style={{ fontSize: 12 }}>{diffCountText(detail.restore.counts)}</span>{itemList(detail.restore)}</> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>—</span>}
+                    {detail.restore ? <><span style={{ fontSize: 12 }}>{diffCountText(detail.restore.counts)}</span>{itemList(detail.restore)}</> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{restoreMissingText(isAdmin)}</span>}
                   </div>
                   {list.canRestore && sel && selVid !== list.latestId ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '10px 12px', border: `1px solid ${confirm ? 'var(--red)' : 'var(--border)'}`, borderRadius: 10, background: confirm ? 'rgba(239,68,68,.10)' : 'transparent' }}>
@@ -865,7 +866,7 @@ export default function RackTool() {
                   </div>
                 ) : null}
                 {view.unplacedTotal > (view.unplaced || []).length ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서버가 많아 앞 {(view.unplaced || []).length}대만 받았습니다(전체 {view.unplacedTotal}대) — 검색은 받은 목록 안에서만 됩니다.</div> : null}
-                </>) : <div style={{ padding: '8px 14px', fontSize: 12, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>미배치 서버의 목록은 원장을 편집할 수 있는 관리자에게만 보입니다 — 이 계정에는 대수만 보입니다.</div>}
+                </>) : <div style={{ padding: '8px 14px', fontSize: 12, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>미배치 서버의 목록(등록부 이름 · 서비스 태그)은 관리자에게만 보입니다 — 이 계정에는 대수만 보입니다.</div>}
                 {view.serversNoTag ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서비스 태그를 못 읽었거나 태그가 공통 기본값(여러 서버가 같은 값)인 서버 {view.serversNoTag}대는 태그로 이을 수 없어 미배치에서 뺐습니다.</div> : null}
               </div>
               <div style={card}>
@@ -950,7 +951,7 @@ export default function RackTool() {
           onRemove={async () => { const { id } = nameTarget(modal); if (!window.confirm(`전산실 ‘${modal.name || ''}’ 을(를) 지울까요? 판 기록에서 되돌릴 수 있습니다.`)) return; if (await run({ op: 'room.remove', id }, { okText: '전산실을 지웠습니다.', roomId: id })) await loadTree(); }} removeLabel="전산실 지우기(랙이 없을 때만)" />
       ) : null}
       {modal?.kind === 'versions' ? (
-        <VersionsModal corpId={corpId} corpName={corp?.name || corpId} onClose={closeModal}
+        <VersionsModal corpId={corpId} corpName={corp?.name || corpId} isAdmin={!!tree.isAdmin} onClose={closeModal}
           onRestored={async (text, forCorp) => {
             // 되돌리는 동안 창을 닫았거나 법인을 바꿨을 수 있다 — 그 창이 아직 열려 있을 때만 닫고, 그 법인을 보고 있을 때만 알린다.
             if (modalRef.current === modal) setModal(null);

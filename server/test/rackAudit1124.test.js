@@ -222,12 +222,12 @@ test('C5 · C6 · 반증 추가 1: 비관리자 응답에 IP 로 등록한 서�
   ]);
   const p1 = await op(ADMIN, { op: 'place.add', rackId: kr.a1, rev: await rev(kr.r1), place: { face: 'full', uStart: 38, uSize: 1, kind: 'server', label: '', serial: 'IPN0001' } });
   assert.equal(p1.statusCode, 200);
-  const p2 = await op(ADMIN, { op: 'place.add', rackId: kr.a1, rev: await rev(kr.r1), place: { face: 'full', uStart: 40, uSize: 1, kind: 'server', label: '', serial: 'TAG9876' } });
+  const p2 = await op(ADMIN, { op: 'place.add', rackId: kr.a1, rev: await rev(kr.r1), place: { face: 'full', uStart: 40, uSize: 1, kind: 'server', label: 'svc TAG9876', serial: 'TAG9876' } });
   assert.equal(p2.statusCode, 200);
   for (const user of [OP_A, OP_ALL]) {
     const v = await call('GET /tools/rack/room/:id', { user, params: { id: kr.r1 } });
     assert.equal(v.statusCode, 200);
-    const j = JSON.stringify({ places: v.body.places, unplaced: v.body.unplaced });
+    const j = JSON.stringify(v.body);   // [r6 제안] 미배치 목록이 늘 비므로 응답 전체를 본다
     assert.ok(!j.includes('10.20.30.4'), `${user.username}: 관리 IP 가 응답에 없다`);
     const linked = v.body.places.find((x) => x.id === p1.body.id).link;
     assert.ok(linked && linked.serverId.startsWith('masked-'), '주소 id 는 토큰');
@@ -237,7 +237,8 @@ test('C5 · C6 · 반증 추가 1: 비관리자 응답에 IP 로 등록한 서�
     assert.ok(!('mgmtHost' in linked), `${user.username}: 관리 주소는 관리자만`);
     // 미배치 목록(IP 로 등록한 10.20.30.42 가 여기 든다)은 관리자에게만 — 조회 계정에는 대수만 간다.
     assert.deepEqual(v.body.unplaced, [], `${user.username}: 미배치 서버 목록은 비어 있다`); assert.equal(v.body.unplacedListed, false);
-    assert.ok(v.body.unplacedTotal >= 1, `${user.username}: 대수는 그대로 센다(${v.body.unplacedTotal})`);
+    assert.equal(v.body.unplacedTotal, 1, `${user.username}: 대수는 그대로 센다(10.20.30.42 — ${v.body.unplacedTotal})`);   // [r6 제안] >= 1 → 실측값
+    assert.equal(v.body.places.find((x) => x.id === p2.body.id).label, user === OP_A ? 'svc •••' : 'svc TAG9876', `${user.username}: 이름 속 태그 가림은 표시 이름으로 본다`);   // [r6 제안]
   }
   const scoped = JSON.stringify((await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: kr.r1 } })).body).toLowerCase();
   assert.ok(!scoped.includes('tag9876'), '범위 비관리자: 이름 속 서비스 태그도 걷어 낸다');

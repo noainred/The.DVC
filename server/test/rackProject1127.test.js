@@ -246,8 +246,13 @@ test('가림 집계: 조회 · 쓰기 전체 범위 관리자만 · 건수는 (�
   const rackId = cur.racks.find((r) => r.name === 'B2').id;
   const a = await okOp({ op: 'place.add', rackId, rev: cur.rev, place: { face: 'full', uStart: 20, uSize: 1, kind: 'other', label: 'kvm zzhost-a1 spare' } });
   await okOp({ op: 'place.add', rackId, rev: a.rev, place: { face: 'full', uStart: 22, uSize: 1, kind: 'other', label: 'pdu ip-10-20-30-4' } });
+  // [r6 제안] '읽기만' 은 집계 **전 · 후** 를 대조해야 뜻이 있다(예전 단언은 집계 뒤의 두 읽기를 비교해 늘 참이었다)
+  const revBefore = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: seeded.roomId } })).body.rev;
+  const latestBefore = (await call('GET /tools/rack/versions', { user: ADMIN, query: { corp: 'kr' } })).body.latestId;
   const r = await call('GET /tools/rack/mask-census', { user: ADMIN });
   assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.equal((await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: seeded.roomId } })).body.rev, revBefore, '집계는 원장 rev 를 바꾸지 않는다');
+  assert.equal((await call('GET /tools/rack/versions', { user: ADMIN, query: { corp: 'kr' } })).body.latestId, latestBefore, '집계는 판을 만들지 않는다');
   const c = r.body;
   assert.deepEqual(c.corps, [{ id: 'kr', name: 'KR' }]);
   assert.deepEqual(Object.keys(c.fields).sort(), ['label', 'model', 'rackName', 'rackRole', 'rackRow', 'roomName', 'siteName']);
@@ -261,7 +266,7 @@ test('가림 집계: 조회 · 쓰기 전체 범위 관리자만 · 건수는 (�
   assert.equal(c.notes, 2, '메모가 있는 장비 수(내용은 싣지 않는다)');
   assert.ok(!JSON.stringify(c).includes('ZZNOTE'), '메모 내용은 집계에 없다');
   // 재료는 개수만 — 표본의 글은 원장의 글(관리자가 이미 보는 값)뿐
-  assert.deepEqual(Object.keys(c.material).sort(), ['firstLabels', 'hosts', 'tags']);
+  assert.deepEqual(Object.keys(c.material).sort(), ['firstLabels', 'hosts', 'max', 'overflow', 'pending', 'tags']);
   for (const v of Object.values(c.material)) assert.equal(typeof v, 'number');
   assert.ok(c.samples.length >= 7 && c.samples.every((s) => ['addr', 'tag', 'firstLabel', 'altIp'].includes(s.hits[0]) && typeof s.where === 'string'));
   assert.deepEqual(c.samples.find((s) => s.text === 'kvm zzhost-a1 spare').hits, ['firstLabel']);

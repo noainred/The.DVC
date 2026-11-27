@@ -81,23 +81,36 @@ export function nonNeg(v) {
 }
 
 /**
- * 시리얼 칸에 적힌 값이 주소(IPv4 · IPv6 · URL)인가(순수 · 입력은 `LIMITS.serial` 이하로 정리된 글).
- * 2026-11-27 반증 P3(재현): 시리얼 칸은 시리얼을 보는 판본(전체 범위 비관리자)에 원문으로 나간다 — 그 칸에 적힌 관리 주소가 그대로 나갔다.
- * 시리얼에 주소가 들어갈 까닭이 없으므로 저장 때 거절하고(`cleanPlaceInput`), 그 전에 저장된 값은 응답을 만들 때 비운다(`rack/project.js`).
- * MAC 꼴은 거절하지 않는다(MAC 을 시리얼로 쓰는 장비가 있다) — 응답 쪽 판정(`routes/api/rack.js` 의 주소 판정)이 비관리자에게 비운다.
+ * 시리얼 칸에 적힌 값이 주소(IPv4 · IPv6 · URL)인가(순수) — **입력 거절과 응답 비우기가 같은 이 함수 하나**를 쓴다(6회차 보안 4 · 반증 R6:
+ * 입력 · 추가 시리얼 문자열 쪼개기 · 출력 세 곳의 판정이 달라 'node.10.20.30.97' 은 저장되고 비워졌으며, 'https://…' 는 쪼개져 그대로 보였다).
+ *  · IPv4: 점으로 나뉜 1~3자리 숫자 묶음이 **4개 이상 이어짐**(라우트 가림의 `hasIpv4` 와 같은 규칙 — 앞뒤 글자와 붙어 있어도: 'bmc.10.20.30.4' · '10.20.30.4.')
+ *  · IPv6: 16진 · 콜론 낱말이 유효한 IPv6(`net.isIPv6` — '::' 또는 8마디). MAC 꼴은 주소로 보지 않는다(MAC 을 시리얼로 쓰는 장비가 있다).
+ *  · URL: '://' 또는 'http:' · 'https:' 로 시작.
+ * 글자 수 상한을 먼저 본다(시리얼 칸은 64자 · 화면이 보내는 추가 시리얼 문자열은 그보다 길 수 있어 라우트가 낱말로 나눠 부른다).
  */
-const V4_IN = /(?:^|[^0-9.])(?:\d{1,3}\.){3}\d{1,3}(?![0-9.])/;
+const V4_RUN = /[0-9.]{7,}/g;
+function hasV4Run(v) {
+  for (const m of v.matchAll(V4_RUN)) {
+    let n = 0;
+    for (const part of m[0].split('.')) { n = part.length >= 1 && part.length <= 3 ? n + 1 : 0; if (n >= 4) return true; }
+  }
+  return false;
+}
 export function serialAddressLike(v) {
-  if (typeof v !== 'string' || !v || v.length > 256) return false;
-  if (v.includes('://')) return true;
-  if (V4_IN.test(v)) return true;
-  if (v.includes(':')) for (const tok of v.split(/[^0-9a-fA-F:.]+/)) if (tok.split(':').length > 2 && isIPv6(tok)) return true;
+  if (typeof v !== 'string' || !v) return false;
+  const s = foldWidth(v);
+  if (s.length > 512) return true;   // 이렇게 긴 시리얼은 없다 — 살피지 않고 주소로 본다(입력은 거절 · 출력은 비움)
+  if (s.includes('://') || /^https?:/i.test(s)) return true;
+  if (hasV4Run(s)) return true;
+  if (s.includes(':')) for (const tok of s.split(/[^0-9a-fA-F:.%]+/)) { const t = tok.replace(/%.*$/, ''); if (t.split(':').length > 2 && isIPv6(t)) return true; }
   return false;
 }
 const SERIAL_ADDR_ERR = '시리얼 칸에는 주소(IP · URL)를 넣을 수 없습니다 — 주소는 메모에 적으세요(메모는 관리자에게만 보입니다).';
 
 /** 시리얼 비교 키 — 시리얼 색인(insights/serialLookup.js)과 같은 정규화(대소문자 · 공백 · `:` `-` `_` `.` 무시). */
-export const serialKeyOf = (v) => normKey(v);
+// 2026-11-27(6회차 정확성 D2): 전각으로 적힌 옛 시리얼('ＦＷ０００１２３')도 같은 키 — 새 입력은 저장 전에 접히므로(`cleanText`) 키가 폭에 따라 갈리면
+//   같은 시리얼 두 장비가 중복 검사를 통과하고 등록 서버와의 연결이 끊긴다. 키를 바꿨으므로 색인 · 키 칸은 `rack/db.js PLACE_KEYS_VER` 를 올려 다시 만든다.
+export const serialKeyOf = (v) => normKey(foldWidth(typeof v === 'string' ? v : String(v ?? '')));
 
 /** 두 면이 같은 U 에서 부딪히는가. full 은 모두와, front 와 rear 는 서로 부딪히지 않는다. */
 export function facesClash(a, b) {
@@ -176,6 +189,12 @@ export function cleanPlaceInput(body = {}, { partial = false } = {}) {
   if (!partial || has('model')) out.model = cleanText(b.model, LIMITS.model);
   if (!partial || has('serial')) out.serial = cleanText(b.serial, LIMITS.serial);
   if (!partial || has('extraSerials')) {
+    // 화면은 추가 시리얼을 문자열 하나로 보낸다('/' · 쉼표 · 공백으로 구분). '/' 로 먼저 쪼개면 'https://bmc/ui' 가 'https:' · 'bmc' · 'ui' 가 되어 주소 판정을 비켜 갔다
+    //   (6회차 정확성 D4 · 보안 4 · 화면 D2) — 공백 · 쉼표로 나눈 낱말을 먼저 판정하고 그다음 '/' 로 나눈다.
+    if (typeof b.extraSerials === 'string') {
+      const words = b.extraSerials.slice(0, LIMITS.serial * LIMITS.extraSerials * 4).split(/[\s,]+/);
+      if (words.some(serialAddressLike)) return { error: SERIAL_ADDR_ERR };
+    }
     const raw = Array.isArray(b.extraSerials) ? b.extraSerials : (typeof b.extraSerials === 'string' ? b.extraSerials.split(/[\s,/]+/) : []);
     const list = [...new Set(raw.slice(0, LIMITS.extraSerials * 4).map((x) => cleanText(x, LIMITS.serial)).filter(Boolean))];
     if (list.length > LIMITS.extraSerials) return { error: `추가 시리얼은 ${LIMITS.extraSerials}개까지입니다.` };
