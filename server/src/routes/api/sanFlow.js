@@ -3,6 +3,7 @@
 //   감사 로그는 auditMiddleware 가 남기고 '무엇을 · 어디에' 를 res.locals.auditDetail 로 싣는다(미리보기는 AUDIT_SKIP — 저장 아님). 명령은 sanswitch/flowCmd.js 만 만든다.
 //   응답에 스위치 비밀번호 · 관리 주소를 싣지 않는다 — 작업 사유 · 기록 오류의 주소도 가린다(반증 L-4 — cvp.maskErrText · 등록 스위치 주소 포함).
 import { requirePerm, requireRole } from '../../auth/auth.js';
+import { demoAccountView } from '../../auth/demoGuest.js';
 import { fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { reauth } from './reauth.js';
 import { maskErrText } from './cvp.js';
@@ -24,6 +25,7 @@ import { rateOf, esxiBpsOf, flowRatesOf, staleMsOf } from '../../sanswitch/flowV
 import { cmpVersion } from '../../util/cmpVersion.js';
 import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
+const SAN_FLOW_ACCOUNT_KEYS = ['by', 'user', 'createdBy', 'deletedBy'];   // 이 응답들에서 계정 이름인 칸(보안 잔여 11-27 L7)
 const gate = [requirePerm('tools'), requireRole('admin'), fullReadWriteScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
 /** 엣지가 flowNow 를 아는 첫 버전(반증 M-7 — 구버전 엣지는 작업을 모른 채 버린다). */
 export const MIN_FLOW_EDGE_VERSION = '2.935.0';
@@ -141,7 +143,7 @@ function maskJob(j, mask) {
 export function registerSanFlow(api) {
   startFlowShowTimer((id) => getDeviceWithSecret(id), { canDelegate: (agent, action) => flowEdgeIssue(agent, undefined, action), stoppedOf: edgeAuthStopOf });
 
-  api.get('/tools/san-flow', ...gate, async (_req, res) => {
+  api.get('/tools/san-flow', ...gate, async (req, res) => {
     const rows = await devicesWithSnap();
     const checks = flowChecks();
     const flows = listFlows();
@@ -172,8 +174,9 @@ export function registerSanFlow(api) {
         ...flowRatesOf(f, { staleMs: staleMsOf(SHOW_EVERY_MS) }),   // 오래됨은 속도를 비우고 stale 로(반증 M-1)
         esxiBps: esxiBpsOf(t), esxiAt: t ? (sp.at ?? null) : null };
     });
-    res.set('Cache-Control', 'no-store').json({ ok: true, devices, flows: out, jobs: recentFlowJobs(10).map((j) => maskJob(j, mask)), showEveryMs: SHOW_EVERY_MS,
-      edgeDeadlineMs: EDGE_DEADLINE_MS, showCycle: lastShowCycle(), ...registryMark(sanRegistryLoadError()) });   // 133회차: 등록부 표지
+    // 보안 잔여 11-27 L7(반증 1회차 S-2): 점검 · 작업 · 플로우의 by · user · createdBy · deletedBy(포탈 계정)는 데모 계정에 싣지 않는다
+    res.set('Cache-Control', 'no-store').json(demoAccountView(req.user, { ok: true, devices, flows: out, jobs: recentFlowJobs(10).map((j) => maskJob(j, mask)), showEveryMs: SHOW_EVERY_MS,
+      edgeDeadlineMs: EDGE_DEADLINE_MS, showCycle: lastShowCycle(), ...registryMark(sanRegistryLoadError()) }, SAN_FLOW_ACCOUNT_KEYS));   // 133회차: 등록부 표지
   });
 
   /** 만들기 폼 ① — 이 스위치에 HBA 가 로그인한 호스트(스냅샷 포트의 연결 WWN 기준 · 최대 300). */
@@ -317,6 +320,6 @@ export function registerSanFlow(api) {
   api.get('/tools/san-flow/job/:id', ...gate, (req, res) => {
     const j = getFlowJob(req.params.id);
     if (!j) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다(끝나고 1시간 뒤 정리).' });
-    res.set('Cache-Control', 'no-store').json({ ok: true, job: maskJob(j, maskerOf()) });
+    res.set('Cache-Control', 'no-store').json({ ok: true, job: demoAccountView(req.user, maskJob(j, maskerOf()), SAN_FLOW_ACCOUNT_KEYS) });
   });
 }

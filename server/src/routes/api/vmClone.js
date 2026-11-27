@@ -15,6 +15,7 @@ import { enqueueRun } from '../../vmclone/runner.js';
 import { schedulerStatus } from '../../vmclone/scheduler.js';
 import { listMounts } from '../../system/nfsMounts.js';
 import { isAdminReq } from '../../auth/addressMask.js';
+import { demoAccountView } from '../../auth/demoGuest.js';
 import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs, nfsDsLoadError } from '../../vmclone/nfsDs.js';
 import { targetsNow, dispatchVmOp } from '../../vmclone/opDispatch.js';
 import { mountUseView, mountUseDenied, setMountUse, corpMountsLoadError } from '../../vmclone/corpMounts.js';
@@ -181,7 +182,7 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
     vcenterNames: Object.fromEntries(visibleVcs.map((v) => [String(v.id), vcName.get(String(v.id)) || v.name || v.id])),
     nfsDatastores,
     ...(nfsDsLoadError() ? { nfsDsLoadError: nfsDsLoadError() } : {}),   // 결정(56~75 남긴 것) 65 ②: 정의 파일을 못 읽었으면 빈 목록이 '정의 없음' 으로 보이지 않게
-    ops: listOpsView({ allowed }),
+    ops: demoAccountView(req.user, listOpsView({ allowed }), ['by']),   // 보안 잔여 11-27 L7(S-2): 작업을 보낸 포탈 계정은 데모 계정에 싣지 않는다
     ...(corpMountsLoadError() ? { corpMountsError: corpMountsLoadError().reason } : {}),
     // v2.797 historyMax: 화면의 14일 실행 격자가 '잡당 최근 N회만 남은 이력' 으로 잘린 날을 0 이 아니라 '일부' 로 표시한다(숫자를 화면에 박지 않는다).
     limits: { verifyTimeoutMin: VERIFY_TIMEOUT_MIN, opPendingMin: Math.round(PENDING_TTL_MS / 60_000), opClaimMin: Math.round(CLAIM_MS / 60_000), historyMax: HISTORY_MAX },

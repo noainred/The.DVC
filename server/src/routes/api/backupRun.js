@@ -11,7 +11,7 @@
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserScope, inUserWriteScope } from '../../auth/scope.js';
-import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { isAdminDetailUser, isDemoGuest } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
@@ -54,8 +54,30 @@ export function busyFlags(busy) {
   return { active: !!busy };
 }
 
+/**
+ * 보안 잔여 11-27 L7(반증 1회차 M-1 — 재현): 데모 계정 판본 — Veeam B&R 서버는 **데모(mock-) 항목만**.
+ *   이 도구는 adminOnly 라 operator 판본이 없고, 데모 계정은 요청 문맥이 role admin 이라 사람이 등록한 B&R 서버의 이름 · 담당 엣지 ·
+ *   실행 기록(요청한 포탈 계정 · 잡 이름)을 그대로 받았다. 데모 Veeam 시드는 없으므로(등록 id 는 'vbr-…') 데모 계정에는 'Veeam 서버 없음' 판본이
+ *   되고, 화면(데모 vCenter 의 VM 목록)은 그대로 열린다. 사람 서버가 없으면 관리자와 같은 응답이다(뺀 것이 없으면 표지도 없다).
+ *   판정은 이 세 함수 하나 — 서버 목록(serversFor) · 실행 기록(runShownTo) · 포탈 백업 기록(portalRecordShownTo). 설정 탭(/settings)은 READ_DENY.
+ */
+export const isDemoVeeamServerId = (id) => /^mock-/i.test(String(id || ''));
+export function serversFor(req, vcenterId) {
+  const all = serversForVcenter(vcenterId);   // enabled · 등록 순서 · 비밀 없음
+  return isDemoGuest(req?.user) ? all.filter((d) => isDemoVeeamServerId(d.id)) : all;
+}
+/** 실행 기록 1건이 이 요청에 보이는가 — 조회 범위(runVisible) ∧ 데모 계정이면 모든 그룹 · VM 의 서버가 데모 서버. */
+export function runShownTo(req, run, allowed) {
+  if (!runVisible(run, allowed)) return false;
+  if (!isDemoGuest(req?.user)) return true;
+  const ids = [...(run?.groups || []).map((g) => g?.serverId), ...(run?.vms || []).map((v) => v?.serverId)];
+  return ids.length > 0 && ids.every(isDemoVeeamServerId);
+}
+/** 포탈 백업 VM 기록(서버 이름 · 잡 이름 · 마지막 실행)이 이 요청에 보이는가. */
+export const portalRecordShownTo = (req, rec) => !!rec && (!isDemoGuest(req?.user) || isDemoVeeamServerId(rec.serverId));
+
 export function vcRunState(vc, vms, req) {
-  const servers = serversForVcenter(vc.id);   // enabled · 등록 순서 · 비밀 없음
+  const servers = serversFor(req, vc.id);   // enabled · 등록 순서 · 비밀 없음 · 데모 계정은 데모 서버만
   const m = servers.length ? veeamMatchFor(vc, vms, req) : { known: false, match: null };
   const st = getRunSettings();
   const hostName = veeamHostFor(vc, { manual: st.hosts[vc.id] || '', aliasHosts: m.match?.aliasHosts || [] });
@@ -132,8 +154,16 @@ api.get('/tools/backup-run/vms', toolsPerm, adminOnly, (req, res) => {
   const vcId = String(req.query.vcenterId || '').slice(0, 128);
   const vcs = vcentersOf(snap);
   const allowed = scopedVcenterIds(req.user, snap);
-  const list = [...vcs.values()].filter((v) => !allowed || allowed.has(v.id)).map((v) => ({ id: v.id, name: v.name, linked: serversForVcenter(v.id).length > 0 }));
-  if (!vcId) return res.json({ ok: true, vcenters: list, rows: [] });
+  const shown = [...vcs.values()].filter((v) => !allowed || allowed.has(v.id));
+  const list = shown.map((v) => ({ id: v.id, name: v.name, linked: serversFor(req, v.id).length > 0 }));
+  // 데모 판본에서 뺀 서버 수(그 vCenter — 목록이면 보이는 vCenter 전체의 서로 다른 서버). 뺀 것이 없으면 싣지 않는다.
+  const demoMaskedOf = (ids) => {
+    if (!isDemoGuest(req.user)) return {};
+    const hidden = new Set();
+    for (const id of ids) for (const d of serversForVcenter(id)) if (!isDemoVeeamServerId(d.id)) hidden.add(d.id);
+    return hidden.size ? { demoOnly: true, demoMasked: { servers: hidden.size } } : {};
+  };
+  if (!vcId) return res.json({ ok: true, vcenters: list, rows: [], ...demoMaskedOf(shown.map((v) => v.id)) });
   if (!vcs.has(vcId) || !inUserScope(req.user, snap, vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
   const vms = (snap?.vms || []).filter((v) => v.vcenterId === vcId);
   const s = vcRunState(vcs.get(vcId), vms, req);
@@ -154,7 +184,7 @@ api.get('/tools/backup-run/vms', toolsPerm, adminOnly, (req, res) => {
       repositorySet: !!serverRunSettings(d.id).repositoryId };
   });
   res.json({ ok: true, vcenters: list, vcenter: { id: vcId, name: s.vc.name }, known: s.known, hostName: s.hostName, jobName: portalJobName(getRunSettings().jobPrefix, s.vc),
-    servers, rows, counts, writable, maxVms: MAX_BACKUP_VMS, ...(registryLoadError() ? { registryUnreadable: true } : {}), ...(settingsLoadError() ? { settingsUnreadable: true } : {}) });
+    servers, rows, counts, writable, maxVms: MAX_BACKUP_VMS, ...demoMaskedOf([vcId]), ...(registryLoadError() ? { registryUnreadable: true } : {}), ...(settingsLoadError() ? { settingsUnreadable: true } : {}) });
 });
 
 /** 실행 전 미리보기(읽기성 POST — 아무것도 보내지 않는다). 실행과 같은 판정(planFor). 막히는 사유도 미리 말한다. */
@@ -178,16 +208,19 @@ api.post('/tools/backup-run/backup', toolsPerm, adminOnly, reauth, (req, res) =>
 api.get('/tools/backup-run/runs', toolsPerm, adminOnly, (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const all = listRuns();
-  const runs = all.filter((r) => runVisible(r, allowed));
+  const inScope = all.filter((r) => runVisible(r, allowed));
+  const runs = inScope.filter((r) => runShownTo(req, r, allowed));
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 30));
-  res.json({ ok: true, runs: runs.slice(0, limit), total: runs.length, ...(allowed ? { scoped: true, omittedOutOfScope: all.length - runs.length } : {}),
+  const demoHidden = inScope.length - runs.length;   // 데모 판본에서 뺀 실행(사람이 등록한 서버로 보낸 것) — 범위 밖과 따로 센다
+  res.json({ ok: true, runs: runs.slice(0, limit), total: runs.length, ...(allowed ? { scoped: true, omittedOutOfScope: all.length - inScope.length } : {}),
+    ...(demoHidden ? { demoOnly: true, demoMasked: { runs: demoHidden } } : {}),
     ...(runsLoadError() ? { runsUnreadable: true } : {}) });   // 94회차 F2: 읽기 오류 중의 빈 목록은 '실행 없음' 이 아니다
 });
 
 api.get('/tools/backup-run/runs/:id', toolsPerm, adminOnly, (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const run = getRun(String(req.params.id));
-  if (!run || !runVisible(run, allowed)) return res.status(404).json({ ok: false, reason: '실행 기록을 찾을 수 없습니다.' });
+  if (!run || !runShownTo(req, run, allowed)) return res.status(404).json({ ok: false, reason: '실행 기록을 찾을 수 없습니다.' });
   res.json({ ok: true, run });
 });
 
@@ -199,7 +232,7 @@ api.post('/tools/backup-run/runs/:id/close', toolsPerm, adminOnly, reauth, (req,
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const run = getRun(String(req.params.id));
-  if (!run || !runVisible(run, allowed)) return res.status(404).json({ ok: false, reason: '실행 기록을 찾을 수 없습니다.' });
+  if (!run || !runShownTo(req, run, allowed)) return res.status(404).json({ ok: false, reason: '실행 기록을 찾을 수 없습니다.' });
   if (run.vms.some((v) => !inUserWriteScope(req.user, snap, v.vcenterId))) return res.status(403).json({ ok: false, reason: '조회 전용 범위의 VM 이 들어 있는 실행은 닫을 수 없습니다.' });
   const r = closeRun(run.id, { user: req.user?.username || '' });
   if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason || '닫지 못했습니다.' });

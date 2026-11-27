@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
-import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoGuest, demoAccountView } from '../../auth/demoGuest.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import * as registry from '../../focusmon/registry.js';
 import { allTargets, isMockMode, focusKeys } from '../../focusmon/service.js';
@@ -128,7 +128,8 @@ api.get('/tools/focus-mon/audit', adminOnly, fullScopeOnly, async (req, res) => 
   const corpKey = (r) => (r.corp ? r.corp.id : '');
   const corpName = (r) => (r.corp ? r.corp.name : NO_CORP);
   const corpOrder = cr.list.map((d) => d.id);
-  res.json({
+  // 보안 잔여 11-27 L7(반증 1회차 S-2): 회차 · 작업 · 설치의 by(실행한 포탈 계정)는 데모 계정에 싣지 않는다 — 이 응답의 'by' 는 모두 계정 이름이다
+  res.json(demoAccountView(req.user, {
     ok: true, now: Date.now(), mock: isMockMode(), dbAvailable: await db.available(),
     limits: { ...A.LIMITS, rateMinDisks: RATE_MIN_DISKS },
     // v3.17.0: 손으로 설치하는 안내 · 설치 파일도 지금 설치 디렉터리 기준(설정을 못 읽으면 기본 경로 — 설치 파일 받기 · 자동 설치는 503 으로 막힌다)
@@ -149,7 +150,7 @@ api.get('/tools/focus-mon/audit', adminOnly, fullScopeOnly, async (req, res) => 
     corps: demo ? [] : cr.list,
     stateError: A.auditStateError() || null,
     install: installView(targets, cr, demo),
-  });
+  }, ['by']));
 });
 
 /** v3.17.0 설치 디렉터리 저장 — 본문 {dir: '' | 절대 경로, otp}. '' = 기본 경로. 이미 설치된 서버는 그대로 동작한다(‘옛 디렉터리’ 로 표시 · 다시 설치하면 옮긴다). */
@@ -292,7 +293,7 @@ api.get('/tools/focus-mon/audit/jobs', adminOnly, fullScopeOnly, (req, res) => {
   const vis = new Set(visibleTargets(req).map((t) => t.id));
   const jobs = [];
   for (const t of visibleTargets(req)) { const j = A.jobOf(t.id); if (j && vis.has(t.id)) jobs.push({ id: t.id, ...j }); }
-  res.json({ ok: true, now: Date.now(), jobs });
+  res.json({ ok: true, now: Date.now(), jobs: demoAccountView(req.user, jobs, ['by']) });
 });
 
 /** 한 서버의 회차 목록(최근부터 · 원문 없이). */
@@ -303,7 +304,7 @@ api.get('/tools/focus-mon/audit/:id/runs', adminOnly, fullScopeOnly, async (req,
   const runs = await db.listAudits(t.id);
   if (runs == null) return res.status(503).json({ ok: false, code: 'db', reason: '기록 DB 를 열지 못했습니다.' });
   // 예전 접속처(주소 · 포트 · 계정 · 담당 노드)로 돈 회차는 표시만 남긴다(oldEndpoint)
-  res.json({ ok: true, runs: runs.map((r) => ({ ...lastView(r), oldEndpoint: !sameEndpoint(r, t) })) });
+  res.json({ ok: true, runs: demoAccountView(req.user, runs.map((r) => ({ ...lastView(r), oldEndpoint: !sameEndpoint(r, t) })), ['by']) });
 });
 
 /** 회차 하나의 자세한 결과 — 보고서 원문을 다시 해석한다(판정 줄 · 읽은 자료 · 근거 · 해석 범위 · 디스크). 지난 회차에 없던 근거에 new. */
@@ -322,7 +323,7 @@ api.get('/tools/focus-mon/audit/run/:runId', adminOnly, fullScopeOnly, async (re
   const evidence = rep.evidence.map((e) => ({ ...e, isNew: prevKeys ? !prevKeys.has(hash12(evidenceKey(e))) : null }));
   const modelOf = (ids) => { const d = disks.find((x) => (ids.sn && x.sn === ids.sn) || (ids.wwn && x.wwn === ids.wwn)); return d ? d.model : ''; };
   res.json({
-    ok: true, run: { ...lastView(row), oldEndpoint: !sameEndpoint(row, visibleTargets(req).find((x) => x.id === row.target)) }, reportLines: lines.length,
+    ok: true, run: demoAccountView(req.user, { ...lastView(row), oldEndpoint: !sameEndpoint(row, visibleTargets(req).find((x) => x.id === row.target)) }, ['by']), reportLines: lines.length,
     shape: rep.shape.map((k) => SHAPE_TEXT[k] || k),
     verdicts: rep.verdicts, sources: rep.sources, missing: rep.missing, partial: rep.partial, scope: rep.scope, gaps: rep.gaps,
     inventory: rep.inventory.map((d) => ({ ...d, model: modelOf(d.ids) })), evidence, evidenceTotal: rep.evidenceTotal, errorKinds: ERROR_KINDS,

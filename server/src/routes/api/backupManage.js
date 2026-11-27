@@ -12,9 +12,9 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserScope, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { serversForVcenter, getServerWithSecret, registryLoadError } from '../../veeam/registry.js';
+import { getServerWithSecret, registryLoadError } from '../../veeam/registry.js';
 import { reauth } from './reauth.js';
-import { vcentersOf, vcRunState, runVisible, busyFlags } from './backupRun.js';
+import { vcentersOf, vcRunState, busyFlags, serversFor, runShownTo, portalRecordShownTo } from './backupRun.js';   // 보안 잔여 11-27 L7: 데모 판본 판정은 backupRun.js 하나
 import { portalJobName, morefOf, vmSizeOf } from '../../veeam/run/plan.js';
 import { getRunSettings } from '../../veeam/run/settings.js';
 import { startRun, listRuns, getRun, serverBusy, claimServer, releaseServer } from '../../veeam/run/runs.js';
@@ -38,10 +38,11 @@ export function ctxFor(req, vmId, { write = false } = {}) {
   if (registryLoadError()) return { error: 'Veeam 서버 등록부를 읽지 못했습니다 — 설정 › Veeam 백업 서버에서 확인하세요.', status: 503 };
   const vcId = String(vm.vcenterId);
   const vc = vcentersOf(snap).get(vcId) || { id: vcId, name: vcId, host: '' };
-  const servers = serversForVcenter(vcId);
+  const servers = serversFor(req, vcId);
   const vms = (snap?.vms || []).filter((v) => v.vcenterId === vcId);
   const s = vcRunState(vc, vms, req);
-  const record = getPortalVm(vmId);
+  const rec0 = getPortalVm(vmId);
+  const record = portalRecordShownTo(req, rec0) ? rec0 : null;   // 데모 계정에 사람 서버의 기록(서버 · 잡 이름 · 복원 이름)을 싣지 않는다
   const hostObj = (snap?.hosts || []).find((h) => h.vcenterId === vcId && h.name === vm.host);
   const hostMoref = hostObj ? morefOf(hostObj) : '';
   // Veeam 이 이 vCenter 를 부르는 이름 — 복원 대상(dest)은 **지금 설정·대조** 기준(관리자가 이름을 고쳤으면 고친 이름), 없으면 지난 요청에 쓴 이름.
@@ -97,14 +98,17 @@ api.get('/tools/backup-run/portal-vms', toolsPerm, adminOnly, (req, res) => {
   if (vcId && !inUserScope(req.user, snap, vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
   const present = new Map((snap?.vms || []).map((v) => [v.id, v]));
   const vcs = vcentersOf(snap);
-  const vms = listPortalVms({ allowed, vcenterId: vcId }).map((r) => {
+  const inScope = listPortalVms({ allowed, vcenterId: vcId });
+  const recs = inScope.filter((r) => portalRecordShownTo(req, r));
+  const vms = recs.map((r) => {
     const live = present.get(r.vmId);
     return { vmId: r.vmId, name: live?.name || r.name, vcenterId: r.vcenterId, vcenterName: vcs.get(r.vcenterId)?.name || r.vcenterId, folder: typeof live?.folder === 'string' ? live.folder.slice(0, 200) : '',
       exists: !!live, serverName: r.serverName || '', how: r.how || '', jobName: r.jobName || '', lastAt: r.lastAt ?? null, lastState: r.lastState || '',
       excludedAt: r.excludedAt ?? null, deletedAt: r.deletedAt ?? null, restores: (r.restores || []).slice(0, 3),
       ...vmSizeOf(live), live: liveOf(r) };
   });
-  res.json({ ok: true, vms });
+  const demoHidden = inScope.length - recs.length;
+  res.json({ ok: true, vms, ...(demoHidden ? { demoOnly: true, demoMasked: { vms: demoHidden } } : {}) });
 });
 
 /** VM 하나의 관리 정보(로컬 — Veeam 에 묻지 않는다). */
@@ -112,7 +116,7 @@ api.get('/tools/backup-run/vm/:vmId', toolsPerm, adminOnly, (req, res) => {
   const ctx = ctxFor(req, String(req.params.vmId).slice(0, 300));
   if (ctx.error) return res.status(ctx.status).json({ ok: false, reason: ctx.error });
   const allowed = scopedVcenterIds(req.user, ctx.snap);
-  const runs = listRuns().filter((r) => runVisible(r, allowed) && r.vms.some((v) => v.vmId === ctx.vm.id)).slice(0, 10).map((r) => {
+  const runs = listRuns().filter((r) => runShownTo(req, r, allowed) && r.vms.some((v) => v.vmId === ctx.vm.id)).slice(0, 10).map((r) => {
     const v = r.vms.find((x) => x.vmId === ctx.vm.id);
     return { id: r.id, at: r.at, user: r.user, how: v.how, state: v.state, detail: v.detail, newName: v.restore?.newName || '' };
   });

@@ -3,7 +3,7 @@
 // 범위: 법인(vCenter) 조회 범위만(bareosAccess read — 범위 밖 법인은 목록에 없다). 데모 계정은 데모 Director 일 때만 상태 조회를 깨운다.
 // 응답에 Director 주소·콘솔 이름·오류 원문 없음(오류는 코드만 — 화면이 문구로 바꾼다).
 import { requireRole } from '../../auth/auth.js';
-import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
+import { isDemoGuest, isAdminDetailUser, demoAccountView } from '../../auth/demoGuest.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { bareosAccess } from './bareosBackup.js';
@@ -242,7 +242,8 @@ export function registerBareosLive(api) {
       const groups = listGroups().filter((g) => allow.has(g.vcenterId));
       for (const g of groups) for (const id of g.vmIds) groupOf.set(id, g.name);
       const vcName = new Map((snap?.vcenters || []).map((v) => [v.id, v.name || v.id]));
-      const corps = sites.map((s) => corpView(s, settings, digests, { now, vms, groupOf, vcName: vcName.get(s.vcenterId), diag, groups, writable: bareosAccess(req.user, s.vcenterId) === 0 }));
+      // 보안 잔여 11-27 L7(반증 1회차 S-2): 실행 행 · 취소 · 그룹 회차 중단의 by(요청한 포탈 계정)는 데모 계정에 싣지 않는다(캐시 열쇠 g)
+      const corps = demoAccountView(req.user, sites.map((s) => corpView(s, settings, digests, { now, vms, groupOf, vcName: vcName.get(s.vcenterId), diag, groups, writable: bareosAccess(req.user, s.vcenterId) === 0 })), ['by']);
       const act = corps.filter((c) => c.running > 0);
       const knownRate = act.filter((c) => c.rateNow !== null);
       const sum = (k) => corps.reduce((a, c) => a + (c.resultsKnown === false ? 0 : (c.today[k] || 0)), 0);   // 52회차 F2: 결과를 모르는 법인은 더하지 않고 따로 센다
@@ -259,6 +260,6 @@ export function registerBareosLive(api) {
         },
         corps,
       };
-    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|w${writeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}|${liveGen()}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다) · w = 쓰기 범위(법인별 writable) · 세대(liveGen)
+    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|w${writeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}|g${isDemoGuest(req.user) ? 1 : 0}|${liveGen()}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다) · w = 쓰기 범위(법인별 writable) · 세대(liveGen)
   });
 }

@@ -4,7 +4,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
-import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff, portalMark, rpText, rpSort, pickHandoff, gbText, bytesText, elapsedText, progressLine } from './backupRunText.js';
+import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff, portalMark, rpText, rpSort, pickHandoff, gbText, bytesText, elapsedText, progressLine, demoMaskedNote } from './backupRunText.js';
 import BackupManageModal from './BackupManageModal.jsx';
 
 /**
@@ -129,6 +129,7 @@ function VmPanel({ vcId, initialIds, onHandoffUsed }) {
             <span className="muted">{s.via === 'edge' ? `엣지${s.agent ? ` ${s.agent}` : ''} 경유` : '중앙 직접'}{s.active ? ' · 백업 요청 진행 중' : ''}{s.busyUnknown ? ' · 진행 여부 모름(실행 기록 읽기 오류 — 새 요청은 막힘)' : ''}{s.repositorySet ? '' : ' · 포탈 전용 잡 저장소 미지정'}</span>
           </span>
         )) : <span className="muted">이 vCenter 를 맡는 Veeam B&amp;R 서버가 없습니다 — 설정 › Veeam 백업 서버에서 연결 vCenter 를 지정하세요.</span>}
+        {demoMaskedNote(d, 'servers') ? <span className="muted" style={{ flexBasis: '100%', fontSize: 12 }}>{demoMaskedNote(d, 'servers')}</span> : null}
         <span className="muted" style={{ flexBasis: '100%', fontSize: 12, overflowWrap: 'anywhere' }}>
           Veeam 이 이 vCenter 를 부르는 이름: <b className="mono">{d.hostName?.name || '—'}</b> ({HOST_HOW[d.hostName?.how || ''] || '모름'}) · 포탈 전용 잡 이름: <span className="mono">{d.jobName}</span>
           {!d.known && d.servers.length ? ' · 이 vCenter 의 Veeam 결과를 다 읽지 못했거나 오래돼 보호 상태를 모릅니다 — 확인 불가 VM 은 어느 방식으로도 보내지 않습니다(Veeam 수집이 다시 성공하면 풀립니다).' : ''}
@@ -253,6 +254,7 @@ function RunsPanel() {
         <b>실행 현황 · 이력</b>
         <span className="muted" style={{ fontSize: 12 }}>10초마다 새로 읽습니다{d.omittedOutOfScope ? ` · 범위 밖 VM 이 든 요청 ${d.omittedOutOfScope}건은 표시하지 않습니다` : ''}.</span>
       </div>
+      {demoMaskedNote(d, 'runs') ? <div className="muted" style={{ fontSize: 12 }}>{demoMaskedNote(d, 'runs')}</div> : null}
       {!runs.length ? <div className={d.runsUnreadable ? '' : 'muted'} style={d.runsUnreadable ? { color: 'var(--red)', fontSize: 12 } : undefined}>{d.runsUnreadable ? '실행 기록 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다) — 진행 중인 요청을 확인할 수 없어 새 백업 · 복원 · 빼기 · 삭제를 막습니다. 파일 권한 · 디스크를 확인하세요.' : '아직 실행한 요청이 없습니다.'}</div> : (
         <STable className="table" minWidth={820}>
           <thead><tr><th>요청 시각</th><th>요청자</th><th>방식</th><th>VM</th><th>상태</th><th>결과</th><th data-nosort>상세</th></tr></thead>
@@ -295,6 +297,7 @@ function PortalVmsPanel() {
         <div style={{ flex: '0 1 280px', minWidth: 0 }}><SearchBox value={q} onChange={setQ} placeholder="VM · vCenter · 폴더" /></div>
       </div>
       <div className="muted" style={{ fontSize: 12 }}>포탈에서 백업을 요청한 VM 입니다(포탈이 보낸 요청과 그 결과). Veeam 이 지금 가진 복원 지점은 ‘관리’ 창이 Veeam 에 직접 묻습니다. vCenter 상세의 폴더 트리에서도 같은 배지로 보입니다.</div>
+      {demoMaskedNote(d, 'vms') ? <div className="muted" style={{ fontSize: 12 }}>{demoMaskedNote(d, 'vms')}</div> : null}
       {!rows.length ? <div className="muted">{(d.vms || []).length ? '검색과 맞는 VM 이 없습니다.' : '아직 포탈로 백업한 VM 이 없습니다.'}</div> : (
         <STable className="table" minWidth={980} limit={300}>
           <thead><tr><th>VM</th><th>vCenter · 폴더</th><th>크기</th><th>방식</th><th>마지막 요청</th><th>상태 · 진행</th><th>복원</th><th data-nosort>관리</th></tr></thead>

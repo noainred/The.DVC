@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gbText, bytesText, elapsedText, avgRate, progressLine, portalMark, pointSource, rpText, rpSort, pickHandoff, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
+import { gbText, bytesText, elapsedText, avgRate, progressLine, portalMark, pointSource, rpText, rpSort, pickHandoff, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY, demoMaskedNote } from './backupRunText.js';
 import { visibleTabs, VEEAM_TABS, veeamSubTabs, topTabOf } from './VeeamHeader.jsx';
 
 // v2.818 Backup 현황 › 백업 실행 — 서버 판정을 글자로만 바꾼다(판정 복제 금지). 못 읽은 값은 '—'.
@@ -105,5 +105,24 @@ describe('v2.822.2 진행 상세 · VM 크기', () => {
       .toBe('100% · 처리 1 GB(세션 전체) · 1분 걸림 · 평균 17 MB/s(계산)');
     expect(progressLine({ state: 'running', progress: null, metrics: null }, { now })).toBe('');
     expect(progressLine(null)).toBe('');
+  });
+});
+
+describe('보안 잔여 11-27 L7 — 데모 계정 판본 안내(demoMaskedNote)', () => {
+  it('demoOnly 가 true 이고 개수가 양의 정수일 때만 말한다', () => {
+    expect(demoMaskedNote(null, 'runs')).toBe(null);
+    expect(demoMaskedNote({ demoMasked: { runs: 2 } }, 'runs')).toBe(null);
+    expect(demoMaskedNote({ demoOnly: 'true', demoMasked: { runs: 2 } }, 'runs')).toBe(null);
+    for (const bad of [0, -1, 1.5, '2', null, undefined]) expect(demoMaskedNote({ demoOnly: true, demoMasked: { runs: bad } }, 'runs')).toBe(null);
+    expect(demoMaskedNote({ demoOnly: true, demoMasked: { runs: 2 } }, 'servers')).toBe(null);
+    expect(demoMaskedNote({ demoOnly: true, demoMasked: { other: 2 } }, 'other')).toBe(null);
+  });
+  it('세 종류 문구 — 개수 · 데모 계정 · 백틱 없음', () => {
+    for (const k of ['servers', 'runs', 'vms']) {
+      const t = demoMaskedNote({ demoOnly: true, demoMasked: { [k]: 3 } }, k);
+      expect(t).toMatch(/데모 계정/);
+      expect(t).toMatch(/3(대|건)/);
+      expect(t).not.toMatch(/`/);
+    }
   });
 });

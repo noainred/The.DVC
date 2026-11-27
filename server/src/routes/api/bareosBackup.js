@@ -51,7 +51,7 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import { normLevel } from '../../bareos/names.js';
 import { authStopView } from '../../util/authGuard.js';
-import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
+import { isDemoGuest, isAdminDetailUser, demoAccountView } from '../../auth/demoGuest.js';
 import { bareosSetupOtpRequired } from '../../security/securitySettings.js';
 import {
   planDirector, setupDirector, planFdIni, setupFdIni, readFdThumbprint, preflight, planFdPlugin, setupFdPlugin, VMWARE_POOL_FULL, VMWARE_SCHEDULE, newConsolePassword,
@@ -1542,7 +1542,7 @@ api.get('/tools/bareos-backup/dr/runs', adminOnly, (req, res) => {
   const v = drRunsView(allowed);
   // writable — 조회는 되지만 쓰기 범위 밖인 회차는 화면이 멈추기 · 계속 버튼을 잠근다(집행은 drRunAccess 403 · v2.733 관례 · 버그 점검 B2 참고)
   const list = (vc ? v.runs.filter((r) => r.vcenterId === vc) : v.runs).map((r) => ({ ...r, writable: bareosAccess(req.user, r.vcenterId, { write: true }) === 0 }));
-  res.json({ ok: true, runs: list });
+  res.json({ ok: true, runs: demoAccountView(req.user, list, ['by']) });   // 보안 잔여 11-27 L7(S-2): 회차를 시작한 포탈 계정은 데모 계정에 싣지 않는다
 });
 
 /** 멈춤 · 계속 — 그 회차의 vCenter 쓰기 범위(조회 밖 404 · 쓰기 밖 403). 계속은 본인 OTP(다음 단계 복원을 보낸다). */

@@ -79,6 +79,9 @@ export const READ_DENY = [
   '/api/tools/bm-usage/ssh-keys', '/api/tools/bm-usage/accounts', '/api/tools/bm-usage/onboard/edge-rows',
   '/api/settings/ssh-access',            // 설정 › 보안 › 서버 접속 — 소유자 게이트로 이미 403 이지만 '설정 화면 API 접두는 READ_DENY 에도'(demo.md)
   '/api/tools/storage-usage/mail',       // 스토리지 사용량 보고서 메일 설정 — 받는 사람 원문 · 통합 관리자 주소(반증 M-2 — /api/admin/mail 의 형제 우회로)
+  // 반증 1회차 M-1(재현): 백업 실행 '설정' 탭 — B&R 서버 주소 · 담당 엣지 · vCenter 접속 주소(/api/admin/veeam 의 형제 우회로 · v2.743 CVP 선례).
+  //   같은 도구의 VM 목록 · 실행 기록은 막지 않고 데모(mock-) 서버만 싣는다(routes/api/backupRun.js serversFor · runShownTo).
+  '/api/tools/backup-run/settings',
 ];
 
 /** v2.720(감사 R1-03·R1-06): 데모 계정이 사람이 등록한(비-mock) 장비를 수집하려 할 때 라우트·폴러가 함께 쓰는 문구. */
@@ -156,6 +159,29 @@ export function isDemoGuest(user) {
  */
 export function isAdminDetailUser(user) {
   return user?.role === 'admin' && !isDemoGuest(user);
+}
+
+/**
+ * 보안 잔여 11-27 L7(반증 1회차 S-2): 데모 계정에는 **포탈 계정 이름**(저장한 · 요청한 · 만든 사람)을 싣지 않는다 — v2.901 savedBy 가림과 같은 규칙을
+ *   관리자 전용 도구의 실행 · 작업 기록(by · user · createdBy …)에도. 사람 관리자가 데모 장비로 돌린 작업의 기록에 그 계정 이름이 남는다.
+ *   빈 글자로 바꾼다(키는 남긴다 — 화면은 '—'). 판정은 isDemoGuest 하나 — operator 등 다른 역할의 응답은 바꾸지 않는다.
+ *   'by' · 'user' 는 다른 뜻(묶는 기준 · 질의 반향)으로도 쓰이는 이름이라 **그 응답에서 계정 이름임을 확인한 라우트에만** 건다(전역 응답 필터로 쓰지 않는다).
+ *   일반 객체 · 배열만 따라 내려간다(Date 등은 그대로 — JSON 직렬화 모양을 바꾸지 않는다). 원본은 바꾸지 않는다(캐시 · 메모리 기록 공유).
+ */
+export const ACCOUNT_KEYS = Object.freeze(['by', 'user', 'savedBy', 'createdBy', 'updatedBy', 'deletedBy']);
+export function demoAccountView(user, value, keys = ACCOUNT_KEYS) {
+  if (!isDemoGuest(user)) return value;
+  const ks = new Set(keys);
+  const plain = (v) => { const p = Object.getPrototypeOf(v); return p === Object.prototype || p === null; };
+  const walk = (v) => {
+    if (v === null || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map(walk);
+    if (!plain(v)) return v;
+    const out = {};
+    for (const [k, x] of Object.entries(v)) out[k] = ks.has(k) && typeof x === 'string' ? '' : walk(x);
+    return out;
+  };
+  return walk(value);
 }
 
 /** 보안 잔여 11-27 L7: 관리자 API(/api/admin 아래) 요청인가 — normApiPath(READ_DENY 와 같은 정규화 — 절대형 · 겹친 슬래시 포함) 기준. */

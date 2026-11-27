@@ -154,7 +154,10 @@ function harnessScript(phase) {
     const vcs = (snap.vcenters || []).map((v) => String(v.id));
     const host0 = (snap.hosts || []).find((h) => h.serviceTag && h.vcenterId) || null;
     const seeds = {};
-    const tryi = async (k, f) => { try { const r = await f(); seeds[k] = r && r.ok === false ? 'FAIL ' + JSON.stringify(r).slice(0, 200) : 'ok'; } catch (e) { seeds[k] = 'ERR ' + e.message; } };
+    const seedIds = {};   // 반증 1회차 S-1: 단건 GET(:id)을 시드한 항목 id 로도 부른다
+    const tryi = async (k, f) => { try { const r = await f(); seeds[k] = r && r.ok === false ? 'FAIL ' + JSON.stringify(r).slice(0, 200) : 'ok';
+      const id = [r && r.id, r && r.device && r.device.id, r && r.server && r.server.id, r && r.target && r.target.id, r && r.director && r.director.id].find((x) => typeof x === 'string' && x);
+      if (id && !seedIds[k]) seedIds[k] = id; } catch (e) { seeds[k] = 'ERR ' + e.message; } };
     // ── 데모 항목(mock-) — 두 단계 공통
     const DS = await import(${J('datacenter/store.js')});
     await tryi('dDcA', async () => DS.addDatacenter({ id: 'dc-mocka', name: 'mocka' }));
@@ -208,6 +211,34 @@ function harnessScript(phase) {
       return (await import(${J('bmstor/historyDb.js')})).commitBmHistory({ slot, ts: Date.now() - 3600e3, rows: [row('server', human.id, 'bm-realq'), row('server', 'mock-bm-t1', 'mockbm-01'), row('group', 'grp-realq', 'grp-realq'), row('total', '', '전체 합계')] });
     });
     await tryi('usageMail', async () => (await import(${J('storage/usageMail.js')})).saveUsageMailSettings({ enabled: false, to: ['qmail2@corpq.example'] }));
+    // 반증 1회차 M-1 · S-1: 예전 하네스가 시드하지 않던 등록부 — Veeam B&R(+ 실행 기록 · 포탈 백업 VM 기록, 요청한 포탈 계정 runuserq) ·
+    //   Monitoring(svcmon) 대상 · Bareos 상태 설정(저장한 포탈 계정 savuserq — S-2). 계정 이름은 민감 카나리 꼴(…userq)이라 ⊆ 불변식이 잡는다.
+    await tryi('veeam', async () => { const d = (await import(${J('veeam/registry.js')})).saveServer({ name: 'vbr-realq', host: '10.66.30.30', username: 'vbruserQ', password: 'pw-VB-qq', agent: 'edge-realq', vcenterIds: [vcs[0]] }); seedIds.veeam = d.id; return d; });
+    await tryi('veeamRun', async () => {
+      const RR = await import(${J('veeam/run/runs.js')});
+      const vm0 = (snap.vms || []).find((v) => v.vcenterId === vcs[0] && v.template !== true && !/^vcls/i.test(String(v.name || '')));
+      const sid = seedIds.veeam;
+      const plan = { groups: [{ serverId: sid, serverName: 'vbr-realq', kind: 'quick', vcenterId: '', refs: [{ name: vm0.name, objectId: 'vm-q1' }] }],
+        vms: [{ vmId: vm0.id, name: vm0.name, vcenterId: vcs[0], objectId: 'vm-q1', hostName: '', serverId: sid, serverName: 'vbr-realq', how: 'quick' }] };
+      const run = RR.startRun(plan, { user: 'runuserq' });
+      seedIds.veeamRun = run.id; seedIds.veeamVm = vm0.id;
+      const ok = (await import(${J('veeam/run/portalVms.js')})).notePortalRun(RR.getRun(run.id));
+      return ok ? { ok: true } : { ok: false, why: 'notePortalRun false' };
+    });
+    await tryi('svcmon', async () => {
+      const SM = await import(${J('svcmon/store.js')});
+      const t = SM.addTarget({ name: 'svc-realq', kind: 'infra', path: 'Q', host: '10.66.31.31' });
+      seedIds.svcmon = t.id;
+      SM.addTest(t.id, { type: 'tcp', name: 'tcp-q', port: 443 });
+      SM.flushStore();
+    });
+    await tryi('bareosHealth', async () => (await import(${J('bareos/health.js')})).saveHealthCfg({}, { by: 'savuserq' }));
+    // S-2: 관리자 전용 도구의 실행 · 작업 기록에 남는 포탈 계정(사람 관리자가 데모 VM · 데모 그룹으로 돌린 것) — 데모 계정에 싣지 않는다
+    await tryi('vmcloneOp', async () => (await import(${J('vmclone/store.js')})).recordOp({ kind: 'run', jobId: 'job-q', vcenterId: vcs[0], vmName: 'x', by: 'opuserq', ok: true, at: Date.now() }));
+    await tryi('bareosGroup', async () => {
+      const vm1 = (snap.vms || []).find((v) => v.vcenterId === vcs[0] && v.template !== true);
+      return (await import(${J('bareos/groups.js')})).addGroup({ name: 'grp-q', vcenterId: vcs[0], vmIds: [vm1.id], schedule: { enabled: false, time: '02:00' } }, { by: 'grpuserq' });
+    });
     ` : ''}
     const mk = (u) => auth.createUser(u, { trusted: true });
     mk({ username: 'fadm', role: 'admin', password: 'Passw0rd!long1' });
@@ -221,9 +252,9 @@ function harnessScript(phase) {
       ['/api/capacity', 'capacity.js', 'capacityRouter'], ['/api/insights', 'insights.js', 'insightsRouter'], ['/api', 'api.js', 'api']];
     const app = express(); app.use(express.json({ limit: '2mb' }));
     app.use('/api/auth', (await import(R + 'auth.js')).authRouter);
-    const gets = [];
+    const gets = []; const posts = [];
     const walk = (stack, pre) => { for (const l of stack) {
-      if (l.route) { if (l.route.methods.get) gets.push(pre + l.route.path); }
+      if (l.route) { if (l.route.methods.get) gets.push(pre + l.route.path); if (l.route.methods.post) posts.push(pre + l.route.path); }
       else if (l.handle && l.handle.stack) { const m = (l.regexp && l.regexp.source || '').match(/^\\^\\\\\\/(.*?)\\\\\\/\\?\\(\\?=/); walk(l.handle.stack, pre + (m ? '/' + m[1].replace(/\\\\\\//g, '/') : '')); } } };
     for (const [pre, f, n] of mods) { const m = await import(R + f); walk(m[n].stack, pre); app.use(pre, auth.authMiddleware, auth.requireEnrolled, m[n]); }
     app.use((err, req, res, _n) => res.status(500).json({ err: String(err?.message || err) }));
@@ -233,6 +264,11 @@ function harnessScript(phase) {
     const call = async (who, p) => {
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
       try { const r = await fetch(base + p, { headers: { authorization: 'Bearer ' + TOK[who] }, signal: ac.signal }); return { st: r.status, txt: await r.text() }; }
+      catch (e) { return { st: -1, txt: String(e.message) }; } finally { clearTimeout(t); }
+    };
+    const callPost = async (who, p) => {
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
+      try { const r = await fetch(base + p, { method: 'POST', headers: { authorization: 'Bearer ' + TOK[who], 'content-type': 'application/json' }, body: '{}', signal: ac.signal }); return { st: r.status, txt: await r.text() }; }
       catch (e) { return { st: -1, txt: String(e.message) }; } finally { clearTimeout(t); }
     };
     const raw = (who, target) => new Promise((res) => {
@@ -250,9 +286,14 @@ function harnessScript(phase) {
     if (host0) IDRAC_VIEWS.push('/api/admin/idrac/trend/resolve-host?hostId=' + encodeURIComponent(host0.id));
     IDRAC_VIEWS.push('/api/admin/idrac/mock-rdemo-1/trend', '/api/admin/idrac/nic-speed', '/api/admin/idrac/hardware-servers?dim=model&key=x');
     out.resolvePath = host0 ? '/api/admin/idrac/trend/resolve-host?hostId=' + encodeURIComponent(host0.id) : null;
+    // 반증 1회차 M-1: 백업 실행 도구(adminOnly — operator 판본 없음). 설정 탭은 READ_DENY, 나머지는 데모 판본(데모 Veeam 서버만).
+    const vm0id = ((snap.vms || []).find((v) => v.vcenterId === vcs[0] && v.template !== true) || {}).id || 'x';
+    const BACKUP_VIEWS = ['/api/tools/backup-run/vms', '/api/tools/backup-run/vms?vcenterId=' + encodeURIComponent(vcs[0] || ''), '/api/tools/backup-run/runs',
+      '/api/tools/backup-run/portal-vms', '/api/tools/backup-run/vm/' + encodeURIComponent(seedIds.veeamVm || vm0id)];
+    out.backupViews = BACKUP_VIEWS;
     if (${JSON.stringify(phase)} === 'base') {
       out.views = {};
-      for (const p of IDRAC_VIEWS) out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p) };
+      for (const p of [...IDRAC_VIEWS, ...BACKUP_VIEWS]) out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p) };
     } else {
       // ③-d 캐시 순서(관리자 → 데모 → 관리자 · 데모 → 관리자)
       out.cache = [];
@@ -263,23 +304,37 @@ function harnessScript(phase) {
       for (const p of [...IDRAC_VIEWS, '/api/admin/idrac/idrac-realq/inventory', '/api/admin/idrac/idrac-realq/sensors', '/api/admin/idrac/idrac-realq/temp-history',
         '/api/admin/idrac/idrac-realq/vcenter-host', '/api/admin/idrac/idrac-realq/trend', '/api/admin/idrac/idrac-realq/trend/hourly', '/api/admin/idrac/mock-evil/inventory',
         '/api/overview/cards', '/api/tools/disk-bad', '/api/tools/server-info', '/api/tools/server-cmd/output?id=x', '/api/admin/ipam/scan/ranges',
-        '/api/admin/central/token-apply/jobs', '/api/tools/bm-usage/ssh-keys', '/api/tools/storage-usage/mail', '/api/admin/idrac/trend/export.csv'])
+        '/api/admin/central/token-apply/jobs', '/api/tools/bm-usage/ssh-keys', '/api/tools/storage-usage/mail', '/api/admin/idrac/trend/export.csv',
+        ...BACKUP_VIEWS, '/api/tools/backup-run/settings', '/api/tools/backup-run/runs/' + encodeURIComponent(seedIds.veeamRun || 'x'), '/api/tools/bareos-backup/health/settings',
+        '/api/tools/vm-clone', '/api/tools/bareos-backup/groups/tree?vcenterId=' + encodeURIComponent(vcs[0] || '')])
         out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p), oper: await pick('oper', p) };
       // M-1 절대형 · 겹친 슬래시(원시 소켓 — fetch 는 대상을 정규화한다)
       out.raw = {};
       for (const t of ['http://x/api/admin/logs', 'HTTP://X/API/ADMIN/USERS', '/api//tools/server-info', '/api/admin//users', 'http://x/api/admin/idrac', '/api/admin//idrac'])
         out.raw[t] = await raw('demo', t);
       // ③-a 일반 불변식 — 모든 GET
+      //   반증 1회차 S-1: 단건 GET(:id)은 'x' 만이 아니라 **시드한 항목 id 마다** 부르고, 매개변수 없는 GET 은 vCenter 질의(?vcenterId=)로도 부른다 —
+      //   예전에는 'x' 로만 불러 단건 · 질의가 있어야 값이 나오는 GET 이 비어 있었다(백업 실행 /vms · /runs/:id 실례).
+      //   읽기성 POST(감사 생략 — 데모 계정이 통과하는 POST)도 빈 본문으로 같은 불변식을 본다.
+      const { auditSkipped } = await import(${J('audit.js')});
+      const idCands = [...new Set(['x', 'idrac-realq', 'hz-realq', 'pgpu-realq', 'edge-realq', 'vc-realq', ...Object.values(seedIds)])].map(encodeURIComponent);
       const uniq = [...new Set(gets)];
+      const urlsOf = (g) => {
+        if (/:[A-Za-z_]/.test(g)) return idCands.map((id) => g.replace(/:[A-Za-z_]\\w*/g, id));
+        return [g, g + '?vcenterId=' + encodeURIComponent(vcs[0] || '')];
+      };
       const sweep = [];
-      for (const g of uniq) {
-        const u = g.replace(/\\/idrac\\/:id/g, '/idrac/idrac-realq').replace(/:[A-Za-z_]\\w*/g, 'x');
-        const d = await call('demo', u);
-        if (!(d.st >= 200 && d.st < 300)) continue;
-        const o = await call('oper', u);
-        sweep.push({ route: g, url: u, demo: d.txt, oper: o.st >= 200 && o.st < 300 ? o.txt : '', operSt: o.st });
-      }
-      out.sweep = sweep; out.totalGets = uniq.length;
+      const sweepOne = async (route, u, method) => {
+        const d = method === 'POST' ? await callPost('demo', u) : await call('demo', u);
+        if (!(d.st >= 200 && d.st < 300)) return;
+        const o = method === 'POST' ? await callPost('oper', u) : await call('oper', u);
+        sweep.push({ route: (method === 'POST' ? 'POST ' : '') + route, url: u, demo: d.txt, oper: o.st >= 200 && o.st < 300 ? o.txt : '', operSt: o.st });
+      };
+      for (const g of uniq) for (const u of urlsOf(g)) await sweepOne(g, u, 'GET');
+      const readPosts = [...new Set(posts)].filter((p) => auditSkipped('POST', p));
+      for (const p of readPosts) await sweepOne(p, p, 'POST');
+      out.sweep = sweep; out.totalGets = uniq.length; out.readPosts = readPosts; out.seedIds = seedIds;
+      out.sweepUrls = sweep.map((x) => x.url);
       // L8 — 관리자 로그 뷰어
       const L = await import(${J('logbuffer.js')});
       const before = L.getLogs({}).lastId;
@@ -517,9 +572,133 @@ test('③ M-3 사람 장비가 없는 데모 설치본 — iDRAC 화면 응답�
   assert.equal(body(U.demo).rows.length, body(U.fadm).rows.length);
   const A = h.views['/api/admin/assignments'];
   assert.equal(body(A.demo).assignments.length, body(A.fadm).assignments.length);
+  // 반증 1회차 M-1: 사람 Veeam 서버가 없으면 백업 실행 화면도 관리자와 같은 응답(표지 없음)
+  for (const p of h.backupViews) {
+    assert.equal(h.views[p].demo.st, 200, `${p} ${h.views[p].demo.txt.slice(0, 160)}`);
+    assert.deepEqual(body(h.views[p].demo), body(h.views[p].fadm), p);
+  }
+});
+
+test('③-l 반증 1회차 M-1 백업 실행(adminOnly) — 설정 탭 403 · VM 목록 · 실행 기록 · 포탈 백업 VM 은 데모(mock-) Veeam 서버만 + 뺀 개수 · 관리자 무변경', () => {
+  const h = harness('full');
+  const V = h.views;
+  const S = V['/api/tools/backup-run/settings'];
+  assert.equal(S.demo.st, 403); assert.equal(body(S.demo).demoGuest, true);
+  assert.equal(S.fadm.st, 200); assert.ok(S.fadm.txt.includes('10.66.30.30') && S.fadm.txt.includes('edge-realq'), '대조: 관리자는 주소 · 담당 엣지를 본다');
+  const [vList, vDetail, runs, pvms, vm] = h.backupViews;
+  for (const p of h.backupViews) {
+    assert.equal(V[p].demo.st, 200, `${p} ${V[p].demo.txt.slice(0, 160)}`);
+    for (const c of ['vbr-realq', 'edge-realq', '10.66.30.30', 'runuserq', 'vbr_']) assert.equal(V[p].demo.txt.includes(c), false, `${p} 데모에 ${c}`);
+  }
+  const L = body(V[vList].demo);
+  assert.ok(L.vcenters.length > 0 && L.vcenters.every((v) => v.linked === false), '데모에게 사람 서버가 맡은 vCenter 를 연결됨으로 말하지 않는다');
+  assert.equal(L.demoOnly, true); assert.deepEqual(L.demoMasked, { servers: 1 });
+  assert.ok(body(V[vList].fadm).vcenters.some((v) => v.linked === true));
+  const D = body(V[vDetail].demo);
+  assert.deepEqual(D.servers, []); assert.deepEqual(D.demoMasked, { servers: 1 });
+  assert.ok(D.rows.length > 0 && D.rows.every((r) => r.run.status === 'unmapped'), '사람 서버로 판정한 상태(서버 이름)를 싣지 않는다');
+  assert.ok(body(V[vDetail].fadm).servers.some((x) => x.name === 'vbr-realq'));
+  assert.deepEqual(body(V[runs].demo).runs, []); assert.deepEqual(body(V[runs].demo).demoMasked, { runs: 1 });
+  assert.ok(V[runs].fadm.txt.includes('runuserq'));
+  assert.equal('demoMasked' in body(V[runs].fadm), false);
+  const R1 = V[`/api/tools/backup-run/runs/${encodeURIComponent(h.seedIds.veeamRun)}`];
+  assert.equal(R1.demo.st, 404); assert.equal(R1.fadm.st, 200);
+  assert.deepEqual(body(V[pvms].demo).vms, []); assert.deepEqual(body(V[pvms].demo).demoMasked, { vms: 1 });
+  assert.ok(body(V[pvms].fadm).vms.some((x) => x.serverName === 'vbr-realq'));
+  const M = body(V[vm].demo);
+  assert.equal(M.record, null); assert.deepEqual(M.servers, []); assert.deepEqual(M.runs, []);
+  assert.ok(body(V[vm].fadm).record && body(V[vm].fadm).runs.length === 1);
+});
+
+test('③-m 반증 1회차 S-2 — 관리자 전용 도구의 실행 · 작업 기록에 남은 포탈 계정 이름은 데모 계정에 싣지 않는다(키는 남긴다)', () => {
+  const V = harness('full').views;
+  const cases = [['/api/tools/vm-clone', 'opuserq'], [`/api/tools/bareos-backup/groups/tree?vcenterId=${encodeURIComponent('vc-us-east')}`, 'grpuserq'], ['/api/tools/bareos-backup/health/settings', 'savuserq']];
+  for (const [p0, c] of cases) {
+    const p = Object.keys(V).find((k) => k.split('?')[0] === p0.split('?')[0]);
+    assert.ok(p, p0);
+    assert.equal(V[p].demo.st, 200, `${p} ${V[p].demo.txt.slice(0, 160)}`);
+    assert.equal(V[p].demo.txt.includes(c), false, `${p} 데모에 ${c}`);
+    assert.ok(V[p].fadm.txt.includes(c), `${p} 대조: 관리자는 ${c} 를 본다`);
+  }
+  const ops = body(V['/api/tools/vm-clone'].demo).ops;
+  assert.ok(ops.some((o) => o.jobId === 'job-q' && o.by === ''), '작업 행은 남고 by 만 비운다');
+  const gp = Object.keys(V).find((k) => k.startsWith('/api/tools/bareos-backup/groups/tree'));
+  const g = (body(V[gp].demo).groups || []).find((x) => x.name === 'grp-q');
+  assert.ok(g && g.createdBy === '' && g.updatedBy === '', JSON.stringify(g).slice(0, 200));
+});
+
+test('③-l 순수 판정 — 데모 Veeam 서버 · 실행 기록(모든 그룹 · VM 이 데모 서버일 때만) · 포탈 기록', async () => {
+  const { isDemoVeeamServerId, runShownTo, portalRecordShownTo } = await import('../src/routes/api/backupRun.js');
+  const demo = { user: { role: 'admin', demoGuest: true } };
+  const adm = { user: { role: 'admin' } };
+  assert.equal(isDemoVeeamServerId('mock-vbr-1'), true); assert.equal(isDemoVeeamServerId('MOCK-x'), true);
+  for (const bad of ['vbr-abc', '', null, undefined, 'xmock-1']) assert.equal(isDemoVeeamServerId(bad), false, String(bad));
+  const run = (g, v) => ({ groups: g.map((serverId) => ({ serverId })), vms: v.map((serverId) => ({ serverId, vcenterId: 'vc-a' })) });
+  assert.equal(runShownTo(demo, run(['mock-1'], ['mock-1']), null), true);
+  assert.equal(runShownTo(demo, run(['mock-1', 'vbr-x'], ['mock-1']), null), false, '그룹 하나라도 사람 서버면 뺀다');
+  assert.equal(runShownTo(demo, run(['mock-1'], ['mock-1', 'vbr-x']), null), false, 'VM 하나라도 사람 서버면 뺀다');
+  assert.equal(runShownTo(demo, run([], []), null), false, '서버가 없는 기록은 데모 기록이 아니다');
+  assert.equal(runShownTo(adm, run(['vbr-x'], ['vbr-x']), null), true);
+  assert.equal(runShownTo(adm, run(['vbr-x'], ['vbr-x']), new Set(['vc-b'])), false, '범위 판정(runVisible)은 그대로');
+  assert.equal(runShownTo(demo, run(['mock-1'], ['mock-1']), new Set(['vc-b'])), false);
+  assert.equal(portalRecordShownTo(demo, { serverId: 'mock-1' }), true);
+  assert.equal(portalRecordShownTo(demo, { serverId: 'vbr-x' }), false);
+  assert.equal(portalRecordShownTo(adm, { serverId: 'vbr-x' }), true);
+  assert.equal(portalRecordShownTo(adm, null), false);
+});
+
+test('③-m demoAccountView — 데모만 · 일반 객체와 배열만 내려간다 · 원본 무변경 · 문자열만 비운다', async () => {
+  const { demoAccountView, ACCOUNT_KEYS } = await import('../src/auth/demoGuest.js');
+  const demo = { role: 'admin', demoGuest: true };
+  const d = new Date(0);
+  const src = { by: 'a', user: 'u', n: { createdBy: 'c', by: 3, list: [{ updatedBy: 'x', deletedBy: 'y', savedBy: 'z' }] }, when: d, other: 'keep', byKey: 'keep' };
+  const out = demoAccountView(demo, src);
+  assert.deepEqual(out, { by: '', user: '', n: { createdBy: '', by: 3, list: [{ updatedBy: '', deletedBy: '', savedBy: '' }] }, when: d, other: 'keep', byKey: 'keep' });
+  assert.equal(out.when, d, 'Date 는 그대로(직렬화 모양 무변경)');
+  assert.equal(src.by, 'a'); assert.equal(src.n.list[0].updatedBy, 'x');
+  assert.equal(demoAccountView({ role: 'admin' }, src), src, '관리자 · operator 는 원본 그대로(같은 객체)');
+  assert.equal(demoAccountView({ role: 'operator' }, src), src);
+  assert.deepEqual(demoAccountView(demo, { by: 'a', user: 'u' }, ['by']), { by: '', user: 'u' }, '키 목록을 받으면 그 키만');
+  assert.deepEqual([...ACCOUNT_KEYS].sort(), ['by', 'createdBy', 'deletedBy', 'savedBy', 'updatedBy', 'user']);
+  assert.equal(demoAccountView(demo, null), null);
+  assert.deepEqual(demoAccountView(demo, [{ by: 'q' }]), [{ by: '' }]);
 });
 
 /* ─────────────────────────── ④ 소스 스윕 ─────────────────────────── */
+
+test('④-b 반증 1회차 M-1 소스 — 백업 실행 · 관리 라우트의 Veeam 서버 · 실행 기록 · 포탈 기록은 데모 판정 함수를 거친다', () => {
+  const run = read('routes/api/backupRun.js');
+  const man = read('routes/api/backupManage.js');
+  const lineOf = (s, i) => s.slice(s.lastIndexOf('\n', i) + 1, s.indexOf('\n', i)).trim();
+  // serversForVcenter 직접 호출은 serversFor 본문 · 뺀 개수 계산(demoMaskedOf)만
+  const sv = [...run.matchAll(/\bserversForVcenter\(/g)].map((m) => lineOf(run, m.index));
+  assert.equal(sv.length, 2, sv.join('\n'));
+  assert.ok(sv.some((l) => /const all = serversForVcenter\(vcenterId\)/.test(l)) && sv.some((l) => /isDemoVeeamServerId\(d\.id\)/.test(l)), sv.join('\n'));
+  assert.equal(/\bserversForVcenter\b/.test(man), false, 'backupManage 는 serversFor 를 쓴다');
+  // 실행 기록 노출 판정은 runShownTo — runVisible 은 그 안에서만
+  const rv = [...run.matchAll(/\brunVisible\(/g)].map((m) => lineOf(run, m.index));
+  assert.ok(rv.every((l) => /if \(!runVisible\(run, allowed\)\) return false;|inScope = all\.filter\(\(r\) => runVisible\(r, allowed\)\)/.test(l)), rv.join('\n'));
+  assert.equal(/\brunVisible\b/.test(man), false);
+  for (const s of [run, man]) for (const m of s.matchAll(/\bapi\.get\('\/tools\/backup-run\/(runs\/:id|vm\/:vmId)'/g)) assert.ok(/runShownTo\(req,/.test(s.slice(m.index, s.indexOf('\n});', m.index))), m[1]);
+  // 포탈 기록: 단건(getPortalVm)은 portalRecordShownTo 를 거친 값만 · 목록은 거른 뒤
+  assert.ok(/const record = portalRecordShownTo\(req, rec0\) \? rec0 : null;/.test(man));
+  assert.equal([...man.matchAll(/\bgetPortalVm\(/g)].length, 1);
+  assert.ok(/inScope\.filter\(\(r\) => portalRecordShownTo\(req, r\)\)/.test(man));
+  // 설정 탭은 READ_DENY
+  assert.ok(read('auth/demoGuest.js').includes("'/api/tools/backup-run/settings'"));
+});
+
+test('④-c 반증 1회차 S-2 소스 — 계정 이름 가림을 건 라우트(데모 계정 · operator 403 · 사람 관리자의 기록이 실린다)', () => {
+  const need = [
+    ['routes/api/bareosLive.js', /demoAccountView\(req\.user, sites\.map\(/, /\|g\$\{isDemoGuest\(req\.user\) \? 1 : 0\}/],
+    ['routes/api/bareosBackup.js', /runs: demoAccountView\(req\.user, list, \['by'\]\)/],
+    ['routes/api/bareosGroups.js', /return demoAccountView\(req\.user, \{ \.\.\.groupView\(g, now\)/],
+    ['routes/api/vmClone.js', /ops: demoAccountView\(req\.user, listOpsView\(\{ allowed \}\), \['by'\]\)/],
+    ['routes/api/sanFlow.js', /json\(demoAccountView\(req\.user, \{ ok: true, devices, flows: out/, /job: demoAccountView\(req\.user, maskJob\(/],
+    ['routes/api/focusMonAudit.js', /res\.json\(demoAccountView\(req\.user, \{\s*\n?\s*ok: true, now: Date\.now\(\), mock:/, /jobs: demoAccountView\(req\.user, jobs, \['by'\]\)/, /runs: demoAccountView\(req\.user, runs\.map\(/, /run: demoAccountView\(req\.user, \{ \.\.\.lastView\(row\)/],
+  ];
+  for (const [f, ...res] of need) { const s = read(f); for (const re of res) assert.ok(re.test(s), `${f} ${re}`); }
+});
 
 test('④ L7 소스 — iDRAC 조회 캐시 열쇠는 idracViewSig · sc.allowed 직접 사용처 허용 목록 · /assignments GET 이 demoRegistryView', () => {
   for (const f of ['routes/admin/idracCore.js', 'routes/admin/idracTrend.js']) {

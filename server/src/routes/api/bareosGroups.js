@@ -4,7 +4,7 @@
 // 그룹 VM 중 잡이 없는 VM 은 저장 때 **Director 스케줄 없이** 등록한다(그룹 스케줄과 Director 스케줄이 겹쳐 두 번 돌지 않게).
 import { requireRole, verifyUserOtp, getUser } from '../../auth/auth.js';
 import { config } from '../../config.js';
-import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoGuest, demoAccountView } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { bareosAccess, sendBareosErr, MAX_BULK } from './bareosBackup.js';
@@ -247,7 +247,8 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
           dupVms = known ? n : null;
         }
         // v2.867 회차 중단 계획(확인 창의 수 · '회차 중단…' 버튼을 열지) — 원장 · 실행 표만(Director 에 접속하지 않는다)
-        return { ...groupView(g, now), poolPolicy: pp ? { ...pp, from: g.pool ? 'group' : 'site' } : null, dupVms, stop: cancelPlan(g, jobs, now) };
+        // 보안 잔여 11-27 L7(S-2): 만든 · 고친 사람 · 회차 by · 중단 요청 by(포탈 계정)는 데모 계정에 싣지 않는다
+        return demoAccountView(req.user, { ...groupView(g, now), poolPolicy: pp ? { ...pp, from: g.pool ? 'group' : 'site' } : null, dupVms, stop: cancelPlan(g, jobs, now) }, ['by', 'createdBy', 'updatedBy']);
       });
     })(),
   });
