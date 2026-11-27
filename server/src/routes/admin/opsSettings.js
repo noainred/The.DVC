@@ -5,6 +5,8 @@ import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners, sessio
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus, osScanWriteRefusal } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
+import { buildOsProbe } from '../../inventory/osProbe.js';   // v3.54(실제 OS 1단계 실측)
+import { vmCfgStatus } from '../../vmcfg/cache.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 import { alertStatus, saveAlertConfig, alertConfigWriteRefusal, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
@@ -36,6 +38,15 @@ const csvPerm = requireCsvPerm('data.csv');
  *   범위 계정에는 `url:''` + `hasUrl`·`urlHidden` 만 준다(형제 /tools/report/alerts 는 처음부터 '설정 여부만' 이다). 전체 범위 admin 은
  *   편집 폼에 원문이 필요하므로 그대로다.
  */
+/** v3.54(실제 OS 1단계 실측) — 아래 GET /os-scan/probe 의 본문(범위 · 요청 필터 · 집계). 테스트가 직접 부른다. */
+export function scopedOsProbe(user, snap, { vcenterId = '', statuses = vmCfgStatus().vcenters, now = Date.now() } = {}) {
+  const allowed = scopedVcenterIds(user, snap);
+  const okVc = (id) => (!allowed || allowed.has(String(id))) && (!vcenterId || String(id) === vcenterId);
+  const vms = (snap?.vms || []).filter((v) => okVc(v.vcenterId));
+  const vcenters = (snap?.vcenters || []).filter((vc) => okVc(vc.id));
+  const st = (Array.isArray(statuses) ? statuses : []).filter((x) => okVc(x?.vcenterId));
+  return { ...buildOsProbe(vms, vcenters, st, { now }), ...(allowed ? { scoped: true } : {}) };
+}
 export function alertVcenterOf(a, allowed) {
   if (!a || typeof a !== 'object') return null;
   if (typeof a.vcenterId === 'string' && a.vcenterId) return a.vcenterId;
@@ -335,6 +346,15 @@ adminRouter.get('/os-scan/results.csv', csvPerm, adminOnly, (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="real-os-${todayStamp()}.csv"`);
   res.send('﻿' + lines.join('\r\n'));
+});
+
+// v3.54(실제 OS 1단계 실측): VMware Tools 보고(vm.gos)가 법인별로 얼마나 채워지는지 · 어떤 글자로 오는지(종류 · 버전 · 개수 — VM 이름 없음).
+//   화면이 이 응답을 그대로 JSON 파일로 내려받게 한다(다음 단계 판정 코어를 실측 문자열에 맞춘다 — docs/design/real-os/README.md §7).
+//   범위: 요청 필터(?vcenterId)보다 **먼저** 조회 범위 교집합 · 수집 상태(vmCfgStatus — 이 포탈이 직접 수집하는 vCenter 만)도 같은 범위로.
+//   마운트 1회 + 버튼(상시 폴링 아님) · O(N) 한 번 순회.
+adminRouter.get('/os-scan/probe', adminOnly, (req, res) => {
+  const vcenterId = typeof req.query.vcenterId === 'string' ? req.query.vcenterId.slice(0, 128) : '';
+  res.json(scopedOsProbe(req.user, store.get(), { vcenterId }));
 });
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
