@@ -104,6 +104,8 @@ server/config/ipam-scan-results.json
 server/config/ipam-scan-runs.json
 server/config/audit.ndjson
 server/config/alerts.json
+server/config/bm-events.json
+server/config/bm-power.json
 server/config/host-temp.db
 server/config/host-temp.ndjson
 server/config/ping-monitor.db

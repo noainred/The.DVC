@@ -24,14 +24,27 @@ const dkey = (agent, deviceId) => `${t(agent)}|${t(deviceId)}`;
  * @param {{stateFor:(target,now)=>object}} judge
  * @returns {{ hold:Set<string>, byDevice:Map<string,{ids:string[],until:number,key:string}> }}
  */
-export function holdSetFor(devices = [], targets = [], judge, now = Date.now(), { knownAgents = null, blindAgent = null } = {}) {
+export function holdSetFor(devices = [], targets = [], judge, now = Date.now(), { knownAgents = null, blindAgent = null, corpsOf = null, agentKey = null } = {}) {
+  // 엣지 이름은 출처마다 다르다(장비 쪽 = 부품 장애 보고의 인증 이름 · 대상 쪽 = 베어메탈 인출의 수집 서버 등록 이름) — 같은 키(수집 서버 등록 id)로 맞춰 견준다(디버깅 2회차 엣지 #11)
+  //   이 호출 안에서 기억한다 — 장비 · 대상마다 부르면 수집 서버 목록을 매번 읽고 복호해 3,000대에 3초 넘게 막았다(디버깅 3회차 엣지 #1)
+  const akMemo = new Map();
+  const ak = (a) => {
+    const x = String(a || '').trim().toLowerCase(); if (!x || typeof agentKey !== 'function') return x;
+    if (akMemo.has(x)) return akMemo.get(x);
+    let v = x; try { v = String(agentKey(x) || x).toLowerCase(); } catch { v = x; }
+    akMemo.set(x, v); return v;
+  };
+  // 태그 대응은 **같은 수집 주체** 먼저, 없으면 중앙 로컬(agent '')만 — 다른 법인 엣지의 같은 태그 대상이 이 장비를 보류하지 않게(v3.52 디버깅 1회차 보안 #7)
   const byTag = new Map(); const byReg = new Map();
+  const agOf = (x) => ak(x?.agent);
   for (const x of targets) {
     const tag = t(x.serviceTag).toUpperCase();
-    if (tag && !byTag.has(tag)) byTag.set(tag, x);
+    const k = `${agOf(x)}|${tag}`;
+    if (tag && !byTag.has(k)) byTag.set(k, x);
     if (!t(x.agent) && t(x.regId) && !byReg.has(t(x.regId))) byReg.set(t(x.regId), x);
   }
   const hold = new Set(); const byDevice = new Map(); const seen = new Set();
+  const knownKeys = knownAgents ? new Set([...knownAgents].map(ak)) : null;
   const unknown = new Map();   // v2.954(점검 D-2): 엣지(소문자) → 대상을 몰라 판정하지 못한 장비 수
   for (const d of devices) {
     if (!d || t(d.scope) !== 'idrac') continue;
@@ -39,9 +52,15 @@ export function holdSetFor(devices = [], targets = [], judge, now = Date.now(), 
     const k = dkey(ag, d.deviceId);
     if (seen.has(k)) continue;
     seen.add(k);
-    const tg = byTag.get(t(d.deviceKey).toUpperCase()) || (!t(d.agent) ? byReg.get(t(d.deviceId)) : null);
+    const dtag = t(d.deviceKey).toUpperCase();
+    // 엣지 장비가 중앙 로컬 대상으로 넘어갈 때는 **그 엣지가 맡은 법인**의 대상만 — 다른 법인 서버의 정비 창이 이 장비를 보류하지 않게(디버깅 2회차 보안 #5).
+    //   엣지 법인을 모르면 넘어가지 않는다(대상 모름으로 센다 — 보류를 지어내지 않는다)
+    const akey = ak(ag);
+    const localTg = dtag ? byTag.get(`|${dtag}`) : null;
+    const localOk = !!localTg && (!ag || (() => { let cs = []; try { cs = corpsOf ? corpsOf(ag) || [] : []; } catch { cs = []; } return cs.map((c) => t(c)).includes(t(localTg.vcenterId)); })());
+    const tg = (dtag && (byTag.get(`${akey}|${dtag}`) || (localOk ? localTg : null))) || (!t(d.agent) ? byReg.get(t(d.deviceId)) : null);
     if (!tg) {
-      if (ag && knownAgents && !knownAgents.has(ag) && (!blindAgent || blindAgent(ag))) unknown.set(ag, (unknown.get(ag) || 0) + 1);
+      if (ag && knownAgents && !knownAgents.has(ag) && !knownKeys?.has(akey) && (!blindAgent || blindAgent(ag))) unknown.set(ag, (unknown.get(ag) || 0) + 1);
       continue;
     }
     const s = judge.stateFor(tg, now);
@@ -81,7 +100,9 @@ export async function partfaultMaintHold(devices = [], { now = Date.now(), deps 
     let corpsOf = deps.corpsOf || null;
     if (!corpsOf) { try { corpsOf = (await import('../edgeCorps.js')).edgeCorpsSource(); } catch { corpsOf = null; } }
     const blindAgent = (ag) => { let cs = []; try { cs = corpsOf ? corpsOf(ag) || [] : []; } catch { cs = []; } return !cs.length || cs.some((c) => holdCorps.has(t(c))); };
-    const r = holdSetFor(devices, targets, judge, now, { knownAgents: deps.knownAgents !== undefined ? deps.knownAgents : (targets.knownAgents || null), blindAgent });
+    let agentKey = deps.agentKey || null;
+    if (!agentKey) agentKey = await agentKeyFn();
+    const r = holdSetFor(devices, targets, judge, now, { knownAgents: deps.knownAgents !== undefined ? deps.knownAgents : (targets.knownAgents || null), blindAgent, corpsOf, agentKey });
     for (const [k, v] of r.byDevice) {
       noteApplied('hold', v.key, v.until, v.ids, now, { occ: v.occ });   // 창마다 그 창 발생의 시작 · 끝(3회차 D3)
       // 계수는 장비마다 창 한 번(주기마다 세지 않는다 — 화면 ‘전이 보류 n대’).
@@ -104,7 +125,18 @@ export async function partfaultMaintHoldPeek(devices = [], { now = Date.now() } 
   try {
     const judge = await maintJudge({ now });
     if (!judge.windows.some((w) => w.scopes?.hold && !w.deleted)) return { hold: new Set() };
-    return { hold: holdSetFor(devices, await centralTargets(), judge, now).hold };
+    let corpsOf = null; let agentKey = null;
+    try { corpsOf = (await import('../edgeCorps.js')).edgeCorpsSource(); } catch { corpsOf = null; }
+    agentKey = await agentKeyFn();
+    return { hold: holdSetFor(devices, await centralTargets(), judge, now, { corpsOf, agentKey }).hold };
   } catch (e) { return { hold: new Set(), error: String(e?.message || e).slice(0, 160) }; }
+}
+/** 엣지 이름 → 수집 서버 등록 키(목록은 한 번만 읽어 넘긴다 — 3회차 엣지 #1). */
+async function agentKeyFn() {
+  try {
+    const { agentKeyOf } = await import('../../diskbad/agentKey.js');
+    let rows = null; try { rows = (await import('../../collector/registry.js')).listCollectors() || []; } catch { rows = null; }
+    return (a) => agentKeyOf(a, rows);
+  } catch { return null; }
 }
 export const maintHoldKeyOf = (agent, deviceId) => dkey(String(agent || '').trim().toLowerCase(), deviceId);

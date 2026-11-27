@@ -87,6 +87,7 @@ export const RESTORE_EXCLUDE = new Map([
 const KEEP_LEDGER = '보낸 회차 · 알린 사건 기록 — 되돌리면 이미 보낸 알림을 다시 보낸다';
 const KEEP_RUN = '실행 회차 · 실행 기록 — 되돌리면 이미 돈 작업을 다시 돌리거나 진행 중인 실행의 추적을 잃는다';
 const KEEP_CURSOR = '읽은 위치 · 기준선 — 되돌리면 이미 처리한 구간을 다시 처리한다';
+const KEEP_SWITCH = '본인 OTP 로 켜는 장비 조작 스위치 · 장비에 건 받는 주소 비밀 — 되돌리면 OTP 없이 원격 전원이 다시 켜지거나 장비 구독의 비밀과 어긋난다(v3.56)';
 export const RESTORE_KEEP_CURRENT = new Map([
   // 메일 · 알림 발송 기록
   ...['alerts-state.json', 'backup-stale-alert-state.json', 'bareos-digest-state.json', 'bareos-health-state.json', 'bareos-mail-state.json',
@@ -103,7 +104,11 @@ export const RESTORE_KEEP_CURRENT = new Map([
   // 수집 커서 · 증분 기준선
   ...['diskbad-cursors.json', 'vcenter-logs-cursor.json', 'cvp-push.json', 'isidu-push.json', 'sanswitch-perf-push.json', 'net-issues-state.json', 'ipam-change-baseline.json',
   ].map((n) => [n, KEEP_CURSOR]),
+  // v3.52 물리서버 원격 전원 · LED 켜기(⑦ ⑥) · 이벤트 구독(⑬)
+  ...['bm-power.json', 'bm-events.json'].map((n) => [n, KEEP_SWITCH]),
 ]);
+/** v3.52 지금 파일이 없어도 백업에서 되살리지 않는 것(KEEP_SWITCH — 재해 복구의 ‘없으면 백업 그대로’ 예외 · 시험이 고정). */
+export const RESTORE_NEVER_FROM_BACKUP = new Set([...RESTORE_KEEP_CURRENT].filter(([, why]) => why === KEEP_SWITCH).map(([n]) => n));
 /** 114회차: 인증 실패 정지 기록(util/authGuard.js createAuthGuard 의 파일 — 도구마다 `<도구>-auth-stops.json`). reconcileAuthStopsText 가 합친다. */
 export const AUTH_STOPS_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}-auth-stops\.json$/;
 /**
@@ -651,6 +656,8 @@ function readCurrentOrThrow(configDir, name, what) {
 function keepCurrentReason(configDir, name) {
   const why = RESTORE_KEEP_CURRENT.get(name);
   if (!why) return null;
+  // v3.52 장비 조작 스위치 · 받는 주소 비밀 — 지금 파일이 없어도(새 설치 · 손상 보존) 백업 판본을 쓰지 않는다: OTP 없이 켜짐 · 옛 비밀이 되살아나지 않게(디버깅 1회차 보안 #3)
+  if (RESTORE_NEVER_FROM_BACKUP.has(name)) return why;
   try { fs.lstatSync(path.join(configDir, name)); return why; } catch (e) { return e?.code === 'ENOENT' ? null : why; }
 }
 

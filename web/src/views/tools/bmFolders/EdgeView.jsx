@@ -10,12 +10,14 @@ import { STable } from '../../../components/STable.jsx';
 import { UsagePair, StatusDot } from './parts.jsx';
 import { ageText, wattsText, csvNameOf, opErrorText } from '../bmFoldersText.js';
 import { edgeFolderRows, edgeRowsOf, edgeCopyNote } from './edgeViewText.js';
+import EventSubSettings from './EventSubSettings.jsx';   // v3.52 ⑬ 엣지 포탈의 이벤트 구독 창(반증 B1)
 
 export default function EdgeView({ d, reload }) {
   const [sel, setSel] = useState({ corp: '', path: '' });
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [evtCfg, setEvtCfg] = useState(false);   // v3.52 ⑬ 이벤트 구독 창 — 엣지는 자기 등록부의 장비에 건다(반증 B1)
   const now = Date.now();
   const tree = useMemo(() => edgeFolderRows(d.corps || [], d.servers || []), [d]);
   const rows = useMemo(() => edgeRowsOf(d.servers || [], sel, q), [d, sel, q]);
@@ -34,6 +36,7 @@ export default function EdgeView({ d, reload }) {
           <span className="muted" style={{ fontSize: 12 }}>{copyNote.text}</span>
           <span style={{ marginLeft: 'auto' }} className="flex wrap gap">
             {d.canPull ? <button type="button" className="logout-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} disabled={busy} onClick={pullNow}>{busy ? '받는 중…' : '지금 받기'}</button> : null}
+            {d.canFleet ? <button type="button" className="logout-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setEvtCfg(true)} title="이 엣지 등록부의 장비가 장애 경고를 이 엣지로 바로 보내게 구독을 겁니다(기본 꺼짐)">이벤트 구독</button> : null}
             <button type="button" className="logout-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => reload()}>새로고침</button>
           </span>
         </div>
@@ -106,6 +109,7 @@ export default function EdgeView({ d, reload }) {
         </div>
       ) : null}
       <div className="muted" style={{ fontSize: 11.5 }}>값이 없는 칸은 '—' 아래 이유를 누르면 자세히 보입니다 · {d.copy ? `사본 ${ageText(d.copy.savedAt, now)} 받음` : '사본 없음'}</div>
+      {evtCfg ? <EventSubSettings onClose={() => setEvtCfg(false)} /> : null}
     </div>
   );
 }

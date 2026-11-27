@@ -3349,6 +3349,10 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmd-ct-btn { display: block; margin-top: 4px; padding: 3px 8px; font-size: 11.5px; white-space: nowrap; }
 /* 구역 머리의 오른쪽 글자 — 좁은 드로어에서 낱말 가운데서 꺾이지 않게(‘견/줌’) */
 .bmd-sh-sub { min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: anywhere; }
+/* 구역 머리 배지는 글자 중간에서 접지 않는다 — 400px 에서 ‘88 · 주’ / ‘의’ 로 갈렸다(디버깅 1회차 화면 U3) */
+.vmh-sec .sh h3 .badge { white-space: nowrap; }
+/* 물리서버 드로어 — 부제(.bmd-sh-sub)가 길면 제목이 낱말 가운데서 꺾였다(‘부품 수 / 명 지표’ — 디버깅 3회차 화면 N1). 제목은 줄지 않고 부제가 줄바꿈한다 */
+.vmh-sec > .sh:has(> .bmd-sh-sub) > h3 { flex-shrink: 0; max-width: 60%; word-break: keep-all; }
 /* v3.48 같은 묶음 대비 — 지표마다 한 줄(왼쪽 이름 · 기준 · 상태 / 오른쪽 띠 그림 + 설명). 좁은 화면에서는 위아래로 */
 .bmf-hs-row { margin-top: 3px; }
 .bmf-hs { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
@@ -3939,3 +3943,17 @@ thead th[data-nosort] { cursor: default; }
 .pfe-step > .pfe-min { width: 64px; flex: 0 0 64px; }
 .pfe-step > .pfe-mail { width: auto; flex: 1 1 180px; }
 .pfe-dl { font-size: 12px; text-align: center; }
+/* v3.52 원격 전원 조작 · 위치 LED(⑦ ⑥) — 드로어 구역 · 확인 칸 */
+.bmd-pw-row { gap: 6px; margin-top: 4px; min-width: 0; }
+.bmd-pw-lb { font-size: 12px; min-width: 56px; }
+.logout-btn.bmd-pw-force { border-color: var(--red); color: var(--red); }
+.bmd-pw-confirm { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.bmd-pw-confirm.force { border-color: var(--red); }
+.bmd-pw-h { font-size: 13px; overflow-wrap: anywhere; }
+.bmd-pw-warn { font-size: 12px; color: var(--red); overflow-wrap: anywhere; }
+.bmd-pw-f { display: grid; gap: 3px; font-size: 12px; min-width: 0; }
+.bmd-pw-f > .input { width: 100%; max-width: 360px; min-width: 0; box-sizing: border-box; }
+.login-btn.bmd-pw-go-force { background: var(--red); border-color: var(--red); }
+.bmd-pw-bad { color: var(--red); overflow-wrap: anywhere; }
+.pfe-on.bmd-wrapline { white-space: normal; align-items: flex-start; min-width: 0; overflow-wrap: anywhere; }   /* 긴 체크 글자가 창 격자를 넓히지 않게(400px — 반증 B2) */
+.pfe-on.bmd-wrapline > input { flex: none; margin-top: 2px; }

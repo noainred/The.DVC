@@ -22,9 +22,10 @@ const BASELINE_FILE = () => path.join(config.configDir, 'bm-fw-baseline.json');
 /**
  * @param L 공용 로더(makeJsonFileLoader — 아래에서 파일마다 **글자 그대로의 label · confirm 과 함께** 만든다: 서비스 점검 등재 스윕 audit2633 이 그 줄을 본다)
  */
-function docStore({ file, L, what, empty, shape }) {
+function docStore({ file, L, what, empty, shape, maxBytes = null }) {
   let cache = null; let rev = 0;
-  const write = (doc) => { fs.mkdirSync(path.dirname(file()), { recursive: true }); atomicWriteFileSync(file(), JSON.stringify(doc, null, 2)); };
+  // 들여쓰기 없이 쓴다 — 케이스 5,000건이 들여쓰기로 25MB · 한 건 저장 0.3~0.46초였다(v3.52 디버깅 1회차 성능 P8). 읽는 쪽은 JSON.parse 라 같다
+  const write = (doc, text = JSON.stringify(doc)) => { fs.mkdirSync(path.dirname(file()), { recursive: true }); atomicWriteFileSync(file(), text); };
   const load = () => {
     if (cache && !L.recheckDue()) return cache;
     const hadErr = !!L.loadError();
@@ -41,11 +42,18 @@ function docStore({ file, L, what, empty, shape }) {
     loadError: () => { load(); return L.loadError(); },
     refusal: () => { load(); return L.refusal(what); },
     /** 통째로 바꾼다. 로드 오류면 { ok:false, status:409, ... }. */
-    save(doc) {
+    save(doc, { shrinking = false } = {}) {
       const refused = this.refusal();
       if (refused) return { ok: false, status: 409, ...refused };
       const next = shape(doc);
-      try { write(next); } catch (e) { return { ok: false, status: 500, reason: `${what} 파일을 쓰지 못했습니다 — ${String(e?.code || e?.message || e).slice(0, 120)}` }; }
+      const text = JSON.stringify(next);
+      // 파일 크기 상한(있으면) — 넘으면 쓰지 않는다(백업 파일 상한 안에 머물게 · 성능 P8)
+      // 상한은 **커지는 쓰기**만 막는다 — 지우기 · ‘끝남’ 으로 바꾸기 · 줄이는 편집은 상한을 넘은 파일에서도 된다(자리를 만드는 길 — 디버깅 2회차 판정 #10)
+      const lim = !shrinking && typeof maxBytes === 'function' ? maxBytes() : null;
+      const bytes = lim ? Buffer.byteLength(text, 'utf8') : 0;
+      const curBytes = lim && bytes > lim ? (() => { try { return fs.statSync(file()).size; } catch { return 0; } })() : 0;
+      if (lim && bytes > lim && bytes > curBytes) return { ok: false, status: 413, reason: `${what} 파일이 상한(${Math.round(lim / 1048576)}MB)에 닿았습니다 — 끝난 항목을 지워 자리를 만든 뒤 다시 하십시오.` };
+      try { write(next, text); } catch (e) { return { ok: false, status: 500, reason: `${what} 파일을 쓰지 못했습니다 — ${String(e?.code || e?.message || e).slice(0, 120)}` }; }
       cache = next; rev += 1; L.saved();
       return { ok: true };
     },
@@ -183,8 +191,16 @@ const parseList = (field) => (text) => {
 };
 const _casesFile = makeJsonFileLoader(CASES_FILE, { label: '물리서버 제조사 케이스 기록', tag: 'bm-cases', parse: parseDoc('cases'), confirm: () => caseStore._confirm() });
 const _advisoryFile = makeJsonFileLoader(ADVISORY_FILE, { label: '물리서버 펌웨어 보안 권고 표', tag: 'bm-advisories', parse: parseList('rows'), confirm: () => advisoryStore._confirm() });
+/**
+ * 케이스 기록 파일이 가질 수 있는 가장 큰 크기(바이트) — 백업 파일 상한(backup/service.js fileCapFor)이 이 값을 쓴다(v3.52 디버깅 1회차 성능 P8:
+ * 메모 · 이력을 채운 케이스가 약 1,700건을 넘으면 8MB 를 넘어 백업에서 빠졌다 — v2.901 이슈 · 게시판 · 위키와 같은 꼴). 꼴의 글자 상한 × 3바이트(한글)로 센다.
+ */
+export const CASES_FILE_MAX_BYTES = 16 * 1024 * 1024;   // 건수 상한(5,000)으로는 글자를 꽉 채우면 60MB 를 넘을 수 있다 — 파일 크기로도 묶는다(이슈 · 게시판과 같은 16MB)
+export const casesMaxBytes = () => CASES_FILE_MAX_BYTES;
+/** 자산 원장 · 펌웨어 기준 파일의 백업 상한 기준(줄 · 글자 상한을 꽉 채우면 계산상 12.6MB · 10.5MB — 8MB 를 넘어 백업에서 빠졌다: 디버깅 2회차 성능 Q9). */
+export const ledgerMaxBytes = () => 16 * 1024 * 1024;
 /** 제조사 케이스 기록(⑫). */
-export const caseStore = docStore({ file: CASES_FILE, L: _casesFile, what: '물리서버 제조사 케이스 기록', empty: () => caseShape(null), shape: caseShape });
+export const caseStore = docStore({ file: CASES_FILE, L: _casesFile, what: '물리서버 제조사 케이스 기록', empty: () => caseShape(null), shape: caseShape, maxBytes: casesMaxBytes });
 /** 펌웨어 보안 권고 표(④). */
 export const advisoryStore = docStore({ file: ADVISORY_FILE, L: _advisoryFile, what: '물리서버 펌웨어 보안 권고 표', empty: () => advisoryShape(null), shape: advisoryShape });
 
@@ -211,7 +227,8 @@ export function upsertCase({ id = '', tag, corp = '', part = '', caseNo = '', st
   if (!cur || cur.status !== next.status || cur.caseNo !== next.caseNo) next.hist = [...next.hist, { at: now, by: next.by, status: next.status, caseNo: next.caseNo }].slice(-CASE_HIST_MAX);
   if (cur && cur.part === next.part && cur.caseNo === next.caseNo && cur.status === next.status && cur.note === next.note) return { ok: true, id: nid, changed: false };
   cases[nid] = next;
-  const r = caseStore.save({ v: 1, cases });
+  // 있던 케이스를 ‘끝남’ 으로 바꾸는 쓰기는 상한으로 막지 않는다 — 이력 한 줄만큼 커져도 그 뒤 지우기로 자리를 만드는 길이다(디버깅 3회차 판정 #7). 새 케이스 · 다른 고치기는 상한을 지킨다
+  const r = caseStore.save({ v: 1, cases }, { shrinking: !!cur && cur.status !== 'closed' && next.status === 'closed' });   // ‘끝남’ 으로 **바뀌는** 쓰기만(끝난 케이스의 메모 고치기는 상한 안 — 4회차 성능 N1)
   return r.ok ? { ok: true, id: nid, changed: true } : r;
 }
 /**
@@ -225,7 +242,7 @@ export function removeCase({ id = '', tag, corp = '' } = {}) {
   if (!cur || cur.tag !== tg || cur.corp !== cp) return { ok: false, status: 404, reason: '케이스를 찾지 못했습니다(다른 사람이 지웠을 수 있습니다).' };
   if (cur.status !== 'closed') return { ok: false, status: 400, reason: '끝난 케이스만 지울 수 있습니다(상태를 ‘끝남’ 으로 바꾼 뒤 지우십시오).' };
   const cases = { ...doc.cases }; delete cases[cid];
-  const r = caseStore.save({ v: 1, cases });
+  const r = caseStore.save({ v: 1, cases }, { shrinking: true });
   return r.ok ? { ok: true, removed: cur } : r;
 }
 /** 서버(태그 + 법인)의 케이스 — 새로 고친 것부터. 법인이 다른 케이스는 싣지 않는다(반증 A2). */

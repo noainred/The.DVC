@@ -48,7 +48,7 @@ test('요약 · 상세 · 엣지 정제 — SSD 가 있으면 disk.life · 정�
   const bad = (life) => HS.sanitizeHwSummary({ ...sm, disk: { ...sm.disk, life } }).disk;
   assert.equal('life' in bad({ n: 2, read: 5, min: 3 }), false, 'read > n');
   assert.equal('life' in bad({ n: 'x', read: 1, min: 3 }), false);
-  assert.equal(bad({ n: 2, read: 1, min: 300 }).life.min, null, '범위 밖 값은 null');
+  assert.equal('life' in bad({ n: 2, read: 1, min: 300 }), false, '읽었다면서 최솟값이 범위 밖이면 요약을 싣지 않는다(어긋난 값 — 디버깅 2회차 엣지 #7)');
   assert.equal(bad({ n: 2, read: 0, min: 50 }).life.min, null, '읽은 것이 없으면 최솟값도 없다');
   assert.equal('life' in HS.sanitizeHwSummary({ ...sm, disk: { n: 3, gb: 1, ssd: 2, hdd: 1, nvme: 0 } }).disk, false, '구버전 엣지');
   const hddOnly = HS.hwSummaryOf({ collectedAt: 1, collections: { disks: 'ok' }, disks: [{ media: 'HDD', capacityGB: 1 }] });

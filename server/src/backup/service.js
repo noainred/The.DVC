@@ -22,6 +22,7 @@ import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconc
 import { issuesMaxBytes } from '../issues/store.js';   // v2.901(점검 P1) 사용자 문서 파일의 백업 상한
 import { boardMaxBytes } from '../bulletin/store.js';
 import { wikiMaxBytes } from '../wiki/store.js';
+import { casesMaxBytes, ledgerMaxBytes } from '../bmcheck/store.js';   // v3.52 디버깅 1회차 성능 P8 — 물리서버 제조사 케이스 기록도 그 저장소 상한까지 담는다
 
 /** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -46,7 +47,7 @@ const FILE_SIZE_CAP = 8 * 1024 * 1024; // 파일당 8MB 상한(대용량 데이�
  *   env 로 더 올릴 수 있다)이 파일당 8MB 이상이라, 가득 차면 그 파일이 백업에서 빠졌다(건너뜀 목록에만 남고, 그 백업으로 복원하면 이슈 · 글이 사라진다).
  *   이 세 파일은 '그 저장소 상한 × 1.25 + 1MB'(감싸는 글자 · 이스케이프 여유) 와 8MB 중 큰 값까지 담는다. 상한 함수는 그 저장소의 것 하나를 쓴다.
  */
-export const USER_DOC_FILES = Object.freeze({ 'issues.json': issuesMaxBytes, 'board.json': boardMaxBytes, 'wiki.json': wikiMaxBytes });
+export const USER_DOC_FILES = Object.freeze({ 'issues.json': issuesMaxBytes, 'board.json': boardMaxBytes, 'wiki.json': wikiMaxBytes, 'bm-cases.json': casesMaxBytes, 'bm-assets.json': ledgerMaxBytes, 'bm-fw-baseline.json': ledgerMaxBytes });
 export function fileCapFor(name) {
   const f = USER_DOC_FILES[name];
   if (!f) return FILE_SIZE_CAP;

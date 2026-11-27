@@ -103,23 +103,29 @@ export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
   if (_busy) { // 재진입 가드(CLAUDE.md 필수) — 거절하지 않고 끝난 뒤 한 번 더
     if (!_again) console.log(`[partfault-push] ${reason} — 이전 push 진행 중, 끝난 뒤 한 번 더 스캔·전송합니다`);
     _again = true;
+    if (reason === 'event') _urgentAgain = true;   // 진행 중인 push 에 합류한 이벤트 보고도 다음 전송에 urgent 를 싣는다(디버깅 2회차 엣지 #4)
     return _busy;
   }
   _busy = (async () => {
-    let r; let why = reason; let rounds = 0;
-    do { _again = false; r = await pushOnce(why); why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
-    if (_again) { _again = false; console.warn('[partfault-push] 재전송 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 push 에 실립니다'); }
+    // urgent 가 실패한 push 에 실렸으면 다음 push(주기 포함)에 다시 싣는다 — 성공할 때까지(7회차 엣지 #3: 중앙 재시작 · 끊김 뒤 표지가 사라져 알림이 다음 중앙 주기까지 늦었다)
+    let r; let why = reason; let rounds = 0; let urgent = reason === 'event' || _urgentCarry;
+    do { _again = false; r = await pushOnce(why, { urgent }); if (urgent) _urgentCarry = !r?.ok; urgent = _urgentAgain || _urgentCarry; _urgentAgain = false; why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
+    if (_again) { _again = false; if (urgent) _urgentCarry = true; console.warn('[partfault-push] 재전송 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 push 에 실립니다'); }   // 그 요청이 urgent 였으면 다음 push 에 싣는다(디버깅 8회차 엣지 #1)
     return r;
   })().finally(() => { _busy = null; });
   return _busy;
 }
 
-async function pushOnce(reason) {
+let _urgentAgain = false;
+let _urgentCarry = false;   // 보내지 못한 urgent — 다음 push 에 싣는다(7회차 엣지 #3)
+export function _resetPushUrgentForTest() { _urgentAgain = false; _urgentCarry = false; }
+async function pushOnce(reason, { urgent = reason === 'event' } = {}) {
   if (!partFaultEnabled().enabled) return { ok: false, reason: '파트 장애 기능이 꺼져 있습니다' }; // 재전송 사이에 꺼졌을 수 있다
   const t0 = Date.now();
   try {
     const scan = await runScan();
     const payload = buildPayload(scan);
+    if (urgent) payload.urgent = true;   // v3.52 ⑬ — 장비 이벤트 뒤 push: 중앙이 다음 주기를 기다리지 않고 바로 판정하게(디버깅 1회차 엣지 #5)
     const json = JSON.stringify(payload);
     const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken, ...agentHeaders(config.agent.name) };
     let body = json;
