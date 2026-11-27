@@ -554,7 +554,7 @@ export async function readCatalog(deps = {}) {
   return { ...result, sourceErrors: built.sourceErrors || [], ms: Date.now() - t0, at: Date.now() };
 }
 
-async function loadCorpContext() {
+export async function loadCorpContext() {   // v3.54: 포탈 서비스 상태 모니터링도 같은 법인 판정 문맥을 쓴다(사본 금지)
   const vcNames = new Map(); const dcNames = new Map(); const dcOfVc = new Map();
   const vcAssign = new Map(); const dcByName = new Map(); const vcEdge = new Map();
   try { for (const v of (await import('../vcenter/registry.js')).listRegistry()) if (t(v.id)) vcNames.set(t(v.id), t(v.name) || t(v.id)); } catch { /* 이름 없이 진행 */ }

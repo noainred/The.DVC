@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **344개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **346개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-26)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-27)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -303,6 +303,8 @@
 | `storage-perf-check.json` | 설정 | SAN 스토리지 성능 점검의 임계값 설정(v2.948). | ✅ | ✅ |  | sanswitch/storageCheckSettings.js |
 | `storage-usage-mail-state.json` | 설정 | 스토리지 사용량 예약 메일 회차·기록(상태, v2.789) | ✅ | ✅ | ✅ | storage/usageMail.js |
 | `storage-usage-mail.json` | 설정 | 스토리지 사용량 예약 메일 설정(v2.789 — 켜기·요일·시각·받는 사람·표 단위. 비밀 없음, 주소는 담는다) | ✅ | ✅ | ✅ | storage/usageMail.js |
+| `svc-status-settings.json` | 설정 | 포탈 서비스 상태 모니터링 설정(v3.54 — 측정 켜짐 · 주기 · 시한 · 끊김/지연 기준 · 보관 · 종류 · 알림 · 측정 제외) | ✅ |  | ✅ | svcstatus/settings.js |
+| `svc-status.db` | DB | 포탈 서비스 상태 모니터링 측정 저장소(v3.54). 파일: `svc-status.db`(dbDir 또는 configDir). |  |  | ✅ | svcstatus/db.js |
 | `svcmon-alert.json` | 설정 | Monitoring **점검 실패 알림 설정**(v2.915) — `CONFIG_DIR/svcmon-alert.json`. | ✅ | ✅ |  | svcmon/alertSettings.js |
 | `svcmon-batches.json` | 설정 | 성능점검 대량 등록/가져오기 **이력 원장**(+ 롤백) — `CONFIG_DIR/svcmon-batches.json`. | ✅ | ✅ |  | svcmon/batches.js |
 | `svcmon-log.json` | 설정 | 성능점검 로그 설정 — CSV 적재/분할/보관 정책. `CONFIG_DIR/svcmon-log.json`. | ✅ | ✅ |  | svcmon/logsettings.js |
@@ -397,6 +399,7 @@
 - **`isidu-edge-targets.json`** — 상태 파일(백업 감시 제외). 지우면 다음 설정 pull(5분)까지 그 엣지의 조사가 멈춘다
 - **`isidu-push.json`** — 지우면 처음부터 다시 보낸다 — 중앙이 같은 대상·시각을 한 번만 넣으므로 중복되지 않는다
 - **`ssh`** — ⚠ 비밀(개인키). 백업에 들어가지 않는다(확장자 화이트리스트 밖). 지우면 다음 조사 때 새 키가 생기고 아이실론 authorized_keys 에 공개키를 다시 넣어야 한다
+- **`svc-status-settings.json`** — 중앙 전용(엣지는 중앙이 계산한 자기 몫만 받는다). 손상이면 보존하고, 이 프로세스가 한 번 읽은 값(제외 · 알림)으로 계속 돈다
 - **`xfer-speed-settings.json`** — 중앙 전용(엣지로 배포하지 않는다). 손상이면 보존하고 기본값(꺼짐)으로 읽는다
 - **`xfer-speed-schedule-state.json`** — 상태 파일(백업 감시 제외). 지우면 지난 예약 시각을 다시 판정한다 — 유예(30분) 안의 시각은 한 번 더 실행될 수 있다
 - **`bmusage-distribute.json`** — 배포 원본은 bmusage-settings.json 이다. 손상이면 배포 꺼짐으로 시작한다

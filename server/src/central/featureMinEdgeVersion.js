@@ -57,6 +57,9 @@ export function featureMinEdgeVersion(titleRe, { notesFile = new URL('../release
 export const stage6MinEdgeVersion = (o) => featureMinEdgeVersion(STAGE6_TITLE_RE, o);
 /** 물리서버 ‘같은 묶음 대비’ 를 답하는 엣지의 최소 버전 — 숫자를 박지 않는다(릴리스 노트의 그 제목 첫 번호 · 없으면 지금 버전). */
 export const peerMinEdgeVersion = (o) => featureMinEdgeVersion(PEER_TITLE_RE, o);
+/** v3.54 포탈 서비스 상태 모니터링 — 엣지 측정 워커(agent/svcStatusWorker.js)를 처음 실은 판. 릴리스 노트 제목에 이 문구를 그대로 넣는다. */
+export const SVC_STATUS_TITLE_RE = /포탈 서비스 상태 모니터링/;
+export const svcStatusMinEdgeVersion = (o) => featureMinEdgeVersion(SVC_STATUS_TITLE_RE, o);
 /** 물리서버 ‘하드웨어 이벤트 로그’ 를 답하는 엣지의 최소 버전. */
 export const hwlogMinEdgeVersion = (o) => featureMinEdgeVersion(HWLOG_TITLE_RE, o);
 /** 7a단계(로그 분석 봉투 · 엣지 대행) 최소 엣지 버전. */
