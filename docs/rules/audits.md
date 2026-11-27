@@ -6,6 +6,7 @@
 
 ## 목차
 
+- 보안 잔여 11-27(2026-11-27 — 11-08 감사 잔여 M1 · M3 · L2 · L4 · L5 · L6 · L12 · L13 · OLD-1 · Node 런타임 — 8그룹 설계 → 설계 반증 → 격리 구현 → 반증 · 수정 루프 · 문서 끝 절)
 - Bareos 재해 복구 1·2차 버그 점검 — 5축 + 반증 1인 확정분(2026-11-05)
 - Bareos 재해 복구 2차 — 복구 순서(단계 자동 실행) 모듈 규칙(2026-11-04)
 - Bareos 재해 복구 1차 — 모듈 규칙(2026-11-04)
@@ -1308,6 +1309,8 @@
     (컨테이너 `setpriv --no-new-privs` 재현: `sudo: The "no new privileges" flag is set…`). 그 문구는 `isSudoDenied` 에 걸리지 않아 화면은 `unavailable`
     원문만 보였다(분석 보고의 'sudoers 안내' 는 틀렸다) → `hostaccess/service.js NNP_NOTE` 안내만 추가. 실서버에서 유닛 밖 `sudo -u vmportal sudo -n
     /usr/bin/firewall-cmd --state` 와 포탈 화면을 비교해 가를 것. 근본 해결(NNP 해제 또는 헬퍼 분리)은 하드닝 약화라 별건.
+    → 정정(보안 잔여 11-27 M-5 · OLD-1 처분 — 사용자 결정 '래퍼로 제한'): firewall-cmd sudo 의 **인자 제한**은 root 소유 인자 검사 래퍼(`/usr/local/libexec/vmware-portal-firewall-cmd` — install.sh 가 설치 · sudoers 는 그 파일 하나)로 했다.
+    NNP 아래 본체 sudo 거부 자체는 그대로다(유닛 불변 — 사용자 판단 사항 유지 · 확인 명령 경로는 실행 방식을 따른다 `nnpNoteFor`). 이 문서 끝 '보안 잔여 11-27' 절.
   - **UAG Monitor 1.2**(`horizon-uag-monitor/CLAUDE.md` v1.2 절) — Windows 화면 미확인.
   - 남은 후보(다음 점검 첫 후보): prune 틱 카운터 · `install.sh --user` · hostAccess 변경 라우트 5개 전체 범위 게이트(정책 — v2.741 LEFT-12) · Electron 버전 고정(정책).
     ✅ 고친 것(v2.741 LEFT-10 정정): `capacity hosts` 표 영구 잔존·`Diagnostics.jsx` memtrack 403·uagmon scrypt(v2.740) · REST 폴백 `d.capacity||0`(v2.733 C2-06) · NDJSON 폴백 직접 쓰기(v2.741 LEFT-13 — 7곳 원자 쓰기).
@@ -1682,7 +1685,8 @@
   · '변경 시에만 발송' 의 기준은 마지막 **발송 성공** 회차(R3-C4-3) · pyportal 요청 전체 시한(점검·웹훅, R3-C3-1 — uagmon B5-5 와 같은 클래스) · 새 계정 tokenVersion 무작위 시작(R3-C3-5).
   · 2회차 '남긴 것' 정정: 데모 형제 라우트 가림(완료) · pyportal 세마포어(반증 — check_many 는 상한 32) · guard IPv6(반증) · history.latest(완료) · check_url 시한(완료) · C# 가져오기 정렬(완료) ·
     LogAnalysis 늦은 응답(도달 불가) · onlyOnChange(완료) · 상대 storagePath(버그 아님 — 라우트 400).
-  · 남긴 것: pyportal HubServer 연결 세마포어를 스레드 생성 뒤 획득(미인증 64연결로 슬롯 고갈) · C# EndpointEditForm IPv6 ':' 절단(판독) · pyportal check_url 첫 주소만 접속 ·
+  · 남긴 것: ~~pyportal HubServer 연결 세마포어를 스레드 생성 뒤 획득(미인증 64연결로 슬롯 고갈)~~ → ✅ **보안 잔여 11-27 L12 처리**(1회차 + 반증 3회 — 자리는 스레드 생성 전 `process_request` 의 입장 표에서 ·
+    가득 차면 accept 루프 FIFO 유한 대기 + 연결 단위 느린 누계로 되찾기 · 반환은 `shutdown_request` 하나 · 이 문서 끝 '보안 잔여 11-27' 절 · `pyportal/CLAUDE.md`) · C# EndpointEditForm IPv6 ':' 절단(판독) · pyportal check_url 첫 주소만 접속 ·
     pyportal stats 첫 호출 COUNT 는 O(N) · 복원 예약 뒤 재시작 전에 바꾼 설정은 재시작 때 덮인다(화면 배너·취소 버튼) · 웹 vcdOverview·DatastoreUsage 결측 0 합산(낮음 참고).
 - **v2.769 — 버그 점검 4회차(다중 에이전트 5축 → 반증 1인 → 수정 4그룹) 확정 25·개연 1·일부 설계 1 = 27건 수정**(회귀 `server/test/audit2769{a,b,c,d}` · 웹 `linkCheckText`·`isiduText`·`gpuUsageText`·`portalBackup2768` · `pyportal/tests/test_audit2769`):
   · ⚠⚠ **비활동 타이머는 시한이 아니다**(R4-D3-1 `linkcheck/protocols.js stepSmtp`): `sock.setTimeout` 은 소켓이 파괴되면 같이 사라져, 응답 없이 FIN 으로 닫는 상대 하나가 Promise 를 영원히 남기고
@@ -5927,3 +5931,48 @@ B 18건(높음 1 — 엣지 포탈에서 이벤트 구독 창에 닿을 수 없�
   판정이 단 키 이전 표지(migratedFrom)로만 잇도록 고쳤다(변이 잡힘 · 다른 서버 둘 다 나가는 시험). 관찰 2(edge-stale 3시간도 정리 대상 — 화면이 사유를 보여 준다 · 사유는 마지막 판정 시점).
 - 반증 16 수정분(키 이전 표지 연결)은 **변이 · 회귀 시험만** 거쳤다 — 반증 17 은 돌리지 않았다(사용자 결정 ‘여기서 릴리스’ 범위 · 보고의 ‘타협한 것’).
 - Chromium(메인 재판독 포함): 단계 패널 정리 문구 · 결과/실패 문구 위치 · 대기 중 알림 문구 — 1440 · 400 오류 0 · 넘침 0.
+
+### 보안 잔여 11-27(2026-11-27 — 11-08 감사 잔여 · 8그룹 설계 → 설계 반증 → 격리 구현 → 반증 · 수정 루프)
+
+- 대상: 2026-11-08 보안 감사(v2.914 정적 감사 · 5축 + CVE 점검)의 미조치분 — MEDIUM M1(C-1) · M3(D-1), LOW L2(B-1) · L4(B-3) · L5(C-2) · L6(C-3) · L7(D-2) · L8(D-3) · L12(E-3) · L13(E-4), 기존 OLD-1(2026-09-12 M-5),
+  CVE 보너스(Node 런타임) · 웹 source-map-js. 기준 커밋 a821fd9e(main v3.58.0 직전). 그룹마다 설계 → 설계 반증 1인 → 격리 worktree 구현(새 시험 · 수정 전 판본에서 실패 확인 · 변이) →
+  반증 1인 → must 가 있으면 고쳐 다시 반증. 공유 · 생성 문서는 그룹이 고치지 않고 메인이 합쳤다(그동안 그룹 브랜치의 생성물 대조 시험이 빨간 것은 예상된 것). 규칙 원문은 `security-api.md` · `edge.md` · `common.md` 의 '보안 잔여 11-27' 항목.
+- **G1 M1 · L6**(중계 HAProxy 배포 명령 · SSH 창 크기 — 커밋 970c5b4e · 0bb8b6e6): 화면/API 명령은 좁은 문법의 정규형만 실행 · portal.env 값은 그대로 · 거절된 철거는 '철거 보류'(한 방향 · 시한 없음) · `termDim`.
+  설계 반증 must 1(거절된 배포가 철거를 무효로 만들어 만료된 공개 포트가 화면 밖에서 열린 채 — fail-open → 보류 도입) → 구현 반증 1회차 must 1(R-1 관리자 재적용이 보류를 'error' 로 덮어 지운 매핑을 되살림 — 재현) →
+  수정(판정 `setMappingStatus` 하나 · 경로 거절도 보류 · 유닛 `@` 앞) → 반증 2회차 must 0(should 3 · nit 4). 시험 `secResidual1127Proxy` 16 + 웹 15(수정 전 12/12 · 새 4/4 실패) · 변이 54/54 · 20/20(그 밖에 동등 변이 1 — ms 가 이미 보류 매핑을 뺀다).
+- **G2 M3**(users.json OTP 시드 레코드 단위 봉인 — 1cfa126a · 107b3e8a): 원 감사 권고(전역 SECRET_FIELDS)는 택하지 않았다(이유 3 — `security-api.md`). 설계 반증 must 1(콘솔 도구가 포탈과 다른 키로 봉인 → 키 확인 값) →
+  반증 1회차 must 3(M-1 봉인 모양 표시 이름 한 줄로 평문 설치가 정책 잠금 · M-2 root:root portal.env 설치에서 콘솔 OTP 등록 불가 · M-3 키 분실 복구 안내 부재 — 모두 재현) → 수정 → 반증 2회차 must 0(should 5 · nit 3).
+  시험 `secResidual1127TotpSeal` 35(1차 수정 전 27/29 실패 · 2차 수정 전 9/35 실패) · 변이 36/37(남은 1 등가 V9a) · 23/23.
+- **G3 OLD-1 / M-5**(firewall-cmd sudo 를 root 소유 인자 검사 래퍼로 — 사용자 결정 '래퍼로 제한' · 71368485): 설계 반증 must 1(패키지에 래퍼가 빠짐 — build-package cp · 구성 목록을 한 커밋에) →
+  반증 1회차 must 0(should 3 — 문서 · 생성 문서 · 웹 문구, nit 3). 형제 결함 `isManagedRich` 앵커(forward-port · source-port 규칙을 지우던 것)도 고쳤다. 시험 `secResidual1127FwWrapper` 16(수정 전 16/16 실패) · 변이 44/45(남은 1 등가 — 인자 길이 1024 검사).
+- **G4 CVE 보너스**(Node 22.23.5 · 압축본 저장소 해시 · 보안 하한 · 웹 source-map-js 1.2.2 — 9cd1f14a · 35eaccfb): 설계 반증 must 1(검증 버전 판정 줄 변이를 시험이 못 잡음 → `VERIFIED_NODE_VERSION`) →
+  반증 1회차 must 0(should 3 — 공유 문서 · 22.23.5 실행 시험 0건 · Chromium). 시험 `secResidual1127Runtime` 11(수정 전 11/11 실패) · 변이 40/40. 핀 두 줄은 SHASUMS256.txt.sig GPG 서명(5BE8A3F6…D356) 확인 뒤 복사.
+- **G5 L12**(pyportal 허브 수신 단계 시한 · 연결 자리 선획득 — 311a9d92 · 42ddbdb2 · 4cfd640e · 0ba0f92c): 설계 반증 must 3(keep-alive 로 무기한 · 즉시 거절의 빈자리 복권 · 선언 길이로 늘어나는 본문 시한) →
+  반증 1회차 must 1(M1 공격 중 기존 정상 keep-alive 가 자리를 잃음 — 느린 읽기에서 수정 전보다 악화) → 느린 단계 우선 되찾기 · 응답 쓰기 시한 · 미인증 큰 본문 선거절 → 반증 2회차 must 1(R2-1 단계 갈아타기로 되찾기 회피 — 새 사용자 0%) →
+  연결 단위 누계(반감기) · 계정당 보호 상한 → 반증 3회차 must 1(R3-1 `Expect: 100-continue` 한 줄로 헤더 드립분이 누계에서 빠짐) → 덮어쓴 단계 진행분도 누계에. 반증 4회차(3회차 수정분)는 이 기록을 쓸 때 판정 보고를 보지 못했다
+  (재현 실행 기록만 있음 — 메인 확인). 시험 `pyportal/tests/test_sec_residual_1127.py`(1회차 26 → 53+) · 변이 29/30(stock.close 등가) · 23/23 · 13/13(3회차 수정분 변이 기록은 보지 못함) · pyportal 전량 473 OK(3회차 수정 뒤).
+- **G6 L13 · L4**(CSP connect-src · 본문 전 판정의 디스크 쓰기 — 7aab3bc1): 설계 반증 must 0(should 6 · nit 5) · 반증 1회차 must 0(should 1 — 생성 문서 · nit 3 · Chromium 153 실측으로 옛 정책은 외부 wss 통과 · 새 정책은 위반).
+  시험 `secResidual1127Csp` 15(수정 전 11 실패 · 4는 회귀 고정) · 변이 25/26(남은 1 등가 — IPv6 '[' 거부 줄).
+- **G7 L7 · L8**(데모 계정의 관리자 등록부 가림 · 관리자 로그 뷰어 비밀값 가림): 반증 중 — 메인이 추가.
+- **G8 L2 · L5**(옛 방식 엣지 목록 평문 HTTP · 중계 haproxy.cfg 임시 경로 — a9a44cf2): 설계 반증 must 1(평문 엣지만 있는 현장에서 화면이 '할 일 없음' 을 초록으로 — 결과에 reason · 웹 경고) → 반증 1회차 must 0(should 2 · nit 5).
+  감사가 놓친 형제 경로(적용 직후 `manager.pushToEdges` — 판정 0개)도 같은 판정. 시험 `secResidual1127EdgeRelay` 27(수정 전 25 실패) + 웹 3 · 변이 35/36(남은 1 등가 — 싱크가 edge.url 을 판정해도 fail-closed 라 같음 · 형식 증명 아님).
+- **정정**(감사 · 앞 기록):
+  - L5: '`sudo sh -c` 리다이렉트로 root 가 /tmp 에 쓴다' 는 틀렸다 — SSH 계정이 쓰고 root 가 `haproxy -c` 로 검증한 뒤 `install` 로 설치한다. 위협은 심링크 선점과 검증 · 설치 사이 내용 교체 두 갈래였다.
+    같은 함수의 기존 결함: `withSsh` 의 ok:true 가 `applySite` 응답의 ok 를 덮어 검증 · 백업에 실패한 적용도 ok=true(화면 '성공' · 감사 로그 ok=true) — 기준 판본 실측(L5-4 · L5-5 expected false / actual true). 고쳤다.
+  - L6: '동기 예외(`stream.write(null)`)' 는 ssh2 1.17.0 에서는 일어나지 않는다(판독) — 남은 결함은 수 범위였다.
+  - L4: `bigJsonGate` 의 '부작용 없는 조회' 와 `server-security-history.md` 의 같은 기록은 틀렸다(유효 토큰이면 본문 전 동기 쓰기 — 세 곳이 각자).
+  - M3: 'openSecretsDeep 는 키 이름과 무관하게 복호' 는 틀렸다(21회차 M-2 이후 비밀 칸만). L13: `/intro` 의 '세션 토큰이 없다 — 훔칠 것이 없다' 는 틀렸다(같은 출처라 localStorage 토큰이 읽힌다).
+  - CVE 보너스의 '22.23.4+ 로' 는 그 뒤 22.23.5(2026-11-11 보안 릴리스)가 나와 22.23.5 로 올렸다 · `NETWORK-COMMS-FIREWALL.md` 의 '기본 22.20.0' 은 이미 낡은 값이었다.
+  - 그룹 보고 정정: G1 1회차 '거절된 철거는 매핑을 지우지 않는다' 는 명령 거절에만 · '보류 매핑은 재사용을 막는다' 는 재적용 라우트로 깨짐 · G2 'portal.env 를 못 읽어도 키 확인 값이 맞으면 진행' 은 키 파일 설치에서만 참 ·
+    G2 1차 거절 문구 '기존 OTP 로그인은 그대로' 는 키 분실 계정에 거짓 · G5 1회차 '가득 차면 가장 오래 유휴한 keep-alive 를 내보내고 요청을 마친 연결이 자리를 넘긴다' 는 반증 1회차 M1 로 폐기, 1차 수정의 '느린 단계에 가장 오래 머문 연결 먼저' 는 연결 단위 누계로 바뀜(R2-1).
+- **남긴 것**(다음 점검 첫 후보 — 상세는 각 규칙 항목): G1 NSX 다이얼의 보류 매핑 재사용(S2-1 · 재현) · 배포된 적 없는 매핑의 보류 누적 + 주기마다 동기 전체 쓰기(S2-2 · 재현) · Data Plane 철거 실패를 성공으로 봄(S2-3) ·
+  G2 다른 SECRET_FILES 흔적 판정의 원문 정규식(22회차 D-9 계열) · 반증 2회차 should 5 · Windows 키 전달 미확인 · G3 래퍼로도 남는 기능 권한(전 포트 drop 영구화 DoS) · `rma/deploy.js` 방화벽 유닛 · 실서버 firewalld 정규형 · SELinux 미검증 ·
+  G4 중앙 함대 화면의 엣지별 보안 하한 판정 없음 · 22.23.5 로 돌린 시험은 CI 가 처음 · G5 빠른 실제 요청을 자주 보내는 연결 · 여러 출발지 · stdlib 헤더 상한(N-4) · 운영 비율 · 고지연 오인율 실측 없음 ·
+  G6 구형 WebKit 근거 원문 미확인 · 서비스 워커 폴백 옛 헤더 · `tokenApplyJob.js:128` 주석 · G8 평문 엣지 중단에 알림 없음 · `POST /edge-sync` 응답 ok 어긋남 · `remoteBase` + `UPGRADE_TOKEN` 평문 경로 · `UPGRADE_TLS_INSECURE` ·
+  자가 점검 wan-transport 가 옛 엣지를 세지 않음 · 옛 판의 `/tmp/haproxy.cfg.portal-*` 잔존 · 감사 detail 의 advisory 단계 표기(N-6) · `proxy/deploy.js` 의 `${cfgPath}.portal.tmp`(cfgPath 를 /tmp 아래로 두면 예측 가능 — 판독).
+- **타협한 것**: G1 보류에 시한 없음(시한 = fail-open) · 거절 경고 억제는 프로세스 메모리 · G2 평문(기본) 정책 · 엣지 사본의 평문 시드(메인 판단) · G3 옛 설치본은 root 가 install.sh 를 다시 돌리기 전까지 무제한 ·
+  G4 재설치 전 설치본은 하한 미만 런타임으로 계속(경고만) · CI GPG 확인 없음 · G5 공격 중 유휴 정리 유예(새 사용자 최소 reclaim_after 대기) · 느린 회선 정상 사용자 오인 가능 · 첫 헤더 시한을 입장부터 ·
+  G6 Host 소스를 모든 응답에 덧붙임(HTML 만이 아님) · G8 기존 원격 http 옛 방식 엣지를 승계 없이 즉시 중단(S-09 의 '저장값 동일 → 경고' 와 다르게 — 관리자 토큰이 실리므로 · 사용자 확인 대상).
+- 작업 방식 교훈: `common.md` '시험 · 반증 작업 교훈 — 보안 잔여 11-27'. 구현 반증에서 must 가 나온 것은 셋이고 모두 **수정이 새로 만든 상태 · 등록**에서 나왔다 —
+  G1(1회 — 새 '철거 보류' 를 기존 재적용 라우트가 덮음) · G2(1회 3건 — users.json 을 SECRET_FILES 에 넣은 것 · root 소유 portal.env · 키 분실 갈래) · G5(3회 연속 — 매번 되찾기 '판정 기준 시각' 의 다른 구멍).
+  형제 경로 · 기존 소비처(재적용 라우트 · 흔적 판정 · 100-continue)를 수정의 새 상태 기준으로 다시 훑는 것이 반증보다 먼저다.

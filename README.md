@@ -651,7 +651,7 @@ sudo ./install.sh --port 4000
 | `UPGRADE_ENABLED` | 기능 활성화 |
 | `UPGRADE_REMOTE_BASE` / `UPGRADE_TOKEN` | 원격 소스(versions.json 디렉터리) / 사설 레포 PAT |
 | `UPGRADE_WATCH_DIR` / `UPGRADE_INSTALL_DIR` / `UPGRADE_PACKAGE_NAME` | 로컬 번들 감시 / 교체 대상 / 번들 최상위 디렉터리명 |
-| `UPGRADE_POLL_INTERVAL_MS` / `UPGRADE_AUTO_APPLY` / `UPGRADE_EDGES` | 확인 주기 / 자동 적용 / 엣지 푸시 목록 |
+| `UPGRADE_POLL_INTERVAL_MS` / `UPGRADE_AUTO_APPLY` / `UPGRADE_EDGES` | 확인 주기 / 자동 적용 / 엣지 푸시 목록(엣지 관리자 토큰이 실리므로 원격 `http://` 는 보내지 않는다 — https · 루프백 · `COLLECTOR_HTTP_ALLOW` 대역만, 보안 잔여 11-27 L2) |
 | `UPGRADE_ALLOW_UNVERIFIED` / `UPGRADE_TLS_INSECURE` | sha256 미검증 번들 허용(기본 거부) / 업그레이드 fetch TLS 완화 |
 | `UPGRADE_EDGE_AUTO` / `UPGRADE_EDGE_SYNC_INTERVAL_MS` / `UPGRADE_KEEP_BUNDLES` | 엣지 자동 업그레이드(기본 켬, `false` 로 끔) / 뒤처진 엣지 동기화 주기(기본 10분, 1분~24시간) / 패키지 폴더에 보관하는 번들 수(기본 3) |
 
@@ -673,7 +673,7 @@ sudo ./install.sh --port 4000
   - 헤드리스 등록·잠금 복구: `sudo vmware-portal-otp <username>`(설치본) / `npm run otp-enroll -- <username>`(소스). 기동 시 OTP 등록 admin이 없으면 서버 로그가 절차를 안내합니다. 긴급 해제는 `OTP_ROLE_ENFORCE=false`. viewer·데모 계정은 강제 대상이 아닙니다.
 - **특수 계정** — `noainred`(수퍼관리자)는 항상 admin이 보장되고 강등·삭제·로그인 차단이 거부되며 설정 소유자에 자동 포함됩니다. `thedvcdemp`(데모)는 viewer 고정·삭제 불가이며 **비밀번호가 설정된 동안에만** 로그인됩니다([로그인 차단]으로 즉시 잠금 + 활성 세션 종료).
 - **설정 접근 계정(settingsOwners)** — '설정' 탭은 지정 계정만 보고 접근합니다(서버측 강제). 지정 방법 3가지가 **합산** 적용됩니다: ① `portal.env`의 `SETTINGS_OWNERS=계정1,계정2` ② `$CONFIG_DIR/settings-owners.txt`(한 줄에 하나, `#` 주석 가능) ③ 포탈 UI(설정 › 세션 보안). ①②는 서버 파일이라 **UI 저장으로 지워지지 않아**, 아무도 설정에 들어가지 못하는 잠금 상황의 복구 경로가 됩니다(`noainred`는 항상 자동 포함).
-- **⚠ 포탈 백업 = 자격증명 사본 (v2.210.0)** — 백업 아카이브에는 `portal.env`(**AUTH_SECRET**·`CENTRAL_TOKEN`)·`users.json`(**TOTP 시크릿**·비번 해시)·`vcenters.json` 사본이 들어갑니다. 그래서 `/api/admin/backup/*`(상태·설정·즉시 백업·다운로드·조회·삭제·복원) **전부와 세션 보안 설정 조회**는 admin이 아니라 **설정 소유자(settingsOwners)만** 호출할 수 있고, 다운로드·복원은 **감사 로그**에 남습니다. 내려받은 파일은 자격증명과 동급으로 보관·폐기하세요(AUTH_SECRET 유출 = 임의 계정 토큰 위조 = OTP 정책·소유자 경계 동시 무력화).
+- **⚠ 포탈 백업 = 자격증명 사본 (v2.210.0)** — 백업 아카이브에는 `portal.env`(**AUTH_SECRET**·`CENTRAL_TOKEN`)·`users.json`(**TOTP 시크릿**(자격증명 저장 방식이 암호화면 봉인 — 키는 번들 밖)·비번 해시)·`vcenters.json` 사본이 들어갑니다. 그래서 `/api/admin/backup/*`(상태·설정·즉시 백업·다운로드·조회·삭제·복원) **전부와 세션 보안 설정 조회**는 admin이 아니라 **설정 소유자(settingsOwners)만** 호출할 수 있고, 다운로드·복원은 **감사 로그**에 남습니다. 내려받은 파일은 자격증명과 동급으로 보관·폐기하세요(AUTH_SECRET 유출 = 임의 계정 토큰 위조 = OTP 정책·소유자 경계 동시 무력화).
 - **사용자별 데이터 범위(scope)** — 계정에 허용 vCenter/리전을 지정하면 인벤토리 목록과 vCenter 필터가 서버에서 그 범위로 제한됩니다(외주·감사·데모 계정에 유용). **목록뿐 아니라 id를 직접 받는 단건 라우트**(VM 콘솔 티켓·호스트/VM 지표)도 범위를 검사하며, 범위 밖은 403이 아니라 **404**로 응답해 존재 여부도 흘리지 않습니다(v2.207.0). 전역 KPI 합계 등 일부 집계 화면은 후속 확대 예정.
 - **엣지 토큰 스코프** — 공유 `CENTRAL_TOKEN` 하나를 전 엣지가 쓰면 엣지 1대 침해로 다른 사이트 자격증명까지 노출됩니다. **설정 → 수집 서버 → 🔑 엣지별 개별 central 토큰**에서 사이트별 토큰을 발급해 이관하세요(무중단, 미이관 엣지는 화면에 표시). 이관 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`.
 - **버전 파일** — 기동 시 `CONFIG_DIR/vmware-portal-release`에 실행 버전·역할(central/edge/…)을 기록합니다(`/etc/redhat-release` 방식) — 배포 점검·자산 조사용.

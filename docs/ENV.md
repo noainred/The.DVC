@@ -593,12 +593,12 @@
 | `PROXY_HAPROXY_CFG` | `'/etc/haproxy/haproxy.cfg'` |  | proxy/registry.js |
 | `PROXY_PUBLIC_HOST` | `''` |  | proxy/registry.js |
 | `PROXY_PUBLIC_PORT_BASE` | `20000` |  | proxy/registry.js |
-| `PROXY_RELOAD_CMD` | `'systemctl reload haproxy'` |  | proxy/registry.js |
+| `PROXY_RELOAD_CMD` | `'systemctl reload haproxy'(운영자 값 — 문법 검사 없이 그대로 실행 · 호출 시각에 읽음 · 화면 값만 문법 제한)` |  | proxy/registry.js |
 | `PROXY_SSH_HOST` | `''` |  | proxy/registry.js |
 | `PROXY_SSH_PASS` | `''` |  | proxy/registry.js |
 | `PROXY_SSH_PORT` | `22` |  | proxy/registry.js |
 | `PROXY_SSH_USER` | `''` |  | proxy/registry.js |
-| `PROXY_VALIDATE_CMD` | `'haproxy -c -f {file}'` |  | proxy/registry.js |
+| `PROXY_VALIDATE_CMD` | `'haproxy -c -f {file}'(운영자 값 — 문법 검사 없이 그대로 실행 · 호출 시각에 읽음 · 화면 값만 문법 제한)` |  | proxy/registry.js |
 | `REMOTE_IDLE_TIMEOUT_MS` |  |  | proxy/sshGateway.js |
 | `REMOTE_MAPPING_TTL_MS` | `86400000` |  | proxy/expiry.js |
 | `REMOTE_MAX_SESSIONS` | `80` |  | proxy/sshGateway.js |
@@ -776,7 +776,7 @@
 | `RIGHTSIZE_READY_WARN_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central/pduSanRoutes.js |
 | `SANSW_PROBLEM_PORT_MAX` | `40` |  | routes/api/sanSwitch.js |
-| `SECRETS_KEY` |  |  | routes/admin/opsSettings.js, security/secretVault.js |
+| `SECRETS_KEY` |  |  | routes/admin/opsSettings.js, security/secretVault.js 외 1 |
 | `SVCMON_XLSX_MAX_BYTES` | `8000000` |  | routes/svcmon/shared.js |
 | `TREND_CLUSTER_MAX_HOSTS` | `40` |  | routes/api/toolsCapacity.js |
 | `UPGRADE_INSTALL_DIR` | `''` | ✅ | config.js, routes/upgrade.js |

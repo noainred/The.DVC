@@ -93,20 +93,29 @@ sudo systemctl restart vmware-portal
 사용자 관리: 콘솔 메뉴 `sudo vmware-portal-users`(계정 생성·편집·비밀번호·로그인 방식·OTP) 또는 포탈 화면에서 합니다.
 계정은 `/etc/vmware-portal/users.json` 에 저장됩니다 — root 로 직접 고치면 파일이 root 소유가 되어 포탈이 저장하지 못합니다.
 
-### 호스트 접근 제어 sudoers (v2.485)
+### 호스트 접근 제어 sudoers (v2.485 · 보안 잔여 11-27 M-5 인자 검사 래퍼)
 
 `install.sh` 는 서비스 계정(`vmportal`)이 포탈 화면(설정 › Security › 호스트 접근 제어)에서 firewalld 를 제어할 수 있도록
-`/etc/sudoers.d/vmware-portal-hostaccess` 를 설치한다(`firewall-cmd` 전체 + `systemctl {stop,start,disable,enable} sshd.service`
-만, visudo 검증 실패 시 미설치). **v2.485 이전에 설치해 업그레이드 번들로만 올라온 서버**에는 이 파일이 없으므로 화면의
-'엔진 상태' 가 안내하는 두 줄을 root 가 한 번 추가한다:
+root 소유 **인자 검사 래퍼** `/usr/local/libexec/vmware-portal-firewall-cmd`(이 패키지의 `vmware-portal-firewall-cmd` — 포탈이 실제로 쓰는
+`firewall-cmd` 인자 형태만 받는다)를 root:root 0755 로 놓고, `/etc/sudoers.d/vmware-portal-hostaccess` 에 **그 래퍼 한 줄** +
+`systemctl {stop,start,disable,enable} sshd.service` 만 설치한다(visudo 검증 실패 시 미설치). `firewall-cmd` 를 인자 제한 없이 허용하는 옛 줄은 지운다 —
+그 줄이 있으면 포탈 계정이 탈취됐을 때 기본 존 바꾸기 · direct passthrough · panic 으로 방화벽 전체를 바꿀 수 있었다(2026-09-12 감사 M-5).
+
+**업그레이드 번들로만 올라온 서버**(자동 업그레이드는 서비스 계정으로 앱 트리만 바꿔 sudoers · `/usr/local/libexec` 를 바꾸지 못한다)는
+새 패키지의 `install.sh` 를 root 로 다시 실행하면 래퍼와 sudoers 가 함께 좁혀진다. 그 전까지는 옛 방식으로 예전처럼 동작하고 화면의 계획 보기에
+'옛 설치 방식' 경고가 붙는다. **래퍼 파일 없이 화면 안내 줄만 넣으면 동작하지 않는다**(포탈이 래퍼가 없으면 옛 경로를 부르고 sudo 가 거부한다).
+install.sh 를 쓸 수 없는 수동 설치에서만 root 가 직접:
 
 ```bash
+install -o root -g root -m 0755 ./vmware-portal-firewall-cmd /usr/local/libexec/vmware-portal-firewall-cmd
 visudo -f /etc/sudoers.d/vmware-portal-hostaccess
-# vmportal ALL=(root) NOPASSWD: /usr/bin/firewall-cmd
+# vmportal ALL=(root) NOPASSWD: /usr/local/libexec/vmware-portal-firewall-cmd
 # vmportal ALL=(root) NOPASSWD: /usr/bin/systemctl stop sshd.service, /usr/bin/systemctl start sshd.service, /usr/bin/systemctl disable sshd.service, /usr/bin/systemctl enable sshd.service
 ```
 
-`uninstall.sh` 가 함께 제거한다. 설계·잠금 방지·오픈소스 권고는 `docs/HOST-ACCESS.md`.
+`/usr/local/libexec` 와 그 위 폴더는 root 만 쓸 수 있어야 한다(install.sh 는 길 전체를 확인하고 아니면 설치하지 않는다 — 포탈은 래퍼가 링크 · 비root 소유 ·
+그룹/기타 쓰기 가능이면 쓰지 않는다). `RMA_SERVICE_UNITS` 에 방화벽 유닛(firewalld · nftables · iptables 등)을 넣으면 같은 서비스 계정이 방화벽을 끌 수 있어
+install.sh 가 경고한다. `uninstall.sh` 가 sudoers 와 래퍼를 함께 제거한다. 설계·잠금 방지·남는 권한·오픈소스 권고는 `docs/HOST-ACCESS.md`.
 
 ### RMA sudoers 확장 (v2.742)
 

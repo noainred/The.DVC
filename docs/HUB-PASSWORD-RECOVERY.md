@@ -75,6 +75,11 @@ sudo /opt/vmware-portal/app/otp-enroll.sh admin --disable
 포탈이 사용자 정보를 저장하지 못합니다. git 소스/개발 환경에서는 저장소 루트의 `./otp-enroll.sh`
 를 그대로 씁니다.
 
+자격증명 저장 방식이 **암호화**인 설치에서는 OTP 키도 봉인돼 있어(보안 잔여 11-27 M3) 도구가 포탈과 같은 키를 써야 합니다 —
+root 소유 래퍼 `sudo vmware-portal-otp` 가 `portal.env` 의 `SECRETS_KEY` 를 환경으로 넘깁니다(이 래퍼는 `install.sh` 가 만들므로 업그레이드만 받은 설치는
+새 패키지의 `install.sh` 를 다시 실행해야 키를 넘깁니다). 도구가 '키가 포탈과 같은지 확인하지 못했다' 고 거절하면 키 위치를 확인하고,
+키를 정말 잃었으면 `portal.env` 에 `SECRETS_KEY_LOST=true` 를 넣고 한 번 재시작한 뒤(옛 키로 봉인한 장비 비밀번호는 다시 입력) 재등록하고, 끝나면 그 줄을 지웁니다.
+
 ### 1-4. 긴급 해제 — `OTP_ROLE_ENFORCE=false`
 
 OTP 강제 등록 자체를 **임시로** 끕니다(잠금 복구용). 서비스 환경파일(예:

@@ -37,6 +37,8 @@
 - (다음 점검 ②③ 추가) 봉투 powerCapVer/powerCaps(서버별 PowerCap) · 엣지 전력 알림 발송 기록(랙 키) — 정제 화이트리스트 · 랙 법인은 중앙이 · 버전 안내는 old-version 만
 - (v2.976) 집중 모니터링 엣지 대행 — 중앙이 깨우고(wake) 엣지가 2초마다 동기화 · 개별 토큰만 · 맡은 대상만 받음 · validUntil 30초 보류 시한
 - (다음 작업 2026-11-19 ⑤) 베어메탈 사용률 봉투 정제 — 대상 · 행은 아는 필드 표(엣지 export 와 같은 표 · export ⟺ 표 시험) · 행 시각은 수신 시각으로(원본 atRaw) · 수신 상한 초과는 kind too-large(공용 사다리)
+- (보안 잔여 11-27 추가) 옛 방식 엣지(UPGRADE_EDGES · upgrade.json edges)의 평문 HTTP — S-09 판정 재사용 · 동기화 · 적용 직후 push · 싱크 세 곳 · 뺀 엣지가 있으면 결과에 reason(L2 — 엣지 자동 업그레이드 절 안)
+- (보안 잔여 11-27 추가) 본문 파싱 전 판정 · 오류 처리기는 기록하지 않는다 — lastUsedAt 은 centralRouter 인증 미들웨어 한 곳(L4)
 
 ## 본문
 
@@ -704,6 +706,18 @@
     D. 같은 엣지가 같은 대상 버전으로 **백오프 상한(6시간)에 닿을 만큼 연속 실패**(10분 주기면 7번째)하면 `alerts.js notify` 로 한 번 알리고(key `edgesync:<id>|<버전>`), 그 뒤
        성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). ~~알린 사실은 메모리뿐~~ → ✅ **v2.938 해결**: 연속 실패 수·알린 사실을 upgrade-status.json `edgeSyncState` 로 재시작을 넘긴다(`persistState`·`restoreState` · 백오프도 이어진다 — 회귀 `edgeSyncPersist2938`).
        알림 발송이 던져도 동기화는 계속된다.
+  · **보안 잔여 11-27 L2 — 옛 방식 엣지의 평문 HTTP**(판정 `upgrade/legacyEdgePolicy.js legacyEdgeTransportIssue` — S-09 와 같은 `evaluateCollectorUrl` 을 `existing:null` · source internal 로 ·
+    규칙 원문 `server/CLAUDE.md` S-09 줄 · 회귀 `server/test/secResidual1127EdgeRelay.test.js` L2-1~L2-12 · 웹 `upgradeEdgeSyncText`):
+    이 목록의 엣지에는 엣지 관리자 토큰(Bearer)과 번들이 실린다. 원격 `http://` 는 https · 루프백 · `COLLECTOR_HTTP_ALLOW` 가 아니면 `legacyDropped` 에 code `insecure-http` · 한국어 사유로 **말하고** 뺀다
+    (저장값 승계 · 관리자 예외 없음 · 해석 못 하는 URL · http(s) 가 아닌 스킴은 `invalid-url` 로 거부 — fail-closed). 동기화(`legacyEdgesOf`) · 적용 직후 push(`manager.pushToEdges` — 감사가 놓친 판정 0개 형제 경로) ·
+    싱크(`pushBundleToEdge` — 실제로 보낼 조립 URL 을 번들 파일 읽기 전에) 세 곳이 같은 판정을 탄다.
+    ⚠ 동기화 화면의 '뺀 옛 방식 엣지' 는 **기능이 꺼져 있어도 계산한다**(수동 적용도 push 한다). 뺀 엣지가 있으면 `idle` · `no-edges` · `pushed` 결과에 `reason` 을 싣고, 웹은 reason 이 있는 이 결과를 경고로 읽는다
+    (이 결과들은 예전에 reason 이 없었고 그것이 신호다 — 새 결과 코드를 만들지 않아 서버 ↔ 웹 1:1 시험을 유지했다). 평문 집합이 바뀔 때만 콘솔 1줄 · 같은 origin 중복은 `duplicates` 로 따로(manager 가 콘솔에) ·
+    형식 오류 항목의 계정 부분은 가린다(길이 먼저 · 반복 상한 정규식).
+    남긴 것: 기존 원격 http 옛 방식 엣지를 승계 없이 즉시 중단(fail-closed — S-09 의 '저장값 동일 → 경고' 와 일부러 다르다 · 관리자 토큰이 실리므로 · 사용자 확인 대상) · 그 중단에 알림(sendAlert)이 없다 ·
+    `POST /api/upgrade/edge-sync` 응답 `ok` 는 여전히 idle · no-edges 면 true(화면은 run.reason 으로 경고 — API 소비자는 어긋남) · `remoteBase` + `UPGRADE_TOKEN` 의 평문 HTTP 경로 ·
+    `UPGRADE_TLS_INSECURE=true` 면 https 엣지에도 인증서 검증 없이 토큰 · 자가 점검 wan-transport 가 옛 방식 엣지를 세지 않음 · `legacyDropped.slice(0,10)` 의 총수가 화면에 없음 ·
+    `upgrade/settings.js` 요약의 `edges` URL 에 계정부가 그대로(관리자 전용 · 기존) · `*.localhost` 이름이 루프백으로 판정됨(S-09 에서 물려받음 — 추정). 이 버전으로 올라가는 그 한 번은 옛 프로세스가 push 하므로 평문 엣지도 받는다(추정).
 - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
   (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
   콤보박스로 … 오타/대소문자 방지"):
@@ -1004,3 +1018,12 @@
      바뀌는 것은 예전 bad-body 였던 이 경우의 kind · 사유뿐이다. 이 사다리를 쓰는 화면 문구 맵 다섯(edgeLogText FETCH_KIND_TEXT · EmptyInvModal · focusMonText WAKE_TEXT · isiduText EDGE_CALL_TEXT · tokenCheckText)에 too-large 를 넣었다
      (그 밖 호출부 — bmTop · bmCapacity · bmLogs · bmCompare · bmPerfOps · 스냅샷 대행 — 는 kind · reason 을 그대로 넘긴다 · kind 로 분기하는 서버 코드는 edgeLogPull 의 접두 규칙 · routes/api/{edgeLog,bmFolders,bmCompare,bmTop}.js · central/isiduRemote.js 이고(재확인 정정 — 처음엔 '접두 규칙뿐' 이라 적었다), 어느 곳도 too-large 를 따로 고르지 않아 bad-body 와 같은 갈래로 간다. 웹의 kind 원문 표시 두 곳(bmUsageText 마지막 시도 문구 · BmCollectHealth 마지막 시도 칸)은 공용 낱말 표 `EDGE_PULL_FAIL_LABEL` 로 바꿨다).
   ④ 엣지 스냅샷 응답 정제의 code 표는 `bmusage/snapshot/command.js SNAPSHOT_CODES` 하나(예전 사본에 auth-unresolved 가 없어 엣지의 ‘참조 미해석’ 이 ssh-error 로 바뀌었다).
+
+- **본문 파싱 전 판정(`bigJsonGate` 판정기) · 오류 처리기는 기록하지 않는다 — 엣지 토큰 `lastUsedAt` 은 centralRouter 인증 미들웨어 한 곳**(보안 잔여 11-27 L4 · 2026-11-08 감사 B-3 ·
+  회귀 `server/test/secResidual1127Csp.test.js` T1~T6):
+  - `central/agentTokens.js resolveAgentByToken` · `routes/central.js resolveCentralAuth` 는 **기본으로 사용 시각을 쓰지 않는다**(캐시 무효 시 동기 읽기 · 손상 보존 rename 은 남는다 — '순수' 라 적지 말 것).
+    기록은 `record === true`(엄격 — 'yes' · 1 은 기록 안 함)를 주는 centralRouter 인증 미들웨어 한 곳뿐이고, 자리는 **인증 성공 직후 · 이름 바인딩 대조 전**이다(lastUsedAt 의 뜻 보존 — 바인딩 403 요청도 '사용' 으로 센다 · T4 고정).
+  - 예전에는 게이트(index.js) · 오류 처리기 · centralRouter 세 곳이 같은 판정을 하며 각자 동기 원자적 쓰기를 했다('부작용 없는 조회' 주석이 틀렸다). 의도한 변화: 게이트 503 · 본문 400/413 으로
+    라우터에 닿지 못한 요청은 더는 lastUsedAt 을 찍지 않는다(토큰 적용 확인은 health-probe — 라우터 경로라 영향 없음). 직접 호출하는 시험은 `{ record: true }` 를 넘긴다.
+  - 남긴 것: 세션 판정기(resolveTokenUser → sessionState.lastActivity)의 '처음 본 활동 시각' 기록은 그대로(auth/ 범위 밖 — 주석만 정확히) · 기록 위치를 바인딩 대조 뒤로 옮기는 개선은 뜻 변경이라 하지 않았다 ·
+    `central/tokenApplyJob.js:128` 주석의 '(resolveAgentByToken)' 는 찍는 곳이 이제 centralRouter 인증 미들웨어다 — 다음에 그 파일을 만질 때 고칠 것.

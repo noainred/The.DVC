@@ -8,8 +8,8 @@
 | 항목 | 내용 |
 |---|---|
 | 엔진 | **firewalld**(Rocky 9 기본, nftables 백엔드). `install.sh` 가 이미 `firewall-cmd --add-port=PORT` 로 포탈 포트를 여는 같은 도구 |
-| 실행 계정 | 포탈 서비스 계정(`vmportal`, 비root). `sudo -n /usr/bin/firewall-cmd`, `sudo -n /usr/bin/systemctl {stop,start,disable,enable} sshd.service` 만 허용 |
-| sudoers | `install.sh`(v2.485+)가 `/etc/sudoers.d/vmware-portal-hostaccess` 설치. **업그레이드로 올라온 서버는 root 가 한 번 추가**해야 한다 — 화면의 '엔진 상태' 가 정확한 줄을 보여준다 |
+| 실행 계정 | 포탈 서비스 계정(`vmportal`, 비root). `sudo -n /usr/local/libexec/vmware-portal-firewall-cmd`(root 소유 **인자 검사 래퍼** — 포탈이 실제로 쓰는 firewall-cmd 인자 형태만 받는다, 보안 잔여 11-27 M-5), `sudo -n /usr/bin/systemctl {stop,start,disable,enable} sshd.service` 만 허용 |
+| sudoers | `install.sh` 가 래퍼(`/usr/local/libexec/vmware-portal-firewall-cmd`, root:root 0755)와 `/etc/sudoers.d/vmware-portal-hostaccess`(래퍼 한 줄 + sshd 줄 — `firewall-cmd` 인자 무제한 줄은 없다)를 **함께** 설치한다. **업그레이드로 올라온 서버(래퍼가 없는 옛 설치)는 새 오프라인 패키지의 `install.sh` 를 root 로 다시 실행**해야 좁혀진다 — 자동 업그레이드는 서비스 계정으로 앱 트리만 바꿔 sudoers · `/usr/local/libexec` 를 바꾸지 못한다. 그 전까지는 옛 방식(인자 무제한 sudoers)으로 예전처럼 동작하고 계획 보기에 '옛 설치 방식' 경고가 붙는다. 래퍼 없이 화면 안내 줄만 넣으면 sudo 가 거부한다. 수동 설치: 패키지의 `vmware-portal-firewall-cmd` 를 root:root 0755 로 `/usr/local/libexec/vmware-portal-firewall-cmd` 에 둔 뒤 화면 안내 줄을 `visudo -f` 로 넣는다 |
 | 화면 권한 | 조회 admin · 초안 저장/계획 admin + 설정 소유자 · **적용/확정 admin + 설정 소유자 + 본인 OTP**(세션 탈취만으로는 서버 접근 경로를 못 바꾸게) |
 | 저장 | `host-access.json`(초안·확정본·확정 대기) — 비밀 값 없음 |
 | 감사 | 초안 저장·적용·확정·되돌림 전부 감사 로그 |
@@ -20,7 +20,8 @@
 2. **웹(포탈 포트 + 선택한 80/443)**: 열림 / 허용목록. 포탈 포트는 포탈이 **실제로 듣는 포트 전부**다(평문 `PORT` · TLS `TLS_PORT` — `TLS_HTTP_ALSO` 면 둘 다, v2.731). **'완전 차단' 은 없다** — 포탈 자체가 잠긴다. 허용목록에는 **요청자(관리자 본인) IP 가 반드시 포함**돼야 적용된다(자기 잠금 방지). 중계(HAProxy) 뒤라면 중계 서버 IP 를 넣는다(그 경우 실제 클라이언트 제어는 중계에서).
 3. **OS 방화벽 추가 규칙**: 포트(a 또는 a-b)/프로토콜/동작(accept·drop·reject)/출발지. 기본 존의 rich rule 로 적용. 포탈 포트를 전체 drop/reject 하거나 요청자 IP 를 막는 규칙은 오류로 거부.
 
-포탈이 **관리 대상으로 보고 추가·삭제하는 규칙**: `ssh` 서비스·`service name="ssh"` rich rule·22/tcp, 웹 포트의 `port port="P" protocol="tcp"` rich rule·`P/tcp`·http/https 서비스, 추가 규칙이 만든 rich rule, 직전 확정 때 포탈이 추가한 rich rule. **그 밖의 존 설정(다른 서비스·포트·인터페이스)은 건드리지 않는다.**
+포탈이 **관리 대상으로 보고 추가·삭제하는 규칙**: `ssh` 서비스·`service name="ssh"` rich rule·22/tcp, 웹 포트의 `port port="P" protocol="tcp"` rich rule·`P/tcp`·http/https 서비스, 추가 규칙이 만든 rich rule, 직전 확정 때 포탈이 추가한 rich rule. **그 밖의 존 설정(다른 서비스·포트·인터페이스)은 건드리지 않는다.** `forward-port` · `source-port` 규칙은 관리 대상이 아니다(보안 잔여 11-27 전에는 'port port=' 글자만 보고 포트 규칙으로 오인해 지웠다).
+래퍼 모드에서 관리 대상 규칙이 래퍼가 받는 형태 밖이면(mark 등) 계획 보기가 오류로 알리고 **아무것도 적용하지 않는다** — 그 규칙은 서버에서 root 로 직접 정리한 뒤 다시 적용한다(예전에는 포탈이 지웠다).
 
 ## 3. 잠금 사고 방지 — commit-confirm
 
@@ -42,6 +43,10 @@ IPv6 주소도 받는다(`family="ipv6"` rich rule). 이벤트/추적과 달리 
 - 이미 열린 SSH 세션은 방화벽 규칙을 바꿔도 conntrack 상태에 따라 유지될 수 있다. 확정 후 새 접속으로 확인할 것.
 - 포탈 화면에서 sshd 를 중지하면, 포탈 접근까지 잃었을 때 남는 경로는 **콘솔(iDRAC/IPMI/vSphere 콘솔)** 뿐이다. 차단 전에 콘솔 경로를 확보하라.
 - 다른 존에 인터페이스가 바인딩돼 있으면(예: `internal`) 그 존은 관리하지 않는다. 기본 존만 다룬다.
+- **래퍼가 줄여도 남는 권한**(보안 잔여 11-27 M-5 — 기능의 정의라 더 좁힐 수 없다): 포탈 서비스 계정이 탈취되면 래퍼로도 기본 존에 아무 tcp/udp 포트 · 출발지의 accept/drop 규칙을 넣고,
+  ssh/http/https 와 관리자가 만든 ssh · 포트 rich rule 을 지우고, `--runtime-to-permanent` · `--reload` 를 할 수 있다(모든 포트 drop + ssh 제거 + 영구화면 콘솔로만 복구되는 잠금). 막히는 것: 기본 존 바꾸기 ·
+  target · 다른 존 · panic · direct/passthrough · forward-port/masquerade · ipset · icmp · lockdown · `--*-from-file` · `--permanent` 직접 쓰기. 래퍼의 rich rule 정규형 · SELinux Enforcing 에서의 실행은 실서버로 확인하지 못했다(추정 — 정규형이 다르면 적용이 막히고 화면이 알린다).
+- 래퍼가 없는 옛 설치(자동 업그레이드만 받은 서버)는 root 가 새 패키지의 `install.sh` 를 다시 실행하기 전까지 `firewall-cmd` 인자 무제한 sudoers 그대로다. 새 install.sh 뒤 앱만 옛 판으로 되돌리면(app.bak) 옛 앱이 `/usr/bin/firewall-cmd` 를 직접 불러 sudo 가 거부한다(기능 정지 — 안전한 쪽).
 
 ## 5. 함께 쓰면 좋은 오픈소스 (사실 기반, 권고 순)
 
@@ -71,5 +76,6 @@ Rocky Linux 9 오프라인 설치를 전제로 **RPM 으로 넣을 수 있고 �
 - `server/src/hostaccess/render.js` — 순수 계산(검증·파싱·계획), `service.js` — 실행/commit-confirm, `exec.js` — spawn, `settings.js` — 저장
 - `server/src/routes/admin/hostAccess.js` — API(`/api/admin/host-access`, `/draft`, `/plan`, `/apply`, `/confirm`, `/revert`)
 - `web/src/views/HostAccessSettings.jsx` — 화면
-- `packaging/offline/install.sh` — sudoers 설치, `uninstall.sh` — 제거
+- `packaging/offline/vmware-portal-firewall-cmd` — root 소유 인자 검사 래퍼(판정 코어 — 서버 사전 검사도 이 파일을 `--vp-validate-only` 로 실행), `packaging/offline/install.sh` — 래퍼 · sudoers 설치, `uninstall.sh` — 제거
+- `server/test/secResidual1127FwWrapper.test.js` — 래퍼 실제 실행 · install.sh 함수 · 정적 대조(보안 잔여 11-27 M-5)
 - `server/test/hostAccess2485.test.js` — 검증·계획·상태 기계(가짜 실행기)

@@ -37,7 +37,7 @@ server {
   location / {
     proxy_pass http://davinci_portal;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;               # 포트까지 그대로($host 는 포트를 뗀다 — 원격 콘솔 WS 의 CSP 소스가 틀려진다)
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header Upgrade $http_upgrade;          # WebSocket(원격 콘솔) 유지
     proxy_set_header Connection $connection_upgrade;

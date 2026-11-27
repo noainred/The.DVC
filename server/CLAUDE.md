@@ -56,6 +56,9 @@
   ⚠ v2.731(점검 1회차 A4-01): 중앙↔엣지 클라이언트가 자체 undici Agent 를 만들면(통신 점검 stepHttp·엣지 업그레이드 push·업그레이드 원격 받기)
   `resilientFetch.wanTlsConnectOptions()` 를 **통째로** 펼친다 — 검증 여부만 가져오면 사설 CA(`WAN_TLS_CA_FILE`) 엣지를 거짓 'tls-fail' 로 기록한다.
   사설 CA 는 미리 만든 SecureContext 로 싣는다(ca 배열은 연결마다 약 23~28ms 동기 파싱). 사본을 만들지 말 것. 회귀 `test/audit2731g2b.test.js`.
+  ⚠ 보안 잔여 11-27 L2: **옛 방식 엣지 목록**(`UPGRADE_EDGES` · upgrade.json `edges` — 엣지 관리자 토큰 · 번들이 실린다)도 같은 판정 — `upgrade/legacyEdgePolicy.js legacyEdgeTransportIssue`
+  (evaluateCollectorUrl 을 `existing:null` · source internal 로: 저장값 승계 · 관리자 예외 없음 · https · 루프백 · `COLLECTOR_HTTP_ALLOW` 만 · 해석 못 하는 URL 은 거부).
+  동기화(`legacyEdgesOf`) · 적용 직후 push(`manager.pushToEdges`) · 싱크(`pushBundleToEdge` — 조립 URL 을 번들 읽기 전에) 세 곳이 탄다. 회귀 `secResidual1127EdgeRelay`.
 - **상태변경 라우트 RBAC**: `/api` 의 POST/PUT/PATCH/DELETE에는 `requireRole('admin','operator')`를 붙인다(읽기성 POST 제외). WS SSH/RDP 게이트웨이도 역할을 검사한다.
   - ✅ **수정됨(v2.313)**: `DELETE /remote/mappings/:id`(`routes/remote.js:208`)에 `requirePerm('remote.access')`
     추가 + 소유자 없는 매핑은 admin 전용으로 보정(과거 `m.owner && …` 단락으로 소유자 없는 레거시 매핑을
@@ -74,20 +77,7 @@
   ⚠ v2.977(심층 방어): agent 는 **글자만**(`agentClaimTypeIssue` 400) · 64자 넘는 주장은 원문으로도 대조. 운영은 index.js `queryNormalizer` 가 central 보다 먼저 배열을 글자로 바꿔 이미 403 이었다
   (처음 '재현' 은 정규화 없는 맨 express 구성 — 정정). 정규화 순서를 central 뒤로 옮기지 말 것(회귀 `centralAgentType2977` 두 구성).
 - **자격증명 파일은 원자적 쓰기 + 로드 손상 보존**: `util/atomicWrite.js`의 `atomicWriteFileSync`로 쓰고(직접 `fs.writeFileSync` 금지), **로드 catch에서 파싱 실패 시 `preserveCorrupt(FILE)`로 `<file>.corrupt.<ts>` 보존** 후 빈 값 반환. 쓰기만 원자적이고 로드가 손상을 조용히 `[]`로 넘기면, 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 전 자격증명이 영구 유실된다(3차 감사 지적 — vcenters/nsx/collectors/users 4종이 이 비대칭이었음). portal.env(CENTRAL_TOKEN)도 원자적으로 쓴다.
-- **7b SSH 키 저장소(`bmusage/onboard/keyStore.js` · `ssh-keys.json`)**: 관리 = 소유자 등급 + 본인 OTP(`reauth` 는 마지막 게이트) · 응답 · 감사 · 백업 · 엣지 push 에는 지문 · 공개키만
-  (번들 가림 `keyBundle.js` — 봉인본도 싣지 않음) · 손상이면 쓰기 거절(로드 먼저) · 주소가 바뀌면 `keyRef` · `credRef` 승계 없음 · 키가 없으면 비밀번호로 넘어가지 않음 ·
-  키 서버는 엣지 위임 잡에 싣지 않음 · **저장 비밀을 주소에 묶는 쓰기(CSV · bm-storage keyRef/credRef · iDRAC 사본 · 엣지 배포)도 소유자 등급 + OTP**(r2) ·
-  복호 실패 중 쓰기 거절 · 퇴역 키 접속 거부. **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 · 등록부 `applyServerInput` 이 choke point** — `bindApproved === true` 는
-  게이트를 통과한 호출만 세운다(bm-storage 라우트 OTP 뒤 · 온보딩 `plan.binds` · 엣지는 행의 중앙 승인 `bindOk`) · 새 쓰기 경로도 이 함수를 지나게(r3 R-N1). **키 배치(폴더 · 허용 기능)는 쓰기 때도 접속 때와 같은 판정**(`onboard/placement.js keyPlacementIssue` — 분석 · bmBindCheck · 회전: 폴더 밖 거부 · 기능은 경고 — 4회차 D1). 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩ ⑪.
-- **8a 정비 창(`bmusage/maint/*` · `routes/api/bmMaint.js`)**: 억제를 **늘리는** 쓰기(법인 · 태그 · 12h 초과 창 만들기 · 고치기 전/후 · 재확인)는 소유자 등급(`isOwnerTier`), 줄이는 쓰기(지금 끝내기 · 지우기)는 쓰기 범위 ·
-  판정은 `maint/judge.js` 하나(서버 · 엣지 · 화면) · **억제에는 시한**(발생 끝 · 길이 상한을 계산에서도 · 반복 92일 재확인 · 엣지 배포본 24h) · 못 읽은 창 파일은 억제가 아니다 ·
-  인증 거부(authGuard)는 창과 무관 · 배포 인출은 개별 토큰만 · 엣지는 같은 `normalizeWindow` 로 다시 자른다. **서버 대상 = (법인, 키) 쌍**(판정 · 배포 · 쓰기 — IP 키는 법인끼리 겹친다) ·
-  12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다 · **재확인은 재확인 라우트 하나**(고치기는 confirmedAt 을 바꾸지 않는다 — 점검 반복 3회차) · 엣지 배포 history 창은 지난 구간 제외용이라 **지금 판정(억제)에서 뺀다**. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
-- **SSH exec 안 timeout 합 + 여유 ≤ 그 exec 시한**(8b 반증 F1 — 4 · 5단계부터의 결함): 주 명령은 exec 하나라 넘치면 그 주기 전 구획을 잃는다 — 새 구획 · exec 는 `test/bmTop8bBudget.test.js` 기계 산수를 지킨다(needs-restarting ↔ dnf 한 주기 하나).
-- **8b Top-N · 저활용 · 전력(`bmusage/{parse/linuxTop,topStore,idle,powerAgg}.js` · `routes/api/{bmTop,bmIdle,bmPower}.js`)**: Top-N 은 **같은 세션 별도 exec**(주 명령 밖 · 실패 격리) · **comm 만**(인자 · 환경 · 열린 파일 · kill 없음 —
-  top COMMAND 열은 셸 밖으로 내지 않는다) · 줄마다 고정 접두 · awk getline 으로 /proc 을 읽지 않는다(mawk 중단) · 권한 없는 I/O = null · 프로세스 사용자 이름은 관리자 판본만 원문 ·
-  전력 · 저활용은 **범위로 서버를 먼저 거른 뒤** 합한다 · 집계 cfg 에 설정 원본(전 법인 랙)을 넘기지 않는다 · 검토 쓰기 = (법인, 키) 쌍 · 404 → 403 · 비관리자는 계정 단서(gpdb)도 숨김 ·
-  저활용 활동은 포탈 수집 로그인 제외 · 랙 여유는 다 측정된 랙만 · 상세 `docs/rules/{idrac-server,security-api,edge,perf-db}.md` 8b 항목.
+- **7b SSH 키 저장소 · 8a 정비 창 · SSH exec 시한 산수 · 8b Top-N · 저활용 · 전력**(리눅스 성능 7b~8b — 되돌리지 말 것): 원문 네 단락은 `docs/rules/security-api.md` '(server/CLAUDE.md 에서 옮김) 7b · 8a · 8b' 항목으로 옮겼다(2026-11-27 보안 잔여 11-27 — 크기 상한). 판정 코어 `bmusage/onboard/bindRule.js`(묶음 · choke point `applyServerInput`) · `maint/judge.js` · 기계 산수 `test/bmTop8bBudget.test.js`.
 - **소유자 경계는 서버측 강제**: `settingsOwners`(설정 소유 계정)처럼 UI가 숨기는 권한 경계는 서버에서도 검사한다(`routes/admin.js requireSettingsOwner`). 클라이언트 전용 게이트는 admin이 API를 직접 호출해 우회·소유자 목록 탈취가 가능하다.
   - ⚠ **소유자 등급 = 소유자 ∧ 전체 범위**(v2.744 AUTHZ-02, `routes/admin/shared.js requireSettingsOwner`): 소유자 목록에 있어도
     범위가 지정된 계정(scope.vcenters)은 403(`SETTINGS_OWNER_FULL_SCOPE_REASON`)이다. `/auth/me` 의 **`isSettingsOwner`(설정 메뉴 노출 —
@@ -147,11 +137,12 @@
     계산한다(등록 즉시 반영·우회 불가).
   - ⚠️ **콘솔 등록 도구(`server/src/tools/otp-enroll.js` + 래퍼 `otp-enroll.sh`)를 없애지 말 것** —
     헤드리스 등록과 '모든 admin이 OTP 분실' 잠금 복구 경로다. 래퍼는 번들 Node 경로·CONFIG_DIR·
-    서비스 계정 강등을 처리하므로 문서에서 `node`를 직접 안내하지 말 것(root 실행 시 users.json이
-    root 소유가 되어 포탈이 쓰기 불가). 기동 시 `warnIfNoOtpAdmin()`이 부재를 경고한다.
+    서비스 계정 강등 + portal.env 의 `SECRETS_KEY` 를 환경으로 넘김(보안 잔여 11-27 M3 — 강등된 도구는 root:root portal.env 를 못 읽어 root 로 도는 래퍼가 읽어 넘긴다 ·
+    명령줄 금지)을 처리하므로 문서에서 `node`를 직접 안내하지 말 것(root 실행 시 users.json이
+    root 소유가 되어 포탈이 쓰기 불가 — 도구도 root 직접 실행을 거절한다). 기동 시 `warnIfNoOtpAdmin()`이 부재를 경고한다.
     긴급 해제는 `OTP_ROLE_ENFORCE=false`. viewer·데모는 강제 대상이 아니다.
   - v2.723 콘솔 계정 메뉴(`tools/user-admin.js` + `user-admin.sh`, 설치본 `vmware-portal-users`)도 같은 신뢰 경로(`trusted:true`)다 —
-    래퍼의 서비스 계정 강등을 빼지 말 것(같은 이유). 계정별 로그인 방식은 `login-policy-users.txt`(UI 미노출 규칙 그대로 — 화면·API 에 싣지 않는다)를 쓴다.
+    래퍼의 서비스 계정 강등 · 키 전달을 빼지 말 것(같은 이유). 계정별 로그인 방식은 `login-policy-users.txt`(UI 미노출 규칙 그대로 — 화면·API 에 싣지 않는다)를 쓴다.
   - **전역 로그인 정책(v2.272)**: OTP 강제 여부는 이제 설정 소유자가 '설정 › 세션 보안'에서 고르는
     전역 정책(`security-session.json` `loginPolicy`)이 결정한다 — `isOtpOnlyRole`이 이 값을 읽는다
     (핫패스라 `securitySettings.effectiveLoginPolicy`가 3초 캐시·저장 시 즉시 무효화). 값:
@@ -251,6 +242,9 @@
   읽기 오류 중에는 AD 로그인 · 계정 생성 · 중앙 배포 적용도 막는다 · 확정 게이트 ≥ 쓰기 게이트(`ownerOnly` · `superOnly`).
 - **전체 점검 21 · 22회차(비밀 보관)**: 봉인된 값이 있으면 **키를 새로 만들지 않고 비밀 파일 저장을 거절**(env 누락 재시작 → 저장 한 번이 전 비밀 소거 · 탈출은 `SECRETS_KEY_LOST=true`) ·
   `openSecretsDeep` 는 비밀 칸만 연다(복호 오라클) · 저장은 쓰기 성공 뒤에 메모리 반영 · SSH 키 KDF rounds 상한(`util/sshKeyKdf.js`).
+- **보안 잔여 11-27 M3(users.json OTP 시드 봉인)**: 시드(`USER_SECRET_FIELDS`)는 레코드 단위 봉인(`openRecordFields`/`sealRecordFields` — 일반 경로 금지) ·
+  복호 실패는 암호문 보존(비밀번호로 내려가지 않음) · 콘솔 도구는 `disallowKeyCreation` + `secrets-keycheck`(같은 키일 때만 새 봉인 — **키를 쓰는 새 독립 실행 스크립트도 부를 것**) ·
+  흔적 판정은 시드 칸만(표시 이름 한 줄이 평문 설치를 잠갔다). 상세 `src/security/CLAUDE.md` · `docs/rules/security-api.md`. 회귀 `secResidual1127TotpSeal`.
 - **134회차**: 설정 · 비밀 · 등록부 파일 유무를 `fs.existsSync` 로 가르지 말 것(stat 실패도 false — 권한 · 계정 · 폐기 목록 · 키가 '없음' 으로 열렸다). 곧바로 읽어 ENOENT 만 없음 · `util/fileMissing.js` · 분류표 `existsSyncSweep134`.
 
 ## 옮긴 절 (2026-10-20 — 이 파일을 짧게 유지하려고)

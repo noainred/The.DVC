@@ -48,6 +48,9 @@ const MANUAL = {
   REMOTE_WS_HIGH_WATER_BYTES: { area: '원격 접속(프록시)', file: 'proxy/sshGateway.js', def: '1048576' },
   REMOTE_WS_LOW_WATER_BYTES: { area: '원격 접속(프록시)', file: 'proxy/sshGateway.js', def: '262144' },
   REMOTE_WS_MAX_QUEUE_BYTES: { area: '원격 접속(프록시)', file: 'proxy/sshGateway.js', def: '8388608' },
+  // 보안 잔여 11-27 M1: 키 이름을 런타임에 조합한다(process.env[DEPLOY_CMD_ENV[kind]]) — 스캐너가 못 잡아 문서에서 빠졌다. 기본값은 DEPLOY_CMD_BUILTIN.
+  PROXY_VALIDATE_CMD: { area: '원격 접속(프록시)', file: 'proxy/registry.js', def: "'haproxy -c -f {file}'(운영자 값 — 문법 검사 없이 그대로 실행 · 호출 시각에 읽음 · 화면 값만 문법 제한)" },
+  PROXY_RELOAD_CMD: { area: '원격 접속(프록시)', file: 'proxy/registry.js', def: "'systemctl reload haproxy'(운영자 값 — 문법 검사 없이 그대로 실행 · 호출 시각에 읽음 · 화면 값만 문법 제한)" },
   TLS_RELOAD_CHECK_MS: { area: '공통', file: 'util/httpsServer.js', def: '3600000' },
   // v3.10.3: 기본값이 함수 안의 식(30 * 60_000)이라 스캐너가 못 읽는다 — 1분~6시간으로 가둔다.
   EXPORT_LOCK_MAX_MS: { area: '공통', file: 'util/exportBusy.js', def: '1800000(30분 — 1분~6시간)' },

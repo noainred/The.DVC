@@ -183,7 +183,12 @@ npm run otp-enroll -- admin --confirm 482913
 
 > 래퍼(`otp-enroll.sh` / `vmware-portal-otp`)가 번들 Node 경로·`CONFIG_DIR`·서비스 계정 강등을
 > 모두 자동 처리합니다. **root로 직접 `node`를 실행하지 마세요** — `users.json`이 root 소유가 되어
-> 이후 포탈이 사용자 정보를 저장하지 못합니다.
+> 이후 포탈이 사용자 정보를 저장하지 못합니다(도구도 root 직접 실행을 거절합니다).
+>
+> **자격증명 저장 방식이 암호화인 설치**(보안 잔여 11-27 M3): OTP 키(시드)도 봉인되므로 콘솔 도구는 포탈과 **같은 키**가 있어야 새 OTP 를 등록합니다.
+> root 소유 래퍼(`vmware-portal-otp` · `vmware-portal-users`)가 `portal.env` 의 `SECRETS_KEY` 를 root 권한으로 읽어 **환경으로** 넘깁니다(명령줄에 싣지 않음).
+> 이 래퍼는 `install.sh` 가 만들기 때문에 **앱 업그레이드만 받은 설치는 새 패키지의 `install.sh` 를 다시 실행해야** 키를 넘깁니다(특히 `portal.env` 가 root:root 인 설치).
+> 키를 정말 잃었으면(`secrets-key` 삭제 · 키 없이 다른 호스트로 복원) `portal.env` 에 `SECRETS_KEY_LOST=true` 를 넣고 한 번 재시작한 뒤 다시 등록하고, 끝나면 그 줄을 지웁니다.
 >
 > **긴급 해제**: `portal.env`에 `OTP_ROLE_ENFORCE=false` → 재시작하면 강제 등록이 비활성화됩니다
 > (복구 후 다시 제거하세요). 포탈 기동 시 OTP 등록 admin이 하나도 없으면 **서버 로그에도 이 절차가
@@ -339,7 +344,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 > 동작하되 화면·보안 자가진단이 경고합니다. 꼭 필요한 보호 구간은 설정 › 엣지·원격 › 수집 서버(원격)에서 **사유와 함께 예외**로 두거나 중앙
 > `COLLECTOR_HTTP_ALLOW`(대역) 로 허용합니다.
 
-> **호스트 접근 제어(v2.485)**: 설치 후에는 설정 › 보안 › **호스트 접근 제어**에서 이 호스트의 SSH/포탈 포트 인바운드를 출발지 허용목록으로 좁히거나 SSH 를 완전 차단할 수 있다(firewalld, 런타임 적용 → 미확정 시 자동 복원). 포탈 서비스 계정에 `firewall-cmd` sudo 가 필요하며 `packaging/offline/install.sh` 가 `/etc/sudoers.d/vmware-portal-hostaccess` 로 설치한다. 수동 설치(이 문서 방식)나 v2.485 이전에 설치한 서버는 화면이 안내하는 두 줄을 root 가 `visudo -f /etc/sudoers.d/vmware-portal-hostaccess` 로 추가한다. 상세: [docs/HOST-ACCESS.md](HOST-ACCESS.md).
+> **호스트 접근 제어(v2.485)**: 설치 후에는 설정 › 보안 › **호스트 접근 제어**에서 이 호스트의 SSH/포탈 포트 인바운드를 출발지 허용목록으로 좁히거나 SSH 를 완전 차단할 수 있다(firewalld, 런타임 적용 → 미확정 시 자동 복원). 포탈 서비스 계정에 sudo 가 필요하며 `packaging/offline/install.sh` 가 root 소유 **인자 검사 래퍼**(`/usr/local/libexec/vmware-portal-firewall-cmd` — 포탈이 실제로 쓰는 `firewall-cmd` 인자 형태만 받는다)와 `/etc/sudoers.d/vmware-portal-hostaccess`(래퍼 한 줄 + sshd 줄)를 함께 설치한다(보안 잔여 11-27 M-5 — `firewall-cmd` 인자 무제한 줄은 더 이상 안내하지 않는다). 업그레이드로 올라온 서버는 새 오프라인 패키지의 `install.sh` 를 root 로 다시 실행해야 좁혀진다(자동 업그레이드는 sudoers 를 바꾸지 못한다). 수동 설치(이 문서 방식)는 패키지의 `vmware-portal-firewall-cmd` 를 root:root 0755 로 `/usr/local/libexec/vmware-portal-firewall-cmd` 에 둔 뒤 화면이 안내하는 줄을 root 가 `visudo -f /etc/sudoers.d/vmware-portal-hostaccess` 로 넣는다(래퍼 파일 없이 줄만 넣으면 동작하지 않는다). 상세: [docs/HOST-ACCESS.md](HOST-ACCESS.md).
 
 ---
 
@@ -355,7 +360,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 | **데이터 범위(scope)** | 계정별로 **볼 수 있는 vCenter/리전**을 제한할 수 있습니다(외주·감사·데모 계정 권장). 미지정 시 전체. 목록 API뿐 아니라 **id를 직접 받는 단건 라우트**(VM 콘솔 티켓·호스트/VM 지표)도 검사하며, 범위 밖은 **404**로 응답합니다(존재 여부 은닉, v2.207.0). |
 | **특수 계정** | `noainred`(수퍼관리자 — 강등/삭제/차단 불가), `thedvcdemp`(데모 — 비번 설정 시에만 로그인, [로그인 차단]으로 즉시 잠금). §2.2 표 참고. |
 | **★ 설정 접근 계정** | '설정' 탭은 지정 계정만 접근할 수 있습니다(서버측 강제). 세 경로가 **합산** 적용: ① `portal.env` 의 `SETTINGS_OWNERS=계정1,계정2` ② `$CONFIG_DIR/settings-owners.txt`(한 줄에 하나, `#` 주석) ③ 포탈 UI(설정 › 세션 보안). ①②는 **UI 저장으로 지워지지 않아** 아무도 설정에 못 들어가는 잠금 상황의 복구 경로입니다. 편집 후 `systemctl restart vmware-portal` 없이도 즉시 반영되지만(파일은 매 조회 시 읽음), `SETTINGS_OWNERS` 환경변수 변경은 재시작이 필요합니다. |
-| **★ 백업 아카이브 취급** | 포탈 백업에는 `portal.env`(**AUTH_SECRET**·`CENTRAL_TOKEN`)·`users.json`(**TOTP 시크릿**)·`vcenters.json` 사본이 들어갑니다 = **자격증명 사본**. v2.210.0부터 `/api/admin/backup/*` 전부(상태·설정·즉시 백업·다운로드·조회·삭제·복원)와 세션 보안 설정 조회는 **설정 소유자만** 호출할 수 있고, 다운로드·복원은 **감사 로그**에 남습니다. 내려받은 파일은 공유 저장소에 두지 말고 사용 후 삭제하세요(AUTH_SECRET 유출 시 임의 계정 토큰 위조 가능). |
+| **★ 백업 아카이브 취급** | 포탈 백업에는 `portal.env`(**AUTH_SECRET**·`CENTRAL_TOKEN`)·`users.json`(**TOTP 시크릿** — 자격증명 저장 방식이 암호화면 봉인된 채로, 키는 번들 밖 · 보안 잔여 11-27 M3)·`vcenters.json` 사본이 들어갑니다 = **자격증명 사본**. v2.210.0부터 `/api/admin/backup/*` 전부(상태·설정·즉시 백업·다운로드·조회·삭제·복원)와 세션 보안 설정 조회는 **설정 소유자만** 호출할 수 있고, 다운로드·복원은 **감사 로그**에 남습니다. 내려받은 파일은 공유 저장소에 두지 말고 사용 후 삭제하세요(AUTH_SECRET 유출 시 임의 계정 토큰 위조 가능). |
 | **HTTPS 권장** | 리버스 프록시(nginx/HAProxy)로 TLS 종단 권장. HTTPS면 `HSTS` 헤더가 자동 적용됩니다. |
 | **CORS** | 기본은 **교차출처 차단**(같은 포탈에서 SPA 사용 시 무영향). 별도 프론트 출처가 있으면 `CORS_ORIGINS=https://포탈주소`. |
 | **/metrics** | 토큰 **미설정 시 404(비활성)**. Prometheus 연동은 `METRICS_EXPORT_TOKEN` + Authorization 헤더(옛 `?token=`은 `METRICS_ALLOW_QUERY_TOKEN=true`). 무인증 공개가 꼭 필요하면 `METRICS_ALLOW_ANON=true`. |

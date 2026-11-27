@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **348개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **349개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-27)
@@ -8,6 +8,10 @@
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
 > ⚠️ **백업**: 설정 › 포탈 백업이 이 디렉터리를 통째로 담는다. 수동 백업 시에도 `portal.env`·`auth-secret`·`secrets-key`·`users.json` 은 반드시 포함할 것 — 이 넷이 없으면 복원해도 로그인·복호가 안 된다.
+>
+> 🔑 **키 없이 다른 호스트로 복원**(보안 잔여 11-27 M3): 자격증명 저장 방식이 암호화면 `users.json` 의 OTP 시드도 봉인돼 있어, 키(`secrets-key` 또는 `SECRETS_KEY`)를 함께 옮기지 않으면
+> OTP 로그인이 되지 않고 콘솔 OTP 도구도 새 등록을 거절한다(키 확인 값 불일치). 키를 정말 잃었으면 포탈 환경(리눅스 설치본은 `portal.env`)에 `SECRETS_KEY_LOST=true` 를 한 줄 넣고 한 번 재시작한 뒤
+> (옛 키로 봉인된 비밀 값은 전부 다시 입력해야 한다) `sudo vmware-portal-otp` 로 다시 등록하고, 끝나면 그 줄을 지운다.
 >
 > 💾 **용량**: 디스크를 쓰는 것은 거의 전부 `.db`(SQLite 시계열)다. 특수 기능 › 포탈 DB 에서
 > 파일별 크기를 보고, 필요하면 `db-location.json` 으로 큰 볼륨에 옮긴다.
@@ -274,6 +278,7 @@
 | `sanswitch-perf.db` | DB | SAN 스위치 포트 처리량(누적 카운터 델타) |  |  | ✅ | sanswitch/perfDb.js |
 | `scan-journal.json` | 설정 | 실행 중 스캔 기록 + 재시작 뒤 자동 재개(상태, v2.737) | ✅ | ✅ | ✅ | util/scanJournal.js |
 | `secrets-key` | 디렉터리 | 자격증명 봉인 키(암호화 모드) | ✅ | ✅ | ✅ | security/secretVault.js |
+| `secrets-keycheck` | 디렉터리 | 포탈이 쓰는 키 확인 값(포탈 키로 봉인한 상수 — 보안 잔여 11-27 M3) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.trusted.json` | 설정 | 자격증명 저장 방식 정책의 신뢰 사본(S-07) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ |  | ✅ | security/securitySettings.js |
@@ -326,7 +331,7 @@
 | `usage-settings.json` | 설정 | 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음). | ✅ | ✅ |  | usage/settings.js |
 | `usage.db` | DB | 기능 사용 일 집계 DB(v2.913). 파일: `<dbDir>/usage.db`. |  |  | ✅ | usage/db.js |
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
-| `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
+| `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·OTP 시드 — 자격증명 저장 방식이 암호화면 OTP 시드는 봉인, 키는 secrets-key/SECRETS_KEY 로 번들 밖 · 보안 잔여 11-27 M3) | ✅ | ✅ | ✅ | auth/auth.js |
 | `vcenter-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | vcenter/restClient.js |
 | `vcenter-logs-cursor.json` | 설정 | vCenter 이벤트 수집 커서(상태, v2.765 — 읽은 마지막 시각·온전한 시각·연속 상한 수) | ✅ | ✅ | ✅ | logs/poller.js |
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
@@ -371,7 +376,8 @@
 
 - **`portal.env`** — ⚠ 지우면 인증 비밀·중앙 토큰이 사라져 로그인·수집이 전부 끊긴다. 백업 필수. 자세한 키는 docs/ENV.md
 - **`auth-secret`** — ⚠ 바뀌면 전 사용자 세션 무효(재로그인). 유출 시 임의 계정 토큰 위조 가능 — 0600 유지
-- **`users.json`** — ⚠ 지우면 관리자 계정이 사라진다. 기동 시 초기 관리자만 재생성
+- **`users.json`** — ⚠ 지우면 관리자 계정이 사라진다. 기동 시 초기 관리자만 재생성. 암호화 설치의 OTP 시드는 이 호스트의 키로만 열린다 — 키 없이 다른 호스트로 복원하면 OTP 재등록이 필요하다(복원 예약 경고가 알린다)
+- **`secrets-keycheck`** — 비밀이 아니다. 콘솔 OTP 도구(vmware-portal-otp · vmware-portal-users)가 자기 키가 포탈과 같은지 이 값으로 확인한다(같을 때만 새 OTP 시드를 봉인). 확장자가 없어 백업에 들어가지 않는다. 지우면 포탈이 다음 기동 때 다시 쓴다 — 그 전까지 콘솔 도구의 새 OTP 등록은 거절된다
 - **`secrets-key`** — ⚠ 지우면 저장된 모든 비밀번호를 복호할 수 없다(재입력 필요)
 - **`secrets-policy.trusted.json`** — 정책 파일이 손상·유실되면 이 사본으로 복구한다. 둘 다 없는데 암호화 흔적이 있으면 새 비밀 저장을 막는다(평문 저장 금지) — 지우지 말 것
 - **`security-session.trusted.json`** — 정상으로 읽거나 저장할 때 본 파일과 같게 맞춘다. 본 파일이 손상·읽기 오류·유실이면 직전 값 → 이 사본 순으로 쓰고, 둘 다 없는 손상·읽기 오류는 엄격 값(전 계정 OTP 전용 · 단일 세션 · 총 상한 8시간)으로 돈다. 백업 복원 대상이 아니다. 기본값으로 되돌리려면 두 파일을 함께 지운다

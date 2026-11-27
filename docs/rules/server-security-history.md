@@ -373,11 +373,15 @@ XFF 우회·대용량 본문). 경로 탈출·열거·잠금·헤더는 전부 �
     고정하고, 새 push 경로를 만들 때 "BIG_JSON 에 등록" 규칙도 그대로다. 등록만 하면 게이트가 덮는다.
   · 마운트 안에서는 `req.path` 가 `/` 라 `req.baseUrl + req.path` 로 본다(초판이 이걸로 틀릴 뻔했다).
   · 실증 기준: **무토큰 3MB → 413, 유효 토큰 3MB → 413 아님** — 테스트가 실제 서버를 띄워 본다.
+  · ⚠ 정정(보안 잔여 11-27 L4): 위의 '부작용 없는 조회' 는 틀렸다 — 유효 토큰이면 `resolveAgentByToken` 이 lastUsedAt 을 동기 원자적 쓰기로 찍었다(본문을 읽기 전 · 오류 처리기도).
+    이제 판정 함수는 기본으로 기록하지 않고 centralRouter 인증 미들웨어 한 곳만 `record: true` 로 찍는다(`docs/rules/edge.md` L4 항목 · 회귀 `secResidual1127Csp` T1~T6).
 - **비밀 필드를 가진 파일은 ① load 에 `openSecretsDeep` ② save 에 `sealSecretsDeep` ③ `SECRET_FILES`
   등록 — 셋을 같이**(medium/low): `agent-assignments.json`(위임 스캔 iDRAC 비밀번호)·`guest-scans.json`
   (게스트 계정)·`upgrade.json`·`packages.json`(토큰)이 v2.537 까지 **셋 다 없었다**. v2.500 M4
   (bm-storage)와 같은 계열의 재발이다. 파일에 `password|token|guestPass|…` 를 새로 쓰면 이 세 줄부터.
   `configDir` JSON 전수표(감사 보고서)에서 `pwRefs>0 && seal=0` 인 파일이 곧 후보다.
+  · ⚠ 예외(보안 잔여 11-27 M3): `users.json`(OTP 시드)은 ③ 등록 + 파일 한정 필드(`USER_SECRET_FIELDS`)이지만 ①② 일반 경로를 쓰지 않고 **레코드 단위 봉인**
+    (`openRecordFields`/`sealRecordFields`)이다 — 일반 경로는 키 없음에서 로그인 저장을 거절하고 복호 실패를 '' 로 지운다(`docs/rules/security-api.md` M3 항목).
 - **백업 번들·엣지 설정 push 는 `.env` 의 키·토큰을 싣지 않는다**(medium — `util/envRedact.js`,
   `backup/service.js collectConfigDir`, `central/agentConfig.js setAgentConfig`): 운영 CONFIG_DIR
   (`/etc/vmware-portal`)의 `portal.env` 에는 `AUTH_SECRET`(세션 서명 — 관리자 토큰 위조)·`SECRETS_KEY`

@@ -156,6 +156,8 @@ systemctl restart vmware-portal
 - `EDGE_MODE=all` + `CENTRAL_URL` 이면 엣지는 **중앙 포탈의 `/dl`** 을 소스로 1시간 주기 자동 업그레이드하고 자동 적용합니다
   (`config.upgrade`, 폐쇄망에서도 중앙만 최신이면 됨). 끄려면 `UPGRADE_AUTO_APPLY=false`.
 - 중앙에서 특정 엣지로 번들을 **푸시**하려면 `UPGRADE_EDGES='[{"url":"https://edge1","token":"…"}]'`.
+  이 목록에는 엣지 관리자 토큰이 실리므로 원격 `http://` 주소에는 **보내지 않는다**(보안 잔여 11-27 L2 — 수집 서버 등록과 같은 평문 HTTP 정책: https · 루프백 · `COLLECTOR_HTTP_ALLOW` 대역만).
+  뺀 엣지는 업그레이드 화면의 '동기화에서 뺀 옛 방식 엣지' 줄과 동기화 결과 경고로 보인다. 복구는 엣지를 https 로 바꾸거나, 사내망 대역이면 `COLLECTOR_HTTP_ALLOW` 에 넣는 것이다(그 대역의 평문 수집 서버 등록도 함께 허용된다).
 - 업그레이드 번들은 **sha256 검증**을 통과해야 적용됩니다(미검증 거부).
 
 ---
