@@ -77,6 +77,7 @@ test('12a F2 · F4 — 서버를 다 읽으면 그 서버만 먼저 풀려 새 �
   assert.deepEqual(runs[1], ['f2-x'], '같은 묶음의 느린 서버를 기다리지 않는다(F2)');
   // F4 — 도는 묶음이 맡은 서버도 상한에 센다(EVT_BATCH_MAX). 느린 묶음이 1대를 쥔 채 상한까지 채우면 그 다음은 미룬다
   await sleep(40);   // 둘째 묶음(x)이 끝나 x 가 풀린 뒤 — 도는 묶음은 느린 서버 1대만 쥔다
+  send('f2-slow');   // 도는 묶음이 맡은 서버에 새 이벤트 — 대기에도 들어가지만 서로 다른 서버 수는 그대로 1(13a G2 — 두 번 세지 않는다)
   const d0 = E.eventStatus().deferred;
   for (let i = 0; i < E.EVT_BATCH_MAX; i += 1) send(`f4-${i}`);
   assert.equal(E.eventStatus().deferred - d0, 1, '대기 + 도는 묶음 합계가 상한 — 마지막 1대는 정규 주기로 미룬다(F4)');
@@ -99,53 +100,77 @@ test('12a F3 — 묶음 도중 시험 초기화를 해도 카운트가 음수가
 
 const alertsOf = (n, pre, closed = false) => ({ opened: closed ? [] : Array.from({ length: n }, (_, k) => ({ agent: '', partKey: `${pre}-${k}`, state: 'fault', scope: 'idrac', kind: 'psu', label: `PSU ${k}`, firstSeenAt: 1000 + k })), updated: [], closed: closed ? Array.from({ length: n }, (_, k) => ({ agent: '', partKey: `${pre}-${k}`, state: 'fault', scope: 'idrac', kind: 'psu', label: `PSU ${k}`, closeReason: 'ok' })) : [] });
 
-test('12b — 넘치면 같은 부품의 뒤 알림이 있는 앞 알림부터 대신(마지막 상태 유지) · 무게 ≥ 1 · 대기 수는 상한까지 · 꺼지면 안 보냄 · 늦은 알림은 판정 시각', async () => {
+test('13b — 부품마다 마지막 대기 알림 하나(같은 부품의 뒤 알림이 대신) · 0건 판정은 넣지 않음 · 넘침은 오래된 것부터 셈 · 꺼지면 안 보냄 · 늦은 알림은 알림마다 판정 시각', async () => {
   const PF = await import('../src/partfault/poller.js');
   PF._resetNotifyForTest();
   let release = null; let gate = new Promise((r) => { release = r; }); const sent = []; let now = 1_000_000; let enabled = true;
   PF._setNotifyDepsForTest({
-    sendAlerts: async (alerts, { note } = {}) => { sent.push({ keys: alerts.map((a) => `${a.closed ? 'C' : 'O'}:${a.partKey}`), note }); await gate; return { sent: alerts.length, skipped: 0, failed: 0, results: [] }; },
+    sendAlerts: async (list, { note } = {}) => { for (const e of list) sent.push({ key: `${e.closed ? 'C' : 'O'}:${e.partKey}`, note }); await gate; return { sent: list.length, skipped: 0, failed: 0, results: list.map((e) => ({ partKey: e.partKey, closed: e.closed, result: 'webhook:ok', outcome: 'delivered' })) }; },
     markNotified: async () => {}, enabled: () => ({ enabled, source: 'saved' }), now: () => now,
   });
   const warns = []; const ow = console.warn; console.warn = (...a) => { warns.push(a.map(String).join(' ')); };
   try {
-    // #6 — 500건 판정: 대기 수는 200(상한까지) · 상한 밖 300 은 대기 중에도 밝힌다
+    // 12b #6 — 500건 판정: 대기 수는 200(상한까지) · 상한 밖 300 은 대기 중에도 밝힌다
     const v0 = PF._enqueueNotifyForTest(alertsOf(500, 'big'), 'big');
-    assert.deepEqual([v0.queued, v0.capped, v0.total], [200, 300, 500]);
-    // 같은 부품 200 이 열림 · 해소를 번갈아(채널 막힘) — 넘치면 앞 알림을 뒤 알림으로 대신한다(마지막 상태가 남는다)
+    assert.deepEqual([v0.queued, v0.capped, v0.total, v0.pending], [200, 300, 500, true]);
+    // 같은 부품 200 이 열림 · 해소를 번갈아(채널 막힘) — 기다리던 앞 알림은 뒤 알림이 대신한다(부품마다 하나)
     const vs = [];
     for (let j = 0; j < 12; j += 1) vs.push(PF._enqueueNotifyForTest(alertsOf(200, 'flip', j % 2 === 1), `flip-${j}`));
     let q = PF._notifyQueueStatusForTest();
-    assert.ok(q.superseded > 0 && q.overflowDropped === 0, `대신함 ${q.superseded} · 뺌 ${q.overflowDropped}`);
-    assert.ok(q.waitingItems <= PF.NOTIFY_QUEUE_MAX_ITEMS);
-    assert.equal(vs.at(-1).pending, true, '마지막 판정(해소)은 남는다');
-    assert.ok(warns.some((w) => /뒤 알림이 있는 앞 알림/.test(w)));
-    // #3 — 보낼 것이 없는 판정(키 이전만)도 1 로 센다 — 수천 개여도 상한이 지켜진다
+    assert.deepEqual([q.superseded, q.waiting], [11 * 200, 199 + 200], '앞 판정 11개의 200건씩을 대신 · 기다리는 것은 부품 수만큼');
+    assert.deepEqual([vs[0].pending, vs[0].superseded, vs[10].pending, vs[11].pending], [false, 200, false, true], '대신된 판정은 끝남 · 마지막 판정(해소)이 남는다');
+    // 13b N2 — 보낼 것이 없는 판정(키 이전만)은 큐에 넣지 않는다(진짜 알림을 밀어내지 않음)
     const mig = { opened: [{ agent: '', partKey: 'mig-1', migratedFrom: 'old', prevState: 'fault', state: 'fault', scope: 'idrac', kind: 'psu' }], updated: [], closed: [] };
-    for (let j = 0; j < 2_500; j += 1) PF._enqueueNotifyForTest(mig, 'mig');
+    const vm = PF._enqueueNotifyForTest(mig, 'mig');
+    assert.deepEqual([vm.pending, vm.queued, PF._notifyQueueStatusForTest().waiting], [false, 0, 399]);
+    // 상한(부품 수) — 넘치면 가장 오래된 것부터 빼고 센다
+    for (let j = 0; j < 25; j += 1) PF._enqueueNotifyForTest(alertsOf(200, `ov${j}`), `ov-${j}`);
     q = PF._notifyQueueStatusForTest();
-    assert.ok(q.waiting <= PF.NOTIFY_QUEUE_MAX_ITEMS, `대기 판정 ${q.waiting}개 ≤ 상한(무게 0 이면 끝없이 쌓였다)`);
-    // #5 · 지연 — 2분 뒤 채널이 풀림 · 그 사이 점검을 끔 → 남은 대기는 보내지 않는다
+    assert.deepEqual([q.waiting, q.overflowDropped], [PF.NOTIFY_QUEUE_MAX_ITEMS, 399]);
+    assert.deepEqual([v0.queueDropped, v0.pending, vs[11].queueDropped, vs[11].pending], [199, true, 200, false], '가장 오래된 big 나머지 · flip 마지막 판정이 빠짐(센다) · big 은 보내는 중인 1건이 남아 대기');
+    assert.ok(warns.some((w) => /알림 대기열이 넘쳐/.test(w)));
+    // 12b #5 · 지연 — 2분 뒤 채널이 풀림 · 그 사이 점검을 끔 → 남은 대기는 보내지 않는다
     now += 120_000; enabled = false;
     release(); release = null;
     await PF._notifyIdleForTest();
     assert.equal(sent.length, 1, '보내던 것 하나만 — 꺼진 뒤의 대기는 보내지 않는다(#5)');
     q = PF._notifyQueueStatusForTest();
-    assert.ok(q.disabledSkipped > 0);
-    assert.equal(vs.at(-1).disabledSkipped, 200);
-    // 지연 표기 — 켠 채 대기가 1분을 넘으면 본문 끝에 판정 시각
+    assert.equal(q.disabledSkipped, PF.NOTIFY_QUEUE_MAX_ITEMS);
+    // 13b D1 — 늦은 알림 표기는 알림마다(한 판정 안의 뒤쪽 알림도)
     enabled = true; gate = Promise.resolve();
     PF._enqueueNotifyForTest(alertsOf(1, 'late'), 'late');
     await PF._notifyIdleForTest();
     assert.equal(sent.at(-1).note, '', '바로 보내면 덧붙이지 않는다');
     let rel2 = null; gate = new Promise((r) => { rel2 = r; });
-    PF._enqueueNotifyForTest(alertsOf(1, 'late2'), 'late2');
-    const v2 = PF._enqueueNotifyForTest(alertsOf(1, 'late3'), 'late3');
+    PF._enqueueNotifyForTest(alertsOf(1, 'late2'), 'late2');   // 보내는 중(막힘)
+    const v3 = PF._enqueueNotifyForTest(alertsOf(3, 'late3'), 'late3');
     now += 180_000; rel2();
     await PF._notifyIdleForTest();
-    assert.match(sent.at(-1).note, /^판정 시각 .*알림 채널이 늦어 약 3분 뒤에 보냅니다/);
-    assert.equal(v2.delayedMs, 180_000);
-  } finally { console.warn = ow; PF._resetNotifyForTest(); release?.(); await PF._notifyIdleForTest(); PF._setNotifyDepsForTest(null); }   // 실패해도 남은 대기를 실제 채널로 흘려보내지 않는다(먼저 비운다)
+    const notes = sent.slice(-3).map((x) => x.note);
+    assert.equal(notes.length, 3);
+    for (const n of notes) assert.match(n, /^판정 시각 .*알림 채널이 늦어 약 3분 뒤에 보냅니다/);
+    assert.equal(v3.delayedMs, 180_000);
+  } finally { console.warn = ow; PF._resetNotifyForTest(); release?.(); await PF._notifyIdleForTest(); PF._setNotifyDepsForTest(null); }
+});
+
+test('13b N5 · 대신함의 발송 표시 — 같은 partKey 라도 수집 주체가 다르면 따로 · 열림이 같은 부품의 변화 알림으로 대신되면 표시를 넘겨받음', async () => {
+  const PF = await import('../src/partfault/poller.js');
+  PF._resetNotifyForTest();
+  let release = null; const gate = new Promise((r) => { release = r; }); const marks = [];
+  PF._setNotifyDepsForTest({
+    sendAlerts: async (list) => { await gate; return { results: list.map((e) => ({ partKey: e.partKey, closed: e.closed, result: '', outcome: e.agent === 'edge-a' ? 'failed' : 'delivered' })) }; },
+    markNotified: async (k) => { marks.push(...k.map((m) => `${m.agent}|${m.partKey}|${m.firstSeen}`)); }, enabled: () => ({ enabled: true, source: 'saved' }),
+  });
+  try {
+    const p = (agent, k, state = 'fault') => ({ agent, partKey: k, state, scope: 'idrac', kind: 'psu', label: 'PSU', firstSeenAt: 777 });
+    PF._enqueueNotifyForTest({ opened: [p('edge-z', 'zz')], updated: [], closed: [] }, 'head');   // 보내는 중(막힘)
+    PF._enqueueNotifyForTest({ opened: [p('edge-a', 'same'), p('edge-b', 'same')], updated: [], closed: [] }, 'two');
+    // 열림(edge-c) 뒤 같은 부품의 변화(warn → fault) 알림이 대신 — 표시 정보를 넘겨받는다
+    PF._enqueueNotifyForTest({ opened: [p('edge-c', 'chg', 'warn')], updated: [], closed: [] }, 'open-c');
+    PF._enqueueNotifyForTest({ opened: [], updated: [{ ...p('edge-c', 'chg'), prevState: 'warn', sameState: false }], closed: [] }, 'change-c');
+    release(); await PF._notifyIdleForTest();
+    assert.deepEqual(marks.sort(), ['edge-b|same|777', 'edge-c|chg|777', 'edge-z|zz|777'], '받은 열림만 · 수집 주체까지 · 대신한 변화 알림이 열림 표시를 넘겨받음');
+  } finally { release?.(); PF._setNotifyDepsForTest(null); PF._resetNotifyForTest(); }
 });
 
 test('12b 관찰 · #4 — 채널 오류는 발송이 아니라 실패로 · 발송 표시는 받은 열림만 · 그 판정이 연 행에만(처음 감지 시각)', async () => {
@@ -165,8 +190,8 @@ test('12b 관찰 · #4 — 채널 오류는 발송이 아니라 실패로 · 발
 
 test('12b #1 — 화면 응답의 큐 상태는 아는 수 필드만', async () => {
   const R = await import('../src/routes/api/partFaults.js');
-  assert.deepEqual(R.queueView({ waiting: 2, waitingItems: '7', overflowDropped: 400, superseded: 1, disabledSkipped: 0, running: true, secret: 'x', lastDoneAt: null }),
-    { waiting: 2, waitingItems: 7, maxItems: null, enqueued: null, done: null, overflowDropped: 400, superseded: 1, disabledSkipped: 0, lastDoneAt: null, running: true });
+  assert.deepEqual(R.queueView({ waiting: 2, sent: '7', failed: 3, overflowDropped: 400, superseded: 1, disabledSkipped: 0, running: true, secret: 'x', lastDoneAt: null }),
+    { waiting: 2, maxItems: null, enqueued: null, sent: 7, failed: 3, skipped: null, overflowDropped: 400, superseded: 1, disabledSkipped: 0, lastDoneAt: null, running: true });
   assert.equal(R.queueView(null), null);
 });
 
@@ -182,4 +207,93 @@ test('12c D5 — 꺼져 건너뛴 회차는 판정 몫 0', async () => {
     assert.equal(r.skipped, true);
     assert.equal(PF._lastJudgeCostForTest(), 0);
   } finally { process.env.PARTFAULT_ENABLED = keep; }
+});
+
+test('13c N1 — 판정 폴러의 가상 전이: DB 에 없는 기록의 장비를 읽지 못했거나 · 종류를 못 모았거나 · 보고에 빠졌으면(보류) 남기고 · 읽었고 정상이면 닫힘 근거(실제 판정 경로)', async () => {
+  const { putEdgeReport } = await import('../src/central/partFaultEdge.js');
+  const PF = await import('../src/partfault/poller.js');
+  const E = await import('../src/partfault/escalation.js');
+  const RUN = await import('../src/partfault/escalationRun.js');
+  const CE = await import('../src/partfault/closeEvidence.js');
+  PF._setNotifyDepsForTest({ sendAlerts: async (list) => ({ results: list.map((e) => ({ partKey: e.partKey, closed: e.closed, result: '', outcome: 'skipped' })) }) });
+  const rep = (ok, open, failedKinds = [], okParts = []) => ({
+    v: 2, agent: 'synth-n1', version: '3.54.0', at: Date.now(), partIdents: 1, omitted: 0, scanned: { idrac: { devices: 1, ok: ok ? 1 : 0, failed: ok ? 0 : 1 } },
+    devices: [{ scope: 'idrac', deviceId: 'synth-n1d', deviceKey: 'SYNTHN1D', deviceKeyKind: 'serviceTag', deviceName: 'synth-n1d', ok, reason: ok ? '' : 'device-failed', failedKinds, capped: false, notCollected: [],
+      states: { ok: ok ? ['fan:FAN.1', ...okParts] : [], unknown: [], absent: [] },
+      open: open ? [{ kind: 'psu', partId: 'PSU.N1', keyKind: 'name', state: 'fault', rawState: 'Critical', label: 'PSU N1', detail: '' }] : [] }],
+  });
+  fs.writeFileSync(path.join(tmp, 'partfault-escalation.json'), JSON.stringify({ v: 1, enabled: true, enabledAt: 1, policies: [{ id: 'pf', name: 'fault', agents: [], states: ['fault'], steps: [{ afterMin: 15, emails: ['a1@example.test'], channels: false, oncall: false }] }], oncall: {}, at: 1, by: 'admin' }));
+  E.escalationStore._resetForTest(); E._resetEscalationStateForTest();
+  RUN._setEscalationDepsForTest({ partFaultSwitch: async () => ({ enabled: true, source: '' }), hold: async () => ({ hold: null, keyOf: null }), mail: async () => ({ ok: true }), channels: async () => [] });
+  try {
+    // 장애를 열고 진행 기록을 만든다(판정 재료 pk 가 실린다)
+    assert.equal((await putEdgeReport('synth-n1', rep(true, true))).ok, true);
+    await PF.runPartFaultsNow({ reason: 'n1-open' });
+    await RUN.runEscalationNow();
+    const key = Object.keys(E.loadEscalationState().items).find((k) => k.startsWith('synth-n1|'));
+    assert.ok(key && E.loadEscalationState().items[key].pk?.deviceId === 'synth-n1d', `기록과 판정 재료(${key})`);
+    // 새 DB 처럼 — 열린 행을 닫힘 이벤트 없이 지운다(그 열쇠의 마지막 이벤트는 ‘열림’ — DB 근거 없음)
+    const { DatabaseSync } = await import('node:sqlite');
+    const raw = new DatabaseSync(path.join(tmp, 'part-faults.db'));
+    raw.prepare('DELETE FROM part_state WHERE agent=?').run('synth-n1');
+    raw.close();
+    // ① 장비를 읽지 못함 → 가상 전이가 보류 → 근거 없음 → 기록 유지
+    await putEdgeReport('synth-n1', rep(false, false));
+    await PF.runPartFaultsNow({ reason: 'n1-devfail' });
+    assert.equal(CE.judgedClosedKeys().has(key), false, '장비 실패는 닫힘이 아니다');
+    await RUN.runEscalationNow();
+    assert.ok(Object.hasOwn(E.loadEscalationState().items, key), '기록을 남긴다(13c N1)');
+    // ② 그 종류를 모으지 못함 → 보류
+    await putEdgeReport('synth-n1', rep(true, false, ['psu']));
+    await PF.runPartFaultsNow({ reason: 'n1-kindfail' });
+    assert.equal(CE.judgedClosedKeys().has(key), false, '컬렉션 실패도 닫힘이 아니다');
+    // ③ 장비를 읽었는데 보고에 그 부품이 없음(누락) → 전이가 보류 → 근거 없음
+    await putEdgeReport('synth-n1', rep(true, false));
+    await PF.runPartFaultsNow({ reason: 'n1-missing' });
+    assert.equal(CE.judgedClosedKeys().has(key), false, '보고에서 빠진 부품도 닫힘이 아니다(전이의 누락 보류)');
+    // ④ 장비를 읽었고 그 부품이 정상 → 가상 전이가 닫음 → 근거 → 기록 정리
+    await putEdgeReport('synth-n1', rep(true, false, [], ['psu:PSU.N1']));
+    await PF.runPartFaultsNow({ reason: 'n1-ok' });
+    assert.equal(CE.judgedClosedKeys().has(key), true, '읽었고 정상이면 닫힘 근거');
+    await RUN.runEscalationNow();
+    assert.equal(Object.hasOwn(E.loadEscalationState().items, key), false, '근거가 있으면 정리');
+  } finally { RUN._setEscalationDepsForTest(null); PF._setNotifyDepsForTest(null); CE._resetJudgedClosedForTest(); await PF._notifyIdleForTest(); }
+});
+
+test('13a G1 — 묶음 A 에서 못 읽은 서버를 묶음 B 가 다시 읽어 성공하면 A 가 끝나도 강제 재읽기 표지가 남지 않는다(표지는 그 서버를 끝낸 자리에서)', async (t) => {
+  const { config } = await import('../src/config.js');
+  const keep = config.idrac.pollConcurrency; config.idrac.pollConcurrency = 4;
+  t.after(() => { config.idrac.pollConcurrency = keep; });
+  let xBad = true; const log = [];
+  const app = express();
+  app.use('/bmc/:box', async (req, res) => {
+    const b = req.params.box; log.push([b, Date.now(), xBad]);
+    await sleep(b === 'gslow' ? 150 : 5);
+    if (b === 'gx' && xBad) return res.status(401).end();
+    res.status(404).end();
+  });
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  t.after(() => { srv.closeAllConnections?.(); srv.close(); });
+  const base = `http://127.0.0.1:${srv.address().port}/bmc`;
+  const registry = await import('../src/idrac/registry.js');
+  const reg = (pw) => registry.importServers(['gslow', 'gx'].map((b) => ({ id: `g1-${b}`, name: `synth-${b}`, host: `${base}/${b}`, username: 'u', password: b === 'gx' ? pw : 'p', serviceTag: `SYNTHG1${b}` })), 'replace');
+  reg('wrong');
+  const C = await import('../src/idrac/invCache.js');
+  const E = await import('../src/idrac/eventSub.js');
+  E._resetEventsForTest();
+  E._setEventDepsForTest({ debounceMs: 60, judge: async () => {} });
+  t.after(() => { E._setEventDepsForTest(null); E._resetEventsForTest(); });
+  const s = { enabled: true, base: 'https://portal.example.test', secret: 'E'.repeat(43), ctxKey: 'F'.repeat(43) };
+  const send = (id) => E.acceptEvents(s, { context: E.contextOf(s, id), events: [{ sev: 'critical' }] });
+  send('g1-gslow'); send('g1-gx');
+  for (let i = 0; i < 400; i += 1) { await sleep(5); const xs = log.filter(([b]) => b === 'gx'); if (xs.length && Date.now() - xs.at(-1)[1] > 40) break; }
+  assert.equal(C.isForcedStale('g1-gx'), true, 'A 에서 못 읽은 서버는 끝낸 자리에서 표지');
+  xBad = false; reg('right');
+  send('g1-gx');
+  const tB = Date.now();
+  for (let i = 0; i < 400 && !log.some(([b, a, bad]) => b === 'gx' && a > tB && !bad); i += 1) await sleep(5);
+  for (let i = 0; i < 400; i += 1) { await sleep(5); const xs = log.filter(([b, a]) => b === 'gx' && a > tB); if (xs.length && Date.now() - xs.at(-1)[1] > 40) break; }
+  for (let i = 0; i < 600 && E.eventStatus().running; i += 1) await sleep(10);
+  assert.equal(C.isForcedStale('g1-gx'), false, 'B 의 성공 읽기 뒤에 A 의 끝이 헛 표지를 세우지 않는다');
+  C.removeInventory('g1-gx'); C.removeInventory('g1-gslow');
 });

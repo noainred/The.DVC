@@ -175,7 +175,7 @@ function hidePathsDeep(v, depth = 0) {
 export function queueView(q) {
   if (!q || typeof q !== 'object') return null;
   const out = {};
-  for (const k of ['waiting', 'waitingItems', 'maxItems', 'enqueued', 'done', 'overflowDropped', 'superseded', 'disabledSkipped', 'lastDoneAt']) out[k] = numOrNull(q[k]);   // Number(null) === 0 함정 — 못 읽은 값은 null
+  for (const k of ['waiting', 'maxItems', 'enqueued', 'sent', 'failed', 'skipped', 'overflowDropped', 'superseded', 'disabledSkipped', 'lastDoneAt']) out[k] = numOrNull(q[k]);   // Number(null) === 0 함정 — 못 읽은 값은 null
   out.running = q.running === true;
   return out;
 }
@@ -183,8 +183,8 @@ export function lastView(last, isAdmin) {
   if (isAdmin || !last || typeof last !== 'object') return last ?? null;
   const out = { ...hidePathsDeep(last) };   // 바뀐 것이 없으면 hidePathsDeep 가 원본을 돌려준다 — 아래 notify 가림이 원본(_last)을 바꾸지 않게 얕은 복사
   if (out.notify && typeof out.notify === 'object') {
-    const { results, ...rest } = out.notify;
-    out.notify = { ...rest, resultsCount: Array.isArray(results) ? results.length : 0, resultsHidden: true };
+    const { results, error, ...rest } = out.notify;   // error — 발송 오류 원문(파트 키 · 주소가 섞일 수 있다 — 반증 13b N6). 있었다는 사실만
+    out.notify = { ...rest, resultsCount: Array.isArray(results) ? results.length : 0, resultsHidden: true, ...(error ? { error: '발송 오류(자세한 내용은 관리자 화면)' } : {}) };
   }
   return maskRegistryUnreadable(out);
 }

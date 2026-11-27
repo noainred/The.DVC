@@ -159,6 +159,8 @@ let _timer = null; let _pendingReason = ''; let _inflight = 0; let _lastStart = 
 const _staleIds = new Set();   // 다음 묶음에서 다시 읽을 서버(위험 · 주의를 보낸 서버)
 const _inflightIds = new Map(); // 서버 → 그 서버를 맡은 도는 묶음 표(token) — 새 묶음에 넣지 않는다(그 서버를 다 읽으면 바로 풀린다 · 같은 장비 세션 1)
 let _batchSeq = 0;
+/** 바로 읽기를 기다리거나 도는 묶음이 맡은 서로 다른 서버 수. */
+function distinctPending() { let n = _staleIds.size; for (const k of _inflightIds.keys()) if (!_staleIds.has(k)) n += 1; return n; }
 const _retries = new Map();     // 서버 → 다시 시도 수(정규 주기 · 다른 묶음과 겹쳐 못 읽음 — BUSY_RETRY_MAX 까지 · 묶음이 여럿이라 서버마다 센다)
 const _deferredIds = new Set(); // 묶음 상한을 넘어 정규 주기로 미룬 서버(다시 시작 전까지 한 대로 센다 · 상한 5,000)
 const DEFAULT_DEPS = {
@@ -179,13 +181,22 @@ const DEFAULT_DEPS = {
     // 판정은 서버가 다시 읽힐 때마다 부른다(겹치면 한 번으로 · 시작 사이 judgeGapMs) — 묶음 끝에 한 번이면 느린 서버 하나가 같은 묶음의 빠른 서버 판정 · urgent push 를
     //   그 서버가 끝날 때까지 붙잡았다(디버깅 6회차 엣지 #2: 지연 200~500ms 장비에서 6.6~16.4초). 다시 읽은 것이 없으면 판정하지 않는다(판정할 새 값이 없다)
     const J = judgeLoop(reason);
+    let C = null; try { C = await import('./invCache.js'); } catch { C = null; }
+    // 못 읽은 서버(인증 정지 · 장비 오류)의 재읽기 표지는 그 서버를 끝낸 자리에서 세운다 — 묶음 끝에 몰아 세우면 그 사이 다른 묶음이 그 서버를 성공해 읽어도
+    //   표지가 그 읽기보다 뒤에 서 지워지지 않았다(반증 13a G1). 끝낸 서버는 묶음 끝 표지에서 뺀다
+    const done = new Set();
+    const onDone = (sid, info) => {
+      done.add(String(sid));
+      if (info && info.read === false && C) { try { C.markInventoryStale(String(sid), { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
+      onServerDone?.(sid);
+    };
     // 그 서버들만 읽는다 — 함대 전체 주기를 돌리지 않는다(v3.52 디버깅 1회차 성능 P2: 이벤트 1건에 50대 전부 · 요청 368건이었다)
-    const r = await P.pollNowForEvent(ids, { onRefreshed: J.kick, onServerDone });
+    const r = await P.pollNowForEvent(ids, { onRefreshed: J.kick, onServerDone: onDone });
     if (r?.busy) { await J.settle(); return { busy: true }; }
     const retry = Array.isArray(r?.skipped) ? r.skipped : [];   // 정규 주기가 그때 읽고 있던 서버 — 그 서버만 다시 잡는다(5회차 엣지 #1)
     // 읽지 못한 서버(긴급중단 · 인증 정지 · 장비 오류) — 다시 시도로는 풀리지 않는다. 바로 재읽기 표지를 세워 풀린 뒤 첫 주기가 다시 읽고 urgent 로 보내게(디버깅 6회차 보안 #2 — 표지 없이 버려져 30분 나이 기준까지 밀렸다)
-    const unread = Array.isArray(r?.unread) ? r.unread : [];
-    if (unread.length) { try { const C = await import('./invCache.js'); for (const id of unread) C.markInventoryStale(id, { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
+    const unread = (Array.isArray(r?.unread) ? r.unread : []).filter((id) => !done.has(String(id)));   // 끝낼 때 이미 세운 서버는 빼고(긴급중단 · 데모 — 서버를 읽지 않고 돌아온 것)
+    if (unread.length && C) { try { for (const id of unread) C.markInventoryStale(id, { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
     // 이벤트 읽기는 폴러의 파트 장애 훅을 부르지 않는다(성능 P5: 두 번 돌고 엣지는 WAN push 두 번이었다) — 판정은 위 judgeLoop 하나.
     //   마지막 판정을 기다리지 않고 묶음을 끝낸다 — 엣지는 push(WAN) 재시도 고리를(8회차 엣지 #2) · 중앙은 판정 안의 알림 보내기(웹훅 · 메일 대기)를 기다리느라
     //   다른 서버의 이벤트 읽기가 밀렸다(9회차 엣지 #2). 판정 · push 는 각 모듈의 재진입 합치기가 묶는다
@@ -264,7 +275,8 @@ function scheduleCheck(reason) {
     Promise.resolve().then(() => _deps.runCheck(reason0, ids, { onServerDone })).then(async (r) => {
       if (gen !== _gen) return false;
       const left = new Set((r?.busy ? ids : (Array.isArray(r?.retry) ? r.retry : [])).map(String));
-      for (const id of ids) if (!left.has(id)) _retries.delete(id);
+      // 다시 시도 수는 이 묶음이 아직 맡은(또는 아무도 맡지 않은) 서버만 지운다 — 먼저 풀려 다른 묶음이 맡은 서버의 수를 되돌리지 않게(반증 13a G3)
+      for (const id of ids) if (!left.has(id) && (!_inflightIds.has(id) || _inflightIds.get(id) === tok)) _retries.delete(id);
       const giveUp = [];
       for (const id of left) {
         const n = (_retries.get(id) || 0) + 1;
@@ -300,7 +312,8 @@ export function acceptEvents(s, parsed, { name = '' } = {}) {
   if (check) {
     // 한 묶음에 바로 읽는 서버는 EVT_BATCH_MAX 대까지 — 넘친 서버는 버리지 않고 **다음 정규 주기(1분)** 가 인벤토리를 다시 읽게 표시하고 센다(v3.52 디버깅 1회차 성능 P7)
     // 상한은 기다리는 서버 + 도는 묶음이 맡은 서버를 합쳐 센다 — 묶음이 여럿 함께 돌면(설계 ④) 따로 세어 바로 읽기가 3 × 상한까지 늘었다(반증 12a F4)
-    if (_staleIds.has(id) || _inflightIds.has(id) || _staleIds.size + _inflightIds.size < EVT_BATCH_MAX) _staleIds.add(id);
+    //   서로 다른 서버 수로 센다(대기에도 있는 도는 서버를 두 번 세지 않게 — 반증 13a G2)
+    if (_staleIds.has(id) || _inflightIds.has(id) || distinctPending() < EVT_BATCH_MAX) _staleIds.add(id);
     else {
       // 같은 서버가 여러 번 보내도 한 대로 센다(디버깅 2회차 엣지 #10 — 화면이 ‘미룬 서버 N대’ 라고 말한다)
       if (!_deferredIds.has(id) && _deferredIds.size < 5000) { _deferredIds.add(id); _stat.deferred += 1; }

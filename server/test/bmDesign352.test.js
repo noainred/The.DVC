@@ -174,22 +174,23 @@ test('③ 알림 발송 분리 — 판정은 발송을 기다리지 않고 · �
   } finally { if (release) release(); PF._setNotifyDepsForTest(null); await PF._notifyIdleForTest(); }
 });
 
-test('③ 대기열 넘침 — 가장 오래된 대기 판정부터 보내지 않고 센다(조용히 버리지 않음 · 경고 로그)', async () => {
+test('③ 대기열 넘침 — 부품 수 상한을 넘으면 가장 오래된 대기 알림부터 보내지 않고 센다(조용히 버리지 않음 · 경고 로그)', async () => {
   const PF = await import('../src/partfault/poller.js');
   PF._resetNotifyForTest();
-  let release = null; const gate = new Promise((r) => { release = r; }); const sentJobs = [];
-  PF._setNotifyDepsForTest({ sendAlerts: async (alerts) => { sentJobs.push(alerts[0].partKey); await gate; return { sent: 0, skipped: 0, failed: 0, results: [] }; }, markNotified: async () => {}, enabled: () => ({ enabled: true, source: 'saved' }) });
+  let release = null; const gate = new Promise((r) => { release = r; }); const sentKeys = [];
+  PF._setNotifyDepsForTest({ sendAlerts: async (list) => { sentKeys.push(list[0].partKey); await gate; return { results: [] }; }, markNotified: async () => {}, enabled: () => ({ enabled: true, source: 'saved' }) });
   const warns = []; const ow = console.warn; console.warn = (...a) => { warns.push(a.map(String).join(' ')); };
   try {
     const job = (j) => ({ opened: Array.from({ length: 200 }, (_, k) => ({ agent: '', partKey: `ov-${j}-${k}`, state: 'fault', scope: 'idrac', kind: 'psu', label: `PSU ${k}` })), updated: [], closed: [] });
-    const views = Array.from({ length: 12 }, (_, j) => PF._enqueueNotifyForTest(job(j), `ov-${j}`));
+    const views = Array.from({ length: 27 }, (_, j) => PF._enqueueNotifyForTest(job(j), `ov-${j}`));   // 5,400건 — 첫 건은 보내는 중
     const q = PF._notifyQueueStatusForTest();
-    assert.equal(q.waitingItems <= PF.NOTIFY_QUEUE_MAX_ITEMS, true, `대기량 ≤ 상한(${q.waitingItems})`);
-    assert.equal(q.overflowDropped, 200, '첫 판정은 보내는 중 · 남은 11개(2,200건) 가운데 가장 오래된 하나(200건)를 뺀다');
-    assert.deepEqual([views[0].pending, views[1].pending, views[1].queueDropped, views[2].pending], [true, false, 200, true]);
+    assert.deepEqual([q.waiting, q.overflowDropped], [PF.NOTIFY_QUEUE_MAX_ITEMS, 5_400 - 1 - PF.NOTIFY_QUEUE_MAX_ITEMS]);
+    assert.deepEqual([views[0].queueDropped, views[1].queueDropped, views[1].pending, views[2].pending], [199, 200, false, true]);
     assert.ok(warns.some((w) => /알림 대기열이 넘쳐/.test(w)), '경고 로그');
     release();
     await PF._notifyIdleForTest();
-    assert.deepEqual(sentJobs.map((k) => k.split('-')[1]), ['0', ...Array.from({ length: 10 }, (_, j) => String(j + 2))], '뺀 판정 말고는 순서대로 보낸다');
-  } finally { console.warn = ow; release?.(); PF._setNotifyDepsForTest(null); await PF._notifyIdleForTest(); PF._resetNotifyForTest(); }
+    assert.equal(sentKeys[0], 'ov-0-0');
+    assert.equal(sentKeys[1], 'ov-2-0', '뺀 것 말고는 순서대로 보낸다');
+    assert.equal(sentKeys.length, 1 + PF.NOTIFY_QUEUE_MAX_ITEMS);
+  } finally { console.warn = ow; PF._resetNotifyForTest(); release?.(); await PF._notifyIdleForTest(); PF._setNotifyDepsForTest(null); }
 });

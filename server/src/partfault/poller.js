@@ -18,6 +18,8 @@ import { transition } from './transition.js';
 import { openFaults, applyTransition, partFaultDbStatus, markNotified, resetInfo } from './db.js';
 import { countDropped, transitionAlerts, sendAlerts } from './notify.js';
 import { partFaultEnabled } from './settings.js';
+import { loadEscalationState, escalationStateUnreadable, partKeyOf as escKeyOf } from './escalation.js';
+import { setJudgedClosed } from './closeEvidence.js';
 
 // v2.599 T2599-02: 상한도 둔다(2^31 초과 → 1ms 루프).
 const intervalMs = () => clampIntervalMs(Number(process.env.PARTFAULT_POLL_MS) || 10 * 60_000, 10 * 60_000, 60_000);
@@ -80,96 +82,99 @@ export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {})
  *     조용히 버리지 않는다(그 판정의 notify.queueDropped · 상태 notifyQueue.overflowDropped · 경고 로그). 채널이 오래 응답하지 않을 때 메모리를 지킨다.
  *   · 프로세스가 다시 시작하면 대기 중인 알림은 사라진다(예전에도 보내던 중의 알림은 같았다) — 발송 표시가 없는 채로 남는다.
  */
-export const NOTIFY_QUEUE_MAX_ITEMS = 2_000;
+export const NOTIFY_QUEUE_MAX_ITEMS = 5_000;   // 기다리는 알림(부품 수) 상한 — 부품마다 하나라 함대 부품 수를 넘지 않는다. 넘으면 가장 오래된 것부터 빼고 센다
 export const NOTIFY_DELAY_NOTE_MS = 60_000;   // 이보다 오래 기다린 알림은 본문 끝에 판정 시각과 늦은 이유를 적는다(받는 쪽이 낡은 알림인지 알게 — 반증 12b 관찰)
-/** 기다리는 발송 — 판정이 만든 알림만 담는다(전이 전체를 붙잡지 않는다 — 반증 12b #2). 일꾼이 꺼내 간 것은 없다. */
-const _nq = [];   // { at, reason, alerts:[{partKey, agent, closed, alert}], capped, total, opened:[{agent, partKey, firstSeen}], view, enabledAtEnqueue }
-let _nqRunning = false;
-const _nqStat = { enqueued: 0, done: 0, overflowDropped: 0, superseded: 0, disabledSkipped: 0, lastDoneAt: null };
+/**
+ * 발송 큐 — **부품(agent|partKey)마다 마지막 대기 알림 하나**(반증 13b — 넘칠 때만 하던 대신함 · 판정 통째 빼기가 0건 판정이 진짜 알림을 밀어내거나(N2)
+ *   마지막 상태를 빼는(N4) 새 결함을 만들어 구조를 바꿨다). 같은 부품의 새 알림이 오면 기다리던 앞 알림은 대신된다(받는 쪽 마지막 상태가 맞다 · 채널이 밀릴 때 낡은 전이를 줄줄이 보내지 않는다).
+ *   알림마다 그 판정의 표지(view)를 가리킨다 — 판정의 알림이 모두 끝나면(보냄 · 실패 · 건너뜀 · 대신됨 · 꺼짐 · 넘침) pending 이 풀린다.
+ *   발송 표시는 받은 열림만 · 그 판정이 연 행만(first_seen) — 열림이 같은 부품의 ‘변화’ 알림으로 대신되면 표시 정보를 넘겨받는다.
+ */
+const _q = new Map();   // key → { key, partKey, agent, closed, alert, judgedAt, reason, view, mark, enabledAtEnqueue, replaced }
+let _nqRunning = false; let _overflowWarnAt = 0;
+const NQ0 = () => ({ enqueued: 0, sent: 0, failed: 0, skipped: 0, superseded: 0, overflowDropped: 0, disabledSkipped: 0, lastDoneAt: null });
+const _nqStat = NQ0();
 const ND0 = { sendAlerts, markNotified, enabled: () => partFaultEnabled(), now: () => Date.now() };
 let ND = ND0;
 export function _setNotifyDepsForTest(d) { ND = d ? { ...ND0, ...d } : ND0; }
-export async function _notifyIdleForTest() { while (_nqRunning || _nq.length) await new Promise((r) => setTimeout(r, 5)); }
+export async function _notifyIdleForTest() { while (_nqRunning || _q.size) await new Promise((r) => setTimeout(r, 5)); }
 export const _enqueueNotifyForTest = (tr, reason = 'test') => enqueueNotify(tr, reason);
 export const _notifyQueueStatusForTest = () => notifyQueueStatus();
-export function _resetNotifyForTest() { _nq.length = 0; Object.assign(_nqStat, { enqueued: 0, done: 0, overflowDropped: 0, superseded: 0, disabledSkipped: 0, lastDoneAt: null }); }
-const weightOf = (j) => Math.max(1, j.alerts.length);   // 보낼 것이 없는 판정(키 이전만)도 1 로 센다 — 0 이면 판정 수에 상한이 없었다(반증 12b #3)
-const partOfAlert = (a) => `${String(a.agent || '').trim().toLowerCase()}|${a.partKey}`;
+export function _resetNotifyForTest() { _q.clear(); Object.assign(_nqStat, NQ0()); }
+const keyOfAlert = (a) => `${String(a.agent || '').trim().toLowerCase()}|${a.partKey}`;
+const RESULTS_MAX = 200;
+function finishOne(view, at) {
+  view.left -= 1;
+  if (view.left <= 0) { view.left = 0; view.pending = false; view.doneAt = at; view.dropped = countDropped(view.results); }
+}
 function enqueueNotify(tr, reason) {
   const { alerts, total, capped } = transitionAlerts(tr);
-  // queued — 보낼 수(상한까지). 상한 밖은 대기 중에도 capped 로 밝힌다(‘500건 발송 대기’ 뒤 ‘200건 발송’ 으로 바뀌지 않게 — 반증 12b #6)
-  const view = { pending: true, queued: alerts.length, capped, total, sent: 0, skipped: 0, failed: 0, results: [] };   // 판정 결과에 실리는 살아 있는 표지 — 일꾼이 끝나면 채운다
-  const opened = (tr.opened || []).map((p) => ({ agent: String(p.agent || ''), partKey: p.partKey, firstSeen: Number.isFinite(p.firstSeenAt) ? p.firstSeenAt : null }));
+  const now = ND.now();
+  // queued — 보낼 수(상한까지). 상한 밖은 대기 중에도 capped 로 밝힌다(반증 12b #6). 보낼 알림이 없으면 큐에 넣지 않는다(키 이전만 — 반증 13b N2)
+  const view = { pending: alerts.length > 0, queued: alerts.length, capped, total, sent: 0, skipped: 0, failed: 0, superseded: 0, disabledSkipped: 0, queueDropped: 0, results: [], left: alerts.length };
+  if (!alerts.length) return view;
+  // 발송 표시 대상 — 그 판정이 연 열림만(알림이 있는 것만 붙잡는다 — 반증 13b N1b)
+  const openedBy = new Map();
+  for (const p of tr.opened || []) openedBy.set(keyOfAlert(p), { agent: String(p.agent || ''), partKey: p.partKey, firstSeen: Number.isFinite(p.firstSeenAt) ? p.firstSeenAt : null });
   let en = null; try { en = ND.enabled(); } catch { en = null; }
-  _nq.push({ at: ND.now(), reason, alerts, capped, total, opened, view, enabledAtEnqueue: en?.enabled === true });
-  _nqStat.enqueued += 1;
-  compactQueue();
+  for (const a of alerts) {
+    const k = keyOfAlert(a);
+    let mark = a.closed ? null : (openedBy.get(k) || null);
+    let replaced = 0;
+    const prev = _q.get(k);
+    if (prev) {
+      // 같은 부품의 기다리던 앞 알림을 대신한다 — 앞 판정 표지에 대신됨으로 센다. 열림 표시는 해소가 아닌 뒤 알림이 넘겨받는다
+      prev.view.superseded += 1; finishOne(prev.view, now); _nqStat.superseded += 1;
+      if (!a.closed && !mark && prev.mark) mark = prev.mark;
+      replaced = (prev.replaced || 0) + 1;
+    }
+    _q.set(k, { key: k, partKey: a.partKey, agent: a.agent, closed: a.closed, alert: a.alert, judgedAt: now, reason, view, mark, enabledAtEnqueue: en?.enabled === true, replaced });   // Map.set — 앞 알림의 차례를 그대로 쓴다
+  }
+  _nqStat.enqueued += alerts.length;
+  // 상한 — 부품마다 하나라 보통은 닿지 않는다. 넘으면 가장 오래된 것부터 빼고 센다(조용히 버리지 않는다)
+  let dropped = 0;
+  while (_q.size > NOTIFY_QUEUE_MAX_ITEMS) {
+    const [k0, e0] = _q.entries().next().value; _q.delete(k0);
+    e0.view.queueDropped += 1; finishOne(e0.view, now); _nqStat.overflowDropped += 1; dropped += 1;
+  }
+  if (dropped && now - _overflowWarnAt > 60_000) { _overflowWarnAt = now; console.warn(`[partfault] 알림 대기열이 넘쳐(${NOTIFY_QUEUE_MAX_ITEMS}건) 가장 오래된 알림 ${dropped}건을 보내지 않았습니다(누적 ${_nqStat.overflowDropped}) — 알림 채널 응답을 확인하십시오`); }
   if (!_nqRunning) drainNotify().catch((e) => console.warn(`[partfault] 알림 일꾼 실패: ${String(e?.message || e).slice(0, 160)}`));
   return view;
-}
-/**
- * 대기량이 상한을 넘으면 ① 같은 부품의 **뒤 알림이 있는 앞 알림**부터 뺀다(받는 쪽의 마지막 상태는 그대로 맞다 — superseded) ·
- *   ② 그래도 넘으면 가장 오래된 대기 판정을 통째로 뺀다(queueDropped). 둘 다 센다(표지 · 상태 · 화면 · 경고 — 조용히 버리지 않는다).
- *   예전에는 바로 ②라 보내는 중인 열림 뒤의 해소가 먼저 빠져 받는 쪽은 장애가 계속인 줄 알았다(반증 12b 관찰).
- */
-function compactQueue() {
-  const waitingOf = () => _nq.reduce((a, j) => a + weightOf(j), 0);
-  if (waitingOf() <= NOTIFY_QUEUE_MAX_ITEMS) return;
-  const later = new Set(); let sup = 0;
-  for (let i = _nq.length - 1; i >= 0; i -= 1) {
-    const j = _nq[i]; const keep = [];
-    for (const a of j.alerts) { const k = partOfAlert(a); if (later.has(k)) { sup += 1; j.view.superseded = (j.view.superseded || 0) + 1; } else { later.add(k); keep.push(a); } }
-    if (keep.length !== j.alerts.length) {
-      const kept = new Set(keep.filter((a) => !a.closed).map(partOfAlert));
-      j.alerts = keep; j.opened = j.opened.filter((o) => kept.has(`${o.agent.trim().toLowerCase()}|${o.partKey}`));   // 빼낸 열림은 보내지 않으므로 발송 표시도 하지 않는다
-      j.view.queued = keep.length;
-    }
-  }
-  if (sup) {
-    _nqStat.superseded += sup;
-    for (let i = _nq.length - 1; i >= 0; i -= 1) if (!_nq[i].alerts.length) { Object.assign(_nq[i].view, { pending: false, doneAt: Date.now() }); _nq.splice(i, 1); }
-    console.warn(`[partfault] 알림 대기열이 넘쳐(${NOTIFY_QUEUE_MAX_ITEMS}건) 같은 부품의 뒤 알림이 있는 앞 알림 ${sup}건을 빼고 마지막 상태만 보냅니다 — 알림 채널 응답을 확인하십시오`);
-  }
-  let waiting = waitingOf();
-  while (waiting > NOTIFY_QUEUE_MAX_ITEMS && _nq.length > 1) {
-    const old = _nq.shift(); const w = old.alerts.length; waiting -= weightOf(old); _nqStat.overflowDropped += w;
-    Object.assign(old.view, { pending: false, queueDropped: w, doneAt: Date.now() });
-    console.warn(`[partfault] 알림 대기열이 넘쳐(${NOTIFY_QUEUE_MAX_ITEMS}건) 가장 오래된 판정(${old.reason})의 알림 ${w}건을 보내지 않았습니다 — 알림 채널 응답을 확인하십시오`);
-  }
 }
 async function drainNotify() {
   if (_nqRunning) return;
   _nqRunning = true;
   try {
-    while (_nq.length) {
-      const job = _nq.shift();
+    while (_q.size) {
+      const [k, e] = _q.entries().next().value; _q.delete(k);
       // 판정 뒤 점검이 꺼졌으면(데모로만 켜짐 포함) 보내지 않는다 — 꺼진 채 수동 점검이 만든 판정은 그때처럼 보낸다(반증 12b #5)
       let en = null; try { en = ND.enabled(); } catch { en = null; }
-      if ((job.enabledAtEnqueue && en && en.enabled === false) || en?.source === 'demo') {
-        Object.assign(job.view, { pending: false, disabledSkipped: job.alerts.length, doneAt: Date.now() });
-        _nqStat.disabledSkipped += job.alerts.length; _nqStat.done += 1;
-        console.log(`[partfault] 알림(${job.reason}) ${job.alerts.length}건 — 점검이 꺼져 보내지 않았습니다`);
+      if ((e.enabledAtEnqueue && en && en.enabled === false) || en?.source === 'demo') {
+        e.view.disabledSkipped += 1; _nqStat.disabledSkipped += 1; finishOne(e.view, ND.now());
         continue;
       }
-      const waited = ND.now() - job.at;
-      const note = waited > NOTIFY_DELAY_NOTE_MS
-        ? `판정 시각 ${new Date(job.at).toISOString()} — 알림 채널이 늦어 약 ${Math.max(1, Math.round(waited / 60_000))}분 뒤에 보냅니다. 지금 상태는 포탈에서 확인하십시오.`
-        : '';
+      // 늦은 알림 표기는 알림마다(판정 시각 → 보내는 지금) — 한 판정 안의 뒤쪽 알림도 붙는다(반증 13b D1)
+      const waited = ND.now() - e.judgedAt;
+      const lines = [];
+      if (waited > NOTIFY_DELAY_NOTE_MS) lines.push(`판정 시각 ${new Date(e.judgedAt).toISOString()} — 알림 채널이 늦어 약 ${Math.max(1, Math.round(waited / 60_000))}분 뒤에 보냅니다. 지금 상태는 포탈에서 확인하십시오.`);
+      if (e.replaced) lines.push(`(채널 지연으로 이 부품의 앞선 알림 ${e.replaced}건을 이 알림으로 대신했습니다)`);
       let r; let threw = '';
-      try { r = await ND.sendAlerts(job.alerts, { note }); } catch (e) { threw = String(e?.message || e).slice(0, 200); r = { sent: 0, skipped: 0, failed: job.alerts.length, results: [] }; }
-      // 발송 표시 — 받은 채널이 있는 열림만 · 그 판정이 연 행만(first_seen — 뒤 판정이 다시 연 행에 찍지 않게: 반증 12b #4)
-      if (!threw) {
-        const delivered = new Set((r.results || []).filter((x) => !x.closed && x.outcome === 'delivered').map((x) => x.partKey));
-        const toMark = job.opened.filter((o) => delivered.has(o.partKey));
-        try { if (toMark.length) await ND.markNotified(toMark); } catch (e) { console.warn(`[partfault] 발송 표시 실패: ${String(e?.message || e).slice(0, 160)}`); }
-      }
-      Object.assign(job.view, { ...r, capped: job.capped, total: job.total, dropped: countDropped(r?.results), pending: false, doneAt: Date.now(), ...(threw ? { error: threw } : {}), ...(note ? { delayedMs: waited } : {}) });
-      _nqStat.done += 1; _nqStat.lastDoneAt = Date.now();
-      console.log(`[partfault] 알림(${job.reason}) ${Number(r?.sent) || 0}건 발송${r?.failed ? ` · 실패 ${r.failed}건` : ''}${job.capped ? `(상한 ${job.capped}건 제외)` : ''}${threw ? ` · 오류 ${threw}` : ''} · 대기 ${waited}ms`);
+      try { r = await ND.sendAlerts([e], { note: lines.join('\n') }); } catch (err) { threw = String(err?.message || err).slice(0, 200); r = null; }
+      const res = r?.results?.[0] || { partKey: e.partKey, closed: e.closed, result: threw ? `err ${threw}` : '', outcome: 'failed' };
+      const outcome = res.outcome || (r?.sent ? 'delivered' : r?.failed ? 'failed' : 'skipped');
+      if (outcome === 'delivered') { e.view.sent += 1; _nqStat.sent += 1; } else if (outcome === 'failed') { e.view.failed += 1; _nqStat.failed += 1; } else { e.view.skipped += 1; _nqStat.skipped += 1; }
+      if (e.view.results.length < RESULTS_MAX) e.view.results.push(res);
+      if (threw) e.view.error = threw;
+      if (waited > NOTIFY_DELAY_NOTE_MS) e.view.delayedMs = Math.max(Number(e.view.delayedMs) || 0, waited);
+      // 발송 표시 — 받은 열림만 · 그 판정이 연 행만(first_seen — 반증 12b #4) · 수집 주체까지 같은 행(반증 13b N5)
+      if (outcome === 'delivered' && e.mark) { try { await ND.markNotified([e.mark]); } catch (err) { console.warn(`[partfault] 발송 표시 실패: ${String(err?.message || err).slice(0, 160)}`); } }
+      finishOne(e.view, ND.now());
+      _nqStat.lastDoneAt = ND.now();
+      if (e.view.left === 0) console.log(`[partfault] 알림(${e.reason}) ${e.view.sent}건 발송${e.view.failed ? ` · 실패 ${e.view.failed}건` : ''}${e.view.skipped ? ` · 건너뜀 ${e.view.skipped}건` : ''}${e.view.superseded ? ` · 대신됨 ${e.view.superseded}건` : ''}${e.view.capped ? `(상한 ${e.view.capped}건 제외)` : ''} · 대기 ${waited}ms`);
     }
   } finally { _nqRunning = false; }
 }
-const notifyQueueStatus = () => ({ waiting: _nq.length, waitingItems: _nq.reduce((a, j) => a + weightOf(j), 0), running: _nqRunning, maxItems: NOTIFY_QUEUE_MAX_ITEMS, ..._nqStat });
+const notifyQueueStatus = () => ({ waiting: _q.size, running: _nqRunning, maxItems: NOTIFY_QUEUE_MAX_ITEMS, ..._nqStat });
 export const partFaultNotifyQueueStatus = () => notifyQueueStatus();
 
 let _lastJudgeCost = null;   // 마지막 runOnce 의 판정 몫 ms(알림 발송 제외)
@@ -194,10 +199,26 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     const scopeUnreadable = { ...(edge.scopeUnreadable || {}) };
     for (const [sc, e] of Object.entries(local.registryUnreadable || {})) scopeUnreadable[`|${sc}`] = e?.reason || '사유 미상';
     // 8a단계 ② 정비 창 — 전이 보류를 켠 창 안의 장비(판정 코어 maint/judge.js · 중앙 창). 못 만들면 빈 집합(평소대로 전이).
+    // v3.54 반증 13c — 알림 단계 진행 기록 가운데 DB 에 열려 있지 않은 것을 ‘가상의 열린 장애’ 로 같은 전이에 넣는다. 전이가 닫은 것만 닫힘 근거(closeEvidence) —
+    //   장비 실패 · 컬렉션 실패 · 정비 창 · 등록부 손상 · 보고 없음이면 전이가 보류하므로 기록이 남는다(수집 주체 단위 ‘보고함’ 은 ‘판정함’ 이 아니었다 — 13c N1).
+    let phantoms = [];
+    try {
+      if (!escalationStateUnreadable()) {
+        const openK = new Set(prev.map(escKeyOf));
+        for (const [k, v] of Object.entries(loadEscalationState().items || {})) {
+          if (openK.has(k) || !v?.pk) continue;
+          const i = k.indexOf('|');
+          phantoms.push({ ...v.pk, agent: k.slice(0, i), partKey: k.slice(i + 1), firstSeenAt: v.since, lastSeenAt: v.since });
+        }
+      }
+    } catch { phantoms = []; }
     let maint = null;
-    try { maint = await (await import('../bmusage/maint/partfaultHold.js')).partfaultMaintHold([...observed, ...prev]); } catch { maint = null; }
-    let tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable, ...(maint?.hold?.size ? { maintHold: maint.hold } : {}) } });
-    const saved = await applyTransition(tr, { judgedAgents: agentsReported });   // 이 판정이 본 수집 주체 — 알림 단계 정리 기준(11회차 반증 D1 · D2)
+    try { maint = await (await import('../bmusage/maint/partfaultHold.js')).partfaultMaintHold([...observed, ...prev, ...phantoms]); } catch { maint = null; }
+    const scan = { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable, ...(maint?.hold?.size ? { maintHold: maint.hold } : {}) };
+    let tr = transition({ open: prev, observed, scan });
+    const saved = await applyTransition(tr);
+    // 가상 전이 — DB 에 쓰지 않는다(근거만). 판정마다 통째로 바꾼다
+    try { setJudgedClosed(phantoms.length ? transition({ open: phantoms, observed, scan }).closed.map(escKeyOf) : []); } catch { setJudgedClosed([]); }
     _lastJudgeCost = Date.now() - t0;   // 판정 몫(스캔 · 전이 · 적용)만 — 뒤의 알림 발송 대기는 넣지 않는다(곧 판정 간격의 비용 · 10회차 성능 #2)
 
     // v2.880: 파트 장애 → 이슈 자동 등록(issues/autoCreate.js — 설정에서 켠 칸만). DB 에 쓴 뒤 · 알림 전에 한 번. 던지지 않는다.

@@ -206,8 +206,21 @@ const itemShape = (x) => {
   const ps = {};
   if (isObj(x.ps)) for (const [k, v] of Object.entries(x.ps).slice(0, ESC_POLICIES_MAX * 2)) { const n = numOrNull(v); if (typeof k === 'string' && k.length <= 40 && n != null) ps[k] = n; }
   const lp = Array.isArray(x.lp) ? x.lp.filter((v) => typeof v === 'string' && v.length <= 40).slice(0, ESC_POLICIES_MAX) : undefined;
-  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80), pol, ps, ...(lp ? { lp } : {}) };
+  const pk = pkShape(x.pk);
+  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80), pol, ps, ...(lp ? { lp } : {}), ...(pk ? { pk } : {}) };
 };
+/**
+ * 기록에 남기는 그 부품의 판정 재료(v3.54 반증 13c) — DB 에 열려 있지 않은 기록을 판정 폴러가 ‘가상의 열린 장애’ 로 같은 전이에 넣어 닫힘을 가린다
+ *   (장비 실패 · 컬렉션 실패 · 정비 창 · 등록부 손상 · 보고 없음이면 전이가 보류 — 기록도 남는다). 아는 글자 필드만 · 길이 상한.
+ */
+const PK_FIELDS = ['scope', 'deviceId', 'deviceKey', 'deviceKeyKind', 'deviceName', 'kind', 'partId', 'keyKind', 'label', 'state'];
+function pkShape(x) {
+  if (!isObj(x)) return null;
+  const o = {};
+  for (const f of PK_FIELDS) if (typeof x[f] === 'string') o[f] = x[f].slice(0, 200);
+  return o.scope && o.deviceId && o.kind && o.partId ? o : null;
+}
+export const pkOf = (p) => pkShape(Object.fromEntries(PK_FIELDS.map((f) => [f, p?.[f] == null ? undefined : String(p[f])])));
 // 읽기 오류는 캐시하지 않는다 — 파일을 고치면 다음 재읽기(30초 간격)에 풀린다(v3.52 디버깅 1회차 성능 P4: 예전에는 재시작 전까지 멈췄다)
 export const ESC_STATE_RETRY_MS = 30_000;
 let _stateRetryAt = 0; let _stateErrUntil = 0;
@@ -294,24 +307,25 @@ export function shortWhy(t) {
 /** 기록 열쇠(`agent|partKey`)의 수집 주체(소문자). */
 export const agentOfEscKey = (k) => { const s = String(k); const i = s.indexOf('|'); return i < 0 ? '' : s.slice(0, i); };
 /**
- * @param judged 이 DB 에서 판정된 수집 주체 집합(partFaultJudgedAgentsOrNull) — null 이면 모두 판정된 것으로 본다(호출부 호환).
- *   판정되지 않은 주체의 기록은 열린 장애에 없어도 **닫힘이 아니다** — 손대지 않고 남긴다(키 이전 후보에도 넣지 않는다).
- *   새로 만들어진 DB · 재시작 뒤 엣지 보고 전의 판정이 그 주체를 보지 못한 0건으로 확인 · 단계 기록을 지웠다(11회차 반증 D1 · D2).
+ * @param closed 열린 장애에 없는 기록 가운데 **닫힘 근거가 있는** 열쇠(escalationRun — DB 의 마지막 이벤트가 닫힘 · 판정 폴러의 가상 전이가 닫음).
+ *   null 이면 열린 장애에 없는 기록은 모두 닫힘으로 본다(호출부 호환). 근거가 없는 기록(장비 실패 · 정비 창 · 보고 없음 · 새 DB 의 아직 보지 못한 장비)은
+ *   손대지 않고 남긴다 — ‘열린 장애에 없음’ 은 닫힘이 아니다(11회차 반증 D1 · D2 · 13c N1). 키 이전 후보(sig)는 근거와 상관없이 모든 기록이다(13c N4 — 라우트 표지와 같은 집합).
  */
-export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null, judged = null }) {
+export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null, closed = null }) {
   const items = {};
   const sends = []; let deferred = 0; let overCap = 0; let held = 0; const heldKeys = [];
   const prev = state?.items || {};
   const list = Array.isArray(open) ? open : [];
   const openKeys = new Set(list.map(partKeyOf));
-  const unjudged = (k) => judged != null && !judged.has(agentOfEscKey(k));
-  // 닫힌 장애의 기록 — 키만 바뀐 같은 장애가 이어받을 후보(sig). 꺼져 있어도 닫힌 것은 정리한다(다시 열린 장애가 옛 확인을 물려받지 않게 — 반증 A5)
+  // 닫힌(또는 닫힘을 모르는) 장애의 기록 — 키만 바뀐 같은 장애가 이어받을 후보(sig). 꺼져 있어도 닫힌 것은 정리한다(다시 열린 장애가 옛 확인을 물려받지 않게 — 반증 A5)
   const staleBySig = new Map();
+  const notOpen = [];
   for (const [k, v] of Object.entries(prev)) {
     if (openKeys.has(k)) continue;
-    if (unjudged(k)) { items[k] = v; continue; }   // 아직 이 DB 가 보지 못한 주체 — 그대로 남긴다(닫힘을 모른다)
-    if (v.sig) staleBySig.set(v.sig, v);
+    notOpen.push([k, v]);
+    if (v.sig) staleBySig.set(v.sig, [k, v]);
   }
+  const consumed = new Set();
   const enabled = settings?.enabled === true;
   const enabledAt = numOrNull(settings?.enabledAt);
   // 다시 켰다(켠 시각이 바뀌었다) — 확인하지 않은 기록은 지금부터 다시 센다(옛 since 로 켜자마자 높은 단계가 가지 않게 — 반증 A5)
@@ -322,7 +336,7 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     const key = partKeyOf(p);
     const sig = partSigOf(p);
     let cur = Object.hasOwn(prev, key) ? prev[key] : null;
-    if (!cur && staleBySig.has(sig)) { cur = staleBySig.get(sig); staleBySig.delete(sig); }   // 키 이전 — 기록 · 확인을 이어받는다
+    if (!cur && staleBySig.has(sig)) { const [k0, v0] = staleBySig.get(sig); cur = v0; consumed.add(k0); staleBySig.delete(sig); }   // 키 이전 — 기록 · 확인을 이어받는다
     // 다시 켜면 그때 정책(lp)도 놓는다 — 보낸 줄을 비웠으니 넘겨받을 것이 없다(남기면 lp 정책이 ‘켠 때’ 부터 세어 앞 단계를 건너뛰었다 — 디버깅 6회차 판정 #2)
     if (cur && reEnabled && !cur.ackedAt) { const { lp: _lp, ...rest } = cur; cur = { ...rest, since: now, sent: [], ps: {}, pol: rest.pol || '-' }; }
     const pol = enabled ? policyFor(settings, p) : null;
@@ -339,7 +353,7 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
       if (cur) {
         // 정책 밖으로 이어받은 기록도 새 열쇠라 자리를 쓴다(디버깅 3회차 판정 #8)
         if (!Object.hasOwn(prev, key)) { if (newCount + reserved >= ESC_ITEMS_MAX) continue; newCount += 1; }
-        items[key] = { ...cur, sig };
+        items[key] = { ...cur, sig, ...(pkOf(p) ? { pk: pkOf(p) } : {}) };
       }
       continue;
     }
@@ -356,6 +370,7 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     if (ps[pol.id] == null) ps[pol.id] = legacy ? cur.since : now;
     const sent0 = cur ? (legacy ? cur.sent.map((e) => (e[4] && e[4] !== '-' ? e : [e[0], e[1], e[2], e[3], pol.id])) : cur.sent.map((e) => (e[4] ? e : [e[0], e[1], e[2], e[3], '-']))) : [];
     const it = cur ? { ...cur, sig, sent: sent0, pol: pol.id, ps } : { since: now, sig, sent: [], ackedAt: null, ackBy: '', pol: pol.id, ps };
+    const pk = pkOf(p); if (pk) it.pk = pk;   // 판정 재료 — 열려 있는 동안 늘 새것으로(13c)
     items[key] = it;
     if (it.ackedAt) continue;
     if (hold && holdKeyOf && hold.has(holdKeyOf(p.agent, p.deviceId))) { held += 1; heldKeys.push(key); continue; }
@@ -379,6 +394,8 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     const skippedNote = before.filter((i) => !undeliveredNote.includes(i) && (skipped.includes(i) || has(i, 'skip')));
     sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, skippedNote, undeliveredNote, undeliveredWhy, since: psince, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
   }
+  // 열린 장애에 없고 이어받지도 않은 기록 — 닫힘 근거가 있으면 지우고(진짜 닫힘 — 반증 A5) 없으면 그대로 남긴다(닫힘을 모른다 — 13c N1)
+  if (closed != null) for (const [k, v] of notOpen) if (!consumed.has(k) && !closed.has(k) && !Object.hasOwn(items, k)) items[k] = v;
   return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held, heldKeys };
 }
 /**

@@ -161,7 +161,6 @@ function migrate(db, p, now) {
       db.exec(DDL);
       metaSet.run('schema_version', String(SCHEMA_VERSION));
       metaSet.run('reset', JSON.stringify({ at: now, from, to: SCHEMA_VERSION, reason: RESET_REASON, rows }));
-      db.exec("DELETE FROM meta WHERE k='judged_agents'");   // 지운 표의 판정 기록 — 새 표는 아직 아무 주체도 보지 않았다(알림 단계 정리 기준)
       db.exec('COMMIT');
     } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
     console.warn(`[partfault] ${p}: 스키마 v${from} → v${SCHEMA_VERSION} — 파트 상태 ${rows.states}행·이벤트 ${rows.events}행을 지우고 새로 시작합니다(${RESET_REASON})`);
@@ -208,7 +207,7 @@ function prepare(db) {
     evMaxAt: db.prepare('SELECT MAX(at) AS v FROM part_event'),
     stateStats: db.prepare('SELECT COUNT(*) AS n FROM part_state'),
     metaGet: db.prepare('SELECT v FROM meta WHERE k=?'),
-    metaSet: db.prepare('INSERT INTO meta (k, v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v'),
+    lastEventOfKey: db.prepare('SELECT event FROM part_event WHERE agent=? AND part_key=? ORDER BY at DESC, id DESC LIMIT 1'),
     // v2.734 장애별·종류별 보기 — 기간 이벤트를 최신부터 조각으로 읽는다. (at, id) 행 값 비교는 ix_event_at 범위 탐색 그대로다
     //   (인덱스 항목은 rowid 를 끝 열로 가지므로 ORDER BY at DESC, id DESC 에 정렬 단계가 없다 — EXPLAIN 으로 확인, 테스트 고정).
     incFirst: db.prepare('SELECT * FROM part_event WHERE at>=? ORDER BY at DESC, id DESC LIMIT ?'),
@@ -316,22 +315,25 @@ export function partFaultDbExists() {
 export function partFaultDbMissing() { if (x) return false; return fileMissing(DB_PATH()); }
 
 /**
- * 이 DB 에서 판정된 수집 주체(agent — 소문자 · '' = 중앙 직접). 판정(applyTransition)이 그 회차에 보고가 있던 주체를 같은 트랜잭션에 적는다.
- *   알림 단계 회차는 **판정된 주체의 기록만** ‘열린 장애에 없음 = 닫힘’ 으로 정리한다 — 새로 만들어진 DB · 재시작 뒤 엣지 보고 전의 첫 판정처럼
- *   그 주체를 아직 보지 못한 DB 의 0건은 닫힘이 아니다(디버깅 11회차 반증 D1 · D2 — ‘DB 에 이력이 있는가’ 는 일부만 채워진 DB 와 계속 빈 DB 를 가르지 못했다).
- *   DB 를 못 열거나 못 읽으면 null(‘판정 안 됨’ 과 가른다 — D3). 파일이 정말 없으면 빈 집합.
+ * 열쇠(`agent|partKey` — agent 소문자)마다 **DB 의 마지막 이벤트가 닫힘인가**(알림 단계 기록 정리의 근거 — 평소 닫힘 · 수동 닫기 · 키 이전 닫힘, v3.54 반증 13c).
+ *   마지막 이벤트가 열림 · 변화거나 이벤트가 없으면(새 DB · 보존 기간 밖) 근거가 아니다. 파일이 정말 없으면 빈 집합 · 못 열거나 못 읽으면 null.
  */
-export const JUDGED_AGENTS_MAX = 5_000;
-export async function partFaultJudgedAgentsOrNull() {
+export const CLOSED_KEYS_MAX = 20_000;
+export async function partFaultClosedKeysOrNull(keys) {
+  const list = (Array.isArray(keys) ? keys : [...(keys || [])]).slice(0, CLOSED_KEYS_MAX);
+  if (!list.length) return new Set();
   if (!x && fileMissing(DB_PATH())) return new Set();
   const h = await open();
   if (!h) return null;
   try {
-    const row = h.st.metaGet.get('judged_agents');
-    if (!row) return new Set();
-    const j = JSON.parse(String(row.v || '{}'));
-    if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
-    return new Set(Object.keys(j));
+    const out = new Set();
+    for (const k of list) {
+      const s0 = String(k); const i = s0.indexOf('|');
+      if (i < 0) continue;
+      const row = h.st.lastEventOfKey.get(s0.slice(0, i), s0.slice(i + 1));
+      if (row && row.event === 'close') out.add(s0);
+    }
+    return out;
   } catch { return null; }
 }
 /** openFaults 와 같되 DB 를 못 열면 null(‘열린 장애 0건’ 과 가른다 — 알림 단계 회차가 빈 목록으로 기록을 지우지 않게 · 디버깅 7회차 판정 #3). */
@@ -378,7 +380,7 @@ const agentOf = (p) => String(p?.agent || '');
  *   25초 블로킹을 만든 사고가 있다).
  * @returns {{saved:boolean, opened:number, closed:number, changed:number, reason?:string}}
  */
-export async function applyTransition(tr, { now = Date.now(), judgedAgents = null } = {}) {
+export async function applyTransition(tr, { now = Date.now() } = {}) {
   const h = await open();
   if (!h) return { saved: false, opened: 0, closed: 0, changed: 0, reason: initError ? String(initError.message).slice(0, 200) : 'node:sqlite 없음' };
   const { db, st } = h;
@@ -413,18 +415,6 @@ export async function applyTransition(tr, { now = Date.now(), judgedAgents = nul
     tr = { ...tr, _closedN: closedN };
     // 유지(held)는 **이벤트를 만들지 않는다** — 사유만 갱신해 화면이 '왜 아직 열려 있나' 를 말한다.
     for (const p of tr.held || []) st.touch.run(p.lastSeenAt || p.lastHeldAt || now, p.holdReason || null, p.rawState || null, agentOf(p), p.partKey);
-    // 이 판정이 본 수집 주체를 같은 트랜잭션에 적는다(알림 단계 회차의 ‘닫힘’ 기준 — partFaultJudgedAgentsOrNull). 처음 본 시각만 · 상한
-    if (judgedAgents) {
-      let cur = {};
-      try { const row = st.metaGet.get('judged_agents'); const j = row ? JSON.parse(String(row.v || '{}')) : {}; if (j && typeof j === 'object' && !Array.isArray(j)) cur = j; } catch { cur = {}; }
-      let changed = false;
-      for (const a0 of judgedAgents) {
-        const a = String(a0 ?? '').trim().toLowerCase();
-        if (Object.hasOwn(cur, a) || Object.keys(cur).length >= JUDGED_AGENTS_MAX) continue;
-        cur[a] = now; changed = true;
-      }
-      if (changed) st.metaSet.run('judged_agents', JSON.stringify(cur));
-    }
     db.exec('COMMIT');
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch { /* */ }
@@ -507,6 +497,8 @@ const evRow = (r) => ({
  */
 export async function incidentInputs({ sinceAbs = 0, maxEvents = 100_000, chunk = 5_000, yielder = null } = {}) {
   const h = await openRead();
+  // 아직 만들지 않은 DB(점검을 켠 적 없음 · 첫 판정 전) — ‘열 수 없음’ 이 아니라 기록이 없는 것(반증 13c N3 — 상태는 notCreated 인데 장애별 보기만 ‘DB 를 열 수 없습니다’ 였다)
+  if (!h && !initError && !x && fileMissing(DB_PATH())) return { available: true, notCreated: true, events: [], openRows: [], startLookup: null, truncated: false, coveredSince: null, read: 0 };
   if (!h) return { available: false, events: [], openRows: [], startLookup: null, truncated: false, coveredSince: null, read: 0,
     error: initError ? String(initError.message || initError).slice(0, 200) : lockRetry.note() };
   const since = Math.max(0, Math.trunc(Number(sinceAbs) || 0));

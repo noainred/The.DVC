@@ -271,7 +271,8 @@ async function pollOnceInner({ manual = false, only = null, onRefreshed = null, 
       try { await pollServer(s); } finally {
         _eventIds.delete(sid); if (eventLeft?.delete(sid)) pendDel(sid); releaseSlot('event', tok);
         // 이 서버는 이 묶음에서 끝났다 — 호출부(eventSub)가 묶음 전체를 기다리지 않고 이 서버의 새 이벤트를 다음 묶음에 넣게(반증 12a F2)
-        if (onServerDone) { try { onServerDone(sid); } catch { /* 알림 실패가 읽기를 막지 않는다 */ } }
+        // read — 인벤토리를 실제로 다시 읽었는가(못 읽었으면 호출부가 그 자리에서 재읽기 표지를 세운다 — 묶음 끝에 세우면 그 사이 다른 묶음이 성공한 읽기보다 뒤에 서 지워지지 않았다: 반증 13a G1)
+        if (onServerDone) { try { onServerDone(sid, { read: invRead.has(sid) }); } catch { /* 알림 실패가 읽기를 막지 않는다 */ } }
       }
       return;
     }

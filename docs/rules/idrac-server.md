@@ -2336,3 +2336,20 @@ v3.54.0 으로 번호를 다시 매겼다(릴리스 노트 · 버전 파일만 �
 - 판정 몫(`_lastJudgeCost`)은 던진 판정에도 적고 꺼져 건너뛴 회차는 0.
 - 서버 린트: `globals.nodeBuiltin`(ESM 에 없는 require · __dirname 를 잡는다) + 전역 `crypto` 금지(`no-restricted-globals` — node:crypto import 누락).
 - 회귀: `server/test/bmDesign352b.test.js` · `bmDebug8.test.js`(판정 주체 기준으로 다시 씀) · 변이 11개.
+
+### v3.54 반증 13 반영(2026-11-27 — 반증 12 수정분 재반증 3인 · 기록은 `docs/rules/audits.md` ‘반증 13’)
+
+- ⚠ 위 반증 12 절의 **‘판정된 수집 주체(judged_agents)’ 기준과 ‘넘칠 때만 대신함 · 판정 통째 빼기’ 큐는 반증 13 에서 대체됐다** — 아래가 지금 규칙이다.
+- **알림 단계 기록의 ‘닫힘’ = 근거가 있을 때만**(escalationRun 기본 open → `{ open, closed }`): ① DB 의 그 열쇠 마지막 이벤트가 닫힘(`partFaultClosedKeysOrNull` — 평소 닫힘 · 수동 닫기 · 키 이전)
+  ② 판정 폴러의 **가상 전이**가 닫음(`closeEvidence.js` — runOnce 가 진행 기록 중 DB 에 열려 있지 않은 것을 판정 재료 `pk` 로 ‘가상의 열린 장애’ 를 만들어 **같은 scan 으로 transition** —
+  장비 실패 · 컬렉션 실패 · 보고에서 빠짐(누락) · 정비 창 · 등록부 손상 · 보고 없음이면 전이가 보류하므로 근거가 아니다 · DB 에 쓰지 않는다 · 판정마다 통째로 바꾼다).
+  근거가 없는 기록은 남는다(`escalationPlan({ closed })`). 키 이전 후보(sig)는 근거와 상관없이 모든 기록(라우트 표지와 같은 집합). 진행 기록은 열려 있는 동안 `pk`(아는 글자 필드)를 새로 적는다.
+  ‘수집 주체가 보고했다’ 는 ‘그 주체의 장애를 판정했다’ 가 아니다(13c N1) — 닫힘 판단을 전이 밖에서 따로 만들지 말 것.
+- **알림 큐 = 부품(agent|partKey)마다 마지막 대기 알림 하나**: 같은 부품의 새 알림이 기다리던 앞 알림을 대신한다(앞 판정 표지 superseded · 열림 표시는 해소가 아닌 뒤 알림이 넘겨받음 ·
+  본문에 대신한 건수). 상한 `NOTIFY_QUEUE_MAX_ITEMS`(5,000 — 부품 수)를 넘으면 가장 오래된 알림부터 빼고 센다. 보낼 알림이 없는 판정은 넣지 않는다. 판정 표지(view)는 그 판정의 알림이 모두 끝나야 pending 이 풀린다(left).
+  늦은 알림 표기 · 발송 표시(수집 주체까지 · first_seen)는 알림마다. 큐 누적(sent · failed · skipped · superseded · overflowDropped · disabledSkipped)은 `poller.notifyQueue` 로 화면에.
+  비관리자 판본은 표지의 error 원문을 가린다.
+- 이벤트 묶음: 못 읽은 서버의 재읽기 표지는 **그 서버를 끝낸 자리**(`onServerDone(sid, { read })`)에서 세운다(묶음 끝에 몰아 세우면 다른 묶음의 성공 읽기 뒤에 서 지워지지 않았다) ·
+  바로 읽기 상한은 서로 다른 서버 수(`distinctPending`) · 다시 시도 수는 이 묶음이 맡은 서버만 지운다.
+- 장애별 보기 입력(`incidentInputs`)도 만들지 않은 DB 는 `notCreated`(‘열 수 없음’ 이 아님).
+- 회귀: `server/test/bmDesign352b.test.js`(13b · 13c N1 실제 판정 경로 · 13a G1) · `bmDebug8.test.js`(닫힘 근거 기준으로 다시 씀) · 변이 10개(9 잡힘 · 1 동등 — 0건 판정 조기 return 은 구조상 같은 동작).
