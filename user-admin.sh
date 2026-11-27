@@ -43,6 +43,27 @@ if [[ ! -x "$NODE" ]]; then
   [[ -n "$NODE" ]] || { echo "✖ Node 런타임을 찾을 수 없습니다(번들·시스템 모두)." >&2; exit 1; }
 fi
 
+# vp_env_key_value <키 이름> — stdin 의 env 파일 본문에서 그 키의 값(마지막 줄 우선). 보안 잔여 11-27 M3: packaging/offline/release-verify-lib.sh 의 같은 이름 함수와
+#   글자 그대로 같은 사본이다(이 파일은 그 라이브러리를 읽을 수 없다 — 시험이 세 사본 · JS parseSecretsKey 를 대조한다). 고칠 때는 셋을 함께.
+vp_env_key_value() {
+  local key="$1" line="" body="" rest="" v="" val="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    body="$line"
+    if [[ "$body" == "export "* ]]; then body="${body:7}"; body="${body#"${body%%[![:space:]]*}"}"; fi
+    [[ "$body" == "$key"* ]] || continue
+    rest="${body:${#key}}"; rest="${rest#"${rest%%[![:space:]]*}"}"
+    [[ "$rest" == =* ]] || continue
+    v="${rest:1}"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+    if (( ${#v} >= 2 )) && { [[ "${v:0:1}" == '"' && "${v: -1}" == '"' ]] || [[ "${v:0:1}" == "'" && "${v: -1}" == "'" ]]; }; then v="${v:1:${#v}-2}"; fi
+    val="$v"; found=1
+  done
+  if (( found )); then printf '%s' "$val"; fi
+  return 0
+}
+
 RUN_USER=""; CAN_RESTART=0
 # root 소유 래퍼가 서비스 계정으로 낮춰 부른 경우 — 재시작은 그 래퍼가 한다(종료코드 10 을 그대로 돌려준다).
 [[ "${VP_LAUNCHER:-}" == 1 ]] && CAN_RESTART=1
@@ -69,7 +90,15 @@ for key in LOGIN_POLICY_USERS OTP_ROLE_ENFORCE; do
 done
 
 if [[ -n "$RUN_USER" ]] && id "$RUN_USER" &>/dev/null; then
-  sudo -u "$RUN_USER" env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" USER_ADMIN_CAN_RESTART="$CAN_RESTART" "${EXTRA_ENV[@]}" "$NODE" "$TOOL" "$@"
+  # 보안 잔여 11-27 M3(반증 1회차 M-2): root 로 낮춰 부를 때 portal.env 의 SECRETS_KEY 를 **환경으로** 넘긴다(명령줄 아님 — sudo 로그 · /proc cmdline).
+  #   서비스 계정이 못 읽는 portal.env(root:root)에서도 도구가 봉인된 OTP 키를 열고 새로 봉인하게. 링크 · 일반 파일이 아니면 읽지 않는다(64KB 상한).
+  if [[ -z "${SECRETS_KEY:-}" && -f "$CONFIG_DIR/portal.env" && ! -L "$CONFIG_DIR/portal.env" ]]; then
+    SKEY="$(head -c 65536 -- "$CONFIG_DIR/portal.env" 2>/dev/null | vp_env_key_value SECRETS_KEY || true)"
+    if [[ ${#SKEY} -ge 16 ]]; then export SECRETS_KEY="$SKEY"; fi
+    unset SKEY
+  fi
+  KEEP_ENV=(); if [[ -n "${SECRETS_KEY:-}" ]]; then KEEP_ENV=(--preserve-env=SECRETS_KEY); fi
+  sudo -u "$RUN_USER" "${KEEP_ENV[@]}" env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" USER_ADMIN_CAN_RESTART="$CAN_RESTART" "${EXTRA_ENV[@]}" "$NODE" "$TOOL" "$@"
 else
   env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" USER_ADMIN_CAN_RESTART="$CAN_RESTART" "${EXTRA_ENV[@]}" "$NODE" "$TOOL" "$@"
 fi

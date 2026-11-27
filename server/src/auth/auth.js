@@ -18,7 +18,7 @@ import { isSessionRevoked, isTokenDigestRevoked, tokenDigest, lastActivity, note
 import { getDataSource } from '../runtime-settings.js';
 import { denyDemoGuest } from './demoGuest.js';
 // 보안 잔여 11-27 M3: OTP 시드(totpSecret · totpPendingSecret) 레코드 단위 봉인 — secretVault.js '레코드 단위 봉인' 절.
-import { openRecordFields, sealRecordFields, newSecretSealIssue, isSealed, USER_SECRET_FIELDS, keyCreationDisallowed, secretsPolicyCached, ensureKeyCheckSoon } from '../security/secretVault.js';
+import { openRecordFields, sealRecordFields, newSecretSealIssue, isSealed, USER_SECRET_FIELDS, keyCreationDisallowed, secretsPolicyCached, ensureKeyCheckSoon, seedOpenFailureHint } from '../security/secretVault.js';
 
 /** v2.716: 내장 데모 계정이 mock 모드에서 쓰일 때 — 요청 문맥은 admin + demoGuest(auth/demoGuest.js 가 요청을 먼저 거른다). */
 function demoGuestOf(u) {
@@ -274,7 +274,7 @@ function adoptLoadedUsers(loaded) {
   catch (e) { console.error(`[auth] ⚠ users.json 의 OTP 키를 여는 중 오류(${String(e?.message || e).slice(0, 120)}) — 열지 못한 키는 그대로 두고 계속합니다(계정은 그대로).`); }
   if (opened.failed && !_seedOpenWarned) {
     _seedOpenWarned = true;
-    console.warn(`[auth] ⚠ users.json 의 OTP 키 ${opened.failed}개를 복호하지 못했습니다 — 그 계정은 OTP 로그인 · OTP 재확인이 실패합니다(암호문은 지우지 않고 그대로 둡니다). 자격증명 암호화 키(SECRETS_KEY · CONFIG_DIR/secrets-key)를 원래 값으로 되돌리고 재시작하거나, 콘솔 도구로 다시 등록하세요(sudo vmware-portal-otp <계정>).`);
+    console.warn(`[auth] ⚠ users.json 의 OTP 키 ${opened.failed}개를 복호하지 못했습니다 — 그 계정은 OTP 로그인 · OTP 재확인이 실패합니다(암호문은 지우지 않고 그대로 둡니다). ${seedOpenFailureHint()}`);   // 반증 1회차 M-3 · S-2: 포탈 · 도구 · 키 유무에 맞는 다음 할 일
   }
   const changed = [ensureDemoUser(users), ensureSuperUser(users)].some(Boolean);
   let sealNow = false;
@@ -439,8 +439,9 @@ export function warnIfNoOtpAdmin() {
   if (list.some((u) => isAdminTier(u.role) && u.totpEnabled)) return false;
   console.warn('[auth] ⚠ OTP 가 등록된 admin 계정이 없습니다 — admin/operator 는 비밀번호로 로그인할 수 없습니다(OTP 전용).');
   console.warn('[auth]   서버에서 다음을 실행해 첫 관리자의 OTP 를 등록하세요:');
-  console.warn('[auth]     node server/src/tools/otp-enroll.js --list');
-  console.warn('[auth]     node server/src/tools/otp-enroll.js <username>');
+  // 보안 잔여 11-27 M3: 래퍼로 안내한다 — root 로 node 를 직접 실행하면 도구가 거절하고(users.json · secrets-key 소유권), 래퍼만 portal.env 의 SECRETS_KEY 를 넘긴다.
+  console.warn('[auth]     sudo vmware-portal-otp --list        (git 소스: 앱 폴더의 ./otp-enroll.sh --list)');
+  console.warn('[auth]     sudo vmware-portal-otp <username>');
   console.warn('[auth]   (긴급 시 OTP_ROLE_ENFORCE=false 로 정책을 임시 해제할 수 있습니다.)');
   return true;
 }
@@ -547,6 +548,15 @@ function noteSeedUnreadable(username, now = Date.now()) {
 export function otpSeedUnreadableOf(username) {
   const r = _seedUnreadable.get(String(username ?? '').trim().toLowerCase());
   return r ? { at: r.at, count: r.count, reason: OTP_SEED_UNREADABLE_AUDIT } : null;
+}
+/*
+ * 보안 잔여 11-27 M3(반증 1회차 M-3): 새 OTP 키 발급 거절 문구의 끝 — '기존 OTP 로그인은 그대로' 는 **그 계정의 시드를 열 수 있을 때만** 말한다
+ *   (예전에는 언제나 붙여, 키를 잃어 바로 그 계정이 로그인하지 못하는데도 '그대로 됩니다' 라고 했다). 등록이 없으면 아무 말도 붙이지 않는다.
+ */
+function existingOtpNote(u) {
+  if (!u?.totpEnabled || !u?.totpSecret) return '';
+  if (isSealed(u.totpSecret)) return ' 이 계정의 지금 OTP 키도 열지 못해 이 계정은 OTP 로 로그인할 수 없습니다 — 위 안내대로 키를 되돌리거나, 키를 잃었으면 새 키를 만든 뒤 다시 등록하세요.';
+  return ' 이 계정의 기존 OTP 로그인은 그대로 됩니다.';
 }
 /** 이 계정의 활성 OTP 시드를 복호하지 못했는가(암호문 그대로 남아 있음) — 콘솔 도구 · 자가 점검 · 목록용. */
 function seedUnreadable(u) { return !!(u?.totpEnabled && isSealed(u?.totpSecret)); }
@@ -1034,7 +1044,7 @@ export function beginTotpEnroll(username, host = '', { actor = null, actorUser =
   // 보안 잔여 11-27 M3: 새 시드를 봉인할 수 있는지 **바꾸기 전에** 묻는다 — 잠금(S-07) · 키 없음 · 콘솔 도구의 키 미확인이면 평문으로도 다른 키로도 쓰지 않고
   //   메모리도 바꾸지 않는다(반쪽 상태 없음). 기존 OTP 로그인은 그대로다(그 시드는 디스크 원문 승계로 계속 저장된다).
   const issue = newSecretSealIssue();
-  if (issue) return { ok: false, code: issue.code, reason: `새 OTP 키를 발급하지 않았습니다 — ${issue.reason} 기존 OTP 로그인은 그대로 됩니다.` };
+  if (issue) return { ok: false, code: issue.code, reason: `새 OTP 키를 발급하지 않았습니다 — ${issue.reason}${existingOtpNote(u)}` };
   const secret = totp.generateSecret();
   // 확정(confirm) 전에는 기존 등록을 절대 건드리지 않는다 — 이전에는 여기서 totpSecret을
   // 교체하고 totpEnabled=false로 영속화해, OTP 전용 계정(passwordHash 삭제됨)이 '재등록 시작'
@@ -1047,7 +1057,7 @@ export function beginTotpEnroll(username, host = '', { actor = null, actorUser =
     // 사전 판정과 저장 사이에 정책 · 키가 바뀐 경우(3초 캐시 경계) — 메모리를 되돌리고 사유를 돌려준다.
     if (!SEAL_ERROR_CODES.has(e?.code)) throw e;
     if (hadPending) u.totpPendingSecret = prevPending; else delete u.totpPendingSecret;
-    return { ok: false, code: e.code, reason: `새 OTP 키를 발급하지 않았습니다 — ${e.message} 기존 OTP 로그인은 그대로 됩니다.` };
+    return { ok: false, code: e.code, reason: `새 OTP 키를 발급하지 않았습니다 — ${e.message}${existingOtpNote(u)}` };
   }
   const base = config.auth.totpIssuer || 'VMware Portal';
   const issuer = host ? (base.includes('VMware') ? base.replace('VMware', `VMware(${host})`) : `${base}(${host})`) : base;

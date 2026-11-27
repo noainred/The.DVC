@@ -118,6 +118,8 @@ export const SECRET_FILES = [
 /** 보안 잔여 11-27 M3: users.json 의 OTP 시드 칸 — 전역 SECRET_FIELDS 에 넣지 않는다(다른 파일의 같은 이름 · 일반 경로의 키 없음 저장 거절 · 복호 실패 '' 소거). */
 export const USER_SECRET_FIELDS = new Set(['totpSecret', 'totpPendingSecret']);
 export const FILE_EXTRA_SECRET_FIELDS = Object.freeze({ 'alerts.json': new Set(['url']), 'bm-events.json': new Set(['secret', 'ctxKey', 'prevCtxKey']), 'users.json': USER_SECRET_FIELDS });
+/** 보안 잔여 11-27 M3: 레코드 단위 봉인 파일 — 흔적 판정이 원문이 아니라 { users: [...] } 의 그 칸 값만 본다(아래 recordTextHasSealed). */
+const RECORD_SEALED_FILES = Object.freeze({ 'users.json': USER_SECRET_FIELDS });
 
 /* ── 정책(모드·레벨·알고리즘) ─────────────────────────────────────────────── */
 
@@ -185,8 +187,13 @@ function encryptionEvidence() {
   for (const name of SECRET_FILES) {
     try {
       const fp = path.join(config.configDir, name);
+      if (!fs.existsSync(fp)) continue;
+      const text = fs.readFileSync(fp, 'utf8');
       // 22회차 반증 D-9: 원문에 'enc$1$' 글자가 있는지만 보면 평문 설치의 이름 등에 그 글자가 있을 때 '봉인 흔적' 이 됐다 — JSON 문자열 값의 시작 + 알고리즘 · 레벨 모양까지.
-      if (fs.existsSync(fp) && SEALED_VALUE_RE.test(fs.readFileSync(fp, 'utf8'))) { ev.push('sealed-values'); break; }
+      // 보안 잔여 11-27 M3(반증 1회차 M-1 — 재현): users.json 은 원문이 아니라 **시드 칸 값만** 본다 — 표시 이름(name)은 범위 admin 이 자기 레코드에,
+      //   중앙이 배포 사용자 이름으로 모든 엣지에 쓸 수 있어, 'enc$1$aes-256-gcm$15$…' 이름 한 줄이 평문 설치를 정책 잠금(전 법인 비밀 저장 정지)으로 만들었다.
+      const fields = RECORD_SEALED_FILES[name];
+      if (fields ? recordTextHasSealed(text, fields) : SEALED_VALUE_RE.test(text)) { ev.push('sealed-values'); break; }
     } catch { /* 읽지 못한 파일은 건너뛴다 */ }
   }
   _evidence = ev; _evidenceAt = now;
@@ -293,8 +300,15 @@ const _keyWarned = new Set();
 let _keyMissing = null;   // 22회차 반증: 키를 쓸 수 없다고 판정했으면 그 오류(다시 판정하지 않는다 — 복호 실패마다 흔적을 다시 읽던 비용 · 저장 거절 표지)
 /** 키를 쓸 수 없어 비밀 파일 저장을 막고 있으면 그 사유, 아니면 null(자가진단 · 화면용). */
 export function secretsKeyMissing() { return _keyMissing ? _keyMissing.message : null; }
-function keyUnavailable(why) {
-  const e = new Error(`자격증명 암호화 키를 쓸 수 없습니다(${why}) — 새 키를 만들지 않습니다(기존 암호문 보호). SECRETS_KEY env 또는 CONFIG_DIR/secrets-key 를 되돌리고 재시작하세요.`);
+/*
+ * 보안 잔여 11-27 M3(반증 1회차 M-3 — 재현): 키를 정말 잃은 설치(secrets-key 삭제 · 키 없이 다른 호스트로 복원)의 탈출구는 SECRETS_KEY_LOST=true 재시작
+ *   하나인데 이 경로의 어떤 문구에도 없었다 — OTP 시드가 봉인된 뒤로는 고권한 계정 전원이 OTP 전용이면 웹 관리자 접근이 0 이 되고, 안내된 콘솔 도구도 같은 사유로
+ *   거절한다. '봉인된 값이 있는데 키가 없음' 갈래(포탈 · 도구)와 복원 경고 · 자가 점검이 이 문구를 함께 싣는다. 읽기 오류(EACCES 등 — 키는 있다)에는 싣지 않는다
+ *   (되살릴 수 있는 키를 버리게 하지 않으려고).
+ */
+export const KEY_LOST_GUIDE = '키를 정말 잃었으면(secrets-key 삭제 · 키를 옮기지 않고 다른 호스트로 복원) 포탈 환경(리눅스 설치본은 portal.env)에 SECRETS_KEY_LOST=true 한 줄을 넣고 포탈을 한 번 재시작하세요 — 포탈이 새 키를 만들고, 옛 키로 봉인한 값(장비 비밀번호 · OTP 키)은 열 수 없게 되어 비밀번호는 다시 입력하고 OTP 는 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록해야 합니다(끝나면 그 줄을 지울 것).';
+function keyUnavailable(why, guide = '') {
+  const e = new Error(`자격증명 암호화 키를 쓸 수 없습니다(${why}) — 새 키를 만들지 않습니다(기존 암호문 보호). SECRETS_KEY env 또는 CONFIG_DIR/secrets-key 를 되돌리고 재시작하세요.${guide ? ` ${guide}` : ''}`);
   e.code = 'SECRETS_KEY_MISSING';
   if (!_keyWarned.has(why)) { _keyWarned.add(why); console.error(`[secrets] ⚠ ${e.message}`); }
   _keyMissing = e;
@@ -315,12 +329,12 @@ function masterKey() {
   if (exists && cur.length >= 32) { _key = Buffer.from(cur, 'utf8'); scheduleKeyCheck(); return _key; }
   // 보안 잔여 11-27 M3: 콘솔 도구(otp-enroll · user-admin)는 키를 만들지 않는다 — 도구와 포탈이 각자 키를 만들거나(원자적 쓰기 둘), env 키(portal.env)를
   //   못 받은 도구가 파일 키를 새로 만들어 그 키로 시드를 봉인하면 재시작 뒤 포탈이 그 시드를 열지 못해 그 관리자가 잠긴다. 키는 포탈이 준비한다.
-  if (_noKeyCreation) throw keyUnavailable('콘솔 도구는 암호화 키를 만들지 않습니다 — 키는 포탈이 준비합니다');
+  if (_noKeyCreation) throw keyUnavailable('콘솔 도구는 암호화 키를 만들지 않습니다 — 키는 포탈이 준비합니다', toolNoKeyGuide());
   _evidence = null;   // 흔적을 지금 다시 본다(30초 기억을 쓰지 않는다)
   if (encryptionEvidence().includes('sealed-values')) {
     // 22회차 반증 D-2: 키를 정말 잃은 설치의 탈출 — 운영자가 명시적으로 SECRETS_KEY_LOST=true 로 재시작하면 새 키를 만든다(옛 암호문은 복호 실패 · 저장 때 지워진다).
-    if (process.env.SECRETS_KEY_LOST !== 'true') throw keyUnavailable(exists ? '키 파일이 짧거나 비었는데 봉인된 비밀이 있음' : '봉인된 비밀이 있는데 키가 없음');
-    console.error('[secrets] ⚠ SECRETS_KEY_LOST=true — 키 분실을 확정해 새 키를 만듭니다. 옛 키로 봉인한 비밀은 복호되지 않고, 저장할 때 지워집니다. 모든 장비 비밀번호를 다시 입력하세요(끝나면 이 env 를 지울 것).');
+    if (process.env.SECRETS_KEY_LOST !== 'true') throw keyUnavailable(exists ? '키 파일이 짧거나 비었는데 봉인된 비밀이 있음' : '봉인된 비밀이 있는데 키가 없음', KEY_LOST_GUIDE);
+    console.error('[secrets] ⚠ SECRETS_KEY_LOST=true — 키 분실을 확정해 새 키를 만듭니다. 옛 키로 봉인한 비밀은 복호되지 않고, 저장할 때 지워집니다. 모든 장비 비밀번호를 다시 입력하세요 · 옛 키로 봉인한 OTP 키는 지우지 않고 남지만 열 수 없으니 그 계정은 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록하세요(끝나면 이 env 를 지울 것).');
   }
   try {
     const gen = crypto.randomBytes(32).toString('base64url');
@@ -341,6 +355,21 @@ function masterKey() {
 
 const PREFIX = 'enc$1$';
 const SEALED_VALUE_RE = /"enc\$1\$[a-z0-9-]{3,40}\$\d{1,2}\$/;   // 22회차 반증 D-9: JSON 문자열 값으로 들어 있는 봉인(알고리즘 · 레벨 모양까지)
+const SEALED_ONE_RE = /^enc\$1\$[a-z0-9-]{3,40}\$\d{1,2}\$/;      // 같은 모양 — 값 하나(앵커 · 고정 길이 반복이라 선형)
+/*
+ * 보안 잔여 11-27 M3(반증 1회차 M-1): 레코드 단위 봉인 파일의 흔적 — 파싱해 records[*][fields] 값만 본다. 파싱하지 못하면(손상) 예전처럼 원문 정규식으로
+ *   본다(보수 쪽 — 손상본은 표시 이름 쓰기로 만들 수 없다). 반환 true = 봉인 모양 값이 있다.
+ */
+function recordTextHasSealed(text, fields) {
+  let data;
+  try { data = JSON.parse(text); } catch { return SEALED_VALUE_RE.test(text); }
+  const list = Array.isArray(data?.users) ? data.users : [];
+  for (const r of list) {
+    if (!r || typeof r !== 'object') continue;
+    for (const f of fields) if (typeof r[f] === 'string' && SEALED_ONE_RE.test(r[f])) return true;
+  }
+  return false;
+}
 export const isSealed = (v) => typeof v === 'string' && v.startsWith(PREFIX);
 
 // scrypt 파생키 캐시 — 캐시 키는 (alg|logN|salt). 복호는 salt 마다 1회 유도하고 여기 둔다.
@@ -774,14 +803,14 @@ export function sealRecordFields(records, fields, pol = policy()) {
 /**
  * 복원 경고용 — JSON 텍스트(users.json 모양 { users: [...] })의 fields 칸 봉인 값 중 **이 호스트의 키로 열 수 없는** 것을 센다.
  * 부작용 없음: 키를 만들지 않는다(키가 없으면 masterKey 를 부르지 않고 전부 못 엶으로 센다) · 실패 카운터 · 경고 · 재사용 기억을 건드리지 않는다.
- * @returns {{ sealed:number, unopenable:number, records: Array<{ role:string|null, totpEnabled:boolean }> }}  records = 못 여는 시드가 있는 레코드
+ * @returns {{ sealed:number, unopenable:number, records: Array<{ role:string|null, totpEnabled:boolean }>, keyUsable:boolean }}  records = 못 여는 시드가 있는 레코드
  */
 export function countUnopenableSealed(text, fields = USER_SECRET_FIELDS) {
-  const out = { sealed: 0, unopenable: 0, records: [] };
+  const usable = keyUsableWithoutCreating();
+  const out = { sealed: 0, unopenable: 0, records: [], keyUsable: usable };   // keyUsable(반증 1회차 M-3): 이 호스트에 키가 있는가 — 없으면 복구는 KEY_LOST_GUIDE 를 거친다
   let data;
   try { data = JSON.parse(String(text)); } catch { return out; }
   const list = Array.isArray(data?.users) ? data.users : [];
-  const usable = keyUsableWithoutCreating();
   for (const r of list) {
     if (!r || typeof r !== 'object') continue;
     let bad = false;
@@ -819,16 +848,55 @@ const keyCheckFile = () => path.join(config.configDir, 'secrets-keycheck');
 const KEYCHECK_PLAIN = 'secretVault-keycheck-v1';
 let _noKeyCreation = false;
 let _toolKeyVerdict;   // undefined = 아직 판정 안 함 · null = 같은 키 · Error = 거절 사유
-/** 콘솔 도구 전용 — 이 프로세스는 키를 만들지 않고, 키 확인 값을 쓰지 않으며, 암호화 정책의 새 봉인 전에 포탈과 같은 키인지 확인한다. */
-export function disallowKeyCreation() { _noKeyCreation = true; _toolKeyVerdict = undefined; }
+let _toolPortalEnv = null;   // 도구가 키를 어디서 찾았나(tools/portalEnvKey.js) — 'env' · 'portal.env' · 'none' · 'unreadable' · null(모름) — 키가 없을 때 안내 문구용
+/**
+ * 콘솔 도구 전용 — 이 프로세스는 키를 만들지 않고, 키 확인 값을 쓰지 않으며, 암호화 정책의 새 봉인 전에 포탈과 같은 키인지 확인한다.
+ * @param {{ portalEnv?: 'env'|'portal.env'|'none'|'unreadable' }} [opts] 키를 찾은 결과(안내 문구가 '래퍼로 실행' 과 '키 분실' 을 가르게)
+ */
+export function disallowKeyCreation(opts = {}) { _noKeyCreation = true; _toolKeyVerdict = undefined; _toolPortalEnv = typeof opts?.portalEnv === 'string' ? opts.portalEnv : null; }
 /** 콘솔 도구 모드인가(auth 의 업그레이드 자동 봉인은 포탈 프로세스에서만 돈다). */
 export function keyCreationDisallowed() { return _noKeyCreation; }
 
 function keyMismatch(why) {
-  const e = new Error(`콘솔 도구가 포탈과 같은 암호화 키를 쓰는지 확인하지 못했습니다(${why}) — 포탈이 열 수 없는 값으로 저장해 그 계정이 잠기지 않게 새 비밀을 봉인하지 않습니다. 래퍼(sudo vmware-portal-otp · vmware-portal-users)로 실행해 도구가 portal.env 의 SECRETS_KEY 를 읽게 하고(SECRETS_KEY 가 systemd drop-in 등 portal.env 밖에 있으면 portal.env 로 옮기세요), 키 확인 값이 없으면 포탈을 재시작하고 한 번 로그인한 뒤 다시 실행하세요.`);
+  const e = new Error(`콘솔 도구가 포탈과 같은 암호화 키를 쓰는지 확인하지 못했습니다(${why}) — 포탈이 열 수 없는 값으로 저장해 그 계정이 잠기지 않게 새 비밀을 봉인하지 않습니다. 래퍼(sudo vmware-portal-otp · sudo vmware-portal-users)로 실행하면 래퍼가 root 권한으로 portal.env 의 SECRETS_KEY 를 읽어 도구에 넘깁니다(SECRETS_KEY 가 systemd drop-in 등 portal.env 밖에 있으면 portal.env 로 옮기세요). 키 확인 값이 없으면 포탈을 재시작하고 한 번 로그인을 시도한 뒤 다시 실행하세요.`);
   e.code = 'SECRETS_KEY_MISMATCH';
   return e;
 }
+/*
+ * 보안 잔여 11-27 M3(반증 1회차 M-2 · M-3): 콘솔 도구에 키가 없을 때의 안내 — 도구는 포탈이 키를 갖고 있는지 알 수 없으므로 아는 것만 말한다.
+ *   ① portal.env 를 못 읽었으면 '래퍼로 실행'(root 래퍼가 읽어 환경으로 넘긴다) ② 다 봤는데 없으면 'portal.env 밖(drop-in)이면 옮기기'
+ *   ③ 봉인 흔적이 있으면 KEY_LOST_GUIDE(그 뒤 이 도구를 다시) · 없으면 '포탈이 아직 키를 만들지 않음'. 흔적 판정은 부작용이 없다(키를 만들지 않는다).
+ */
+function toolNoKeyGuide() {
+  let lost = false;
+  try { _evidence = null; lost = encryptionEvidence().includes('sealed-values'); } catch { lost = false; }
+  const where = _toolPortalEnv === 'unreadable'
+    ? '이 도구가 portal.env 를 읽지 못해 포탈의 SECRETS_KEY 를 모릅니다 — 래퍼(sudo vmware-portal-otp · sudo vmware-portal-users)로 실행하면 래퍼가 root 권한으로 portal.env 를 읽어 환경으로 넘깁니다.'
+    : '이 도구가 찾은 곳(SECRETS_KEY env · portal.env · CONFIG_DIR/secrets-key)에 키가 없습니다 — 포탈이 SECRETS_KEY 를 portal.env 밖(systemd drop-in 등)에서 받으면 portal.env 로 옮기세요.';
+  const next = lost
+    ? `봉인된 값이 있는데 키가 없습니다 — ${KEY_LOST_GUIDE} 그 뒤 이 도구를 다시 실행하세요.`
+    : '봉인된 값은 아직 없습니다 — 포탈을 재시작하면 기동이나 첫 로그인 시도 때 포탈이 키를 만듭니다(그 뒤 이 도구를 다시 실행하세요).';
+  return `${where} ${next}`;
+}
+
+/**
+ * 보안 잔여 11-27 M3(반증 1회차 M-3 · S-2): users.json 의 OTP 키를 열지 못했을 때 **이 프로세스의 상태**에 맞는 다음 할 일(한국어 한 문단).
+ *   포탈: 키 없음 → 되돌리기 + KEY_LOST_GUIDE · 키 있음(다른 키) → 되돌리기 또는 콘솔 도구로 다시 등록.
+ *   콘솔 도구: 키 없음 → '이 도구가 포탈의 키를 모름'(키 분실로 단정하지 않는다) · 키 확인 값 불일치 → '이 도구의 키가 포탈과 다름' ·
+ *   같은 키 → 포탈도 못 여는 값이니 이 도구로 다시 등록. 부작용 없음(키를 만들지 않는다 — masterKey 를 부르지 않는다).
+ */
+export function seedOpenFailureHint() {
+  const noKey = !_key && !keyUsableWithoutCreating();
+  if (_noKeyCreation) {
+    if (noKey) return `이 도구가 포탈의 자격증명 암호화 키를 모릅니다(키 분실로 단정하지 마세요) — ${toolNoKeyGuide()}`;
+    const issue = toolKeyIssue();
+    if (issue) return '이 도구의 키가 포탈과 같은지 확인하지 못했습니다(키 확인 값 secrets-keycheck 없음 · 불일치) — 래퍼(sudo vmware-portal-otp · sudo vmware-portal-users)로 실행해 도구가 portal.env 의 SECRETS_KEY 를 받게 하세요.';
+    return '포탈과 같은 키로도 열리지 않는 OTP 키입니다(키를 바꾸거나 잃은 뒤 남은 값) — 그 계정은 이 도구로 다시 등록하세요(<계정> 인자).';
+  }
+  if (noKey) return `자격증명 암호화 키가 없습니다 — 원래 키(SECRETS_KEY · CONFIG_DIR/secrets-key)를 되돌리고 재시작하세요. ${KEY_LOST_GUIDE}`;
+  return '이 포탈의 키로 열리지 않습니다(키 교체 · 다른 호스트의 키) — 원래 키(SECRETS_KEY · CONFIG_DIR/secrets-key)로 되돌리고 재시작하거나, 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록하세요.';
+}
+
 function toolKeyIssue() {
   if (!_noKeyCreation) return null;
   if (_toolKeyVerdict !== undefined) return _toolKeyVerdict;

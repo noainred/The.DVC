@@ -283,6 +283,47 @@ vp_as_user() {
   fi
 }
 
+# vp_env_key_value <키 이름> — stdin 의 env 파일 본문에서 그 키의 값(마지막 줄 우선)을 stdout 으로(없으면 아무것도 내지 않는다). 셸 평가 없음.
+#   해석은 server/src/tools/portalEnvKey.js parseSecretsKey 와 같다(주석 · 빈 줄 무시 · 'export ' 접두 · 감싼 따옴표 하나 제거 · 앞뒤 공백 제거) —
+#   otp-enroll.sh · user-admin.sh 에 글자 그대로 같은 사본이 있고 시험이 세 사본 · JS 해석을 같은 입력으로 대조한다(보안 잔여 11-27 M3 — secResidual1127TotpSeal).
+vp_env_key_value() {
+  local key="$1" line="" body="" rest="" v="" val="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    body="$line"
+    if [[ "$body" == "export "* ]]; then body="${body:7}"; body="${body#"${body%%[![:space:]]*}"}"; fi
+    [[ "$body" == "$key"* ]] || continue
+    rest="${body:${#key}}"; rest="${rest#"${rest%%[![:space:]]*}"}"
+    [[ "$rest" == =* ]] || continue
+    v="${rest:1}"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+    if (( ${#v} >= 2 )) && { [[ "${v:0:1}" == '"' && "${v: -1}" == '"' ]] || [[ "${v:0:1}" == "'" && "${v: -1}" == "'" ]]; }; then v="${v:1:${#v}-2}"; fi
+    val="$v"; found=1
+  done
+  if (( found )); then printf '%s' "$val"; fi
+  return 0
+}
+
+# vp_launcher_secrets_key <config_dir> [node] — root 래퍼(otp · users)가 portal.env 의 SECRETS_KEY 를 읽어 stdout 으로(없으면 빈 값) — 보안 잔여 11-27 M3(반증 1회차 M-2).
+#   왜: 자격증명 저장 방식 = 암호화이면 users.json 의 OTP 키가 봉인되는데, 키가 portal.env 에만 있고 그 파일이 root:root(아래 install.sh 가 RMA sudoers 를
+#     넓힐 때 권하는 소유)면 서비스 계정으로 낮춘 도구는 키를 읽지 못해 **새 OTP 를 등록할 수 없었다**(잠금 복구 경로 상실). root 인 이 래퍼가 대신 읽어
+#     **환경으로** 넘긴다 — 명령줄(sudo 로그 · /proc/<pid>/cmdline)에 싣지 않는다. 서비스 계정이 받는 값은 포탈 자신(같은 계정)이 systemd 에서 받는 값과 같다(새 노출 없음).
+#   파일은 서비스 계정이 갈아끼울 수 있는 CONFIG_DIR 안이라 한 번만 연다(vp_safe_read — 링크 · FIFO · 하드 링크 · 64KB 초과 거절). 소유자는 따지지 않는다 —
+#     값은 root 판정에 쓰지 않고 낮은 권한 도구에 넘길 뿐이며, 도구가 포탈의 키 확인 값(secrets-keycheck)으로 같은 키인지 다시 확인한다.
+vp_launcher_secrets_key() {
+  local f="$1/portal.env" node="${2:-}" res="" rc=0 body=""
+  if res="$(VP_ROOT_READ_MAX_BYTES=65536 vp_safe_read "$f" "$node")"; then rc=0; else rc=$?; fi
+  case "$rc" in
+    0) ;;
+    11) return 0 ;;
+    *) echo "ⓘ $(VP_ROOT_READ_MAX_BYTES=65536 vp_root_read_text "$f" "$rc" "$res") — 그 안의 SECRETS_KEY 를 도구에 넘기지 않습니다(도구가 직접 찾습니다)." >&2; return 0 ;;
+  esac
+  if [[ "$res" == *$'\n'* ]]; then body="${res#*$'\n'}"; fi
+  printf '%s' "$body" | vp_env_key_value SECRETS_KEY
+  return 0
+}
+
 # vp_write_launcher <파일> <종류 otp|users|verify> <prefix> <서비스 계정> <서비스 이름> <config_dir> <도구 폴더>
 #   root 소유 래퍼를 만든다. 값은 printf %q 로 넣고, 판정 함수는 이 파일의 정의를 그대로 싣는다(declare -f — 사본을 두 벌 두지 않는다).
 vp_write_launcher() {
@@ -295,7 +336,7 @@ vp_write_launcher() {
     echo '# 앱 트리(<prefix>/app)·런타임은 서비스 계정이 쓸 수 있다 — root 로 그 파일을 읽거나 실행하지 않는다.'
     echo 'set -uo pipefail'
     printf 'PREFIX=%q\nSERVICE_USER=%q\nSERVICE_NAME=%q\nCONFIG_DIR=%q\nTOOLS=%q\nTOOL=%q\nKIND=%q\n' "$prefix" "$user" "$svc" "$cdir" "$tools" "$tool" "$kind"
-    declare -f vp_as_user vp_root_read vp_safe_read vp_root_read_text vp_root_env_policy vp_path_root_only vp_tree_root_only vp_anchor_ok
+    declare -f vp_as_user vp_root_read vp_safe_read vp_root_read_text vp_root_env_policy vp_path_root_only vp_tree_root_only vp_anchor_ok vp_env_key_value vp_launcher_secrets_key
     cat <<'BODY'
 if [[ "$KIND" == verify ]]; then
   # 서명 확인 — root 소유 사본(node·server/src·공개키 목록)만 신뢰 기준으로 쓴다.
@@ -312,6 +353,12 @@ fi
 APP_TOOL="$PREFIX/app/$TOOL"
 if [[ "$(id -u)" -ne 0 ]]; then exec /bin/bash "$APP_TOOL" "$@"; fi   # root 가 아니면 권한 경계가 없다 — 앱 트리 래퍼 그대로
 id "$SERVICE_USER" >/dev/null 2>&1 || { echo "✖ 서비스 계정 '$SERVICE_USER' 이 없습니다 — root 로 앱 트리를 실행하지 않습니다." >&2; exit 1; }
+# 보안 잔여 11-27 M3(반증 1회차 M-2): portal.env 의 SECRETS_KEY 를 root 로 읽어 **환경으로** 넘긴다(명령줄 아님) — 서비스 계정이 못 읽는 portal.env(root:root)에서도
+#   도구가 봉인된 OTP 키를 열고 새로 봉인할 수 있게. root 로 실행해도 되는 node(root 소유 확인 사본)가 있으면 그것으로 한 번만 연다.
+VP_KNODE=""; if vp_anchor_ok "$TOOLS"; then VP_KNODE="$TOOLS/verify/node"; fi
+VP_SKEY="$(vp_launcher_secrets_key "$CONFIG_DIR" "$VP_KNODE")"
+if [[ ${#VP_SKEY} -ge 16 ]]; then export SECRETS_KEY="$VP_SKEY"; fi
+unset VP_SKEY VP_KNODE
 if [[ "$(id -u "$SERVICE_USER")" -eq 0 ]]; then   # 서비스가 root 로 도는 설치(--user root) — 앱 트리도 root 소유다
   exec env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" VP_LAUNCHER=1 VP_LAUNCHER_CMD="sudo $0" /bin/bash "$APP_TOOL" "$@"
 fi

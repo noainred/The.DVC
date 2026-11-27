@@ -58,6 +58,27 @@ if [[ ! -x "$NODE" ]]; then
   [[ -n "$NODE" ]] || { echo "✖ Node 런타임을 찾을 수 없습니다(번들·시스템 모두)." >&2; exit 1; }
 fi
 
+# vp_env_key_value <키 이름> — stdin 의 env 파일 본문에서 그 키의 값(마지막 줄 우선). 보안 잔여 11-27 M3: packaging/offline/release-verify-lib.sh 의 같은 이름 함수와
+#   글자 그대로 같은 사본이다(이 파일은 그 라이브러리를 읽을 수 없다 — 시험이 세 사본 · JS parseSecretsKey 를 대조한다). 고칠 때는 셋을 함께.
+vp_env_key_value() {
+  local key="$1" line="" body="" rest="" v="" val="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    body="$line"
+    if [[ "$body" == "export "* ]]; then body="${body:7}"; body="${body#"${body%%[![:space:]]*}"}"; fi
+    [[ "$body" == "$key"* ]] || continue
+    rest="${body:${#key}}"; rest="${rest#"${rest%%[![:space:]]*}"}"
+    [[ "$rest" == =* ]] || continue
+    v="${rest:1}"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+    if (( ${#v} >= 2 )) && { [[ "${v:0:1}" == '"' && "${v: -1}" == '"' ]] || [[ "${v:0:1}" == "'" && "${v: -1}" == "'" ]]; }; then v="${v:1:${#v}-2}"; fi
+    val="$v"; found=1
+  done
+  if (( found )); then printf '%s' "$val"; fi
+  return 0
+}
+
 # 3) 실행 계정 — root 라면 서비스 계정으로 강등(파일 소유권 보존).
 RUN_USER=""
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -67,7 +88,15 @@ if [[ "$(id -u)" -eq 0 ]]; then
 fi
 
 if [[ -n "$RUN_USER" ]] && id "$RUN_USER" &>/dev/null; then
-  exec sudo -u "$RUN_USER" env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" OTP_ENROLL_CMD="$CMD_HINT" "$NODE" "$TOOL" "$@"
+  # 보안 잔여 11-27 M3(반증 1회차 M-2): root 로 낮춰 부를 때 portal.env 의 SECRETS_KEY 를 **환경으로** 넘긴다(명령줄 아님 — sudo 로그 · /proc cmdline).
+  #   서비스 계정이 못 읽는 portal.env(root:root)에서도 도구가 봉인된 OTP 키를 열고 새로 봉인하게. 링크 · 일반 파일이 아니면 읽지 않는다(64KB 상한).
+  if [[ -z "${SECRETS_KEY:-}" && -f "$CONFIG_DIR/portal.env" && ! -L "$CONFIG_DIR/portal.env" ]]; then
+    SKEY="$(head -c 65536 -- "$CONFIG_DIR/portal.env" 2>/dev/null | vp_env_key_value SECRETS_KEY || true)"
+    if [[ ${#SKEY} -ge 16 ]]; then export SECRETS_KEY="$SKEY"; fi
+    unset SKEY
+  fi
+  KEEP_ENV=(); if [[ -n "${SECRETS_KEY:-}" ]]; then KEEP_ENV=(--preserve-env=SECRETS_KEY); fi
+  exec sudo -u "$RUN_USER" "${KEEP_ENV[@]}" env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" OTP_ENROLL_CMD="$CMD_HINT" "$NODE" "$TOOL" "$@"
 fi
 # SERVICE_NAME 도 넘긴다(v2.674) — 도구의 완료 문구가 재시작할 서비스 이름을 이 래퍼가 본 이름 그대로 말하게.
 exec env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" OTP_ENROLL_CMD="$CMD_HINT" "$NODE" "$TOOL" "$@"

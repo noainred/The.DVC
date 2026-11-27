@@ -6,7 +6,9 @@
  * 설계(원 감사 권고 '전역 SECRET_FIELDS + 일반 경로' 를 택하지 않은 이유 — secretVault.js '레코드 단위 봉인' 절):
  *   일반 경로는 키 없음에서 모든 저장을 거절하고(로그인 · 비밀번호 변경이 깨진다) 복호 실패를 '' 로 열어 암호문을 지우고 OTP 전용 계정을 비밀번호로 내린다.
  *
- * 시나리오(T1~T25)는 자식 프로세스에서 돈다 — auth 의 사용자 목록 · vault 의 키 · 정책 캐시가 프로세스에 굳으므로 '재시작' 은 새 프로세스다.
+ * 시나리오(T1~T30)는 자식 프로세스에서 돈다 — auth 의 사용자 목록 · vault 의 키 · 정책 캐시가 프로세스에 굳으므로 '재시작' 은 새 프로세스다.
+ * 반증 1회차(T26~T30): 봉인 모양 표시 이름이 평문 설치를 잠그지 않음(M-1) · root 래퍼가 portal.env(root:root)의 SECRETS_KEY 를 환경으로 넘김(M-2 — root 일 때만 실제 강등) ·
+ *   키 분실의 정직한 안내와 SECRETS_KEY_LOST 복구 경로(M-3) · 프로세스 · 키 상태별 복호 실패 안내(S-2). 래퍼 · 라이브러리는 SRC 의 저장소 트리 것을 쓴다.
  * `M3_SRC` 로 다른 소스 트리(수정 전 판본의 격리 사본)를 가리킬 수 있다 — 수정 전 실패 확인 · 변이 검증용.
  * TOTP 코드는 실제 시각의 30초 칸에서 고정 칸 번호(counter)로 만든다 — 검증 창(±1칸) 안이고, 확정 칸(now) 다음 칸(now+1)을 로그인에 쓴다(재사용 거부 회피).
  */
@@ -292,17 +294,20 @@ function enrolledEncDir() {
   return { dir, ...r };
 }
 
-test('T9 잠금 — begin 거절(SECRETS_POLICY_UNAVAILABLE · 한국어 사유) · 메모리 · 파일 불변', () => {
+test('T9 잠금 — begin 거절(SECRETS_POLICY_UNAVAILABLE · 한국어 사유) · 메모리 · 파일 불변 · \'기존 OTP 로그인은 그대로\' 는 열 수 있는 시드가 있을 때만', () => {
   const e = enrolledEncDir(); dropPolicy(e.dir);
   const before = raw(e.dir, 'users.json');
   const r = child(async (c) => {
     const A = await c.imp('auth/auth.js');
     const b = A.beginTotpEnroll('noainred', '', { trusted: true });
-    return { b: { ok: b.ok, code: b.code || null, reason: b.reason || '', secret: !!b.secret }, mem: A.getUser('noainred').totpPendingSecret ?? null };
+    const ba = A.beginTotpEnroll('adm', '', { trusted: true });   // OTP 가 등록돼 있고 그 시드를 열 수 있다(키 파일 있음)
+    return { b: { ok: b.ok, code: b.code || null, reason: b.reason || '', secret: !!b.secret }, ba: { ok: ba.ok, reason: ba.reason || '' }, mem: A.getUser('noainred').totpPendingSecret ?? null };
   }, e.dir);
   assert.equal(r.b.ok, false); assert.equal(r.b.code, 'SECRETS_POLICY_UNAVAILABLE'); assert.equal(r.b.secret, false);
   assert.match(r.b.reason, /새 OTP 키를 발급하지 않았습니다 — 자격증명 저장 방식/);
-  assert.match(r.b.reason, /기존 OTP 로그인은 그대로 됩니다/);
+  assert.doesNotMatch(r.b.reason, /기존 OTP 로그인/, 'OTP 가 없는 계정에는 붙이지 않는다(반증 1회차 M-3)');
+  assert.equal(r.ba.ok, false);
+  assert.match(r.ba.reason, /이 계정의 기존 OTP 로그인은 그대로 됩니다/);
   assert.equal(r.mem, null, '메모리를 바꾸지 않는다');
   assert.equal(raw(e.dir, 'users.json'), before, '파일 불변');
 });
@@ -440,6 +445,8 @@ test('T15 도구 — 암호화 정책 · 키 없음 · 흔적 없음: 등록 시
   const t = tool('otp-enroll.js', ['adm'], dir);
   assert.notEqual(t.status, 0, t.out);
   assert.match(t.err, /새 OTP 키를 발급하지 않았습니다/);
+  assert.match(t.err, /봉인된 값은 아직 없습니다 — 포탈을 재시작하면/, '흔적이 없으면 키 분실로 안내하지 않는다(반증 1회차 M-3)');
+  assert.doesNotMatch(t.err, /SECRETS_KEY_LOST=true/);
   assert.equal(fs.existsSync(path.join(dir, 'secrets-key')), false, '도구는 키를 만들지 않는다');
   assert.equal(raw(dir, 'users.json'), orig);
 });
@@ -579,9 +586,9 @@ test('T19 복호 실패 표시 — otp-enroll --list 문구 · loginStateOf(강�
     const st = X.loginStateOf({ role: 'admin', totpEnabled: true, otpUnreadable: true, hasPassword: true }, {});
     const vw = X.loginStateOf({ role: 'viewer', totpEnabled: true, otpUnreadable: true, hasPassword: true }, {});
     const okRow = X.loginStateOf({ role: 'admin', totpEnabled: true }, {});
-    return { st: [st.state, st.methods, /복호하지 못해/.test(st.note)], vw: [vw.state, vw.methods], ok: okRow.state };
+    return { st: [st.state, st.methods, /복호하지 못해/.test(st.note), /SECRETS_KEY_LOST=true/.test(st.note)], vw: [vw.state, vw.methods], ok: okRow.state };
   }, tmpDir());
-  assert.deepEqual(r, { st: ['none', '없음', true], vw: ['ok', '비밀번호'], ok: 'ok' });
+  assert.deepEqual(r, { st: ['none', '없음', true, true], vw: ['ok', '비밀번호'], ok: 'ok' });
 });
 
 /* ── T20 복원 경고 ─────────────────────────────────────────────────────────────────────── */
@@ -595,7 +602,16 @@ test('T20 복원 예약 — 이 호스트 키로 못 여는 번들 OTP 키를 �
     return { w: res.warnings.map((x) => x.reason), key: fs.existsSync(path.join(c.DIR, 'secrets-key')) };
   }, dir, { M3_BUNDLE: bundle });
   assert.ok(r.w.some((w) => /번들의 OTP 키 1개\(고권한 계정 1개\)를 이 포탈의 암호화 키로 열 수 없습니다/.test(w)), r.w.join(' | '));
+  // 반증 1회차 M-3: 키가 없는 호스트 — 콘솔 도구도 거절하므로 탈출구(SECRETS_KEY_LOST)를 싣는다
+  assert.ok(r.w.some((w) => /콘솔 도구로도 다시 등록할 수 없습니다/.test(w) && /SECRETS_KEY_LOST=true/.test(w)), r.w.join(' | '));
   assert.equal(r.key, false, '판정이 키를 만들지 않는다');
+  const rb = child(async (c) => {
+    const B = await c.imp('backup/service.js');
+    const res = await B.restoreCentral({ central: { files: { 'users.json': process.env.M3_BUNDLE } } });
+    return res.warnings.map((x) => x.reason).filter((x) => /OTP 키/.test(x));
+  }, tmpDir(), { M3_BUNDLE: bundle, SECRETS_KEY: KEY_B });
+  assert.equal(rb.length, 1, '다른 키 호스트도 경고');
+  assert.match(rb[0], /이 포탈의 키로 다시 등록/); assert.doesNotMatch(rb[0], /SECRETS_KEY_LOST/, '키가 있는 호스트에는 키 분실 탈출구를 권하지 않는다');
   const r2 = child(async (c) => {
     const B = await c.imp('backup/service.js');
     const res = await B.restoreCentral({ central: { files: { 'users.json': process.env.M3_BUNDLE } } });
@@ -622,6 +638,9 @@ test('T21 · T22 소스 대조 — 로그인 실패 감사 detail · verifyToken
   assert.equal(/JSON\.stringify\(\{ users: loadUsers\(\) \}/.test(s), false);
   const confirm = s.slice(s.indexOf('export function confirmTotpEnroll('), s.indexOf('export function disableTotp('));
   assert.ok(/SEAL_ERROR_CODES\.has\(e\?\.code\)[\s\S]*for \(const \[k, s0\] of Object\.entries\(snap\)\)/.test(confirm), 'confirm 저장 실패 되돌림(도달 조건 없음 — 소스 대조)');
+  // 반증 1회차: 기동 경고가 node 직접 실행을 안내하지 않는다(root 직접 실행은 도구가 거절하고, 래퍼만 portal.env 의 SECRETS_KEY 를 넘긴다)
+  const warn = s.slice(s.indexOf('export function warnIfNoOtpAdmin('), s.indexOf('return true;', s.indexOf('export function warnIfNoOtpAdmin(')));
+  assert.equal(/node server\/src\/tools\/otp-enroll\.js/.test(warn), false); assert.ok(/sudo vmware-portal-otp/.test(warn));
 });
 
 /* ── T23 salt 정리 · T24 평문 점검기 · T25 자가 점검 ─────────────────────────────────────── */
@@ -663,8 +682,264 @@ test('T25 자가 점검 — 복호 실패 계정은 OTP 등록 수에서 빠지�
       { username: 'op', role: 'operator', totpEnabled: true, otpUnreadable: false },
     ] });
     const cov = checks.find((x) => x.id === 'otp-coverage'); const un = checks.find((x) => x.id === 'otp-seed-unreadable');
-    return { cov: [cov.status, cov.detail], un: un ? [un.status, un.detail] : null };
+    return { cov: [cov.status, cov.detail], un: un ? [un.status, un.detail, un.howto] : null };
   }, tmpDir());
   assert.equal(r.cov[0], 'warn'); assert.match(r.cov[1], /2개 중 1개 등록 · admin 1개 중 0개 등록/);
   assert.ok(r.un); assert.equal(r.un[0], 'risk'); assert.equal(/adm/.test(r.un[1]), false);
+  assert.match(r.un[2], /키가 아예 없으면[^]*콘솔 도구도 거절한다 — portal\.env 에 SECRETS_KEY_LOST=true/, '키가 없을 때의 탈출구(반증 1회차 M-3)');
+});
+
+/* ══ 반증 1회차(must 3건 · should 1건) ═══════════════════════════════════════════════════════════════ */
+const REPO = path.resolve(SRC, '..', '..');   // M3_SRC 가 다른 트리를 가리키면 그 트리의 래퍼 · 라이브러리를 쓴다(수정 전 판본 확인)
+const LIB = path.join(REPO, 'packaging/offline/release-verify-lib.sh');
+const IS_ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
+const idOf = (flag, who) => { const r = spawnSync('id', [flag, who], { encoding: 'utf8' }); return r.status === 0 ? Number(r.stdout.trim()) : null; };
+const NOBODY = { uid: idOf('-u', 'nobody'), gid: idOf('-g', 'nobody') };
+const HAS_RUNUSER = spawnSync('sh', ['-c', 'command -v runuser'], { encoding: 'utf8' }).status === 0;
+const HAS_SUDO = spawnSync('sh', ['-c', 'command -v sudo'], { encoding: 'utf8' }).status === 0;
+const ROOT_SKIP = !IS_ROOT || NOBODY.uid == null || !HAS_RUNUSER ? '권한 강등 시험 — root + nobody + runuser 가 있을 때만(CI 일반 계정에서는 건너뜀 — 순수 부분은 T28)' : false;
+const bashRun = (script, args = [], opts = {}) => spawnSync('bash', ['-c', script, '_', ...args], { encoding: 'utf8', timeout: 120_000, ...opts });
+
+/* ── T26 반증 1회차 M-1: 봉인 모양 표시 이름이 평문 설치를 정책 잠금으로 만들지 않는다 ───────────────────── */
+test('T26 평문 설치(정책 파일 없음) — 표시 이름을 봉인 모양으로 바꿔도 같은 프로세스 암호화 켜기 성공 · 재시작 뒤 plain · 등록부 저장 · begin 성공(반증 1회차 M-1)', () => {
+  const FAKE = 'enc$1$aes-256-gcm$15$display';
+  // ① 같은 프로세스에서 암호화 켜기
+  const d1 = tmpDir(); put(d1, 'users.json', baseUsers());
+  const r1 = child(async (c) => {
+    const A = await c.imp('auth/auth.js'); const V = await c.imp('security/secretVault.js');
+    A.loadUsers();
+    const u = A.updateUser('adm', { name: process.env.M3_FAKE }, { trusted: true }).ok;
+    try { V.saveSecretsPolicy({ mode: 'encrypted', level: 1 }); return { u, enc: 'ok' }; } catch (e) { return { u, enc: e.code || e.message }; }
+  }, d1, { M3_FAKE: FAKE });
+  assert.deepEqual(r1, { u: true, enc: 'ok' }, '표시 이름이 키 분실 흔적(sealed-values)이 되면 안 된다');
+  // ② 재시작
+  const d2 = tmpDir(); put(d2, 'users.json', baseUsers());
+  const ren = child(async (c) => { const A = await c.imp('auth/auth.js'); A.loadUsers(); return A.updateUser('adm', { name: process.env.M3_FAKE }, { trusted: true }).ok; }, d2, { M3_FAKE: FAKE });
+  assert.equal(ren, true);
+  assert.equal(byName(d2, 'adm').name, FAKE, '이름은 그대로 저장');
+  const r2 = child(async (c) => {
+    const V = await c.imp('security/secretVault.js'); const A = await c.imp('auth/auth.js');
+    const pol = V.loadSecretsPolicy();
+    let deep; try { deep = V.sealSecretsDeep({ password: 'vc-pass' }).password; } catch (e) { deep = e.code; }
+    A.loadUsers();
+    const b = A.beginTotpEnroll('adm', '', { trusted: true });
+    return { mode: pol.mode, locked: !!pol.locked, deep, begin: b.ok };
+  }, d2);
+  assert.deepEqual(r2, { mode: 'plain', locked: false, deep: 'vc-pass', begin: true });
+  // ③ 대조군 — 진짜 봉인 시드는 여전히 흔적이다(정책 파일 · 신뢰 사본 없음 → 잠금) · 손상된 users.json 은 원문 정규식(보수 쪽)
+  const d3 = tmpDir(); put(d3, 'users.json', baseUsers([{ username: 'a1', name: 'A1', role: 'admin', totpEnabled: true, totpSecret: SEALED_A[0], tokenVersion: 1 }]));
+  const d3b = tmpDir(); put(d3b, 'users.json', baseUsers([{ username: 'a1', name: 'A1', role: 'admin', totpPendingSecret: SEALED_A[1], tokenVersion: 1 }]));
+  const d4 = tmpDir(); put(d4, 'users.json', `{ "users": [ { "username": "a1", "totpSecret": "${SEALED_A[0]}" `);
+  const d5 = tmpDir(); put(d5, 'users.json', baseUsers([{ username: 'a1', name: 'x', role: 'admin', totpEnabled: true, totpSecret: SEED, note: SEALED_A[0], tokenVersion: 1 }]));
+  const pol = (dir) => child(async (c) => { const V = await c.imp('security/secretVault.js'); const p = V.loadSecretsPolicy(); return [p.mode, (p.evidence || []).join(',')]; }, dir);
+  assert.deepEqual(pol(d3), ['unavailable', 'sealed-values'], '봉인 활성 시드 = 흔적');
+  assert.deepEqual(pol(d3b), ['unavailable', 'sealed-values'], '봉인 대기 시드 = 흔적');
+  assert.deepEqual(pol(d4), ['unavailable', 'sealed-values'], '파싱 못 하는 users.json 은 원문으로 본다');
+  assert.deepEqual(pol(d5), ['plain', ''], '시드 칸이 아닌 곳의 봉인 모양 글자는 흔적이 아니다');
+});
+
+/* ── T27 반증 1회차 M-2: root 래퍼가 portal.env(root:root)의 SECRETS_KEY 를 환경으로 넘긴다 — 실제 강등 · 실제 도구 ───────── */
+function execChown(p) { spawnSync('chown', ['-R', `${NOBODY.uid}:${NOBODY.gid}`, p]); }
+function launcherFixture(tag, { fakeTools = false } = {}) {
+  const base = fs.mkdtempSync(path.join('/tmp', `m3launch-${tag}-`)); TMP_DIRS.push(base);
+  fs.chmodSync(base, 0o755);
+  const prefix = path.join(base, 'opt', 'vp'); const app = path.join(prefix, 'app');
+  const cfg = path.join(base, 'etc'); const tools = path.join(base, 'libexec');
+  fs.mkdirSync(app, { recursive: true }); fs.mkdirSync(cfg); fs.mkdirSync(tools);
+  for (const d of [path.join(base, 'opt'), prefix, app, cfg, tools]) fs.chmodSync(d, 0o755);
+  fs.copyFileSync(path.join(REPO, 'otp-enroll.sh'), path.join(app, 'otp-enroll.sh'));
+  fs.copyFileSync(path.join(REPO, 'user-admin.sh'), path.join(app, 'user-admin.sh'));
+  for (const f of ['otp-enroll.sh', 'user-admin.sh']) fs.chmodSync(path.join(app, f), 0o755);
+  fs.mkdirSync(path.join(prefix, 'runtime', 'node', 'bin'), { recursive: true });
+  fs.symlinkSync(process.execPath, path.join(prefix, 'runtime', 'node', 'bin', 'node'));
+  if (fakeTools) {
+    // 가짜 도구 — 받은 키의 지문(값은 싣지 않는다) · 조상 프로세스 명령줄에 키가 보였는가 · 실행 uid
+    const td = path.join(app, 'server', 'src', 'tools');
+    fs.mkdirSync(td, { recursive: true });
+    const body = `const fs=require('fs');const k=process.env.SECRETS_KEY||'';let leak=false,pid=process.pid,n=0;
+while(pid>1&&n++<12){let cl='';try{cl=fs.readFileSync('/proc/'+pid+'/cmdline','utf8')}catch{}if(k&&cl.includes(k))leak=true;let st='';try{st=fs.readFileSync('/proc/'+pid+'/stat','utf8')}catch{break}pid=Number(st.slice(st.lastIndexOf(')')+2).split(' ')[1]);}
+console.log('@@'+JSON.stringify({uid:process.getuid(),has:'SECRETS_KEY' in process.env,key:k?require('crypto').createHash('sha256').update(k).digest('hex').slice(0,12):null,leak}));`;
+    for (const f of ['otp-enroll', 'user-admin']) { fs.writeFileSync(path.join(td, `${f}.cjs`), body); fs.writeFileSync(path.join(td, `${f}.js`), `import('./${f}.cjs');\n`); }
+    fs.writeFileSync(path.join(app, 'server', 'package.json'), '{"type":"module"}');
+    execChown(path.join(app, 'server'));
+  } else {
+    fs.symlinkSync(path.join(REPO, 'server'), path.join(app, 'server'));   // 실제 도구(이 트리의 server/src + node_modules)
+  }
+  const out = bashRun('set -euo pipefail\nsource "$1"\nvp_write_launcher "$2/vmware-portal-otp" otp "$3" nobody vp-m3-svc "$4" "$2"\nvp_write_launcher "$2/vmware-portal-users" users "$3" nobody vp-m3-svc "$4" "$2"', [LIB, tools, prefix, cfg]);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  return { base, prefix, app, cfg, tools };
+}
+const fpOf = (k) => crypto.createHash('sha256').update(k).digest('hex').slice(0, 12);
+const fakeOut = (r) => { const l = String(r.stdout || '').split('\n').find((x) => x.startsWith('@@')); return l ? JSON.parse(l.slice(2)) : null; };
+const launcherEnv = (extra = {}) => { const env = { ...process.env, ...extra }; for (const k of CHILD_ENV_DROP) delete env[k]; delete env.CONFIG_DIR; delete env.DATA_DIR; return env; };
+
+test('T27 root 래퍼 — portal.env(root:root 0640)에만 키가 있는 설치: 강등된 실제 도구가 OTP 를 등록 · 확정 · 포탈이 그 시드로 로그인 · users.json 소유 그대로(반증 1회차 M-2)', { skip: ROOT_SKIP }, () => {
+  const fx = launcherFixture('real');
+  put(fx.cfg, 'users.json', baseUsers());
+  assert.equal(portalWithEnvKey(fx.cfg, KEY_A).kc, true, '포탈(env 키)이 암호화 정책 · 키 확인 값을 남김');
+  execChown(fx.cfg);
+  const pe = path.join(fx.cfg, 'portal.env');
+  put(fx.cfg, 'portal.env', `PORT=8080\nSECRETS_KEY="${KEY_A}"\n`);
+  fs.chownSync(pe, 0, 0); fs.chmodSync(pe, 0o640);
+  const env = launcherEnv({ AUTH_ENABLED: 'true', DATA_SOURCE: 'live' });
+  const t1 = spawnSync(path.join(fx.tools, 'vmware-portal-otp'), ['adm'], { encoding: 'utf8', env, cwd: '/', timeout: 120_000, input: '' });
+  assert.equal(t1.status, 0, t1.stdout + t1.stderr);
+  const secret = (/설정 키\s*:\s*([A-Z2-7]+)/.exec(t1.stdout) || [])[1];
+  assert.ok(secret, t1.stdout);
+  assert.ok(isSealedStr(byName(fx.cfg, 'adm').totpPendingSecret), '포탈 키로 봉인');
+  const now = Math.floor(Date.now() / 30000);
+  const code = child(async (c) => { const T = await c.imp('auth/totp.js'); return T.generateToken(process.env.M3_S, { counter: Number(process.env.M3_N) }); }, tmpDir(), { M3_S: secret, M3_N: String(now) });
+  const t2 = spawnSync(path.join(fx.tools, 'vmware-portal-otp'), ['adm', '--confirm', code], { encoding: 'utf8', env, cwd: '/', timeout: 120_000, input: '' });
+  assert.equal(t2.status, 0, t2.stdout + t2.stderr);
+  assert.equal(fs.statSync(path.join(fx.cfg, 'users.json')).uid, NOBODY.uid, 'users.json 은 서비스 계정 소유 그대로');
+  assert.equal(fs.existsSync(path.join(fx.cfg, 'secrets-key')), false, '키 파일을 만들지 않았다');
+  assert.equal(raw(fx.cfg, 'users.json').includes(secret), false);
+  const r = child(async (c) => {
+    const A = await c.imp('auth/auth.js'); const T = await c.imp('auth/totp.js');
+    return !!A.authenticateLocal('adm', T.generateToken(process.env.M3_S, { counter: Number(process.env.M3_N) + 1 }));
+  }, fx.cfg, { SECRETS_KEY: KEY_A, M3_S: secret, M3_N: String(now) });
+  assert.equal(r, true, 'env 키 포탈이 래퍼 경유 도구가 봉인한 시드로 로그인');
+});
+
+test('T27b root 래퍼 · git 소스 래퍼(root 직접) — 키는 환경으로만(조상 명령줄에 없음) · 강등 uid · 링크 portal.env 는 읽지 않음 · 키 없는 portal.env 는 아무것도 넘기지 않음', { skip: ROOT_SKIP }, () => {
+  const fx = launcherFixture('fake', { fakeTools: true });
+  execChown(fx.cfg);
+  const pe = path.join(fx.cfg, 'portal.env');
+  put(fx.cfg, 'portal.env', `# x\nexport SECRETS_KEY='${KEY_A}'\r\nAUTH_SECRET=zz\n`);
+  fs.chownSync(pe, 0, 0); fs.chmodSync(pe, 0o640);
+  const env = launcherEnv({ VP_ROOT_TOOLS_BASE: path.join(fx.base, 'none') });
+  for (const kind of ['vmware-portal-otp', 'vmware-portal-users']) {
+    const r = spawnSync(path.join(fx.tools, kind), ['--list'], { encoding: 'utf8', env, cwd: '/', timeout: 60_000, input: '' });
+    const o = fakeOut(r);
+    assert.ok(o, `${kind}: ${r.stdout}${r.stderr}`);
+    assert.deepEqual(o, { uid: NOBODY.uid, has: true, key: fpOf(KEY_A), leak: false }, `${kind}: 강등 · 키 전달 · 명령줄 노출 없음`);
+  }
+  // git 소스 래퍼를 root 로 직접(root 소유 래퍼 없음 — VP_ROOT_TOOLS_BASE 가 빈 곳) — sudo -u 강등 + --preserve-env
+  if (HAS_SUDO) {
+    for (const sh of ['otp-enroll.sh', 'user-admin.sh']) {
+      const r = spawnSync(path.join(fx.app, sh), ['--list'], { encoding: 'utf8', env: { ...env, CONFIG_DIR: fx.cfg }, cwd: '/', timeout: 60_000, input: '' });
+      const o = fakeOut(r);
+      assert.ok(o, `${sh}: ${r.stdout}${r.stderr}`);
+      assert.deepEqual(o, { uid: NOBODY.uid, has: true, key: fpOf(KEY_A), leak: false }, `${sh}: root 직접 실행도 강등 · 키는 환경으로`);
+    }
+  }
+  // portal.env 가 링크면 root 가 따라가 읽지 않는다(대상이 root 전용 파일이어도 서비스 계정에 넘기지 않는다)
+  const secretFile = path.join(fx.base, 'root-only.env'); fs.writeFileSync(secretFile, `SECRETS_KEY=${KEY_B}\n`, { mode: 0o600 });
+  fs.rmSync(pe); fs.symlinkSync(secretFile, pe);
+  const rl = spawnSync(path.join(fx.tools, 'vmware-portal-otp'), ['--list'], { encoding: 'utf8', env, cwd: '/', timeout: 60_000, input: '' });
+  assert.deepEqual(fakeOut(rl), { uid: NOBODY.uid, has: false, key: null, leak: false }, rl.stdout + rl.stderr);
+  assert.match(rl.stderr, /심볼릭 링크라 따라가 읽지 않습니다 — 그 안의 SECRETS_KEY 를 도구에 넘기지 않습니다/);
+  // 키가 없는(또는 짧은) portal.env — 아무것도 넘기지 않는다(빈 값 · 짧은 값을 환경에 싣지 않는다)
+  fs.rmSync(pe); put(fx.cfg, 'portal.env', 'PORT=1\nSECRETS_KEY_LOST=true\nSECRETS_KEY=short\n'); fs.chownSync(pe, 0, 0);
+  const rn = spawnSync(path.join(fx.tools, 'vmware-portal-otp'), ['--list'], { encoding: 'utf8', env, cwd: '/', timeout: 60_000, input: '' });
+  assert.deepEqual(fakeOut(rn), { uid: NOBODY.uid, has: false, key: null, leak: false }, rn.stdout + rn.stderr);
+  // 래퍼 글자 — 키를 명령줄 인자(env SECRETS_KEY=…)로 넘기는 줄이 없다
+  for (const f of [path.join(fx.tools, 'vmware-portal-otp'), path.join(REPO, 'otp-enroll.sh'), path.join(REPO, 'user-admin.sh')]) {
+    assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /\benv\b[^\n#]*\bSECRETS_KEY=/, `${f}: 명령줄로 키를 넘기지 않는다`);
+  }
+});
+
+/* ── T28 순수: 세 bash 사본 = 같은 글자 · JS parseSecretsKey 와 같은 해석 · vp_launcher_secrets_key 의 64KB 상한 ─────────── */
+test('T28 vp_env_key_value — 라이브러리 · otp-enroll.sh · user-admin.sh 사본이 글자 그대로 같고 parseSecretsKey 와 같은 입력에 같은 값 · 큰 portal.env 는 읽지 않음', () => {
+  const fnOf = (f) => { const s = fs.readFileSync(f, 'utf8'); const i = s.indexOf('vp_env_key_value() {'); assert.ok(i >= 0, `${f}: vp_env_key_value 없음`); return s.slice(i, s.indexOf('\n}\n', i) + 2); };
+  const lib = fnOf(LIB);
+  for (const f of ['otp-enroll.sh', 'user-admin.sh']) assert.equal(fnOf(path.join(REPO, f)), lib, `${f}: 사본이 라이브러리와 같다`);
+  const inputs = [
+    'A=1\nSECRETS_KEY="abc def"\n#SECRETS_KEY=zz\n', "export SECRETS_KEY='q1'\r\nSECRETS_KEY = last\n", 'SECRETS_KEY_LOST=true\n', '',
+    '  SECRETS_KEY=  padded value  \n', 'SECRETS_KEY=a=b=c', 'SECRETS_KEY="unterminated\n', "SECRETS_KEY='x\"", 'SECRETS_KEY=""\n', 'SECRETS_KEY=\n',
+    '#SECRETS_KEY=c\n\n\t SECRETS_KEY=tabbed\n', 'export   SECRETS_KEY="spaced-export"\n', 'XSECRETS_KEY=no\n', 'SECRETS_KEY\n', 'SECRETS_KEYS=no\n',
+  ];
+  const js = child(async (c) => { const K = await c.imp('tools/portalEnvKey.js'); return JSON.parse(process.env.M3_IN).map((t) => K.parseSecretsKey(t) ?? ''); }, tmpDir(), { M3_IN: JSON.stringify(inputs) });
+  const sh = inputs.map((t) => { const r = bashRun('source "$1"; printf "%s" "$2" | vp_env_key_value SECRETS_KEY', [LIB, t]); assert.equal(r.status, 0, r.stderr); return r.stdout; });
+  assert.deepEqual(sh, js, '같은 입력 → 같은 값');
+  const dir = tmpDir();
+  put(dir, 'portal.env', `SECRETS_KEY=${KEY_A}\n`);
+  const got = bashRun('source "$1"; vp_launcher_secrets_key "$2" "$3"', [LIB, dir, process.execPath]);
+  assert.equal(got.status, 0, got.stderr); assert.equal(got.stdout, KEY_A, 'node 로 한 번 열기');
+  const got2 = bashRun('source "$1"; vp_launcher_secrets_key "$2" ""', [LIB, dir]);
+  assert.equal(got2.stdout, KEY_A, 'node 없이(시한 있는 한 번 열기)');
+  put(dir, 'portal.env', `SECRETS_KEY=${KEY_A}\n${'#'.repeat(70_000)}\n`);
+  const big = bashRun('source "$1"; vp_launcher_secrets_key "$2" "$3"', [LIB, dir, process.execPath]);
+  assert.equal(big.stdout, ''); assert.match(big.stderr, /크기 상한\(65536바이트\)/);
+  fs.rmSync(path.join(dir, 'portal.env'));
+  const none = bashRun('source "$1"; vp_launcher_secrets_key "$2" "$3"', [LIB, dir, process.execPath]);
+  assert.equal(none.status, 0); assert.equal(none.stdout + none.stderr, '', '파일 없음은 조용히 빈 값');
+});
+
+/* ── T29 반증 1회차 M-3: 키를 잃은 설치 — 정직한 사유 · 탈출구 안내 · SECRETS_KEY_LOST 재시작 뒤 콘솔 도구로 복구 ────────── */
+test('T29 키 분실(secrets-key 삭제) — 포탈 · 도구 · begin 문구가 SECRETS_KEY_LOST 를 안내 · \'그대로 됩니다\' 를 말하지 않음 → SECRETS_KEY_LOST 재시작 → 도구 등록 → 포탈 로그인', () => {
+  const e = enrolledEncDir();
+  fs.rmSync(path.join(e.dir, 'secrets-key'));
+  const s1 = child(async (c) => {
+    const A = await c.imp('auth/auth.js'); const T = await c.imp('auth/totp.js');
+    const login = !!A.authenticateLocal('adm', T.generateToken(process.env.M3_S, { counter: Number(process.env.M3_N) + 1 }));
+    const b = A.beginTotpEnroll('adm', '', { trusted: true });
+    return { login, b: { ok: b.ok, code: b.code || null, reason: b.reason || '' }, warn: c.logs.filter((l) => l.includes('[auth] ⚠ users.json 의 OTP 키')) };
+  }, e.dir, { M3_S: e.secret, M3_N: String(e.now) });
+  assert.equal(s1.login, false);
+  assert.equal(s1.b.ok, false); assert.equal(s1.b.code, 'SECRETS_KEY_MISSING');
+  assert.match(s1.b.reason, /포탈 환경\(리눅스 설치본은 portal\.env\)에 SECRETS_KEY_LOST=true 한 줄을 넣고 포탈을 한 번 재시작하세요/);
+  assert.doesNotMatch(s1.b.reason, /기존 OTP 로그인은 그대로/, '바로 그 계정이 로그인하지 못하는데 \'그대로\' 라고 하지 않는다');
+  assert.match(s1.b.reason, /이 계정의 지금 OTP 키도 열지 못해/);
+  assert.equal(s1.warn.length, 1); assert.match(s1.warn[0], /자격증명 암호화 키가 없습니다/); assert.match(s1.warn[0], /SECRETS_KEY_LOST=true/);
+  const t1 = tool('otp-enroll.js', ['adm'], e.dir);
+  assert.notEqual(t1.status, 0, t1.out);
+  assert.match(t1.err, /봉인된 값이 있는데 키가 없습니다 — 키를 정말 잃었으면/); assert.match(t1.err, /그 뒤 이 도구를 다시 실행하세요/);
+  assert.doesNotMatch(t1.err, /기존 OTP 로그인은 그대로/);
+  assert.equal(fs.existsSync(path.join(e.dir, 'secrets-key')), false, '도구는 키를 만들지 않는다');
+  // 운영자가 안내대로 SECRETS_KEY_LOST=true 로 한 번 재시작
+  const boot = child(async (c) => { const A = await c.imp('auth/auth.js'); const V = await c.imp('security/secretVault.js'); A.loadUsers(); return await V._keyCheckSettled(); }, e.dir, { SECRETS_KEY_LOST: 'true' });
+  assert.ok(['written', 'same'].includes(boot), `키 확인 값: ${boot}`);
+  assert.ok(fs.existsSync(path.join(e.dir, 'secrets-key')), '새 키');
+  assert.ok(isSealedStr(byName(e.dir, 'adm').totpSecret), '옛 시드는 지우지 않는다(그 계정은 다시 등록)');
+  const t2 = tool('otp-enroll.js', ['adm'], e.dir);
+  assert.equal(t2.status, 0, t2.err + t2.out);
+  const secret = (/설정 키\s*:\s*([A-Z2-7]+)/.exec(t2.out) || [])[1];
+  assert.ok(secret, t2.out);
+  const now = Math.floor(Date.now() / 30000);
+  const code = child(async (c) => { const T = await c.imp('auth/totp.js'); return T.generateToken(process.env.M3_S, { counter: Number(process.env.M3_N) }); }, tmpDir(), { M3_S: secret, M3_N: String(now) });
+  const t3 = tool('otp-enroll.js', ['adm', '--confirm', code], e.dir);
+  assert.equal(t3.status, 0, t3.err + t3.out);
+  const s2 = child(async (c) => {
+    const A = await c.imp('auth/auth.js'); const T = await c.imp('auth/totp.js');
+    return !!A.authenticateLocal('adm', T.generateToken(process.env.M3_S, { counter: Number(process.env.M3_N) + 1 }));
+  }, e.dir, { M3_S: secret, M3_N: String(now) });
+  assert.equal(s2, true, '새 키로 다시 등록한 OTP 로 로그인(SECRETS_KEY_LOST 없이 재시작)');
+});
+
+/* ── T30 반증 1회차 S-2: OTP 키를 못 열었을 때의 안내가 프로세스(포탈 · 도구)와 키 상태에 맞는다 ──────────── */
+test('T30 복호 실패 안내 — 도구에 키 없음 · 도구 키 불일치 · 포탈의 다른 키 · 포탈 키 없음 · portal.env 읽기 오류를 각각 다르게 말한다', () => {
+  const dir = tmpDir();
+  put(dir, 'users.json', baseUsers());
+  assert.equal(portalWithEnvKey(dir, KEY_A).kc, true);
+  const en = child(async (c) => {
+    const A = await c.imp('auth/auth.js'); const T = await c.imp('auth/totp.js');
+    const b = A.beginTotpEnroll('adm', '', { trusted: true });
+    return A.confirmTotpEnroll('adm', T.generateToken(b.secret, { counter: c.ctr() }), { trusted: true }).ok;
+  }, dir, { SECRETS_KEY: KEY_A });
+  assert.equal(en, true);
+  const warnOf = (txt) => txt.split('\n').find((l) => l.includes('[auth] ⚠ users.json 의 OTP 키')) || '';
+  // ① 도구 — portal.env 없음 · 키 파일 없음(포탈은 env 키): '이 도구가 포탈의 키를 모름'(키 분실로 단정하지 않는다)
+  const t1 = tool('otp-enroll.js', ['--list'], dir);
+  assert.equal(t1.status, 0, t1.err);
+  assert.match(warnOf(t1.err), /이 도구가 포탈의 자격증명 암호화 키를 모릅니다\(키 분실로 단정하지 마세요\)/, t1.err);
+  assert.doesNotMatch(warnOf(t1.err), /이 포탈의 키로 열리지 않습니다|자격증명 암호화 키가 없습니다 — 원래 키/, '포탈용 문구가 도구에 찍히지 않는다');
+  // ② 도구 — 다른 키 파일
+  put(dir, 'secrets-key', 'F'.repeat(44));
+  const t2 = tool('otp-enroll.js', ['--list'], dir);
+  assert.match(warnOf(t2.err), /이 도구의 키가 포탈과 같은지 확인하지 못했습니다/, t2.err);
+  fs.rmSync(path.join(dir, 'secrets-key'));
+  // ③ 포탈 — 다른 키(env KEY_B)
+  const p3 = child(async (c) => { const A = await c.imp('auth/auth.js'); A.loadUsers(); return c.logs.join('\n'); }, dir, { SECRETS_KEY: KEY_B });
+  assert.match(warnOf(p3), /이 포탈의 키로 열리지 않습니다/); assert.doesNotMatch(warnOf(p3), /SECRETS_KEY_LOST/);
+  // ④ 포탈 — 키 없음(env 빠짐 · 키 파일 없음)
+  const p4 = child(async (c) => { const A = await c.imp('auth/auth.js'); A.loadUsers(); return c.logs.join('\n'); }, dir);
+  assert.match(warnOf(p4), /자격증명 암호화 키가 없습니다/); assert.match(warnOf(p4), /SECRETS_KEY_LOST=true/);
+  // ⑤ 도구가 portal.env 를 못 읽음(폴더로 바꿔 읽기 오류) — 래퍼로 실행하라는 안내 · 사실과 다른 옛 안내 없음
+  fs.mkdirSync(path.join(dir, 'portal.env'));
+  const t5 = tool('otp-enroll.js', ['adm'], dir);
+  assert.notEqual(t5.status, 0);
+  assert.match(t5.err, /래퍼가 root 권한으로 읽어 넘깁니다/);
+  assert.match(t5.err, /이 도구가 portal\.env 를 읽지 못해 포탈의 SECRETS_KEY 를 모릅니다/);
+  assert.doesNotMatch(t5.err, /암호화 저장 방식이면 키 확인 값이 맞을 때만 새 OTP 키를 봉인합니다/, '사실과 다른 옛 안내');
 });

@@ -23,7 +23,7 @@ import { issuesMaxBytes } from '../issues/store.js';   // v2.901(점검 P1) 사�
 import { boardMaxBytes } from '../bulletin/store.js';
 import { wikiMaxBytes } from '../wiki/store.js';
 import { casesMaxBytes, ledgerMaxBytes } from '../bmcheck/store.js';   // v3.52 디버깅 1회차 성능 P8 — 물리서버 제조사 케이스 기록도 그 저장소 상한까지 담는다
-import { countUnopenableSealed, USER_SECRET_FIELDS } from '../security/secretVault.js';   // 보안 잔여 11-27 M3: 번들 OTP 키를 이 호스트 키로 열 수 있는가
+import { countUnopenableSealed, USER_SECRET_FIELDS, KEY_LOST_GUIDE } from '../security/secretVault.js';   // 보안 잔여 11-27 M3: 번들 OTP 키를 이 호스트 키로 열 수 있는가
 import { isAdminTier } from '../auth/roles.js';
 
 /** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
@@ -559,7 +559,11 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     try { un = countUnopenableSealed(toStage['users.json'], USER_SECRET_FIELDS); } catch { un = null; }
     if (un?.unopenable) {
       const admins = un.records.filter((r) => r.role && (isAdminTier(r.role) || r.role === 'operator')).length;
-      warnings.push({ file: 'users.json', reason: `번들의 OTP 키 ${un.unopenable}개(고권한 계정 ${admins}개)를 이 포탈의 암호화 키로 열 수 없습니다 — 재시작 뒤 그 계정은 OTP 로 로그인하지 못합니다. 원래 키(secrets-key · SECRETS_KEY)를 함께 옮기거나, 재시작 뒤 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록하세요.` });
+      // 반증 1회차 M-3: 이 호스트에 키가 **없으면** 콘솔 도구도 같은 사유로 거절한다(도구는 키를 만들지 않는다) — 그때의 탈출구(KEY_LOST_GUIDE)를 정확히 싣는다.
+      const next = un.keyUsable
+        ? '원래 키(secrets-key · SECRETS_KEY)를 함께 옮기거나, 재시작 뒤 콘솔 도구(sudo vmware-portal-otp <계정>)로 이 포탈의 키로 다시 등록하세요.'
+        : `이 포탈에는 자격증명 암호화 키가 없어 재시작 뒤 콘솔 도구로도 다시 등록할 수 없습니다 — 원래 키(secrets-key · SECRETS_KEY)를 함께 옮기세요. ${KEY_LOST_GUIDE}`;
+      warnings.push({ file: 'users.json', reason: `번들의 OTP 키 ${un.unopenable}개(고권한 계정 ${admins}개)를 이 포탈의 암호화 키로 열 수 없습니다 — 재시작 뒤 그 계정은 OTP 로 로그인하지 못합니다. ${next}` });
     }
   }
   for (const w of warnings) console.warn(`[backup] 복원 경고 — ${w.file}: ${w.reason}`);

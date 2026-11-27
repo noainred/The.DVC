@@ -236,7 +236,7 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
         ? `OTP 키를 복호하지 못한 계정이 ${unreadable.length}개다(고권한 ${unreadablePriv.length}개 · 계정명은 표시하지 않는다). 그 계정은 OTP 로 로그인 · 재확인할 수 없다.`
         : '없음 — 등록된 OTP 키를 모두 열 수 있다.',
       evidence: 'users.json(자격증명 저장 방식 = 암호화이면 OTP 키 봉인) · secrets-key · SECRETS_KEY',
-      howto: unreadable.length ? '자격증명 암호화 키(SECRETS_KEY · CONFIG_DIR/secrets-key)를 원래 값으로 되돌리고 재시작한다. 키를 정말 잃었으면 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록한다.' : '',
+      howto: unreadable.length ? '자격증명 암호화 키(SECRETS_KEY · CONFIG_DIR/secrets-key)를 원래 값으로 되돌리고 재시작한다. 이 포탈이 다른 키를 이미 쓰고 있으면 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록한다. 키가 아예 없으면(secrets-key 삭제 · 키 없이 다른 호스트로 복원) 콘솔 도구도 거절한다 — portal.env 에 SECRETS_KEY_LOST=true 를 넣고 한 번 재시작해 새 키를 만든 뒤(옛 키로 봉인한 장비 비밀번호는 다시 입력) 콘솔 도구로 다시 등록하고, 그 줄을 지운다.' : '',   // 반증 1회차 M-3
     });
   } else {
     add({

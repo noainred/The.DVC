@@ -74,7 +74,7 @@ export function loginStateOf(u, { override = null, overrideSource = null, global
   const hasPw = !!u?.hasPassword;
   const otp = !!u?.totpEnabled;
   const otpBroken = otp && !!u?.otpUnreadable;   // 보안 잔여 11-27 M3
-  const OTP_BROKEN_NOTE = 'OTP 키를 복호하지 못해 OTP 로그인이 실패합니다 — 키(SECRETS_KEY · secrets-key)를 되돌리거나 6번으로 다시 등록하세요';
+  const OTP_BROKEN_NOTE = 'OTP 키를 복호하지 못해 OTP 로그인이 실패합니다 — 키(SECRETS_KEY · secrets-key)를 되돌리거나 6번으로 다시 등록하세요(6번이 암호화 키를 쓸 수 없다고 거절하면 그 안내를 따르세요 — 키가 아예 없으면 SECRETS_KEY_LOST=true 재시작)';   // 반증 1회차 M-3
   const policy = override || globalPolicy || null;
   const source = override
     ? `계정별 지정(${overrideSource === 'env' ? 'portal.env' : '파일'})`

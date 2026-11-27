@@ -8,6 +8,9 @@
  *   ② portal.env 에서 SECRETS_KEY 를 **직접** 읽는다(래퍼가 `env SECRETS_KEY=…` 로 넘기면 sudo 로그 · /proc cmdline 에 남는다). 셸 평가 없음 · 64KB 상한.
  *   ③ 키를 만들지 않는 도구 모드로 들어간다(disallowKeyCreation) — 암호화 정책의 새 봉인 전에 포탈이 남긴 키 확인 값으로 '같은 키' 를 확인한다.
  *      portal.env 를 못 읽어도(권한) 키 확인 값이 맞으면 된다(포탈이 파일 키를 쓰는 설치) — 맞지 않거나 없으면 새로 봉인하지 않는다(fail-closed).
+ *      ⚠ 키가 portal.env 에만 있고 그 파일이 root:root(install.sh 가 RMA sudoers 를 넓힐 때 권하는 소유)면 이 도구는 키가 없다 — 그래서 root 소유 래퍼
+ *      (packaging/offline/release-verify-lib.sh vp_launcher_secrets_key)가 root 권한으로 읽어 SECRETS_KEY 를 **환경으로** 넘긴다(반증 1회차 M-2).
+ *      git 소스 래퍼(otp-enroll.sh · user-admin.sh)를 root 로 부를 때도 같은 일을 한다(sudo --preserve-env=SECRETS_KEY).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -69,7 +72,10 @@ export function prepareConsoleTool(configDir) {
   const issue = rootRunIssue({ uid: typeof process.getuid === 'function' ? process.getuid() : null, configDirUid });
   if (issue) return { issue, note: null };
   const k = loadKeyEnvFromPortalEnv(configDir);
-  disallowKeyCreation();
-  const note = k.error ? `portal.env 를 읽지 못했습니다(${k.error}) — 포탈이 거기 둔 SECRETS_KEY 를 이 도구는 모릅니다. 암호화 저장 방식이면 키 확인 값이 맞을 때만 새 OTP 키를 봉인합니다.` : null;
+  // 반증 1회차 M-2 · M-3: 키를 어디서 찾았는지 vault 에 알린다 — 키가 없을 때 '래퍼로 실행' 과 '키 분실(SECRETS_KEY_LOST)' 안내를 가른다.
+  disallowKeyCreation({ portalEnv: k.error ? 'unreadable' : k.source });
+  // 반증 1회차 M-2(구현 보고 deviation ① 정정): 키가 portal.env 에만 있으면 이 도구는 키 자체가 없다 — '키 확인 값이 맞으면 진행' 은 키 파일(secrets-key)을
+  //   쓰는 설치에서만 참이다. 래퍼(root 소유 vmware-portal-otp · -users)는 root 권한으로 portal.env 의 SECRETS_KEY 를 읽어 **환경으로** 넘긴다(명령줄 아님).
+  const note = k.error ? `portal.env 를 읽지 못했습니다(${k.error}) — 포탈이 거기 둔 SECRETS_KEY 를 이 도구는 모릅니다. 래퍼(sudo vmware-portal-otp · sudo vmware-portal-users)로 실행하면 래퍼가 root 권한으로 읽어 넘깁니다. 자격증명 저장 방식 = 암호화이면, 이 도구가 키 파일(secrets-key)로 포탈의 키 확인 값을 열 수 있을 때만 새 OTP 키를 봉인합니다.` : null;
   return { issue: null, note };
 }

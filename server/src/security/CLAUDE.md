@@ -20,4 +20,6 @@
 - 복호 실패 시드는 **암호문 그대로** 메모리에 둔다(소비처는 `isSealed` 가드 · TOTP 는 엄격 base32) · 시드를 안 바꾸는 저장은 잠금 · 키 없음에서도 디스크 원문 승계 ·
   새 시드만 사전 판정(`newSecretSealIssue`)으로 거절 · 평문 정책은 같은 배열(바이트 동일). 콘솔 도구는 `disallowKeyCreation`(키 생성 · 키 확인 값 쓰기 · 자동 봉인 없음)
   + 포탈이 남긴 `secrets-keycheck` 로 같은 키일 때만 새로 봉인. 회귀 `test/secResidual1127TotpSeal.test.js`.
-
+- 반증 1회차(되돌리지 말 것): 흔적 판정(`encryptionEvidence`)은 users.json 을 **파싱해 시드 칸만** 본다(원문 정규식이면 봉인 모양 표시 이름 한 줄이 평문 설치를 정책 잠금으로 만든다) ·
+  root 소유 래퍼가 portal.env 의 SECRETS_KEY 를 **환경으로** 넘긴다(`release-verify-lib.sh vp_launcher_secrets_key` — 명령줄 금지 · `vp_env_key_value` 사본 3개는 글자 동일) ·
+  봉인 흔적이 있는데 키가 없으면 포탈 · 도구 · 복원 경고 · 자가 점검이 `KEY_LOST_GUIDE`(SECRETS_KEY_LOST=true 재시작)를 싣는다 · '기존 OTP 로그인은 그대로' 는 그 계정 시드를 열 수 있을 때만.
