@@ -201,7 +201,8 @@ function harnessScript(phase) {
     await tryi('focus', async () => (await import(${J('focusmon/registry.js')})).addTarget({ name: 'fm-realq', host: '10.66.14.14', username: 'fmuserQ', password: 'pw-FM-qq', os: 'linux' }, { agents: [], by: 'x', corps: [] }));
     await tryi('bareos', async () => (await import(${J('bareos/settings.js')})).addDirector({ name: 'bd-realq', host: '10.66.16.16', consoleName: 'bdconsoleuserQ', password: 'pw-BD-qq' }));
     await tryi('ping', async () => (await import(${J('ping/store.js')})).addTarget({ name: 'pg-realq', host: '10.66.18.18' }));
-    await tryi('mail', async () => (await import(${J('mail/settings.js')})).save({ defaultTo: ['qmail1@corpq.example'] }));
+    // 반증 3회차 must 2: SMTP 보내는 주소(smtp.from)도 시드 — 예전에는 받는 사람만 시드해 /tools/guest-partition/mail 의 from 을 놓쳤다.
+    await tryi('mail', async () => (await import(${J('mail/settings.js')})).save({ defaultTo: ['qmail1@corpq.example'], smtp: { host: '10.66.50.50', port: 25, from: 'qmail3@corpq.example' } }));
     await tryi('bmHist', async () => {
       const BR = await import(${J('bmstor/registry.js')});
       const human = BR.listBmServers().find((x) => x.name === 'bm-realq');
@@ -327,7 +328,8 @@ function harnessScript(phase) {
         ...BACKUP_VIEWS, '/api/tools/backup-run/settings', '/api/tools/backup-run/runs/' + encodeURIComponent(seedIds.veeamRun || 'x'), '/api/tools/bareos-backup/health/settings',
         '/api/tools/vm-clone', '/api/tools/bareos-backup/groups/tree?vcenterId=' + encodeURIComponent(vcs[0] || ''),
         '/api/provision/saved', '/api/provision/saved/' + encodeURIComponent(seedIds.xProv || 'x'), '/api/tools/bareos-backup', '/api/tools/bareos-backup/restore-folders',
-        '/api/tools/bareos-backup/live'])
+        '/api/tools/bareos-backup/live', '/api/admin/ipam/vc-ranges/suggest?kind=idrac&vcenterId=' + encodeURIComponent(vcs[0] || '') + '&datacenterId=dc-realq',
+        '/api/admin/ipam/vc-ranges/suggest?kind=vm&vcenterId=' + encodeURIComponent(vcs[0] || ''), '/api/tools/guest-partition/mail'])
         out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p), oper: await pick('oper', p) };
       // M-1 절대형 · 겹친 슬래시(원시 소켓 — fetch 는 대상을 정규화한다)
       out.raw = {};
@@ -347,11 +349,28 @@ function harnessScript(phase) {
       const sweep = [];
       const sweepOne = async (route, u, method) => {
         const d = method === 'POST' ? await callPost('demo', u) : await call('demo', u);
-        if (!(d.st >= 200 && d.st < 300)) return;
+        if (!(d.st >= 200 && d.st < 300)) return d.st;
         const o = method === 'POST' ? await callPost('oper', u) : await call('oper', u);
         sweep.push({ route: (method === 'POST' ? 'POST ' : '') + route, url: u, demo: d.txt, oper: o.st >= 200 && o.st < 300 ? o.txt : '', operSt: o.st });
+        return d.st;
       };
-      for (const g of uniq) for (const u of urlsOf(g)) await sweepOne(g, u, 'GET');
+      // 반증 3회차 should(시험 사각지대 — 재현): 필수 질의(kind · dim · key · cat · jobid …)가 있는 GET 은 매개변수 없이 부르면 데모에게 400 이라
+      //   불변식에서 빠졌다(데모 400 125건 — vc-ranges/suggest?kind=idrac 가 그 틈으로 샜다). 데모가 400 이면 **필수 질의를 채운 판본들로 다시** 부르고,
+      //   그래도 2xx 를 못 받은 라우트는 still400 으로 내보낸다(아래 시험이 '알려진 목록 밖' 을 실패로 본다 — 새 필수 질의 라우트가 조용히 빠지지 않게).
+      const VC0 = encodeURIComponent(vcs[0] || ''); const H0 = encodeURIComponent((host0 && host0.id) || 'x'); const VM0 = encodeURIComponent(((snap.vms || []).find((v) => v.vcenterId === vcs[0]) || {}).id || 'x');
+      const FILL_BASE = 'vcenterId=' + VC0 + '&datacenterId=dc-realq&hostId=' + H0 + '&vmId=' + VM0 + '&key=x&k=x&id=x&name=x&q=x&jobid=1&target=digest&hours=24&days=7&group=x&path=%2Fdata&from=0&to=' + Date.now();
+      const FILLS = ['kind=idrac&dim=model&cat=cpu&type=cpu&metric=cpu', 'kind=vm&dim=vendor&cat=gpu&type=disk&metric=mem', 'kind=host&dim=serviceTag&cat=memory&type=host&metric=disk']
+        .map((f) => FILL_BASE + '&' + f);
+      const still400 = [];
+      for (const g of uniq) {
+        let got400 = false; let gotOk = false;
+        for (const u of urlsOf(g)) { const st = await sweepOne(g, u, 'GET'); if (st === 400) got400 = true; else if (st >= 200 && st < 300) gotOk = true; }
+        if (!got400 || gotOk) continue;
+        let filledOk = false;
+        for (const u of urlsOf(g)) for (const f of FILLS) { const st = await sweepOne(g, u + (u.includes('?') ? '&' : '?') + f, 'GET'); if (st >= 200 && st < 300) filledOk = true; }
+        if (!filledOk) still400.push(g);
+      }
+      out.still400 = still400;
       const readPosts = [...new Set(posts)].filter((p) => auditSkipped('POST', p));
       for (const p of readPosts) await sweepOne(p, p, 'POST');
       out.sweep = sweep; out.totalGets = uniq.length; out.readPosts = readPosts; out.seedIds = seedIds;
@@ -392,6 +411,8 @@ function runHarness(phase) {
 const H = {};
 const harness = (phase) => (H[phase] ||= runHarness(phase));
 
+// 반증 3회차 should: 필수 질의를 채운 판본(FILLS)으로도 데모가 2xx 를 못 받는 GET — 실행할 때 하나씩 확인해 사유를 적는다(아래 시험이 목록 밖을 실패로 본다).
+const STILL400_KNOWN = [];
 const lower = (s) => String(s || '').toLowerCase();
 const sens = (txt, configDir) => {
   const set = new Set((lower(txt).match(new RegExp(SENS_SRC, 'g')) || []));
@@ -904,4 +925,52 @@ test('⑧ L8 소스 — 콘솔 링버퍼(getLogs) 호출처 허용 목록 · 응
   const i = st.indexOf("adminRouter.get('/logs'");
   assert.ok(i > 0);
   assert.equal(/res\.json\(\s*getLogs\(/.test(st.slice(i, st.indexOf('});', i))), false);
+});
+
+// ── 반증 3회차(must 2 · should 1) ─────────────────────────────────────────────────────────────────────────────
+test('③-r3 must 1: vCenter 스캔 대역 /24 가져오기(kind=idrac) — 데모는 403(등록부 원문 없음) · 관리자는 원문 · kind=vm 은 데모도 200', () => {
+  const h = harness('full');
+  const vc = encodeURIComponent(h.seedIds ? '' : '');
+  void vc;
+  const key = Object.keys(h.views).find((p) => p.startsWith('/api/admin/ipam/vc-ranges/suggest?kind=idrac'));
+  const v = h.views[key];
+  assert.equal(v.demo.st, 403, v.demo.txt);
+  assert.equal(body(v.demo).demoGuest, true);
+  assert.ok(!v.demo.txt.includes('10.66.4.'), '데모에 iDRAC 스캔 대역 원문');
+  assert.equal(v.fadm.st, 200, v.fadm.txt);
+  assert.ok(v.fadm.txt.includes('10.66.4.0/24'), '관리자 판본이 바뀌었다(대역 원문이 있어야 한다)');
+  assert.equal(v.oper.st, 403, 'operator 는 adminOnly 403 그대로');
+  const vm = h.views[Object.keys(h.views).find((p) => p.startsWith('/api/admin/ipam/vc-ranges/suggest?kind=vm'))];
+  assert.equal(vm.demo.st, 200, 'VM 대역 가져오기(mock VM 서브넷)는 데모도 쓴다: ' + vm.demo.txt.slice(0, 200));
+});
+
+test('③-r3 must 2: 게스트 파티션 메일 상태 — 데모 판본에 SMTP 보내는 주소 없음 · 관리자 판본은 그대로', () => {
+  const v = harness('full').views['/api/tools/guest-partition/mail'];
+  assert.equal(v.demo.st, 200, v.demo.txt);
+  assert.ok(!lower(v.demo.txt).includes('qmail3@corpq.example'), '데모에 보내는 주소: ' + v.demo.txt.slice(0, 300));
+  assert.equal(body(v.demo).server.from, undefined);
+  assert.equal(body(v.demo).server.configured, true, '설정 여부는 그대로');
+  assert.equal(v.fadm.st, 200);
+  assert.equal(body(v.fadm).server.from, 'qmail3@corpq.example', '관리자 판본이 바뀌었다');
+});
+
+test('③-r3 데모 판본 메일 상태 — 실패 사유 · 마지막 오류의 메일 주소를 가리고 원본은 바꾸지 않는다', async () => {
+  const { demoMailStatusView } = await import(path.join(SRC, 'routes/api/toolsGuestPart.js'));
+  const st = { history: [{ at: 1, kind: 'digest', ok: false, reason: '550 5.1.1 <qmail9@corpq.example> recipient rejected' }, { at: 2, ok: true, note: 'to qmail8@corpq.example' }, null],
+    lastError: { at: 3, message: 'RCPT qmail7@corpq.example refused' }, edge: false };
+  const v = demoMailStatusView(st);
+  assert.ok(!JSON.stringify(v).includes('@corpq.example'), JSON.stringify(v));
+  assert.match(v.history[0].reason, /^550 5\.1\.1 </);
+  assert.equal(v.history[2], null);
+  assert.equal(v.lastError.at, 3);
+  assert.equal(st.history[0].reason.includes('qmail9@corpq.example'), true, '원본을 바꿨다');
+  assert.equal(demoMailStatusView(null), null);
+  assert.deepEqual(demoMailStatusView({ history: [], lastError: null }), { history: [], lastError: null });
+});
+
+test('③-r3 should: 필수 질의를 채워도 데모가 2xx 를 못 받는 GET 은 알려진 목록 안에만(새 필수 질의 라우트가 스윕에서 조용히 빠지지 않게)', () => {
+  const h = harness('full');
+  assert.ok(Array.isArray(h.still400), '하네스가 still400 을 내보내지 않았다');
+  const extra = h.still400.filter((r) => !STILL400_KNOWN.includes(r));
+  assert.deepEqual(extra, [], '필수 질의 표에 없는 데모 400 GET — FILLS 에 그 라우트의 질의를 더하거나(스윕 대상) 아래 목록에 사유와 함께 적을 것');
 });

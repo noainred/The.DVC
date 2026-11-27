@@ -40,6 +40,7 @@ import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';   // 보안 잔여 11-27 L7 반증 3회차 — 등록부 형제 우회로
 import { registerBmOsSuggest } from './bmOsSuggest.js'; // v2.993: 물리서버 OS 주소 제안(설계 bm-folders §13 ②)
 import { textFields, listOrText } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -584,6 +585,10 @@ adminRouter.get('/ipam/vc-ranges/suggest', adminOnly, (req, res) => {
     return res.json({ ...base, ...vmSubnets({ vms: snap.vms, vcenterId }), initial: !!snap.initial });
   }
   if (allowed) return res.status(403).json({ ok: false, requiredFullScope: true, reason: 'iDRAC 스캔 대역은 전 법인 설정이라 전체 범위(vCenter 제한 없는) 계정만 읽을 수 있습니다 — VM 대역 가져오기는 쓸 수 있습니다.' });
+  // 보안 잔여 11-27 L7(반증 3회차 must — 재현): 같은 등록부의 관리 화면(/api/admin/idrac/scan-ranges · /api/admin/ipam/scan)은 데모에게 READ_DENY 인데
+  //   이 '/24 가져오기' 가 사람이 등록한 iDRAC 스캔 대역 원문을 실었다(datacenterId 를 요청이 고르니 전 법인 대역). 질의 값(kind)으로 갈리는 경로라
+  //   접두 표(READ_DENY)로는 못 막는다 — 등록부를 읽기 **전에** 같은 거부 모양(403 + demoGuest)으로. kind=vm(mock VM 서브넷)은 그대로.
+  if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', demoGuest: true, reason: '데모 계정은 iDRAC 스캔 대역(설정 화면의 등록부)을 볼 수 없습니다 — VM 대역 가져오기는 쓸 수 있습니다.' });
   let datacenters = []; let datacentersError = '';
   try { datacenters = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch (e) { datacentersError = e?.message || String(e); }
   let assigned = '';

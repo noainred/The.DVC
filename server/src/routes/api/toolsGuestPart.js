@@ -9,7 +9,8 @@
  */
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { isAdminDetailUser, isDemoGuest } from '../../auth/demoGuest.js';
+import { redactSystemLogLine } from '../../edgelog/redact.js';   // 보안 잔여 11-27 L7 반증 3회차 — 데모 판본의 실패 사유 속 메일 주소
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
@@ -109,10 +110,14 @@ export function registerToolsGuestPart(api) {
   });
 
   // 메일 — 상태·기록(주소 없이 개수만) + 메일 서버 준비 여부.
+  // 보안 잔여 11-27 L7(반증 3회차 must — 재현): 보내는 주소(smtp.from)는 메일 설정(/api/admin/mail — 데모 READ_DENY)의 값이다 — 관리자 판본에만 싣는다
+  //   (범위 관리자는 /api/admin/mail 도 보내는 사람을 그대로 보이므로 isAdminDetailUser 기준). 데모 판본은 기록 · 마지막 오류의 실패 사유(SMTP 응답 원문 —
+  //   '550 <받는 사람>' 처럼 주소가 실릴 수 있다)의 메일 주소 · 전화 · 카드 꼴을 가린다(edgelog/redact.js 하나 — 가림 규칙을 새로 만들지 않는다).
   api.get('/tools/guest-partition/mail', adminOnly, fullScopeOnly, (req, res) => {
+    const detail = isAdminDetailUser(req.user);
     let server = { enabled: false, configured: false, defaultTo: 0, kindEnabled: true };
-    try { const c = loadMailCfg(); server = { enabled: !!c.enabled, configured: !!String(c.smtp?.host || '').trim(), defaultTo: (c.defaultTo || []).length, kindEnabled: (c.kinds || {}).guestpart?.enabled !== false, from: c.smtp?.from || '' }; } catch { /* 메일 설정 없음 */ }
-    res.json({ ok: true, status: mailStatus(), server });
+    try { const c = loadMailCfg(); server = { enabled: !!c.enabled, configured: !!String(c.smtp?.host || '').trim(), defaultTo: (c.defaultTo || []).length, kindEnabled: (c.kinds || {}).guestpart?.enabled !== false, ...(detail ? { from: c.smtp?.from || '' } : {}) }; } catch { /* 메일 설정 없음 */ }
+    res.json({ ok: true, status: isDemoGuest(req.user) ? demoMailStatusView(mailStatus()) : mailStatus(), server });
   });
 
   api.post('/tools/guest-partition/mail/preview', adminOnly, fullScopeOnly, textFields('target'), async (req, res) => {
@@ -136,4 +141,18 @@ export function registerToolsGuestPart(api) {
     if (r.error) return res.status(400).json({ ok: false, reason: r.error });
     res.json(r);
   });
+}
+
+/**
+ * 보안 잔여 11-27 L7(반증 3회차): 데모 판본의 게스트 파티션 메일 상태 — 실패 사유 글자의 메일 주소 등만 가린다(구조 · 개수 · 시각은 그대로).
+ * 원본(메모리 상태)은 바꾸지 않는다.
+ */
+export function demoMailStatusView(st) {
+  if (!st || typeof st !== 'object') return st;
+  const t = (v) => (typeof v === 'string' && v ? redactSystemLogLine(v) : v);
+  return {
+    ...st,
+    history: Array.isArray(st.history) ? st.history.map((h) => (h && typeof h === 'object' ? { ...h, ...(h.reason != null ? { reason: t(h.reason) } : {}), ...(h.note != null ? { note: t(h.note) } : {}) } : h)) : st.history,
+    lastError: st.lastError && typeof st.lastError === 'object' ? { ...st.lastError, message: t(st.lastError.message) } : t(st.lastError),   // notify.js: { at, message }
+  };
 }
