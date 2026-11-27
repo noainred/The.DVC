@@ -21,7 +21,9 @@ export const INSTALL_FEATURE = 'disk-audit-install';
 export const PREP_FEATURE = 'focus-mon-prep';
 export const CRED_FEATURES = KEY_EXPLICIT_FEATURES;   // 점검 2회차 W2-2: 기능 이름은 placement 한 곳(화면 카탈로그의 ‘직접 켜야’ 표시와 같은 목록 — 시험이 대조)
 /** 상태(화면 문구 키 — 웹 `focusMonAuditInstallText.js CRED_TEXT` 와 같다 · 시험 대조). */
-export const CRED_STATES = Object.freeze(['ok', 'feature', 'noentry', 'ambig', 'dup', 'password', 'stopped', 'folder', 'key-missing', 'unreadable', 'error']);
+// v3.54.0 ④ 'not-local': 엣지가 법인 공통 계정을 쓰려는데 그 주소가 엣지가 아는 서버(그 엣지 vCenter 의 VM IP · SSH 공용 접속 서버)가 아니다.
+//   'local-unknown': 그 엣지가 인벤토리를 아직 다 읽지 못했다(첫 수집 전 · vCenter 못 읽음) — 모르는 주소를 '모르는 서버' 로 단정하지 않는다(반증 F2 · 공통 계정은 그래도 쓰지 않는다).
+export const CRED_STATES = Object.freeze(['ok', 'feature', 'noentry', 'ambig', 'dup', 'password', 'stopped', 'folder', 'key-missing', 'unreadable', 'not-local', 'local-unknown', 'error']);
 const t = (v) => String(v ?? '').trim();
 const explicit = (key, feature = INSTALL_FEATURE) => !!key && Array.isArray(key.features) && key.features.includes(feature);
 const CODE_STATE = { 'corp-stopped': 'stopped', 'state-unreadable': 'unreadable', 'store-unreadable': 'unreadable', 'key-feature': 'feature', 'key-folder': 'folder', 'key-missing': 'key-missing', 'account-missing': 'key-missing' };
@@ -47,7 +49,13 @@ export function credSnapshot() {
   try { return { servers: listBmServersRaw(), accounts: KS.listAccountsRaw() }; } catch { return {}; }
 }
 
-export function installCredFor(target, { edge = false, corpVcs = [], pick = null, withAuth = false, feature = INSTALL_FEATURE, servers = null, accounts = null } = {}) {
+/*
+ * v3.54.0 ④(v3.17.0 S4 의 남은 것): 엣지는 중앙이 보낸 root 작업의 대상 주소를 따로 확인하지 않았다 — 법인 공통 계정(root 키)은 법인 어느 주소에나
+ *   쓰이므로, 중앙 · 전송로가 틀리면 그 엣지의 root 키가 엣지가 모르는 주소로 나갔다. 엣지(edge=true)는 이제 공통 계정을 **엣지가 아는 서버**일 때만 쓴다 —
+ *   local(host) = 그 엣지 스냅샷 vCenter 의 VM IP · 그 엣지 SSH 공용 접속 서버 주소(sameMachine.localHostIndex). 같은 주소 서버 항목(①)은 그 자체가 엣지가 아는 서버다.
+ *   local 을 넘기지 않은 엣지 호출은 닫는다('not-local' — 빠뜨린 호출부가 조용히 넓어지지 않게). 중앙(edge=false)은 대상을 정하는 쪽이라 보지 않는다.
+ */
+export function installCredFor(target, { edge = false, corpVcs = [], pick = null, withAuth = false, feature = INSTALL_FEATURE, servers = null, accounts = null, local = null } = {}) {
   if (!CRED_FEATURES.includes(feature)) return { state: 'error', code: 'feature-unknown' };
   try {
     if (KS.keyStoreLoadError() || bmLoadError()) return { state: 'unreadable' };
@@ -67,6 +75,7 @@ export function installCredFor(target, { edge = false, corpVcs = [], pick = null
     //   못 읽었으면 빈 목록 → 'noentry' 로 닫힌다)
     const accs = (Array.isArray(accounts) ? accounts : KS.listAccountsRaw()).filter((a) => a.kind === 'os' && t(a.corp) && t(a.keyRef) && vcs.has(t(a.corp)));
     if (!accs.length) return { state: 'noentry' };
+    if (edge && (typeof local !== 'function' || local(host) !== true)) return { state: typeof local === 'function' && local.unknown === true ? 'local-unknown' : 'not-local', src: 'corp' };
     const withFeat = accs.filter((a) => explicit(KS.keyById(a.keyRef), feature));
     if (!withFeat.length) return { state: 'feature', src: 'corp', acct: accs[0].username, key: KS.keyById(accs[0].keyRef)?.name || '' };
     let acc = withFeat.length === 1 ? withFeat[0] : withFeat.find((a) => a.id === t(pick)) || null;

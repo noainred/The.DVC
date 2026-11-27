@@ -157,7 +157,10 @@ test('④ 설치 계정 — 직접 켠 키만 · 같은 주소 둘 · 비밀번�
   // 반증 S2: 엣지도 법인을 거른다 — 엣지 스냅샷의 vCenter 들(corpVcs)로. 못 읽으면(빈 목록) 닫힌다
   assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true }).state, 'noentry', '엣지라도 법인 목록이 없으면 공통 계정을 쓰지 않는다');
   assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true, corpVcs: ['vcB'] }).state, 'noentry', '엣지가 맡지 않은 법인의 계정은 쓰지 않는다');
-  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true, corpVcs: ['vcA'] }).state, 'ambig', '엣지가 맡은 법인의 계정');
+  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true, corpVcs: ['vcA'], local: () => true }).state, 'ambig', '엣지가 맡은 법인의 계정');
+  // v3.54.0 ④: 엣지는 공통 계정을 자기가 아는 서버에만 — local 이 없거나 모르는 주소면 'not-local'
+  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true, corpVcs: ['vcA'] }).state, 'not-local', 'local 을 빠뜨린 엣지 호출은 닫힌다');
+  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true, corpVcs: ['vcA'], local: (h) => h === '10.9.9.8' }).state, 'not-local');
   void a2;
 });
 
@@ -238,7 +241,7 @@ test('⑥ 중앙 — 접수 · 엣지 배달 · 결과 정제 · 설치 위치 �
   const mine = new Map([[te.id, te]]);
   const first = A.handleEdgeAudit('edge-pl', mine, { cred: { [te.id]: { state: 'ok', src: 'corp', acct: 'pl-ops', key: 'pl-common', privateKey: 'LEAK' }, 'fm-zzzzzzzz99': { state: 'ok' } } }, Date.now());
   assert.ok(Array.isArray(first.known) && first.known[0].id === te.id && first.known[0].host === te.host, '맡은 서버 목록을 보낸다(이름 · 주소 · 포트)');
-  assert.equal(JSON.stringify(first.known).includes('username'), false);
+  assert.equal(first.known[0].username, 'dvcmon', 'v3.54.0 ④: 수집 계정도 싣는다(엣지가 root 작업의 대상을 맞춰 본다 — 비밀 아님)');
   assert.equal(A.credOfTarget(te).acct, 'pl-ops'); assert.equal(JSON.stringify(A.credOfTarget(te)).includes('LEAK'), false, '아는 칸만');
   assert.equal(A.credOfTarget({ ...te, id: 'fm-zzzzzzzz99' }).state, 'edge-unknown', '맡지 않은 대상의 보고는 받지 않는다');
   const r = A.requestInstall(te, { by: 'own' });
@@ -250,7 +253,8 @@ test('⑥ 중앙 — 접수 · 엣지 배달 · 결과 정제 · 설치 위치 �
   const out = A.handleEdgeAudit('edge-pl', mine, { caps: ['install'], cred: { [te.id]: { state: 'ok', acct: 'pl-ops' } } }, Date.now() + 1000);
   const job = out.jobs.find((j) => j.mode === 'install');
   assert.ok(job); assert.equal(job.expect.dir, '/opt/dvc/disk-audit'); assert.deepEqual(job.expect.cands, ['/opt/dvc/disk-audit']); assert.equal(job.expect.wrappers['/opt/dvc/disk-audit'], B.wrapperSha('/opt/dvc/disk-audit'));
-  assert.equal(out.known, undefined, '맡은 서버 목록은 60초에 한 번');
+  assert.equal(noCap.known, undefined, '맡은 서버 목록은 60초에 한 번(root 작업이 없는 응답)');
+  assert.ok(Array.isArray(out.known) && out.known[0].id === te.id && out.known[0].username === 'dvcmon', 'v3.54.0 ④: root 작업을 싣는 응답에는 늘 맡은 서버 목록(엣지가 대상을 맞춰 본다)');
   // 결과 정제 — 아는 칸만 · 이름 규칙 · 까닭 이름
   const c = A.cleanEdgeResult({ mode: 'install', ok: true, kind: 'done', dir: '/opt/dvc/disk-audit', ready: [], install: { code: 'ok', step: 7, acct: 'pl ops<script>', key: 'pl-common', src: 'corp', priv: 'sudo', fail: 'nope', extra: 'x' } });
   assert.equal(c.install.acct, '', '이름 규칙 밖은 비운다'); assert.equal(c.install.fail, 'other'); assert.equal(c.install.extra, undefined);
@@ -355,8 +359,8 @@ test('⑨ 엣지 — 설치 작업은 설치 줄로 · 설치 계정 보고는 �
   const Wk = await import('../src/agent/focusMonWorker.js');
   const src = fs.readFileSync(new URL('../src/agent/focusMonWorker.js', import.meta.url), 'utf8');
   assert.match(src, /const sub = j\.mode === 'install'\n\s+\? installRunner\.submit\(/, '설치 작업은 점검 실행 줄이 아니라 설치 줄로');
-  assert.match(src, /exec: installExec\(\{ edge: true, edgeVcs \}\)/, '엣지는 자기 법인의 계정(edge 모드 · 스냅샷 vCenter)');
-  assert.match(src, /credOf\(t, \{ edge: true, corpVcs, \.\.\.snap \}\)/, '설치 계정 보고도 같은 법인 거르기(50회차 R2: 사본을 함께 넘긴다)');
+  assert.match(src, /exec: installExec\(\{ edge: true, edgeVcs, edgeLocal \}\)/, '엣지는 자기 법인의 계정(edge 모드 · 스냅샷 vCenter · v3.54.0 엣지가 아는 서버)');
+  assert.match(src, /credOf\(t, \{ edge: true, corpVcs, local, \.\.\.snap \}\)/, '설치 계정 보고도 같은 법인 거르기(50회차 R2: 사본을 함께 넘긴다 · v3.54.0 local)');
   assert.match(src, /caps: \[\.\.\.EDGE_AUDIT_CAPS\]/, '매 동기화에 설치 능력 표시(반증 S1)'); assert.ok(Wk.EDGE_AUDIT_CAPS.includes('install')); // v3.18.0 — 목록 상수로(‘prep’ 더함)
   assert.ok(Array.isArray(Wk.edgeVcs()), '엣지 법인 = 스냅샷 vCenter 목록(못 읽으면 빈 목록)');
   assert.equal(Wk.credReport(Date.now(), () => ({ state: 'ok' })), null, '맡은 서버 목록을 받기 전에는 보고하지 않는다');
