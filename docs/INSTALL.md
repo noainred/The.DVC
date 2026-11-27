@@ -18,7 +18,7 @@
 | RAM | 2 GB | 8 GB+ |
 | 디스크 | 5 GB | 20 GB+ (전력/지표 시계열 DB 보존) |
 | 권한 | 설치에 `sudo`(root) | 동일 |
-| 런타임 | **불필요** — 오프라인 패키지에 Node.js 런타임(릴리스 빌드는 **22.23.2**)이 **포함**됨 | 동일 |
+| 런타임 | **불필요** — 오프라인 패키지에 Node.js 런타임(릴리스 빌드는 **22.23.5**)이 **포함**됨 | 동일 |
 
 - 방화벽에서 포탈 포트(**기본 4000/tcp**)를 열어야 합니다(§6).
 - 인터넷이 없어도 됩니다(에어갭). 자동 업그레이드만 사내 미러 또는 GitHub 릴리스가 필요합니다(§8).
@@ -96,7 +96,7 @@ scp vmware-portal-offline-<버전>-el9-x64.tar.gz <서버>:/tmp/
 git clone https://github.com/noainred/The.DVC.git
 cd The.DVC
 
-# 의존성 설치 + 웹 빌드 (Node 22.x 필요 — engines '>=22.5.0 <23', 검증 버전 22.23.2. 소스 실행은 런타임을 직접 준비해야 함 — 부록 A.0)
+# 의존성 설치 + 웹 빌드 (Node 22.x 필요 — engines '>=22.5.0 <23', 검증 버전 22.23.5. 소스 실행은 런타임을 직접 준비해야 함 — 부록 A.0)
 npm install
 npm run build
 
@@ -521,9 +521,11 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 |---|---|---|
 | 지원 major | **Node 22 만** | `server/src/util/runtimeCheck.js` `RUNTIME_CONTRACT` |
 | 범위(engines) | `>=22.5.0 <23` | 루트·`server`·`web` 의 `package.json` `engines` |
-| 검증 버전 | **22.23.2** | `.nvmrc` · `.node-version` · CI(`ci.yml`) · 릴리스(`release.yml NODE_VERSION`) · 오프라인 번들 기본값(`build-package.sh`) |
+| 검증 버전 | **22.23.5** | `.nvmrc` · `.node-version` · CI(`ci.yml`) · 릴리스(`release.yml NODE_VERSION` · `bareos-bundle.yml`) · 오프라인 번들 기본값(`build-package.sh`) |
+| 보안 하한 | **22.23.5** | `RUNTIME_CONTRACT.securityFloor` — 그보다 낮은 런타임은 계약 안이어도 서비스 점검 · 관리자 배너 · 기동 로그가 경고합니다 |
+| 번들 압축본 해시 | 저장소 고정값 | `packaging/node-runtime.sha256` — 빌드가 풀기 전에 대조합니다(고정되지 않은 버전은 `--node-sha256`) |
 
-- **22.5.0 은 기술적 하한**입니다(내장 `node:sqlite` 가 처음 들어간 버전). 검증한 버전은 22.23.2 이고, 22.x 의 다른 패치는 계약 안이지만
+- **22.5.0 은 기술적 하한**입니다(내장 `node:sqlite` 가 처음 들어간 버전). 검증한 버전은 22.23.5 이고, 22.x 의 다른 패치는 계약 안이지만
   CI 로 검증하지 않았습니다. 하한 미만이면 SQLite 대신 NDJSON 폴백이 됩니다.
 - **Node 24 이상은 지원하지 않습니다.** 서버의 장비·엣지 통신은 전역 `fetch` 에 패키지 `undici`(6.x)의 `Agent` 를 넘기는데,
   전역 `fetch` 는 Node 가 내장한 undici 라 major 마다 버전이 다릅니다. 검토 환경 Node 26.6.0 에서는 이 조합이
@@ -538,12 +540,16 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
     `error`(판정 불가) · `checking` · `unchecked` 입니다.
   - **비지원 버전이어도 기동을 막지 않습니다**(경고 + 상태 노출). 막으면 업그레이드·런타임 교체 중 포탈 화면 자체가 사라져 원인을 볼 곳이 없어지고,
     관리 화면·백업·비-HTTP 수집(SSH)은 그 상태에서도 동작하기 때문입니다.
-- 오프라인 패키지는 런타임을 함께 담습니다. `build-package.sh --node-tarball` 로 다른 버전을 넣을 수 있으니 반드시 `node-v22.23.2-…` 를 쓰세요
+- 오프라인 패키지는 런타임을 함께 담습니다. `build-package.sh --node-tarball` 로 다른 버전을 넣을 수 있으니 반드시 `node-v22.23.5-…` 를 쓰세요
   (in-app 업그레이드 번들은 앱만 바꾸고 런타임은 그대로 둡니다).
+  압축본은 풀기 전에 저장소 고정값(`packaging/node-runtime.sha256`)과 해시를 대조하고, 다르면 빌드가 멈춥니다.
+- **보안 하한(22.23.5) 미만 런타임**은 계약 안이어도 서비스 점검 'Node 런타임 호환성' 행 · 관리자 배너 · 기동 로그가 '보안 패치가 빠진 Node 런타임' 으로
+  알립니다(기동 · 수집은 막지 않음). 자동 업그레이드는 런타임을 바꾸지 않으므로 최신 설치 패키지로 다시 설치합니다 — 리눅스 `install.sh` ·
+  엣지는 중앙의 엣지 배포 재실행 · Windows 수집기 zip. 소스 설치면 Node 를 보안 하한 이상으로 올립니다.
 
 ```bash
-nvm install && nvm use       # .nvmrc(22.23.2)
-node -v                      # v22.23.2
+nvm install && nvm use       # .nvmrc(22.23.5)
+node -v                      # v22.23.5
 ```
 
 ### A.1 Node.js 22 설치 (컴파일러 불필요 · 24 이상 금지 — A.0)
@@ -553,7 +559,7 @@ node -v                      # v22.23.2
 curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - && sudo dnf install -y nodejs git
 # Ubuntu/Debian
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs git
-node -v   # v22.x (권장 v22.23.2 — 배포판 저장소의 22.x 패치는 계약 안이지만 검증 버전과 다를 수 있음)
+node -v   # v22.x (권장 v22.23.5 — 배포판 저장소의 22.x 패치는 계약 안이지만 검증 버전과 다를 수 있음)
 ```
 
 ### A.2 클론 + 빌드
