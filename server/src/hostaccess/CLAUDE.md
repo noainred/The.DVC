@@ -19,10 +19,17 @@
   포탈이 중지한 경우만 `applied.sshdStopped=true` 로 기록해 되돌릴 때 재시작한다(사람이 내린 sshd 는 건드리지 않음).
 - **권한 경계**: 적용·확정은 `adminOnly + requireSettingsOwner + 본인 OTP(verifyUserOtp)`. OTP 미등록 계정은 403(needEnroll).
   되돌림은 OTP 없이(안전한 방향). 조회는 admin. 전부 `logAudit`.
-- **실행 경계**: `exec.js` 는 셸 없이 spawn 하고 `sudo -n /usr/bin/firewall-cmd` 와 `sudo -n /usr/bin/systemctl
+- **실행 경계**: `exec.js` 는 셸 없이 spawn 하고 `sudo -n <firewall-cmd 실행기>` 와 `sudo -n /usr/bin/systemctl
   {stop,start,disable,enable} sshd.service` 만 부른다(sudoers 줄과 인자가 정확히 같아야 한다 — `install.sh`
   `/etc/sudoers.d/vmware-portal-hostaccess`). 사용자 입력은 `normalizeSettings`(CIDR·포트 정규식)를 거친 값만 rich rule
   문자열에 들어간다. 자유 인자 실행 경로를 추가하지 말 것.
+  ⚠ 보안 잔여 11-27 M-5: firewall-cmd 는 **root 소유 인자 검사 래퍼**(`packaging/offline/vmware-portal-firewall-cmd` → 설치 경로
+  `exec.js FW_WRAPPER` = install.sh `VP_FW_WRAPPER` = uninstall.sh)로 부르고 sudoers 는 그 파일 하나만 허용한다(인자 무제한 줄 안내 금지 — `SUDOERS_HINT`).
+  ① 래퍼가 **ENOENT 일 때만** 옛 직접 호출(옛 설치본 — 계획 경고 `LEGACY_SUDO_NOTE`) ② 그 밖의 확인 실패 · 링크 · 비root · g/o 쓰기 · 실행 비트 없음 ·
+  위 폴더 불안전은 **실행하지 않는다**(`wrapper-unsafe` — 옛 경로로 내려가지 않는다) ③ 판정 코어는 래퍼 파일 하나 — 계획의 사전 검사도 그 파일을
+  권한 없이 `--vp-validate-only` 로 실행한다(JS 사본을 만들지 말 것) · 하나라도 거부면 적용 0건 ④ 실행 방식은 `fw.runner`(실행기 함수에 붙은 값)로
+  읽는다 — 가짜 실행기 시험이 호스트의 래퍼에 따라 갈리지 않게 ⑤ 래퍼 허용 목록을 넓히면 `render.planCommands` 가 만드는 형태와
+  `test/secResidual1127FwWrapper.test.js` 말뭉치를 함께 고칠 것. 바꿔치기 방지는 install.sh 의 길 판정(`vp_path_controllers`)이고 서버 확인은 알림이다.
 - **관리 대상 규칙만 건드린다**(`isManagedRich`): ssh 서비스/22/tcp/`service name="ssh"` rich rule, 웹 포트의
   `port port="P"` rich rule·`P/tcp`·http/https, 추가 규칙, 직전 적용분(`applied.rich`). 그 밖의 존 설정(다른 서비스·포트·
   인터페이스·다른 존)은 보존한다 — 전체 존을 '포탈 설정으로 교체' 하는 방식으로 바꾸지 말 것.

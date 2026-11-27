@@ -1,0 +1,144 @@
+#!/bin/bash -p
+# vmware-portal-firewall-cmd — 호스트 접근 제어(설정 › Security)의 firewall-cmd 인자 검사 래퍼(보안 잔여 11-27 M-5).
+#
+# install.sh 가 root 소유 0755 로 /usr/local/libexec/vmware-portal-firewall-cmd 에 두고, sudoers
+# (/etc/sudoers.d/vmware-portal-hostaccess)는 서비스 계정에 **이 파일 하나만** 허용한다. 예전에는 /usr/bin/firewall-cmd 를 인자 제한 없이
+# 허용해 서비스 계정(같은 계정으로 도는 RMA 인스턴스 포함)이 탈취되면 --set-default-zone=trusted · --direct --passthrough · --panic-on ·
+# --add-forward-port · --new-*-from-file 로 방화벽 전체를 바꿀 수 있었다(2026-09-12 감사 M-5).
+#
+# 규칙(되돌리지 말 것 — server/test/secResidual1127FwWrapper.test.js 가 고정한다):
+#   - 머리의 -p: BASH_ENV·ENV 를 읽지 않고 환경의 셸 함수·SHELLOPTS·BASHOPTS·GLOBIGNORE 를 무시한다(sudo env_reset 이 꺼진 호스트에서도).
+#   - 경로는 readonly 고정값이다 — 환경 변수로 바뀌는 값이 없다(기본값 확장 패턴을 쓰지 않는다).
+#   - 셸 보간 없이 **검증한 변수만** 고정 경로 firewall-cmd 로 넘긴다(env -i — firewall-cmd 는 파이썬이라 PYTHONPATH 등이 새면 root 코드 실행).
+#   - 허용하는 것은 포탈(server/src/hostaccess — service.js · render.planCommands)이 실제로 만드는 인자 형태뿐이다. 허용 목록을 넓히면
+#     같은 시험의 말뭉치도 함께 넓힐 것. 판정 코어는 이 파일 하나다 — 서버의 사전 검사도 이 파일을 권한 없이 --vp-validate-only 로 실행한다.
+#   - 거부는 종료 64 + 'vmware-portal-firewall-cmd: refused: <사유>' 이고 거부한 인자 원문은 찍지 않는다(로그 · 화면 주입 방지).
+#   - 정규식은 앵커 + 유한 반복이고, 길이(1024)와 글자(인쇄 가능한 ASCII)를 먼저 본다.
+LC_ALL=C
+IFS=$' \t\n'
+set -fu
+umask 077
+readonly FWCMD=/usr/bin/firewall-cmd
+readonly ENVCMD=/usr/bin/env
+readonly TIMEOUTCMD=/usr/bin/timeout
+readonly SAFE_PATH=/usr/sbin:/usr/bin:/sbin:/bin
+readonly TAG='vmware-portal-firewall-cmd: refused:'
+
+refuse() {
+  printf '%s %s\n' "$TAG" "$1" >&2
+  exit 64
+}
+
+# port_ok <P> — 'n' 또는 'a-b'(1~65535 · a<=b · 앞자리 0 없음)
+port_ok() {
+  local re='^([1-9][0-9]{0,4})(-([1-9][0-9]{0,4}))?$' a b
+  [[ "$1" =~ $re ]] || return 1
+  a=$((10#${BASH_REMATCH[1]}))
+  b=$a
+  if [[ -n "${BASH_REMATCH[3]:-}" ]]; then b=$((10#${BASH_REMATCH[3]})); fi
+  (( a >= 1 && a <= 65535 && b <= 65535 && a <= b ))
+}
+
+# addr_ok <ipv4|ipv6> <주소[/접두]> — 패밀리와 주소 표기가 맞는가
+addr_ok() {
+  local fam="$1" ad="$2" re4='^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})(/([0-9]{1,2}))?$'
+  local re6='^[0-9A-Fa-f:.]{2,45}(/([0-9]{1,3}))?$' i
+  if [[ "$fam" == ipv4 ]]; then
+    [[ "$ad" =~ $re4 ]] || return 1
+    for i in 1 2 3 4; do (( 10#${BASH_REMATCH[i]} <= 255 )) || return 1; done
+    if [[ -n "${BASH_REMATCH[6]:-}" ]]; then (( 10#${BASH_REMATCH[6]} <= 32 )) || return 1; fi
+    return 0
+  fi
+  [[ "$fam" == ipv6 && "$ad" == *:* && "$ad" =~ $re6 ]] || return 1
+  if [[ -n "${BASH_REMATCH[2]:-}" ]]; then (( 10#${BASH_REMATCH[2]} <= 128 )) || return 1; fi
+  return 0
+}
+
+# add_rich_ok <규칙> — 포탈이 넣는 rich rule 네 형태(render.js richSsh · richPort)만
+add_rich_ok() {
+  local r="$1" act='(accept|drop|reject)'
+  local ssh='^rule family="(ipv4|ipv6)" source address="([0-9A-Fa-f:./]{1,64})" service name="ssh" accept$'
+  local src='^rule family="(ipv4|ipv6)" source address="([0-9A-Fa-f:./]{1,64})" port port="([0-9-]{1,11})" protocol="(tcp|udp)" '"$act"'$'
+  local any='^rule family="ipv4" port port="([0-9-]{1,11})" protocol="(tcp|udp)" '"$act"'$'
+  if [[ "$r" =~ $ssh ]]; then
+    addr_ok "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return
+  fi
+  if [[ "$r" =~ $src ]]; then
+    local f="${BASH_REMATCH[1]}" ad="${BASH_REMATCH[2]}" p="${BASH_REMATCH[3]}"
+    addr_ok "$f" "$ad" && port_ok "$p"
+    return
+  fi
+  if [[ "$r" =~ $any ]]; then
+    port_ok "${BASH_REMATCH[1]}"
+    return
+  fi
+  return 1
+}
+
+# remove_rich_ok <규칙> — firewalld 정규형(--list-all 출력)의 안전한 부분: 요소는 ssh 서비스 또는 포트만.
+#   관리자가 손으로 만든 ssh · 포트 규칙(log · nflog · audit · limit · priority · source · destination)도 지울 수 있어야 한다(포탈의 관리 대상).
+#   forward-port · source-port · masquerade · icmp-* · mark · 다른 서비스는 받지 않는다. 포탈이 넣는 형태(add)는 모두 이 문법 안이다(시험 고정).
+#   log/nflog prefix 는 따옴표 · 역슬래시만 뺀 인쇄 가능 글자 — 이미 있는 규칙과 정확히 같아야 지워지므로 새 권한이 생기지 않는다.
+remove_rich_ok() {
+  local r="$1"
+  local addr='[0-9A-Fa-f:./]{1,64}' name='[A-Za-z0-9][A-Za-z0-9_.:+-]{0,63}' pfx='[^"\]{0,127}'
+  local mac='[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}'
+  local lim=' limit value="[1-9][0-9]{0,8}/[smhd]"( burst="[1-9][0-9]{0,4}")?'
+  local lvl='(emerg|alert|crit|error|warning|notice|info|debug)'
+  local re='^rule( priority="-?[0-9]{1,5}")?( family="(ipv4|ipv6)")?'
+  re+='( source( NOT)? (address="'"$addr"'"|ipset="'"$name"'"|mac="'"$mac"'"))?'
+  re+='( destination( NOT)? (address="'"$addr"'"|ipset="'"$name"'"))?'
+  re+='( service name="ssh"| port port="([0-9-]{1,11})" protocol="(tcp|udp)")'
+  re+='( log( prefix="'"$pfx"'")?( level="'"$lvl"'")?('"$lim"')?| nflog( group="[0-9]{1,5}")?( prefix="'"$pfx"'")?( queue-size="[0-9]{1,5}")?('"$lim"')?)?'
+  re+='( audit('"$lim"')?)?( (accept|drop|reject( type="[a-z0-9-]{1,40}")?)('"$lim"')?)?$'
+  [[ "$r" =~ $re ]] || return 1
+  # 묶음 번호: 1 priority · 2-3 family · 4-6 source · 7-9 destination · 10 요소 · 11 포트
+  if [[ -n "${BASH_REMATCH[11]:-}" ]]; then port_ok "${BASH_REMATCH[11]}" || return 1; fi
+  return 0
+}
+
+# op_ok <둘째 인자> — 존 지정 명령
+op_ok() {
+  local op="$1" pre='^--(add|remove)-port=([0-9-]{1,11})/tcp$'
+  case "$op" in
+    --list-all|--add-service=ssh|--remove-service=ssh|--remove-service=http|--remove-service=https) return 0 ;;
+    --add-rich-rule=*) add_rich_ok "${op#--add-rich-rule=}"; return ;;
+    --remove-rich-rule=*) remove_rich_ok "${op#--remove-rich-rule=}"; return ;;
+  esac
+  if [[ "$op" =~ $pre ]]; then port_ok "${BASH_REMATCH[2]}"; return; fi
+  return 1
+}
+
+# ── 판정 ───────────────────────────────────────────────────────────────────────────────
+# --vp-validate-only: 포탈 서버가 적용 전에 **권한 없이** 이 파일을 실행해 같은 판정을 미리 본다(판정만 하고 끝낸다 — firewall-cmd 를 부르지 않는다).
+validate_only=0
+if (( $# >= 1 )) && [[ "$1" == --vp-validate-only ]]; then validate_only=1; shift; fi
+(( $# >= 1 && $# <= 2 )) || refuse '인자 개수'
+for a in "$@"; do
+  (( ${#a} >= 1 && ${#a} <= 1024 )) || refuse '인자 길이'
+  [[ "$a" != *[![:print:]]* ]] || refuse '인쇄 가능한 ASCII 밖 글자'
+done
+
+if (( $# == 1 )); then
+  cmd1="$1"
+  case "$cmd1" in
+    --state|--get-default-zone|--reload|--runtime-to-permanent) ;;
+    *) refuse '허용하지 않는 명령' ;;
+  esac
+  if (( validate_only )); then exit 0; fi
+  exec "$ENVCMD" -i PATH="$SAFE_PATH" LANG=C LC_ALL=C "$FWCMD" "$cmd1" </dev/null
+fi
+
+zre='^--zone=([A-Za-z0-9][A-Za-z0-9_.+-]{0,31})$'
+[[ "$1" =~ $zre ]] || refuse '존 형식'
+zone="${BASH_REMATCH[1]}"
+op="$2"
+op_ok "$op" || refuse '허용하지 않는 명령 또는 형식'
+if (( validate_only )); then exit 0; fi
+
+# 포탈은 기본 존만 다룬다 — 다른 존(관리 인터페이스 전용 · trusted 등)을 바꾸지 못하게. 기본 존 바꾸기는 허용 목록에 없다.
+#   조회에 시한을 둔다(포탈은 20초 뒤 sudo 를 끊지만 래퍼는 남는다 — 조회가 늘어져 포탈이 실패로 보고 되돌린 뒤에 늦게 적용하지 않게).
+dz="$("$TIMEOUTCMD" -k 1 5 "$ENVCMD" -i PATH="$SAFE_PATH" LANG=C LC_ALL=C "$FWCMD" --get-default-zone </dev/null 2>/dev/null)" || refuse '기본 존 확인 실패'
+[[ "$dz" == "$zone" ]] || refuse '기본 존이 아님'
+exec "$ENVCMD" -i PATH="$SAFE_PATH" LANG=C LC_ALL=C "$FWCMD" "--zone=$zone" "$op" </dev/null

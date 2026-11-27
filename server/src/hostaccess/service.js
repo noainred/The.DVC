@@ -14,6 +14,7 @@ import { loadHostAccess, saveHostAccess, hostAccessWriteRefusal } from './settin
 import { READ_RETRY_MS } from '../util/jsonFileRead.js';   // 115회차: 읽기 오류 뒤 다시 읽기 간격(설정 파일 공용 읽기와 같은 값)
 import { normalizeSettings, parseListAll, planCommands, fingerprint, normalizeRequesterIp } from './render.js';
 import * as realExec from './exec.js';
+import { FW_WRAPPER, FIREWALL_CMD } from './exec.js';
 import { listeningPortalPorts } from '../util/httpsServer.js';
 
 /**
@@ -25,11 +26,22 @@ const portalPorts = () => listeningPortalPorts(config.port);
 
 let deps = realExec;
 export function _setExec(e) { deps = e || realExec; }
+/**
+ * 보안 잔여 11-27 M-5: 지금 firewall-cmd 를 어떻게 부르는가(wrapper · direct · unsafe). 실행기 함수에 붙은 runner 를 읽는다 —
+ *   가짜 실행기(runner 없음)는 null 이라 예전 동작 그대로다(시험이 호스트에 깔린 래퍼에 따라 갈리지 않게).
+ */
+const runnerNow = () => (typeof deps.fw?.runner === 'function' ? deps.fw.runner() : null);
 let revertTimer = null;
 let busy = false;
 
+/**
+ * 보안 잔여 11-27 M-5: sudoers 안내는 인자 검사 래퍼 기준이다 — firewall-cmd 를 인자 제한 없이 허용하는 줄은 더 이상 안내하지 않는다.
+ *   첫 줄은 sudoers 주석(그대로 붙여 넣어도 visudo 가 받는다). 래퍼 파일 없이 둘째 줄만 넣으면 포탈은 옛 직접 호출(/usr/bin/firewall-cmd)을
+ *   부르고 sudo 가 거부한다 — 그래서 install.sh 재실행(래퍼와 sudoers 를 함께 설치)을 먼저 권한다.
+ */
 export const SUDOERS_HINT = (user = 'vmportal') => [
-  `${user} ALL=(root) NOPASSWD: /usr/bin/firewall-cmd`,
+  `# 권장: 새 패키지의 install.sh 를 root 로 다시 실행하세요 — 인자 검사 래퍼(${FW_WRAPPER})와 아래 줄을 함께 설치합니다(래퍼 파일 없이 아래 줄만 넣으면 동작하지 않습니다).`,
+  `${user} ALL=(root) NOPASSWD: ${FW_WRAPPER}`,
   `${user} ALL=(root) NOPASSWD: /usr/bin/systemctl stop sshd.service, /usr/bin/systemctl start sshd.service, /usr/bin/systemctl disable sshd.service, /usr/bin/systemctl enable sshd.service`,
 ].join('\n');
 
@@ -40,19 +52,34 @@ export const SUDOERS_HINT = (user = 'vmportal') => [
  * 실서버(systemd)에서는 확인하지 못했다. 유닛은 바꾸지 않고 화면 문구로 원인 후보를 알린다(detail 이 화면에 그대로 나간다).
  */
 export const NNP_NOTE = '본체 유닛에 NoNewPrivileges=true 가 있으면 sudoers 가 맞아도 거부됩니다 — 실서버에서 sudo -n /usr/bin/firewall-cmd --state 로 확인하세요.';
+/** 보안 잔여 11-27 M-5: 확인 명령의 경로는 실행 방식을 따른다(래퍼면 래퍼). nnpNoteFor(FIREWALL_CMD) === NNP_NOTE. */
+export const nnpNoteFor = (cmd) => NNP_NOTE.replace('sudo -n /usr/bin/firewall-cmd --state', `sudo -n ${cmd} --state`);
+/**
+ * 보안 잔여 11-27 M-5: 래퍼가 없어(ENOENT) 옛 직접 호출로 도는데 그 호출이 통했다 = sudoers 가 firewall-cmd 를 인자 제한 없이 허용한다(옛 설치 방식).
+ *   자동 업그레이드는 서비스 계정으로 앱 트리만 바꿔 sudoers 를 좁히지 못한다 — root 가 새 패키지의 install.sh 를 다시 실행해야 좁혀진다.
+ */
+export const LEGACY_SUDO_NOTE = '이 서버의 sudoers 는 firewall-cmd 를 인자 제한 없이 허용하는 옛 설치 방식입니다(포탈 계정이 탈취되면 방화벽 전체를 바꿀 수 있습니다) — 새 패키지의 install.sh 를 root 로 다시 실행하면 인자 검사 래퍼로 좁혀집니다.';
+/** 서비스가 root 로 도는 설치(--user root)인데 래퍼가 없다 — sudoers 와 무관하게 root 라 '옛 sudoers' 가 아니다. */
+export const LEGACY_ROOT_NOTE = '방화벽 인자 검사 래퍼가 없어 firewall-cmd 를 직접 부릅니다(포탈이 root 로 동작) — 새 패키지의 install.sh 를 root 로 다시 실행하면 래퍼를 거쳐 부릅니다.';
+const runningAsRoot = () => typeof process.getuid === 'function' && process.getuid() === 0;
+const wrapperUnsafeDetail = (st) => `방화벽 래퍼(${FW_WRAPPER})가 안전하지 않아 쓰지 않습니다 — ${String(st.stderr || '').trim() || '확인 실패'}. 바꿔치기됐을 수 있습니다: 내용을 확인한 뒤 새 패키지의 install.sh 를 root 로 다시 실행하세요.`;
 // 구버전 sudo 는 NNP 아래에서 'effective uid is not 0' 으로 끝난다(추정 — 이 컨테이너 sudo 1.9.15p5 는 위 문구). nosuid 마운트도 같은 문구다.
 const NNP_RE = /no new privileges|effective uid is not 0/i;
 
 /** firewalld 상태 + 기본 존 --list-all. 실패 사유를 구조화(sudo 거부 / firewalld 미동작 / 미설치). */
 export async function readEngine() {
+  const runner = runnerNow();
   const st = await deps.fw(['--state']);
   if (!st.ok) {
+    // 보안 잔여 11-27 M-5: 래퍼가 안전하지 않으면 실행하지 않았다(fail-closed) — 옛 직접 호출로 내려가지 않고 그 사실을 말한다.
+    if (st.wrapperUnsafe) return { ok: false, reason: 'wrapper-unsafe', detail: wrapperUnsafeDetail(st) };
+    const note = nnpNoteFor(runner?.mode === 'wrapper' ? FW_WRAPPER : FIREWALL_CMD);
     const err = String(st.stderr || '').trim();
-    if (deps.isSudoDenied(st)) return { ok: false, reason: 'sudo-denied', detail: `${err} — ${NNP_NOTE}`, hint: SUDOERS_HINT(process.env.USER || 'vmportal') };
+    if (deps.isSudoDenied(st)) return { ok: false, reason: 'sudo-denied', detail: `${err} — ${note}`, hint: SUDOERS_HINT(process.env.USER || 'vmportal') };
     if (/not running/i.test(st.stdout + st.stderr)) return { ok: false, reason: 'not-running', detail: 'firewalld 가 실행 중이 아닙니다(systemctl enable --now firewalld).' };
     const raw = (st.stderr || st.stdout || `exit ${st.code}`).trim();
     // sudo 가 NNP 플래그로 거부하면 위 sudo-denied 정규식에 걸리지 않아 여기로 온다 — 원인을 함께 말한다.
-    return { ok: false, reason: 'unavailable', detail: NNP_RE.test(raw) ? `${raw} — ${NNP_NOTE}` : raw };
+    return { ok: false, reason: 'unavailable', detail: NNP_RE.test(raw) ? `${raw} — ${note}` : raw };
   }
   const dz = await deps.fw(['--get-default-zone']);
   const zone = dz.ok ? dz.stdout.trim() : 'public';
@@ -60,8 +87,15 @@ export async function readEngine() {
   if (!la.ok) return { ok: false, reason: 'unavailable', detail: (la.stderr || la.stdout).trim() };
   const cur = parseListAll(la.stdout);
   if (!cur.zone) cur.zone = zone;
-  return { ok: true, zone, current: cur };
+  return { ok: true, zone, current: cur, runner: runner?.mode ?? null };
 }
+
+function fwRunnerInfo() {
+  const r = runnerNow();
+  return r ? { mode: r.mode, path: r.mode === 'direct' ? FIREWALL_CMD : FW_WRAPPER } : null;
+}
+/** 옛 직접 호출이 실제로 통했다(엔진 ok) — 서비스가 root 로 도는 설치는 sudoers 와 무관하므로 제외. */
+const isLegacySudo = (engine) => engine?.ok === true && engine.runner === 'direct' && !runningAsRoot();
 
 export async function hostAccessStatus({ requesterIp = '' } = {}) {
   const st = loadHostAccess();
@@ -75,6 +109,8 @@ export async function hostAccessStatus({ requesterIp = '' } = {}) {
     // portalPort(하나)는 예전 화면 호환 — 광고 포트(TLS 면 TLS_PORT). 관리 대상은 portalPorts 전부다.
     portalPort: ports[0], portalPorts: ports, busy,
     revertRetryWindowMs,   // 결정(56~75) 64 F2: 되돌림 자동 재시도 시한(화면 배너가 숫자를 박지 않게)
+    // 보안 잔여 11-27 M-5: 실행 방식(wrapper · direct · unsafe)과 옛 설치 방식(무제한 sudoers) 여부 — 경로는 상수라 비밀이 아니다.
+    fwRunner: fwRunnerInfo(), legacySudo: isLegacySudo(engine),
     dirty: st.applied ? fingerprint(st.draft) !== st.applied.fingerprint : true,
   };
 }
@@ -94,7 +130,21 @@ export async function planHostAccess(input, { requesterIp = '', peerIp = '' } = 
   if (!engine.ok) return { ok: false, errors: [...errors, `방화벽 엔진 사용 불가: ${engine.detail || engine.reason}`], engine, settings };
   const prevRich = loadHostAccess().applied?.rich || [];
   const plan = planCommands(settings, engine.current, { prevRich, requesterIp, peerIp });
-  return { ok: !errors.length && !plan.errors.length, settings, engine, ...plan, errors: [...errors, ...plan.errors] };
+  const fwErrors = [];
+  const warnings = [...plan.warnings];
+  if (engine.runner === 'wrapper' && typeof deps.fw?.validate === 'function') {
+    // 보안 잔여 11-27 M-5: 래퍼가 받지 않는 명령이 하나라도 있으면 아무것도 실행하지 않는다(반쯤 적용 금지 — 판정은 래퍼 파일 하나).
+    //   예: 관리 대상 규칙(ssh · 포탈 포트)에 래퍼 문법 밖 요소(mark · 따옴표가 든 log prefix 등)가 있으면 포탈이 지울 수 없다.
+    for (const args of plan.commands) {
+      const why = await deps.fw.validate(args);
+      if (why) fwErrors.push(`방화벽 래퍼가 받지 않는 명령이라 적용하지 않습니다: firewall-cmd ${args.join(' ')} — ${why}. 이 규칙은 서버에서 root 로 직접 정리한 뒤 다시 적용하세요.`);
+    }
+  } else if (engine.runner === 'direct') {
+    // 보안 잔여 11-27 M-5: 옛 설치본은 그대로 동작하되 조용히 넘기지 않는다(자동 업그레이드는 sudoers 를 좁히지 못한다).
+    warnings.push(runningAsRoot() ? LEGACY_ROOT_NOTE : LEGACY_SUDO_NOTE);
+  }
+  const allErrors = [...errors, ...plan.errors, ...fwErrors];
+  return { ok: !allErrors.length, settings, engine, ...plan, warnings, errors: allErrors };
 }
 
 /** 적용(런타임) → pending. 오류가 하나라도 있으면 아무것도 실행하지 않는다. */

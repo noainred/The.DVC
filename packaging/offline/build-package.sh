@@ -213,9 +213,11 @@ cp "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/uninstall.sh" "$STAGE/"
 cp "$SCRIPT_DIR/release-verify-lib.sh" "$STAGE/"   # v2.730(S-10): install.sh 가 source 하는 패키지 서명 확인
 cp "$SCRIPT_DIR/vmware-portal.service" "$STAGE/"
 cp "$SCRIPT_DIR/vmware-portal-rma@.service" "$STAGE/"
+cp "$SCRIPT_DIR/vmware-portal-firewall-cmd" "$STAGE/"   # 보안 잔여 11-27 M-5: install.sh 가 root 소유로 두는 firewall-cmd 인자 검사 래퍼
 cp "$SCRIPT_DIR/portal.env.example" "$STAGE/"
 cp "$SCRIPT_DIR/OFFLINE-INSTALL.md" "$STAGE/README.md"
 chmod +x "$STAGE/install.sh" "$STAGE/uninstall.sh"
+chmod 0755 "$STAGE/vmware-portal-firewall-cmd"
 echo "${VERSION}" > "$STAGE/VERSION"
 
 # 5) Pack the full installer package -----------------------------------------

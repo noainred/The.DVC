@@ -204,9 +204,11 @@ export function desiredRichRules(s) {
 export function isManagedRich(rule, s, prevRich = []) {
   if (prevRich.includes(rule)) return true;
   if (/service name="ssh"/.test(rule)) return true;
-  if (/port port="22" protocol="tcp"/.test(rule)) return true;
+  // 보안 잔여 11-27 M-5(형제 결함 — 재현): 'port port=' 앞이 공백이어야 포트 요소다. 앵커가 없어 forward-port port="80" … to-port="4000" ·
+  //   source-port port="22" 규칙을 포트 요소로 오인해 지웠다(80→포탈 포트 전달 같은 관리자 규칙). 래퍼도 그 둘은 지우지 못한다.
+  if (/(?:^|\s)port port="22" protocol="tcp"/.test(rule)) return true;
   const ports = new Set([...s.web.ports, ...s.firewall.extra.map((r) => r.port)]);
-  const m = /port port="([^"]+)" protocol="(tcp|udp)"/.exec(rule);
+  const m = /(?:^|\s)port port="([^"]+)" protocol="(tcp|udp)"/.exec(rule);
   if (m && ports.has(m[1])) return true;
   return false;
 }

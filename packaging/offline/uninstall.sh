@@ -94,6 +94,9 @@ for u in $(systemctl list-units --all --plain --no-legend 'vmware-portal-rma@*' 
   systemctl disable --now "$u" 2>/dev/null || true
 done
 rm -f /etc/systemd/system/vmware-portal-rma@.service /etc/sudoers.d/vmware-portal-rma /etc/sudoers.d/vmware-portal-hostaccess
+# 보안 잔여 11-27 M-5: 호스트 접근 제어의 firewall-cmd 인자 검사 래퍼(install.sh VP_FW_WRAPPER) — sudoers 를 먼저 지운 뒤(가리킬 것이 없는 순간이 없게).
+#   sudoers 파일과 같은 호스트 단위 하나라 같은 규칙이다(한 호스트에 여러 prefix 를 설치했으면 함께 지워진다).
+rm -f -- /usr/local/libexec/vmware-portal-firewall-cmd
 systemctl daemon-reload
 
 # v2.689(B5): install.sh 가 만든 OTP 등록 도구 링크. **이 설치본을 가리킬 때만** 지운다 —

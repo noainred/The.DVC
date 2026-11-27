@@ -15,6 +15,7 @@ vmware-portal-offline-<버전>-el9-x64/
 ├── release-verify-lib.sh   # install.sh 가 쓰는 패키지 서명 확인
 ├── vmware-portal.service   # systemd 유닛 템플릿
 ├── vmware-portal-rma@.service  # RMA(원격 명령 에이전트) 유닛 템플릿
+├── vmware-portal-firewall-cmd  # 호스트 접근 제어 firewall-cmd 인자 검사 래퍼(install.sh 가 root 소유로 설치)
 ├── portal.env.example      # 환경설정 예시
 ├── VERSION
 └── README.md               # (이 문서)

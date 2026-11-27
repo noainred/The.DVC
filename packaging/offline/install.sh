@@ -203,6 +203,58 @@ vp_rma_sudoers() {
   return 0
 }
 
+# ── 호스트 접근 제어 firewall-cmd 인자 검사 래퍼 — 보안 잔여 11-27 M-5 ──────────────────────────────────────────────
+# 예전 sudoers 는 서비스 계정에 /usr/bin/firewall-cmd 를 **인자 제한 없이** 허용했다 — 서비스 계정(같은 계정으로 도는 RMA 인스턴스 포함 ·
+#   RMA 유닛은 NoNewPrivileges=false)이 탈취되면 기본 존 바꾸기 · direct passthrough · panic · forward-port · 파일 읽기(--*-from-file)로
+#   방화벽 전체를 바꿀 수 있었다(2026-09-12 감사 M-5). 이제 root 소유 래퍼(패키지의 vmware-portal-firewall-cmd)를 두고 sudoers 는 그 파일
+#   하나만 허용한다. 래퍼는 포탈이 실제로 쓰는 인자 형태만 받는다. 경로는 server/src/hostaccess/exec.js FW_WRAPPER · uninstall.sh 와 같다(시험이 대조).
+#   호스트 단위 하나다(prefix 와 무관 — /etc/sudoers.d/vmware-portal-hostaccess 와 수명이 같다).
+#   ⚠ 바꿔치기 방지는 '그 길 전체를 root 만 바꿀 수 있는가' 판정(vp_path_controllers — 링크가 놓인 폴더까지) 하나가 전부다 — sudo 는 명령 파일의
+#     소유자를 보지 않는다. 포탈 서버의 확인(exec.js wrapperState)은 이상을 알리고 멈추는 장치다.
+VP_FW_WRAPPER=/usr/local/libexec/vmware-portal-firewall-cmd
+
+# vp_fw_wrapper_install <원본(root 가 푼 패키지 안)> <설치 경로> — 0 = 길 전체가 root 전용인 곳에 root 소유 0755 일반 파일로 놓였다 · 1 = 실패(사유를 알린다)
+vp_fw_wrapper_install() {
+  local src="$1" dst="$2" dir tmp c
+  dir="$(dirname -- "$dst")"
+  if [[ ! -f "$src" || -L "$src" ]]; then echo "⚠ 패키지에 방화벽 인자 검사 래퍼($src)가 없거나 일반 파일이 아닙니다." >&2; return 1; fi
+  if ! declare -F vp_path_controllers >/dev/null; then echo "⚠ release-verify-lib.sh 가 없어 래퍼를 둘 폴더의 길을 확인할 수 없습니다 — 래퍼를 두지 않습니다." >&2; return 1; fi
+  ( umask 022; mkdir -p -- "$dir" ) || { echo "⚠ $dir 를 만들지 못했습니다." >&2; return 1; }
+  if ! c="$(vp_path_controllers "$dir")" || [[ -n "$c" ]]; then
+    echo "⚠ $dir 로 가는 길을 root 말고도 바꿀 수 있어($c) 방화벽 래퍼를 두지 않습니다." >&2; return 1
+  fi
+  if [[ -d "$dst" && ! -L "$dst" ]]; then echo "⚠ $dst 가 폴더라 방화벽 래퍼를 두지 않습니다." >&2; return 1; fi
+  tmp="$dst.new.$$"
+  rm -f -- "$tmp"
+  if ! install -o 0 -g 0 -m 0755 -- "$src" "$tmp"; then rm -f -- "$tmp"; echo "⚠ 방화벽 래퍼를 복사하지 못했습니다." >&2; return 1; fi
+  # rename — 그 자리에 링크가 있어도 따라가지 않고 링크를 갈아끼운다
+  if ! mv -fT -- "$tmp" "$dst"; then rm -f -- "$tmp"; echo "⚠ 방화벽 래퍼를 제자리에 두지 못했습니다." >&2; return 1; fi
+  if [[ ! -f "$dst" || -L "$dst" || "$(stat -c '%u %a' -- "$dst" 2>/dev/null)" != "0 755" ]] || [[ "$(sha256sum < "$src")" != "$(sha256sum < "$dst")" ]]; then
+    echo "⚠ 방화벽 래퍼($dst)를 root 소유 0755 로 확인하지 못했습니다." >&2; return 1
+  fi
+  if ! c="$(vp_path_controllers "$dst")" || [[ -n "$c" ]]; then echo "⚠ 방화벽 래퍼($dst)의 길을 root 말고도 바꿀 수 있습니다($c)." >&2; return 1; fi
+  if command -v restorecon >/dev/null 2>&1; then restorecon -F -- "$dst" 2>/dev/null || true; fi   # SELinux 기본 라벨
+  return 0
+}
+
+# vp_hostaccess_sudoers <계정> <래퍼 준비 1|0> <래퍼 경로> <지금 sudoers 파일> — 내용을 stdout 으로 · VP_HA_LEGACY(1 = 옛 줄을 남겼다)
+#   래퍼가 준비됐으면 래퍼 하나만(옛 무제한 줄은 지운다 — 좁히기). 못 했으면 새로 넓히지 않는다 — 그 계정의 옛 줄이 **지금 파일에** 있을 때만 남기고
+#   (기능 유지 · 알린다), 없으면 sshd 줄만 둔다.
+vp_hostaccess_sudoers() {
+  local user="$1" ok="$2" wrapper="$3" cur="$4" legacy
+  legacy="$user ALL=(root) NOPASSWD: /usr/bin/firewall-cmd"
+  VP_HA_LEGACY=0
+  printf '# vmware-portal 호스트 접근 제어(v2.485 · 보안 잔여 11-27 M-5): firewalld 는 인자 검사 래퍼로만 + sshd 서비스 중지/재개만 허용\n'
+  if [[ "$ok" == 1 ]]; then
+    printf '%s ALL=(root) NOPASSWD: %s\n' "$user" "$wrapper"
+  elif [[ -f "$cur" && ! -L "$cur" ]] && grep -qxF -- "$legacy" "$cur" 2>/dev/null; then
+    printf '%s\n' "$legacy"
+    VP_HA_LEGACY=1
+  fi
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl stop sshd.service, /usr/bin/systemctl start sshd.service, /usr/bin/systemctl disable sshd.service, /usr/bin/systemctl enable sshd.service\n' "$user"
+  return 0
+}
+
 # ── CONFIG_DIR 파일 안전 쓰기 — v2.744(감사 INJPKG-01) ──────────────────────────────────────────────────────────────
 # CONFIG_DIR 은 서비스 계정 소유(chmod 0750, 아래 5)라 서비스 계정이 그 안의 파일을 지우고 심볼릭 링크·하드 링크로 바꿔 둘 수 있다.
 #   예전에는 root 로 도는 이 스크립트가 rma-<인스턴스>.env·settings-owners.txt·portal.env 를 경로 그대로 chown·chmod·cat >·
@@ -769,18 +821,42 @@ if [[ -f "$SCRIPT_DIR/vmware-portal-rma@.service" ]]; then
     echo "  이미 허용돼 있던 줄은 그대로 둡니다. 더하려면 portal.env 내용을 확인한 뒤 sudo chown root:root $CONFIG_DIR/portal.env 후 install.sh 를 다시 실행하세요"
     echo "  (설치가 끝나면 다시 서비스 계정 소유가 됩니다). 원격 RMA 배포(설정 › RMA)는 root 로 sudoers 를 직접 씁니다."
   fi
+  # 보안 잔여 11-27 M-5(형제 경로): RMA 에 방화벽 유닛을 맡기면 같은 서비스 계정이 방화벽 전체를 끌 수 있다(firewall-cmd 를 래퍼로 좁힌 뜻이 없어진다).
+  #   root 가 portal.env 로 명시한 값이라 막지 않고 알린다(정책 결정은 사용자 몫).
+  if grep -qE 'systemctl (start|stop|restart) (firewalld|nftables|iptables|ip6tables|ebtables|ipset)\.service$' "$SUDO_TMP" 2>/dev/null; then
+    echo "⚠ RMA_SERVICE_UNITS 에 방화벽 유닛(firewalld·nftables·iptables 등)이 있습니다 — 포탈 서비스 계정이 방화벽을 끌 수 있습니다(호스트 접근 제어의 인자 검사 래퍼를 우회). 꼭 필요한지 확인하세요."
+  fi
   if visudo -cf "$SUDO_TMP" >/dev/null 2>&1; then install -m 0440 "$SUDO_TMP" /etc/sudoers.d/vmware-portal-rma; fi
   rm -f "$SUDO_TMP"
 fi
 
 # v2.485 호스트 접근 제어(설정 › Security › 호스트 접근 제어): 포탈이 firewalld 로 SSH/웹 클라이언트 제어·OS 방화벽 추가
 # 규칙을 적용하려면 서비스 계정에 firewall-cmd 와 sshd 서비스 start/stop/enable/disable 의 sudo 가 필요하다.
-# 정확히 이 명령들만 허용(다른 systemctl 인자는 불가). visudo 검증 실패 시 설치하지 않는다(화면이 필요한 줄을 안내).
+# 보안 잔여 11-27 M-5: firewall-cmd 는 root 소유 인자 검사 래퍼($VP_FW_WRAPPER)로만 허용한다(위 vp_fw_wrapper_install 설명).
+#   순서: 래퍼 → sudoers → (아래) 서비스 재시작 — sudoers 가 없는 파일을 가리키는 순간을 만들지 않는다. 래퍼 원본은 root 가 푼(서명 확인을 거친)
+#   패키지에서만 복사한다(서비스 계정이 쓸 수 있는 앱 트리에서 복사하지 않는다). visudo 검증 실패 시 설치하지 않는다(화면이 필요한 줄을 안내).
+#   자동 업그레이드(서비스 계정)는 이 파일들을 바꾸지 못한다 — 옛 설치본은 이 install.sh 를 root 로 다시 실행해야 좁혀진다.
 if command -v firewall-cmd &>/dev/null; then
+  VP_FW_OK=0; VP_HA_LEGACY=0
+  if vp_fw_wrapper_install "$SCRIPT_DIR/vmware-portal-firewall-cmd" "$VP_FW_WRAPPER"; then VP_FW_OK=1; fi
   HA_TMP="$(mktemp)"
-  printf '# vmware-portal 호스트 접근 제어(v2.485): firewalld 제어 + sshd 서비스 중지/재개만 허용\n%s ALL=(root) NOPASSWD: /usr/bin/firewall-cmd\n%s ALL=(root) NOPASSWD: /usr/bin/systemctl stop sshd.service, /usr/bin/systemctl start sshd.service, /usr/bin/systemctl disable sshd.service, /usr/bin/systemctl enable sshd.service\n' "$SERVICE_USER" "$SERVICE_USER" > "$HA_TMP"
-  if visudo -cf "$HA_TMP" >/dev/null 2>&1; then install -m 0440 "$HA_TMP" /etc/sudoers.d/vmware-portal-hostaccess; fi
+  vp_hostaccess_sudoers "$SERVICE_USER" "$VP_FW_OK" "$VP_FW_WRAPPER" /etc/sudoers.d/vmware-portal-hostaccess > "$HA_TMP"
+  if visudo -cf "$HA_TMP" >/dev/null 2>&1; then
+    install -m 0440 "$HA_TMP" /etc/sudoers.d/vmware-portal-hostaccess
+    if [[ $VP_FW_OK -eq 1 ]]; then echo "==> 호스트 접근 제어: firewall-cmd 는 인자 검사 래퍼($VP_FW_WRAPPER)로만 허용합니다"; fi
+  else
+    echo "⚠ 호스트 접근 제어 sudoers 검증(visudo)에 실패해 기존 파일을 그대로 둡니다."
+    # 기존 파일이 옛 방식이면 새 래퍼를 지운다 — 래퍼가 있으면 포탈은 래퍼를 부르는데 옛 sudoers 는 래퍼를 허용하지 않는다(옛 방식으로 계속 돌게).
+    if [[ $VP_FW_OK -eq 1 ]] && grep -qxF -- "$SERVICE_USER ALL=(root) NOPASSWD: /usr/bin/firewall-cmd" /etc/sudoers.d/vmware-portal-hostaccess 2>/dev/null; then
+      rm -f -- "$VP_FW_WRAPPER"; VP_FW_OK=0; VP_HA_LEGACY=1
+    fi
+  fi
   rm -f "$HA_TMP"
+  if [[ $VP_HA_LEGACY -eq 1 ]]; then
+    echo "⚠ 방화벽 인자 검사 래퍼를 쓰지 못해 옛 sudoers 줄(firewall-cmd 인자 제한 없음)을 그대로 둡니다 — 포탈 계정이 탈취되면 방화벽 전체를 바꿀 수 있습니다. 위 원인을 고친 뒤 install.sh 를 다시 실행하세요."
+  elif [[ $VP_FW_OK -ne 1 ]]; then
+    echo "⚠ 방화벽 인자 검사 래퍼를 설치하지 못해 호스트 접근 제어의 방화벽 적용을 허용하지 않았습니다(sshd 줄만). 위 원인을 고친 뒤 install.sh 를 다시 실행하세요."
+  fi
 fi
 
 systemctl daemon-reload
