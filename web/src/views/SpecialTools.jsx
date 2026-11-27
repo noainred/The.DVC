@@ -60,6 +60,7 @@ const PortalCheck = React.lazy(() => import('./tools/PortalCheck.jsx')); // 포�
 const EdgeTokenSync = React.lazy(() => import('./EdgeTokenSync.jsx'));   // 엣지 토큰 맞추기(v2.827 — 설정 하위 탭에서 독립 도구로)
 const CommMap = React.lazy(() => import('./tools/CommMap.jsx'));
 const XferSpeedTool = React.lazy(() => import('./tools/XferSpeedTool.jsx'));   // 법인 간 전송 속도(v2.735)         // 통신 지도(중앙↔엣지 라디얼, v2.584)
+const SvcStatusTool = React.lazy(() => import('./tools/SvcStatusTool.jsx'));   // 포탈 서비스 상태 모니터링(등록부 대상 TCP 포트 감시)
 const IsilonDirUsageTool = React.lazy(() => import('./tools/IsilonDirUsageTool.jsx'));   // 아이실론 디렉터리 사용량(v2.736)
 const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
 const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단 지도(장비 → 엣지 → 메인, v2.588)
@@ -652,6 +653,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'edge-tokens' && <EdgeTokenSync />}
       {tool === 'comm-map' && <CommMap />}
       {tool === 'xfer-speed' && <XferSpeedTool />}
+      {tool === 'svc-status' && <SvcStatusTool />}
       {tool === 'isilon-dirusage' && <IsilonDirUsageTool />}
       {tool === 'data-flow' && <DataFlow />}
       {tool === 'device-flow' && <DeviceFlow />}
