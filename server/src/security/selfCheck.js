@@ -207,9 +207,14 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
     const local = users.filter((u) => !u.ad && !u.isAd);
     // v2.674: 저장 역할 super_admin(v2.643)도 관리자 등급이다 — 예전 비교는 noainred 를 고권한 계정에서 빼고 셌다.
     const priv = local.filter((u) => isAdminTier(u.role) || u.role === 'operator');
-    const enrolled = priv.filter((u) => u.totpEnabled || u.hasTotp || u.otpEnrolled);
+    // 보안 잔여 11-27 M3(반증 S-4): OTP 키를 복호하지 못한 계정(otpUnreadable)은 등록돼 있어도 로그인할 수 없다 — 등록 수에서 뺀다
+    //   (빼지 않으면 다른 키로 복원된 설치의 '전 관리자 OTP 로그인 불가' 가 녹색 '전원 등록' 으로 보였다).
+    const usable = (u) => (u.totpEnabled || u.hasTotp || u.otpEnrolled) && !u.otpUnreadable;
+    const enrolled = priv.filter(usable);
     const admins = local.filter((u) => isAdminTier(u.role));
-    const adminEnrolled = admins.filter((u) => u.totpEnabled || u.hasTotp || u.otpEnrolled);
+    const adminEnrolled = admins.filter(usable);
+    const unreadable = local.filter((u) => u.otpUnreadable);
+    const unreadablePriv = unreadable.filter((u) => isAdminTier(u.role) || u.role === 'operator');
     add({
       id: 'otp-coverage',
       group: '인증·계정',
@@ -220,6 +225,18 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
         : `로컬 고권한 ${priv.length}개 중 ${enrolled.length}개 등록 · admin ${admins.length}개 중 ${adminEnrolled.length}개 등록.`,
       evidence: 'users.json · auth/auth.js listUsers',
       howto: enrolled.length < priv.length ? '설정 › 메인포탈 사용자 관리에서 미등록 계정의 OTP 등록을 요청한다. 전원 분실 시 콘솔 도구 otp-enroll.sh 로 복구한다.' : '',
+    });
+    // 보안 잔여 11-27 M3: OTP 키 복호 실패(키 불일치 · 분실 · 다른 호스트로 복원) — 계정명은 싣지 않는다(목록은 콘솔 도구 --list).
+    add({
+      id: 'otp-seed-unreadable',
+      group: '인증·계정',
+      title: 'OTP 키 복호 실패',
+      status: unreadable.length ? 'risk' : 'ok',
+      detail: unreadable.length
+        ? `OTP 키를 복호하지 못한 계정이 ${unreadable.length}개다(고권한 ${unreadablePriv.length}개 · 계정명은 표시하지 않는다). 그 계정은 OTP 로 로그인 · 재확인할 수 없다.`
+        : '없음 — 등록된 OTP 키를 모두 열 수 있다.',
+      evidence: 'users.json(자격증명 저장 방식 = 암호화이면 OTP 키 봉인) · secrets-key · SECRETS_KEY',
+      howto: unreadable.length ? '자격증명 암호화 키(SECRETS_KEY · CONFIG_DIR/secrets-key)를 원래 값으로 되돌리고 재시작한다. 키를 정말 잃었으면 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록한다.' : '',
     });
   } else {
     add({

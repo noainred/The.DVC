@@ -23,6 +23,8 @@ import { issuesMaxBytes } from '../issues/store.js';   // v2.901(점검 P1) 사�
 import { boardMaxBytes } from '../bulletin/store.js';
 import { wikiMaxBytes } from '../wiki/store.js';
 import { casesMaxBytes, ledgerMaxBytes } from '../bmcheck/store.js';   // v3.52 디버깅 1회차 성능 P8 — 물리서버 제조사 케이스 기록도 그 저장소 상한까지 담는다
+import { countUnopenableSealed, USER_SECRET_FIELDS } from '../security/secretVault.js';   // 보안 잔여 11-27 M3: 번들 OTP 키를 이 호스트 키로 열 수 있는가
+import { isAdminTier } from '../auth/roles.js';
 
 /** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -550,6 +552,16 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     if (pv.revived.length) warnings.push({ file: 'central-agent-tokens.json', reason: `재시작 때 백업에만 있는 엣지 토큰 ${pv.revived.length}개(${pv.revived.slice(0, 10).join(', ')}${pv.revived.length > 10 ? ' …' : ''})가 되살아납니다 — 같은 엣지의 현재 토큰은 유지됩니다. 백업 이후 폐기한 토큰이면 재시작 뒤 다시 폐기하세요.` });
   }
   if (toStage['users.json'] != null) warnings.push({ file: 'users.json', reason: '재시작 때 모든 계정의 세션 버전을 올립니다 — 백업 이후 폐기한 세션이 되살아나지 않게 모든 사용자가 다시 로그인해야 합니다.' });
+  // 보안 잔여 11-27 M3(반증 S-5): 봉인된 OTP 키는 그 키(secrets-key · SECRETS_KEY — 번들 밖)로만 열린다. 다른 호스트 · 다른 키로 복원하면 재시작 뒤 그 계정은
+  //   OTP 로 로그인하지 못한다(관리자 전원이면 웹 관리자 접근 불가 — 콘솔 도구로만 복구). 막지 않고 지금 알린다(판정은 부작용 없음 — 키를 만들지 않는다).
+  if (toStage['users.json'] != null) {
+    let un = null;
+    try { un = countUnopenableSealed(toStage['users.json'], USER_SECRET_FIELDS); } catch { un = null; }
+    if (un?.unopenable) {
+      const admins = un.records.filter((r) => r.role && (isAdminTier(r.role) || r.role === 'operator')).length;
+      warnings.push({ file: 'users.json', reason: `번들의 OTP 키 ${un.unopenable}개(고권한 계정 ${admins}개)를 이 포탈의 암호화 키로 열 수 없습니다 — 재시작 뒤 그 계정은 OTP 로 로그인하지 못합니다. 원래 키(secrets-key · SECRETS_KEY)를 함께 옮기거나, 재시작 뒤 콘솔 도구(sudo vmware-portal-otp <계정>)로 다시 등록하세요.` });
+    }
+  }
   for (const w of warnings) console.warn(`[backup] 복원 경고 — ${w.file}: ${w.reason}`);
   // 원자적 쓰기 — 복원 도중 정전/디스크풀이면 핵심 설정이 부분기록으로 손상된 채 남는다. tmp+rename으로 온전본만 남긴다.
   for (const [base, content] of envWrites) {

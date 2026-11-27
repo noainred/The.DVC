@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf, loginTokenExpSec, extendTokenExpSec, revokeTokenSession, touchSessionActivity, noteIssuedSession, resolveTokenUser, activeSessionKeyOf, legacySessionKeyOf } from '../auth/auth.js';
+import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf, otpSeedUnreadableOf, loginTokenExpSec, extendTokenExpSec, revokeTokenSession, touchSessionActivity, noteIssuedSession, resolveTokenUser, activeSessionKeyOf, legacySessionKeyOf } from '../auth/auth.js';
 import { otpEnrolled, requireCurrentOtp, selfRebindVerified, clearSelfRebind } from '../auth/otpRebind.js';   // 19회차 A-2 · 20회차 F1 — 판정 하나
 import { roleToolsDenied, effectiveToolAccess, userPermissions } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd, adTransportStatus } from '../auth/ad.js';
@@ -117,6 +117,8 @@ authRouter.post('/login', async (req, res) => {
     // v2.682 R3A-05: 같은 이름 로컬 계정 때문에 AD 를 시도하지 않은 실패면 감사 detail 에 그 사유를 남긴다(응답은 그대로 — 계정 열거 단서 금지).
     let shadow = '';
     try { const sb = adShadowBlockOf(username); if (sb && Date.now() - sb.at < 10_000) shadow = ` · ${sb.reason}`; } catch { /* */ }
+    // 보안 잔여 11-27 M3: 복호하지 못한 OTP 시드 때문의 실패면 감사 detail 에 그 사유(응답은 그대로 'invalid credentials').
+    try { const su = otpSeedUnreadableOf(username); if (su && Date.now() - su.at < 10_000) shadow += ` · ${su.reason}`; } catch { /* */ }
     // 잠금을 **발동시킨** 줄은 항상 남긴다. 그 밖의 실패는 출처당 1분에 한 줄 + 합친 개수(감사 이력 밀어내기 방지).
     if (lk.locked) logAudit({ user: username, action: '로그인 실패(잠금 발동)', detail: shadow.replace(/^ · /, '') || undefined, ip, xff });
     else { const sum = loginFailGate(gateIp); if (sum.write) logAudit({ user: username, action: '로그인 실패', detail: (foldedNote(sum.folded) + shadow).replace(/^ · /, ''), ip, xff }); }

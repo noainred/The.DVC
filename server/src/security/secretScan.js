@@ -34,11 +34,12 @@ const maskLen = (v) => `${MASK}(${String(v).length}자)`;
 
 const CONFIG_JSON_MAX = 5 * 1024 * 1024; // 5MB 초과 JSON(대형 스캔 결과 등)은 건너뛰고 사유 보고
 
+// 보안 잔여 11-27 M3(반증 S-3): 파일 한정 추가 필드(alerts.json url · bm-events.json 비밀 셋 · users.json OTP 시드)도 secretVault 와 같은 판정으로 센다.
 function walkFields(obj, cb, trail = '', extra = null) {
   if (Array.isArray(obj)) { obj.forEach((v, i) => walkFields(v, cb, `${trail}[${i}]`, extra)); return; }
   if (obj && typeof obj === 'object') {
     for (const [k, v] of Object.entries(obj)) {
-      // 파일 한정 추가 필드(alerts.json url · bm-events.json 비밀 셋)도 본다 — 금고와 같은 목록(디버깅 5회차 보안 #1)
+      // 파일 한정 추가 필드(alerts.json url · bm-events.json 비밀 셋 · users.json OTP 시드)도 본다 — 금고와 같은 목록(디버깅 5회차 보안 #1 · 보안 잔여 11-27 M3)
       if (typeof v === 'string' && (SECRET_FIELDS.has(k) || extra?.has(k))) cb(`${trail ? `${trail}.` : ''}${k}`, k, v);
       else walkFields(v, cb, `${trail ? `${trail}.` : ''}${k}`, extra);
     }

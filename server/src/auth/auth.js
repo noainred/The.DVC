@@ -17,6 +17,8 @@ import { initialExpSec, extendedExpSec, hardLimitSec, sessionVerdict, loginAtOf,
 import { isSessionRevoked, isTokenDigestRevoked, tokenDigest, lastActivity, noteActivity, sessionNotBefore, forgetUserActivity, revokeSession as revokeSessionImpl, revokeTokenDigest as revokeDigestImpl } from './sessionState.js';
 import { getDataSource } from '../runtime-settings.js';
 import { denyDemoGuest } from './demoGuest.js';
+// 보안 잔여 11-27 M3: OTP 시드(totpSecret · totpPendingSecret) 레코드 단위 봉인 — secretVault.js '레코드 단위 봉인' 절.
+import { openRecordFields, sealRecordFields, newSecretSealIssue, isSealed, USER_SECRET_FIELDS, keyCreationDisallowed, secretsPolicyCached, ensureKeyCheckSoon } from '../security/secretVault.js';
 
 /** v2.716: 내장 데모 계정이 mock 모드에서 쓰일 때 — 요청 문맥은 admin + demoGuest(auth/demoGuest.js 가 요청을 먼저 거른다). */
 function demoGuestOf(u) {
@@ -212,17 +214,15 @@ export function loadUsers() {
     }
   }
   if (text != null) {
+    let loaded = null;
     try {
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed?.users) && parsed.users.length) {
-        users = parsed.users;
-        const changed = [ensureDemoUser(users), ensureSuperUser(users)].some(Boolean);
-        if (changed) { try { persistUsers(); } catch { /* 다음 저장 때 함께 기록 */ } }
-        return users;
+      if (Array.isArray(parsed?.users) && parsed.users.length) loaded = parsed.users;
+      else {
+        // 19회차 A-4: 형태가 다른 파일(users 가 배열 아님 · 빈 목록 · null)도 시드 전에 보존한다 — 예전에는 보존 없이 시드가 덮었다.
+        preserveCorrupt(file, 'users 가 비었거나 배열이 아닙니다(형식 불일치)');
+        console.error('[auth] Failed to parse users.json: 형식 불일치(users 가 비었거나 배열이 아님) — 원본을 보존하고 기본 계정을 만듭니다');
       }
-      // 19회차 A-4: 형태가 다른 파일(users 가 배열 아님 · 빈 목록 · null)도 시드 전에 보존한다 — 예전에는 보존 없이 시드가 덮었다.
-      preserveCorrupt(file, 'users 가 비었거나 배열이 아닙니다(형식 불일치)');
-      console.error('[auth] Failed to parse users.json: 형식 불일치(users 가 비었거나 배열이 아님) — 원본을 보존하고 기본 계정을 만듭니다');
     } catch (err) {
       // 손상본을 조용히 무시하고 아래에서 기본 admin을 시드하면, 다음 persistUsers가
       // 실사용자 전부를 시드 1건으로 덮어써 계정이 영구 유실된다 → 손상본을 .corrupt로 보존.
@@ -231,6 +231,7 @@ export function loadUsers() {
       //   이 줄은 콘솔 링버퍼(/admin/logs·로그 분석·엣지 로그)로 나간다. 원문은 users.json.corrupt.* 보존본에 있다. 접두 문구는 로그 분석 규칙이 본다.
       console.error(`[auth] Failed to parse users.json: ${safeLoadText(err) || '사유 미상'}`);
     }
+    if (loaded) return adoptLoadedUsers(loaded);
   }
   // Seed a default admin so the portal is usable out of the box.
   // 보안(H4): 알려진 기본 비번(admin123) 대신 — DEFAULT_ADMIN_PASSWORD가 있으면 그것을,
@@ -258,6 +259,49 @@ export function loadUsers() {
   return users;
 }
 
+/*
+ * 보안 잔여 11-27 M3: 읽은 계정 목록을 받아들인다 — **JSON.parse 의 try 밖**이다. 시드를 여는 중의 예외가 '손상' 갈래로 떨어지면 원본을 .corrupt 로 옮기고
+ *   기본 admin 을 시드한다(전 계정 유실). 여는 일은 데모 · 수퍼 계정 보장과 그 저장보다 **먼저** 한다(반증 S-1 — 저장의 commit 이 남긴 기억을 여는 쪽이 덮지 않게).
+ *   복호 실패 시드는 암호문 그대로 둔다(지우지 않는다 · 그 계정의 OTP 는 tryOtp · verifyUserOtp 의 isSealed 가드가 정직한 사유로 막는다).
+ *   업그레이드 자동 봉인: 정책이 암호화인데 디스크에 평문 시드가 있으면 지금 봉인해 저장한다 — **포탈 프로세스에서만**(반증 M-1: 콘솔 도구가 포탈과 다른 키로
+ *   전 계정 시드를 봉인하면 OTP 계정 전부가 잠긴다). 봉인하지 못하면 사유를 남기고 디스크 그대로 둔다(하향 아님 · 조용히 넘기지 않음).
+ */
+let _seedOpenWarned = false;
+function adoptLoadedUsers(loaded) {
+  users = loaded;
+  let opened = { opened: 0, failed: 0, plaintext: 0 };
+  try { opened = openRecordFields(users, USER_SECRET_FIELDS); }
+  catch (e) { console.error(`[auth] ⚠ users.json 의 OTP 키를 여는 중 오류(${String(e?.message || e).slice(0, 120)}) — 열지 못한 키는 그대로 두고 계속합니다(계정은 그대로).`); }
+  if (opened.failed && !_seedOpenWarned) {
+    _seedOpenWarned = true;
+    console.warn(`[auth] ⚠ users.json 의 OTP 키 ${opened.failed}개를 복호하지 못했습니다 — 그 계정은 OTP 로그인 · OTP 재확인이 실패합니다(암호문은 지우지 않고 그대로 둡니다). 자격증명 암호화 키(SECRETS_KEY · CONFIG_DIR/secrets-key)를 원래 값으로 되돌리고 재시작하거나, 콘솔 도구로 다시 등록하세요(sudo vmware-portal-otp <계정>).`);
+  }
+  const changed = [ensureDemoUser(users), ensureSuperUser(users)].some(Boolean);
+  let sealNow = false;
+  if (!keyCreationDisallowed()) {
+    let pol = null;
+    try { pol = secretsPolicyCached(); } catch { pol = null; }
+    if (pol?.mode === 'encrypted') {
+      try { ensureKeyCheckSoon(); } catch { /* 키 확인 값은 보조 — 실패는 vault 가 알린다 */ }
+      if (opened.plaintext > 0) {
+        const issue = newSecretSealIssue(pol);
+        if (!issue) sealNow = true;
+        else console.warn(`[auth] ⚠ users.json 의 평문 OTP 키 ${opened.plaintext}개를 봉인하지 못했습니다(자격증명 저장 방식 = 암호화) — ${issue.reason} 디스크는 그대로 둡니다.`);
+      }
+    }
+  }
+  if (changed || sealNow) {
+    try {
+      persistUsers();
+      if (sealNow) console.log(`[auth] users.json 의 평문 OTP 키 ${opened.plaintext}개를 봉인했습니다(자격증명 저장 방식 = 암호화).`);
+    } catch (e) {
+      if (sealNow) console.warn(`[auth] ⚠ users.json 의 평문 OTP 키를 봉인해 저장하지 못했습니다(${String(e?.message || e).slice(0, 160)}) — 다음 저장 때 다시 시도합니다.`);
+      /* 그 밖(데모 · 수퍼 계정 보장)은 다음 저장 때 함께 기록 */
+    }
+  }
+  return users;
+}
+
 /**
  * 디스크의 users.json 을 다시 읽는다 — **콘솔 계정 도구(tools/user-admin.js) 전용**(v2.723).
  * 도구는 메뉴를 오래 띄워 둘 수 있으므로, 실행 중인 포탈이 그 사이 사용자 파일을 저장했으면(OTP 카운터 등)
@@ -275,7 +319,11 @@ function persistUsers() {
   if (_usersReadError) throw new Error('users.json 을 읽지 못한 상태라 저장하지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.');   // 19회차 A-4
   // 원자적 쓰기 — 자격증명 파일이 부분기록으로 손상돼 전 사용자가 유실되는 사고를 방지.
   try {
-    atomicWriteFileSync(file, JSON.stringify({ users: loadUsers() }, null, 2), { mode: 0o600 });
+    // 보안 잔여 11-27 M3: OTP 시드는 레코드 단위 봉인으로 쓴다 — 평문 정책 · 봉인 값 없음이면 같은 배열(바이트가 예전과 같다). 시드를 바꾸지 않는 저장은
+    //   잠금 · 키 없음에서도 디스크 원문을 승계해 계속 된다(새 시드만 던진다). 기억(commit)은 쓰기가 성공한 뒤에만 바꾼다.
+    const sealed = sealRecordFields(loadUsers(), USER_SECRET_FIELDS);
+    atomicWriteFileSync(file, JSON.stringify({ users: sealed.records }, null, 2), { mode: 0o600 });
+    sealed.commit();
   } finally {
     // 저장이 실패해도 인메모리 tokenVersion 은 이미 올라 HTTP 는 거부한다 — 열린 장기 연결(SSH·RDP WS)에도 같은 사실을 알린다.
     flushUserRevocations();
@@ -423,6 +471,9 @@ export function authenticateLocal(username, credential) {
   // OTP 코드 검증 + 재사용(replay) 방지 — 성공하면 성공 카운터를 기록하고 true.
   const tryOtp = () => {
     if (!user.totpEnabled || !user.totpSecret) return false;
+    // 보안 잔여 11-27 M3: 복호하지 못한 시드(암호문 그대로)로는 코드를 맞추지 않는다 — 강제 분기 조건(totpEnabled && totpSecret)은 그대로 참이라
+    //   비밀번호로 내려가지 않는다. 응답은 예전과 같은 'invalid credentials'(계정 열거 단서 금지) · 사유는 콘솔 1회 · 감사 detail.
+    if (isSealed(user.totpSecret)) { noteSeedUnreadable(user.username); return false; }
     const ctr = totp.verifyToken(credential, user.totpSecret, { minCounter: Number.isInteger(user.totpLastCounter) ? user.totpLastCounter : -1 });
     if (ctr == null) return false;
     if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
@@ -468,6 +519,37 @@ export function authenticateLocal(username, credential) {
     mustEnrollOtp: enforced && !user.totpEnabled,
   });
 }
+
+/*
+ * 보안 잔여 11-27 M3: 복호하지 못한 OTP 시드(키 불일치 · 분실 · 다른 호스트로 복원)로 로그인 · 재확인을 시도한 기록 — 로그인 실패 감사 detail 용(응답은 바꾸지 않는다).
+ *   콘솔 경고는 프로세스당 1회이고 **계정 이름을 싣지 않는다**(콘솔은 로그 버퍼 · 엣지 로그로 나간다 — 목록은 콘솔 도구 --list · 자가 점검 개수).
+ */
+export const OTP_SEED_UNREADABLE_REASON = '이 계정의 OTP 키를 복호하지 못해 OTP 코드를 확인할 수 없습니다(자격증명 암호화 키 불일치 · 분실 의심). 관리자에게 키 복구 또는 OTP 재등록(다른 관리자의 대리 등록 · 콘솔 도구 vmware-portal-otp)을 요청하세요.';
+export const OTP_SEED_UNREADABLE_AUDIT = 'OTP 키 복호 실패(키 불일치 · 분실 의심)';
+const SEED_UNREADABLE_MAX = 200;
+// 봉인할 수 없어 저장을 거절한 오류 코드(secretVault) — 시드를 바꾸는 쓰기(begin · confirm)는 이 코드면 메모리를 되돌리고 사유를 돌려준다.
+const SEAL_ERROR_CODES = new Set(['SECRETS_POLICY_UNAVAILABLE', 'SECRETS_KEY_MISSING', 'SECRETS_KEY_MISMATCH']);
+const _seedUnreadable = new Map();   // 소문자 이름 → { at, count }
+let _seedUnreadableWarned = false;
+function noteSeedUnreadable(username, now = Date.now()) {
+  const k = String(username ?? '').trim().toLowerCase();
+  if (!k) return;
+  const prev = _seedUnreadable.get(k);
+  if (prev) _seedUnreadable.delete(k);
+  else if (_seedUnreadable.size >= SEED_UNREADABLE_MAX) { const first = _seedUnreadable.keys().next().value; if (first !== undefined) _seedUnreadable.delete(first); }
+  _seedUnreadable.set(k, { at: now, count: (prev?.count || 0) + 1 });
+  if (!_seedUnreadableWarned) {
+    _seedUnreadableWarned = true;
+    console.warn('[auth] ⚠ OTP 키를 복호하지 못한 계정의 OTP 로그인 · 재확인 시도가 있었습니다 — 그 계정은 OTP 로 들어올 수 없습니다(감사 로그 · 콘솔 도구 --list 에서 확인). 키(SECRETS_KEY · secrets-key)를 되돌리거나 OTP 를 다시 등록하세요.');
+  }
+}
+/** 이 이름이 최근 '복호하지 못한 OTP 시드' 로 실패했는가 — { at, count, reason } 또는 null. */
+export function otpSeedUnreadableOf(username) {
+  const r = _seedUnreadable.get(String(username ?? '').trim().toLowerCase());
+  return r ? { at: r.at, count: r.count, reason: OTP_SEED_UNREADABLE_AUDIT } : null;
+}
+/** 이 계정의 활성 OTP 시드를 복호하지 못했는가(암호문 그대로 남아 있음) — 콘솔 도구 · 자가 점검 · 목록용. */
+function seedUnreadable(u) { return !!(u?.totpEnabled && isSealed(u?.totpSecret)); }
 
 /* ------------------------------ user management ---------------------------- */
 
@@ -528,6 +610,7 @@ export function listUsers() {
   return loadUsers().map((u) => ({
     username: u.username, name: u.name || u.username, role: u.role || 'viewer',
     totpEnabled: !!u.totpEnabled, hasPassword: !!u.passwordHash,
+    otpUnreadable: seedUnreadable(u), // 보안 잔여 11-27 M3: OTP 키를 복호하지 못함(그 계정은 OTP 로그인 불가 — 키 복구 또는 재등록). 비밀 아님
     managedBy: u.managedBy || null, // 'central' = 중앙에서 배포·관리하는 계정
     demo: !!u.demo,                 // 내장 데모 계정(viewer 고정·삭제 불가·비번 없으면 로그인 불가)
     superuser: !!u.superuser,       // 수퍼관리자(super_admin 고정·강등/삭제/로그인차단 불가)
@@ -948,12 +1031,24 @@ export function beginTotpEnroll(username, host = '', { actor = null, actorUser =
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   const denied = totpRebindDenied(u, actor, trusted, actorUser);
   if (denied) return denied;
+  // 보안 잔여 11-27 M3: 새 시드를 봉인할 수 있는지 **바꾸기 전에** 묻는다 — 잠금(S-07) · 키 없음 · 콘솔 도구의 키 미확인이면 평문으로도 다른 키로도 쓰지 않고
+  //   메모리도 바꾸지 않는다(반쪽 상태 없음). 기존 OTP 로그인은 그대로다(그 시드는 디스크 원문 승계로 계속 저장된다).
+  const issue = newSecretSealIssue();
+  if (issue) return { ok: false, code: issue.code, reason: `새 OTP 키를 발급하지 않았습니다 — ${issue.reason} 기존 OTP 로그인은 그대로 됩니다.` };
   const secret = totp.generateSecret();
   // 확정(confirm) 전에는 기존 등록을 절대 건드리지 않는다 — 이전에는 여기서 totpSecret을
   // 교체하고 totpEnabled=false로 영속화해, OTP 전용 계정(passwordHash 삭제됨)이 '재등록 시작'
   // 버튼만 눌러도 기존 OTP·비밀번호 모두 불가한 벽돌 상태가 됐다(마지막 관리자면 복구 불가).
+  const hadPending = Object.prototype.hasOwnProperty.call(u, 'totpPendingSecret');
+  const prevPending = u.totpPendingSecret;
   u.totpPendingSecret = secret;
-  persistUsers();
+  try { persistUsers(); }
+  catch (e) {
+    // 사전 판정과 저장 사이에 정책 · 키가 바뀐 경우(3초 캐시 경계) — 메모리를 되돌리고 사유를 돌려준다.
+    if (!SEAL_ERROR_CODES.has(e?.code)) throw e;
+    if (hadPending) u.totpPendingSecret = prevPending; else delete u.totpPendingSecret;
+    return { ok: false, code: e.code, reason: `새 OTP 키를 발급하지 않았습니다 — ${e.message} 기존 OTP 로그인은 그대로 됩니다.` };
+  }
   const base = config.auth.totpIssuer || 'VMware Portal';
   const issuer = host ? (base.includes('VMware') ? base.replace('VMware', `VMware(${host})`) : `${base}(${host})`) : base;
   return {
@@ -973,6 +1068,8 @@ export function verifyUserOtp(username, code) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (!u.totpEnabled || !u.totpSecret) return { ok: false, reason: 'OTP가 등록되지 않은 계정입니다. 먼저 OTP를 등록하세요.', needEnroll: true };
+  // 보안 잔여 11-27 M3: 복호하지 못한 시드 — 잠금 게이트 **전에** 정직한 사유로 끝낸다. 실패로 세지 않는다(공격자의 추측이 아니다 · 잠금 문구가 사유를 가리지 않게).
+  if (isSealed(u.totpSecret)) { noteSeedUnreadable(u.username); return { ok: false, code: 'OTP_SEED_UNREADABLE', reason: OTP_SEED_UNREADABLE_REASON }; }
   const gate = checkOtpAllowed(username);
   if (gate.blocked) {
     return { ok: false, locked: true, retryAfterSec: gate.retryAfterSec, reason: `OTP 인증 시도가 일시적으로 잠겼습니다. ${gate.retryAfterSec}초 후 다시 시도하세요.` };
@@ -1001,8 +1098,14 @@ export function confirmTotpEnroll(username, code, { actor = null, actorUser = nu
   if (!u || !pending) return { ok: false, reason: '먼저 OTP 등록을 시작하세요.' };
   const denied = totpRebindDenied(u, actor, trusted, actorUser);
   if (denied) return denied;
+  // 보안 잔여 11-27 M3: 대기 시드를 복호하지 못했으면(암호문 그대로) 그 글자로 코드를 맞추지 않는다 — 처음부터 다시.
+  if (isSealed(pending)) return { ok: false, code: 'OTP_SEED_UNREADABLE', reason: '등록 대기 중인 OTP 키를 복호하지 못했습니다(자격증명 암호화 키 불일치 의심 — 콘솔 도구라면 포탈과 같은 키를 쓰는지) — 등록을 처음부터 다시 시작하세요.' };
   const enrollCtr = totp.verifyToken(code, pending);
   if (enrollCtr == null) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
+  // 보안 잔여 11-27 M3: 저장이 봉인 사유(정책 잠금 · 키 없음 · 도구 키 미확인)로 실패하면 바꾼 칸을 되돌린다(메모리만 등록된 반쪽 상태 금지).
+  //   대기 → 활성 이동은 같은 레코드의 형제 칸 암호문을 승계하므로 정상적으로는 여기서 던지지 않는다(방어선 — 도달 조건 없음, 소스 대조로 고정).
+  const snap = {};
+  for (const k of ['totpSecret', 'totpPendingSecret', 'totpEnabled', 'totpLastCounter', 'passwordHash', 'tokenVersion']) snap[k] = Object.prototype.hasOwnProperty.call(u, k) ? { v: u[k] } : null;
   u.totpSecret = pending;
   delete u.totpPendingSecret;
   u.totpEnabled = true;
@@ -1011,7 +1114,12 @@ export function confirmTotpEnroll(username, code, { actor = null, actorUser = nu
   // 재정의에서는 비밀번호를 유지해 둘 다 로그인할 수 있게 한다 — 정책이 결정하는 지점이다.
   if (isOtpOnlyUser(u.username, u.role || 'viewer')) delete u.passwordHash;
   bumpTokenVersion(u, 'otp-enrolled'); // 인증수단 변경 → 기존 토큰 폐기
-  persistUsers();
+  try { persistUsers(); }
+  catch (e) {
+    if (!SEAL_ERROR_CODES.has(e?.code)) throw e;
+    for (const [k, s0] of Object.entries(snap)) { if (s0) u[k] = s0.v; else delete u[k]; }
+    return { ok: false, code: e.code, reason: `OTP 등록을 확정하지 못했습니다 — ${e.message}` };
+  }
   // 부트스트랩용 임의 비밀번호 파일(평문)은 관리자가 OTP 를 등록하는 순간 역할이 끝난다 → 자동 삭제
   // (정책과 무관하게 항상 지운다 — 임의 생성 초기 비번 평문이 서버에 남는 사고를 막는다).
   if (isAdminTier(u.role || '')) {

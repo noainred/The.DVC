@@ -26,6 +26,8 @@
  *   문자열 값만 봉인한다. users.json 의 passwordHash(이미 해시)는 이름이 달라 절대 걸리지 않고,
  *   봉인은 이 모듈에 **등록된 파일**(SECRET_FILES)에서만 일어난다 — 외부 프로그램이 직접 읽는
  *   공유 파일(ipam.db 등)은 등록하지 않는다.
+ *   users.json 의 OTP 시드(totpSecret · totpPendingSecret)는 **파일 한정 추가 필드 + 레코드 단위 봉인**이다
+ *   (보안 잔여 11-27 M3 — openRecordFields/sealRecordFields · 아래 '레코드 단위 봉인' 절. 일반 경로를 타지 않는 이유도 거기).
  * - **복호 실패는 빈 문자열 + 경고**(throw 금지): 폴링 루프가 자격증명 하나 때문에 죽으면 안
  *   된다. 키 분실 시 비밀번호는 복구 불가이므로(설계상 당연) 사용자는 해당 계정 비번을 재입력
  *   해야 한다 — UI 가 이 한계를 고지한다.
@@ -103,6 +105,9 @@ export const SECRET_FILES = [
   // 7b 감사 L-4: 온보딩 적용 직전 스냅샷(원본 바이트 = 봉인 그대로) — 봉인 방식 전환 · 평문 점검이 이 사본도 같이 다루게.
   'onboard-prev/bm-storage.json',
   'onboard-prev/idrac.json',
+  // 보안 잔여 11-27 M3: 포탈 계정의 OTP(TOTP) 시드 — 고권한 계정은 OTP 전용이라 시드가 유일한 자격증명이다. 파일 한정 추가 필드
+  //   (USER_SECRET_FIELDS)이고 load/save 는 일반 경로(openSecretsDeep/sealSecretsDeep)가 아니라 레코드 단위 봉인(auth/auth.js)이다.
+  'users.json',
 ];
 
 /**
@@ -110,7 +115,9 @@ export const SECRET_FILES = [
  * 봉인되어 버리는 이름을 **그 파일에서만** 봉인한다. 해당 파일의 load/save 는 이 집합을 openSecretsDeep/sealSecretsDeep 에
  * 넘기고, 모드 전환 마이그레이션도 같은 집합을 쓴다(한쪽만 하면 반쪽 상태 — 위 메모 규약).
  */
-export const FILE_EXTRA_SECRET_FIELDS = Object.freeze({ 'alerts.json': new Set(['url']), 'bm-events.json': new Set(['secret', 'ctxKey', 'prevCtxKey']) });
+/** 보안 잔여 11-27 M3: users.json 의 OTP 시드 칸 — 전역 SECRET_FIELDS 에 넣지 않는다(다른 파일의 같은 이름 · 일반 경로의 키 없음 저장 거절 · 복호 실패 '' 소거). */
+export const USER_SECRET_FIELDS = new Set(['totpSecret', 'totpPendingSecret']);
+export const FILE_EXTRA_SECRET_FIELDS = Object.freeze({ 'alerts.json': new Set(['url']), 'bm-events.json': new Set(['secret', 'ctxKey', 'prevCtxKey']), 'users.json': USER_SECRET_FIELDS });
 
 /* ── 정책(모드·레벨·알고리즘) ─────────────────────────────────────────────── */
 
@@ -268,6 +275,7 @@ export function saveSecretsPolicy(partial = {}) {
   _lastGoodPolicy = next; _lastGoodFrom = 'policy-file'; _evidence = null; _policyWarnKey = null;
   syncTrustedCopy(next);
   _polAt = 0; // 캐시 즉시 무효화 — 이후 save 부터 새 정책으로 봉인
+  if (next.mode === 'encrypted') scheduleKeyCheck();   // 보안 잔여 11-27 M3: 콘솔 도구가 같은 키인지 확인할 값(아래 '키 확인 값')
   return { ...next };
 }
 
@@ -296,7 +304,7 @@ function masterKey() {
   if (_key) return _key;
   if (_keyMissing) throw _keyMissing;
   const env = process.env.SECRETS_KEY;
-  if (env && env.length >= 16) { _key = Buffer.from(env, 'utf8'); return _key; }
+  if (env && env.length >= 16) { _key = Buffer.from(env, 'utf8'); scheduleKeyCheck(); return _key; }
   // 134회차(재현): 키 파일 유무를 `fs.existsSync` 로 갈랐다 — stat 이 실패하는 폴더 수준 읽기 오류(EACCES · EIO · ESTALE)가 '키 없음' 으로 읽히고, 같은 오류로
   //   비밀 파일의 봉인 흔적도 보이지 않아 **새 키를 만들었다**: 쓰기가 되면(일시 오류) 기존 키 파일을 덮어 모든 암호문이 복호 불가가 되고, 안 되면 임시 메모리 키로 돌았다.
   //   곧바로 읽어 ENOENT 만 '키 없음' 이다 — 그 밖은 아래 '읽지 못함'(새 키를 만들지 않는다 · 21회차 M-1 과 같은 거절).
@@ -304,7 +312,10 @@ function masterKey() {
   let cur = '';
   try { cur = fs.readFileSync(keyFile(), 'utf8').trim(); exists = true; }
   catch (e) { if (e?.code !== 'ENOENT') throw keyUnavailable(`키 파일을 읽지 못함 ${String(e?.code || '')}`.trim()); }
-  if (exists && cur.length >= 32) { _key = Buffer.from(cur, 'utf8'); return _key; }
+  if (exists && cur.length >= 32) { _key = Buffer.from(cur, 'utf8'); scheduleKeyCheck(); return _key; }
+  // 보안 잔여 11-27 M3: 콘솔 도구(otp-enroll · user-admin)는 키를 만들지 않는다 — 도구와 포탈이 각자 키를 만들거나(원자적 쓰기 둘), env 키(portal.env)를
+  //   못 받은 도구가 파일 키를 새로 만들어 그 키로 시드를 봉인하면 재시작 뒤 포탈이 그 시드를 열지 못해 그 관리자가 잠긴다. 키는 포탈이 준비한다.
+  if (_noKeyCreation) throw keyUnavailable('콘솔 도구는 암호화 키를 만들지 않습니다 — 키는 포탈이 준비합니다');
   _evidence = null;   // 흔적을 지금 다시 본다(30초 기억을 쓰지 않는다)
   if (encryptionEvidence().includes('sealed-values')) {
     // 22회차 반증 D-2: 키를 정말 잃은 설치의 탈출 — 운영자가 명시적으로 SECRETS_KEY_LOST=true 로 재시작하면 새 키를 만든다(옛 암호문은 복호 실패 · 저장 때 지워진다).
@@ -316,6 +327,7 @@ function masterKey() {
     atomicWriteFileSync(keyFile(), gen, { mode: 0o600 });
     console.log(`[secrets] 암호화 키가 없어 ${keyFile()} 에 생성·영속했습니다(0600). 멀티노드/외부 비밀관리가 필요하면 SECRETS_KEY env 를 설정하세요.`);
     _key = Buffer.from(gen, 'utf8');
+    scheduleKeyCheck();
   } catch (e) {
     // 키 파일 쓰기 실패 — 프로세스 메모리 키로 폴백(재시작 시 기존 암호문 복호 불가).
     // 이 상태로 '암호화' 모드를 켜면 위험하므로 경고를 명확히 남긴다.
@@ -618,6 +630,273 @@ function sealLocked(obj, pol, extraFields) {
   });
 }
 
+/* ── 레코드 단위 봉인(users.json OTP 시드 — 보안 잔여 11-27 M3) ───────────────────────────────── */
+
+/*
+ * 왜 일반 경로(openSecretsDeep/sealSecretsDeep)가 아닌가 — users.json 은 로그인 카운터 · tokenVersion · 비밀번호 변경 같은 **세션 핵심 쓰기**가 같은 파일이다.
+ *  ① sealSecretsDeep 는 키를 쓸 수 없으면(_keyMissing) 어느 모드든 저장을 거절한다 → 로그인 · 비밀번호 변경이 깨진다.
+ *  ② openSecret 은 복호 실패를 '' 로 연다 → 다음 저장이 암호문을 지우고, OTP 전용 강제 계정의 분기(totpEnabled && totpSecret)가 거짓이 되어
+ *     **비밀번호로 로그인**된다(인증 하향 — 비밀번호가 남아 있는 계정).
+ * 그래서 여기서는 ⓐ 복호 실패를 **암호문 그대로** 메모리에 둔다(지우지 않고 · '등록됨' 의미 유지 — 소비처(auth)가 isSealed 로 거른다)
+ *  ⓑ 레코드 객체마다 '디스크에 무엇이 있었나'(disk · plain)를 기억해, 시드를 바꾸지 않는 저장은 **디스크 원문을 그대로** 다시 쓴다 —
+ *     잠금(S-07) · 키 없음에서도 그렇다(디스크가 이미 그 값이므로 하향이 아니다). 새로 봉인해야 하는 값만 거절한다.
+ * 기억은 WeakMap<레코드 객체, Map<칸, {disk, plain}>> — 같은 메모리 객체의 같은 칸만 대상이다(22회차 반증이 거부한 '근사 문맥' 문제가 없다).
+ */
+const _recMem = new WeakMap();
+// 서로 다른 salt(= 봉인한 프로세스 수)가 이보다 많으면 다음 저장에서 세션 키 하나로 다시 봉인한다(정상 정책 · 키에서만) — 복호 때 salt 마다 scrypt 1회라
+//   콘솔 등록이 쌓일수록 기동 · 첫 요청이 느려지던 것(반증 S-2). 바이트는 한 번 바뀐다.
+export const RECORD_SALT_CAP = 4;
+
+/** 조용한 복호 — 성공이면 평문, 실패면 null(경고 · 실패 카운터 · '' 대체 없음). 키를 쓸 수 없으면 null. */
+function openQuiet(v) {
+  if (!isSealed(v)) return null;
+  try {
+    const [alg, logN, salt, iv, tag, ct] = v.slice(PREFIX.length).split('$');
+    if (!Object.prototype.hasOwnProperty.call(ALGOS, alg)) return null;
+    const key = deriveKey(alg, Number(logN), Buffer.from(salt, 'base64url'));
+    const d = crypto.createDecipheriv(alg, key, Buffer.from(iv, 'base64url'), { authTagLength: 16 });
+    d.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]).toString('utf8');
+  } catch { return null; }
+}
+const saltOf = (v) => v.slice(PREFIX.length).split('$')[2] || '';
+function memOf(r) { let m = _recMem.get(r); if (!m) { m = new Map(); _recMem.set(r, m); } return m; }
+
+/**
+ * 로드 경계 — records(배열)의 fields 칸을 연다(in-place). 평문은 그대로(혼재 읽기 호환), 봉인은 복호해 평문으로 바꾸고,
+ * **복호에 실패하면 암호문을 그대로 둔다**('' 로 바꾸지 않는다). 레코드별로 디스크 원문을 기억한다(sealRecordFields 가 쓴다).
+ * @returns {{ opened:number, failed:number, plaintext:number }}  plaintext = 디스크에 평문으로 있던 시드 수(업그레이드 자동 봉인 판정)
+ */
+export function openRecordFields(records, fields) {
+  const out = { opened: 0, failed: 0, plaintext: 0 };
+  if (!Array.isArray(records)) return out;
+  for (const r of records) {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
+    for (const f of fields) {
+      const v = r[f];
+      if (typeof v !== 'string' || v === '') continue;
+      if (!isSealed(v)) { memOf(r).set(f, { disk: v, plain: v }); out.plaintext += 1; continue; }
+      const p = openQuiet(v);
+      if (p == null || p === '') { memOf(r).set(f, { disk: v, plain: null }); out.failed += 1; continue; }   // 암호문 보존
+      r[f] = p; memOf(r).set(f, { disk: v, plain: p }); out.opened += 1;
+    }
+  }
+  return out;
+}
+
+/** 새 비밀을 봉인할 수 없는 사유(Error) 또는 null. 평문 모드는 null(키를 보지 않는다). */
+function newSealError(pol) {
+  if (pol?.mode === 'plain') return null;
+  if (pol?.mode !== 'encrypted') return new SecretsPolicyUnavailableError(pol);
+  try { masterKey(); } catch (e) { return e; }
+  return toolKeyIssue();
+}
+/** 새 비밀(예: 새 OTP 시드)을 **바꾸기 전에** 봉인할 수 있는지 — null 이면 된다, 아니면 { code, reason }(한국어). */
+export function newSecretSealIssue(pol = policy()) {
+  const e = newSealError(pol);
+  return e ? { code: e.code || 'SECRETS_SEAL_UNAVAILABLE', reason: e.message } : null;
+}
+
+/**
+ * 저장 경계 — records 를 바꾸지 않고, 디스크에 쓸 레코드 배열과 commit() 을 돌려준다. 바꿔 써야 하는 레코드만 얕은 복사(키 순서 유지)하고
+ * 나머지는 **같은 객체**다 — 평문 모드 · 봉인 값 없음이면 records 그 자체를 돌려준다(파일 바이트가 예전과 같다).
+ * 칸 값 v 마다: 봉인 문자열(복호 실패분) → 그대로 · 평문 모드 → 평문 · 암호화 모드 → 같은 레코드의 기억 중 평문이 같은 것(같은 칸 먼저, 다음 형제 칸 —
+ *   확정이 대기 시드를 활성 칸으로 옮길 때 암호문을 승계)이 현재 정책과 같은 봉인이면 재사용, 아니면 새로 봉인 · 새로 봉인할 수 없으면(키 없음 · 잠금 ·
+ *   콘솔 도구 키 미확인) 그 기억의 디스크 원문을 승계하고, 기억이 없으면 던진다. 한 레코드 안에서 같은 암호문을 두 칸에 쓰지 않는다.
+ * 잠금(정책을 못 읽음)도 같은 갈래다 — 정책 판정이 '새로 봉인할 수 없음' 이라 디스크 원문 승계 · 없으면 SecretsPolicyUnavailableError.
+ * commit() 은 **원자적 쓰기가 성공한 뒤에만** 부른다(기억을 이번에 쓴 형태로 바꾼다 — 쓰기 실패면 기억은 디스크 그대로).
+ */
+export function sealRecordFields(records, fields, pol = policy()) {
+  const list = Array.isArray(records) ? records : [];
+  const fieldList = [...fields];
+  const plans = [];
+  let outRecords = list;
+  let issue;   // undefined = 아직 판정 안 함
+  const sealIssue = () => (issue === undefined ? (issue = newSealError(pol)) : issue);
+  const want = pol?.mode === 'encrypted' ? policyParams(pol) : null;
+  // salt 정리(반증 S-2): 재사용 후보 암호문의 서로 다른 salt 가 상한을 넘으면 이번에는 재사용하지 않고 세션 키로 다시 봉인한다.
+  let consolidate = false;
+  if (want) {
+    const salts = new Set();
+    for (const r of list) {
+      const m = r && typeof r === 'object' ? _recMem.get(r) : null;
+      if (!m) continue;
+      for (const e of m.values()) if (e.plain != null && isSealed(e.disk)) salts.add(saltOf(e.disk));
+    }
+    consolidate = salts.size > RECORD_SALT_CAP && !sealIssue();
+  }
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i];
+    if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
+    const mem = _recMem.get(r);
+    const used = new Set();
+    const wrote = new Map();
+    let next = null;
+    for (const f of fieldList) {
+      const v = r[f];
+      if (typeof v !== 'string' || v === '') continue;
+      let disk;
+      if (isSealed(v)) disk = v;                                   // 복호 실패분(또는 이미 봉인) — 원래 암호문 보존
+      else if (pol?.mode === 'plain') disk = v;                     // 정책이 평문 — 다른 등록부와 같다
+      else {
+        const cands = [];
+        if (mem) {
+          const same = mem.get(f);
+          if (same && same.plain === v) cands.push(same);
+          for (const g of fieldList) { if (g === f) continue; const e = mem.get(g); if (e && e.plain === v) cands.push(e); }
+        }
+        const free = cands.filter((c) => !(isSealed(c.disk) && used.has(c.disk)));
+        let reuse = null;
+        if (want && !consolidate) reuse = free.find((c) => { if (!isSealed(c.disk)) return false; const p = sealedParams(c.disk); return p.alg === want.alg && p.logN === want.logN; }) || null;
+        if (reuse) disk = reuse.disk;
+        else if (!sealIssue()) disk = sealSecret(v, pol);
+        else if (free.length) disk = free[0].disk;                 // 새로 봉인할 수 없음 — 디스크에 있던 원문 그대로(하향 아님)
+        else throw sealIssue();
+      }
+      if (isSealed(disk)) used.add(disk);
+      wrote.set(f, { disk, plain: isSealed(v) ? null : v });
+      if (disk !== v) { if (!next) next = { ...r }; next[f] = disk; }
+    }
+    plans.push([r, wrote]);
+    if (next) { if (outRecords === list) outRecords = list.slice(); outRecords[i] = next; }
+  }
+  return {
+    records: outRecords,
+    commit() {
+      for (const [r, wrote] of plans) {
+        const m = memOf(r);
+        for (const f of fieldList) { if (wrote.has(f)) m.set(f, wrote.get(f)); else m.delete(f); }
+      }
+    },
+  };
+}
+
+/**
+ * 복원 경고용 — JSON 텍스트(users.json 모양 { users: [...] })의 fields 칸 봉인 값 중 **이 호스트의 키로 열 수 없는** 것을 센다.
+ * 부작용 없음: 키를 만들지 않는다(키가 없으면 masterKey 를 부르지 않고 전부 못 엶으로 센다) · 실패 카운터 · 경고 · 재사용 기억을 건드리지 않는다.
+ * @returns {{ sealed:number, unopenable:number, records: Array<{ role:string|null, totpEnabled:boolean }> }}  records = 못 여는 시드가 있는 레코드
+ */
+export function countUnopenableSealed(text, fields = USER_SECRET_FIELDS) {
+  const out = { sealed: 0, unopenable: 0, records: [] };
+  let data;
+  try { data = JSON.parse(String(text)); } catch { return out; }
+  const list = Array.isArray(data?.users) ? data.users : [];
+  const usable = keyUsableWithoutCreating();
+  for (const r of list) {
+    if (!r || typeof r !== 'object') continue;
+    let bad = false;
+    for (const f of fields) {
+      const v = r[f];
+      if (!isSealed(v)) continue;
+      out.sealed += 1;
+      if (!usable || openQuiet(v) == null) { out.unopenable += 1; bad = true; }
+    }
+    if (bad) out.records.push({ role: typeof r.role === 'string' ? r.role : null, totpEnabled: !!r.totpEnabled });
+  }
+  return out;
+}
+// 키를 **만들지 않고** 쓸 수 있는가 — 이미 읽었거나, env 가 유효하거나, 키 파일이 유효한 길이로 있을 때만. 이때 masterKey() 는 생성 갈래에 가지 않는다.
+function keyUsableWithoutCreating() {
+  if (_key) return true;
+  if (_keyMissing) return false;
+  const env = process.env.SECRETS_KEY;
+  if (env && env.length >= 16) return true;
+  try { return fs.readFileSync(keyFile(), 'utf8').trim().length >= 32; } catch { return false; }
+}
+
+/* ── 콘솔 도구 모드 · 키 확인 값(보안 잔여 11-27 M3 — 반증 M-1) ─────────────────────────────────────── */
+
+/*
+ * 콘솔 도구(otp-enroll · user-admin)는 포탈과 **같은 키**를 쓰는지 스스로 알 수 없다 — 포탈은 SECRETS_KEY(portal.env, systemd EnvironmentFile)를 우선하고
+ * 도구는 그 파일을 못 읽으면(권한 · Windows 의 portal.env.bat · 따옴표 해석 차이) secrets-key 파일 키를 쓴다. 다른 키로 시드를 봉인하면 재시작 뒤 포탈이
+ * 그 시드를 열지 못해 **복구하려던 관리자가 잠긴다**. 그래서 포탈이 자기 키로 봉인한 상수(키 확인 값)를 CONFIG_DIR/secrets-keycheck 에 두고,
+ * 도구는 암호화 정책에서 새 봉인 전에 그 값을 자기 키로 열어 본다 — 열리지 않거나 없으면 새로 봉인하지 않는다(디스크 원문 승계 · 새 시드 거절).
+ * 값은 다른 암호문과 같은 형식 · 같은 KDF 강도다(빠른 HMAC 검증값을 두면 약한 SECRETS_KEY 의 오프라인 대입이 쉬워진다). 확장자가 없어 백업 번들 밖이다.
+ * 포탈은 키를 처음 쓸 때 · 암호화 정책을 저장할 때 **비동기**(scrypt 를 libuv 스레드에서)로 맞춘다 — 이벤트 루프를 막지 않는다. 도구는 쓰지 않는다.
+ * ⚠ 콘솔 도구 모드가 아닌 프로세스는 '포탈' 로 본다 — 키를 쓰는 다른 독립 실행 스크립트를 새로 만들면 disallowKeyCreation() 을 부를 것.
+ */
+const keyCheckFile = () => path.join(config.configDir, 'secrets-keycheck');
+const KEYCHECK_PLAIN = 'secretVault-keycheck-v1';
+let _noKeyCreation = false;
+let _toolKeyVerdict;   // undefined = 아직 판정 안 함 · null = 같은 키 · Error = 거절 사유
+/** 콘솔 도구 전용 — 이 프로세스는 키를 만들지 않고, 키 확인 값을 쓰지 않으며, 암호화 정책의 새 봉인 전에 포탈과 같은 키인지 확인한다. */
+export function disallowKeyCreation() { _noKeyCreation = true; _toolKeyVerdict = undefined; }
+/** 콘솔 도구 모드인가(auth 의 업그레이드 자동 봉인은 포탈 프로세스에서만 돈다). */
+export function keyCreationDisallowed() { return _noKeyCreation; }
+
+function keyMismatch(why) {
+  const e = new Error(`콘솔 도구가 포탈과 같은 암호화 키를 쓰는지 확인하지 못했습니다(${why}) — 포탈이 열 수 없는 값으로 저장해 그 계정이 잠기지 않게 새 비밀을 봉인하지 않습니다. 래퍼(sudo vmware-portal-otp · vmware-portal-users)로 실행해 도구가 portal.env 의 SECRETS_KEY 를 읽게 하고(SECRETS_KEY 가 systemd drop-in 등 portal.env 밖에 있으면 portal.env 로 옮기세요), 키 확인 값이 없으면 포탈을 재시작하고 한 번 로그인한 뒤 다시 실행하세요.`);
+  e.code = 'SECRETS_KEY_MISMATCH';
+  return e;
+}
+function toolKeyIssue() {
+  if (!_noKeyCreation) return null;
+  if (_toolKeyVerdict !== undefined) return _toolKeyVerdict;
+  let raw;
+  try { raw = fs.readFileSync(keyCheckFile(), 'utf8').trim(); }
+  catch (e) { return (_toolKeyVerdict = keyMismatch(e?.code === 'ENOENT' ? '포탈의 키 확인 값 secrets-keycheck 가 없음' : `키 확인 값을 읽지 못함 ${String(e?.code || '')}`.trim())); }
+  if (!isSealed(raw)) return (_toolKeyVerdict = keyMismatch('키 확인 값 형식 오류'));
+  return (_toolKeyVerdict = openQuiet(raw) === KEYCHECK_PLAIN ? null : keyMismatch('이 도구의 키로 포탈의 키 확인 값이 열리지 않음 — 키가 다름'));
+}
+
+const scryptAsync = (pass, salt, len, opts) => new Promise((res, rej) => crypto.scrypt(pass, salt, len, opts, (e, k) => (e ? rej(e) : res(k))));
+const KDF_OPTS = (logN) => ({ N: 2 ** logN, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
+async function openWithKeyAsync(v, mk) {
+  const [alg, logN, salt, iv, tag, ct] = v.slice(PREFIX.length).split('$');
+  if (!Object.prototype.hasOwnProperty.call(ALGOS, alg) || !(Number(logN) >= 10 && Number(logN) <= 20)) return null;
+  const k = await scryptAsync(mk, Buffer.from(salt, 'base64url'), ALGOS[alg], KDF_OPTS(Number(logN)));
+  try {
+    const d = crypto.createDecipheriv(alg, k, Buffer.from(iv, 'base64url'), { authTagLength: 16 });
+    d.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]).toString('utf8');
+  } catch { return null; }
+}
+async function sealWithKeyAsync(plain, mk, { alg, logN }) {
+  const salt = crypto.randomBytes(16);
+  const k = await scryptAsync(mk, salt, ALGOS[alg], KDF_OPTS(logN));
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv(alg, k, iv, { authTagLength: 16 });
+  const ct = Buffer.concat([c.update(plain, 'utf8'), c.final()]);
+  const b = (x) => x.toString('base64url');
+  return `${PREFIX}${alg}$${logN}$${b(salt)}$${b(iv)}$${b(c.getAuthTag())}$${b(ct)}`;
+}
+let _keyCheckRun = null;    // 진행 중인(또는 끝난) 맞추기(Promise)
+let _keyCheckFor = null;    // 맞춘(또는 맞추는 중인) 키 — 키 하나당 한 번
+/** 포탈 — 암호화 정책이고 키를 쓸 수 있으면 키 확인 값을 비동기로 맞춘다(같은 키면 쓰지 않는다). 도구 모드는 아무것도 하지 않는다. */
+function scheduleKeyCheck() {
+  if (_noKeyCreation || !_key || _keyCheckFor === _key) return;
+  let pol;
+  try { pol = policy(); } catch { return; }
+  if (pol?.mode !== 'encrypted') return;
+  const mk = _key; _keyCheckFor = mk;
+  _keyCheckRun = (async () => {
+    let cur = null;
+    try { cur = (await fs.promises.readFile(keyCheckFile(), 'utf8')).trim(); } catch (e) { if (e?.code !== 'ENOENT') throw e; }
+    if (cur && isSealed(cur) && (await openWithKeyAsync(cur, mk)) === KEYCHECK_PLAIN) return 'same';
+    if (_key !== mk) return 'stale';
+    const sealed = await sealWithKeyAsync(KEYCHECK_PLAIN, mk, policyParams(pol));
+    atomicWriteFileSync(keyCheckFile(), sealed, { mode: 0o600 });
+    return 'written';
+  })().catch((e) => {
+    if (_keyCheckFor === mk) _keyCheckFor = null;   // 다음 기회에 다시
+    warnPolicyOnce(`keycheck|${e?.code || e?.message}`, `[secrets] ⚠ 키 확인 값(secrets-keycheck)을 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 80)}) — 콘솔 도구(OTP 등록)가 암호화 정책에서 새 OTP 키를 봉인하지 않습니다. CONFIG_DIR 권한을 확인하세요.`);
+    return 'error';
+  });
+}
+/** 포탈(auth) — 사용자 목록을 읽을 때 암호화 정책이면 키 확인 값을 맞춰 둔다(키를 아직 안 썼으면 지금 연다 — 암호화 정책의 첫 봉인과 같은 동작). */
+export function ensureKeyCheckSoon() {
+  if (_noKeyCreation) return;
+  let pol;
+  try { pol = policy(); } catch { return; }
+  if (pol?.mode !== 'encrypted') return;
+  try { masterKey(); } catch { return; }   // 키를 쓸 수 없음 — 그 사유는 masterKey 가 이미 알렸다
+  scheduleKeyCheck();
+}
+/** 테스트용 — 진행 중인 키 확인 맞추기를 기다린다. */
+export function _keyCheckSettled() { return _keyCheckRun || Promise.resolve(null); }
+/** 현재(3초 캐시) 정책 — 읽기 전용 사본. */
+export function secretsPolicyCached() { return { ...policy() }; }
+
 /* ── 모드 전환 마이그레이션 ───────────────────────────────────────────────── */
 
 /**
@@ -642,7 +921,8 @@ export function migrateSecretFiles(newPolicy) {
       openSecretsDeep(data, extra);                        // ① 전부 평문으로
       // v2.480(3차 감사 코어2 S2): 이 파일에서 복호 실패가 있었으면 재기록하지 않는다 — 실패값 '' 를 디스크에 쓰면 암호문이
       // 영구 소거된다(키 env 누락 상태에서 '평문 전환' 1회면 전 레지스트리 비밀 유실). 키를 복구한 뒤 다시 전환하면 된다.
-      if (_decryptFailures > failBefore) { out.errors.push({ file: name, error: `복호 실패 ${_decryptFailures - failBefore}건 — 암호문 보존을 위해 이 파일은 재기록하지 않음(키 확인 후 재시도)` }); continue; }
+      // 보안 잔여 11-27 M3(반증 N-5): users.json 의 복호 실패는 OTP 시드다 — 키를 정말 잃었으면(SECRETS_KEY_LOST) 그 계정을 다시 등록하거나 해제해야 이 보고가 사라진다.
+      if (_decryptFailures > failBefore) { out.errors.push({ file: name, error: `복호 실패 ${_decryptFailures - failBefore}건 — 암호문 보존을 위해 이 파일은 재기록하지 않음(키 확인 후 재시도)${name === 'users.json' ? ' · OTP 키라면 키를 되돌리거나, 키를 잃었으면 그 계정의 OTP 를 다시 등록 · 해제하세요(콘솔 도구 vmware-portal-otp)' : ''}` }); continue; }
       let count = 0;
       walk(data, (k, v) => {                               // ② 대상 필드 수 집계(보고용)
         if (k && (SECRET_FIELDS.has(k) || extra?.has(k)) && typeof v === 'string' && v !== '') count += 1;

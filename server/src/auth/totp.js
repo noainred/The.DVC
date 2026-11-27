@@ -20,14 +20,24 @@ export function generateSecret(bytes = 20) {
   return out;
 }
 
+/*
+ * 보안 잔여 11-27 M3: 시드는 **엄격한 base32** 만 받는다(공백 제거 · 대문자화 뒤 A-Z2-7 + 끝의 '=' 채움). 예전에는 알파벳 밖 글자를 **건너뛰었다** —
+ *   봉인 문자열(`enc$1$aes-256-gcm$…`)이 시드 자리에 들어가면(복호 실패 시드는 암호문 그대로 메모리에 남는다 — secretVault 레코드 단위 봉인)
+ *   그 안의 A-Z2-7 글자만으로 키가 만들어져, users.json(암호문)을 가진 사람이 유효한 코드를 계산할 수 있었다. auth 의 isSealed 가드와 이중 방어선이다.
+ *   정규식은 앵커가 있고 선형이다(ReDoS 아님 — 입력은 저장된 시드). 포탈이 만든 시드(generateSecret — 대문자 B32)는 영향이 없다.
+ */
+const STRICT_B32 = /^[A-Z2-7]+=*$/;
+function strictSecret(secret) {
+  const clean = String(secret ?? '').replace(/\s/g, '').toUpperCase();
+  return clean.length <= 1024 && STRICT_B32.test(clean) ? clean : null;
+}
 function base32Decode(secret) {
-  const clean = String(secret).toUpperCase().replace(/=+$/, '').replace(/\s/g, '');
+  const strict = strictSecret(secret);
+  if (strict == null) throw new Error('TOTP 시드가 base32 형식이 아닙니다');
+  const eq = strict.indexOf('=');
+  const clean = eq < 0 ? strict : strict.slice(0, eq);   // 끝의 '=' 채움 — 엄격 판정이 '=' 는 끝에만 허용한다
   let bits = '';
-  for (const ch of clean) {
-    const idx = B32.indexOf(ch);
-    if (idx === -1) continue;
-    bits += idx.toString(2).padStart(5, '0');
-  }
+  for (const ch of clean) bits += B32.indexOf(ch).toString(2).padStart(5, '0');
   const bytes = [];
   for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
   return Buffer.from(bytes);
@@ -52,6 +62,7 @@ export function generateToken(secret, { period = 30, digits = 6, counter } = {})
  */
 export function verifyToken(token, secret, { period = 30, digits = 6, window = 1, minCounter = -Infinity } = {}) {
   if (!secret || !token) return null;
+  if (strictSecret(secret) == null) return null;   // 보안 잔여 11-27 M3 — 봉인 문자열 · 알파벳 밖 글자 시드로 코드를 맞추지 않는다
   const clean = String(token).replace(/\s/g, '');
   if (!/^\d{4,8}$/.test(clean)) return null;
   const now = Math.floor(Date.now() / 1000 / period);

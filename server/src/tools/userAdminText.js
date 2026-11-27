@@ -64,7 +64,8 @@ export const ROLE_TEXT = Object.freeze({
 
 /**
  * 이 계정이 지금 무엇으로 로그인하는가 — authenticateLocal 과 같은 규칙.
- * @param {{ role?:string, hasPassword?:boolean, totpEnabled?:boolean }} u listUsers() 의 한 줄
+ * @param {{ role?:string, hasPassword?:boolean, totpEnabled?:boolean, otpUnreadable?:boolean }} u listUsers() 의 한 줄
+ *   otpUnreadable(보안 잔여 11-27 M3): OTP 키를 복호하지 못함 — authenticateLocal 은 그 시드로 코드를 맞추지 않고 비밀번호로도 내려가지 않는다(강제 계정).
  * @param {{ override?: string|null, overrideSource?: 'file'|'env'|null, globalPolicy?: string|null, enforce?: boolean }} ctx
  * @returns {{ policy: string|null, source: string, enforced: boolean, methods: string, state: 'ok'|'enroll'|'none', note: string }}
  */
@@ -72,6 +73,8 @@ export function loginStateOf(u, { override = null, overrideSource = null, global
   const role = u?.role || 'viewer';
   const hasPw = !!u?.hasPassword;
   const otp = !!u?.totpEnabled;
+  const otpBroken = otp && !!u?.otpUnreadable;   // 보안 잔여 11-27 M3
+  const OTP_BROKEN_NOTE = 'OTP 키를 복호하지 못해 OTP 로그인이 실패합니다 — 키(SECRETS_KEY · secrets-key)를 되돌리거나 6번으로 다시 등록하세요';
   const policy = override || globalPolicy || null;
   const source = override
     ? `계정별 지정(${overrideSource === 'env' ? 'portal.env' : '파일'})`
@@ -83,14 +86,15 @@ export function loginStateOf(u, { override = null, overrideSource = null, global
   else enforced = isAdminTier(role) || role === 'operator';
 
   if (enforced) {
+    if (otpBroken) return { policy, source, enforced, methods: '없음', state: 'none', note: OTP_BROKEN_NOTE };   // 등록된 시드가 있어 비밀번호로 내려가지 않는다
     if (otp) return { policy, source, enforced, methods: 'OTP', state: 'ok', note: '' };
     if (hasPw) return { policy, source, enforced, methods: '비밀번호(OTP 등록 전용)', state: 'enroll', note: '비밀번호로 들어가면 OTP 등록 화면만 열립니다 — 등록하면 그 뒤로는 OTP 로만 로그인합니다' };
     return { policy, source, enforced, methods: '없음', state: 'none', note: '비밀번호도 OTP 도 없어 로그인할 수 없습니다' };
   }
   if (policy === 'password_only' && hasPw) return { policy, source, enforced, methods: '비밀번호', state: 'ok', note: otp ? 'OTP 가 등록돼 있지만 이 방식에서는 쓰지 않습니다' : '' };
-  const m = [hasPw && '비밀번호', otp && 'OTP'].filter(Boolean);
-  if (!m.length) return { policy, source, enforced, methods: '없음', state: 'none', note: '비밀번호도 OTP 도 없어 로그인할 수 없습니다' };
-  return { policy, source, enforced, methods: m.join(' 또는 '), state: 'ok', note: '' };
+  const m = [hasPw && '비밀번호', otp && !otpBroken && 'OTP'].filter(Boolean);
+  if (!m.length) return { policy, source, enforced, methods: '없음', state: 'none', note: otpBroken ? OTP_BROKEN_NOTE : '비밀번호도 OTP 도 없어 로그인할 수 없습니다' };
+  return { policy, source, enforced, methods: m.join(' 또는 '), state: 'ok', note: otpBroken ? OTP_BROKEN_NOTE : '' };
 }
 
 /** 방식 이름(정식 값 → 화면 글자). null 이면 규칙 설명. */

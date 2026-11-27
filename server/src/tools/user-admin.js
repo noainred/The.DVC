@@ -14,7 +14,8 @@
  * 그래도 데모 계정 역할 고정·수퍼관리자 삭제 불가·마지막 관리자 보호는 auth.js 가 그대로 지킨다.
  *
  * 실행: 래퍼 `user-admin.sh`(설치본은 `sudo vmware-portal-users`) — 번들 Node·CONFIG_DIR·서비스 계정 강등을 처리한다.
- *   root 로 node 를 직접 실행하면 users.json 이 root 소유가 되어 포탈이 저장하지 못한다.
+ *   root 로 node 를 직접 실행하면 users.json 이 root 소유가 되어 포탈이 저장하지 못한다 — 보안 잔여 11-27 M3 부터 그 실행을 거절한다
+ *   (CONFIG_DIR 이 root 소유인 설치는 예외). OTP 키 봉인(암호화 저장 방식)은 tools/portalEnvKey.js 머리말.
  */
 import process from 'node:process';
 import os from 'node:os';
@@ -29,6 +30,7 @@ import {
 import { VALID_ROLES, isAdminTier } from '../auth/roles.js';
 import { effectiveLoginPolicy, loginPolicyOverrideOf, setFileLoginPolicy, invalidateLoginPolicyCache } from '../security/securitySettings.js';
 import { boxLines, tableLines, loginStateOf, policyLabel, POLICY_TEXT, ROLE_TEXT, fitDisp } from './userAdminText.js';
+import { prepareConsoleTool } from './portalEnvKey.js';
 
 const SERVICE = process.env.SERVICE_NAME || 'vmware-portal';
 const CAN_RESTART = process.env.USER_ADMIN_CAN_RESTART === '1';
@@ -435,6 +437,10 @@ async function main() {
     out('계정 관리 콘솔 도구 — 인자 없이 실행하면 메뉴가 뜹니다. --list 는 목록만 출력합니다.');
     process.exit(0);
   }
+  // 보안 잔여 11-27 M3: 어떤 users.json 읽기보다 먼저 — root 직접 실행 거절 · portal.env 의 SECRETS_KEY · 키를 만들지 않는 도구 모드(tools/portalEnvKey.js).
+  const prep = prepareConsoleTool(config.configDir);
+  if (prep.issue) { fail(prep.issue); process.exit(1); }
+  if (prep.note) warn(prep.note);
   if (argv.includes('--list')) { listTable(); out(''); process.exit(0); }
   reloadUsersFromDisk(); // 첫 설치 시드 안내가 메뉴 중간이 아니라 시작에 찍히게
   for (;;) {

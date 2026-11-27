@@ -4,22 +4,25 @@
  *
  * admin·operator 계정은 비밀번호 로그인이 완전히 차단되므로(OTP 전용 정책), 첫 관리자는
  * 웹으로 OTP 를 등록할 방법이 없다. 이 도구가 그 유일한 초기 등록 경로이자 잠금 복구 수단이다.
- * users.json 을 직접 읽고 쓰므로 **포탈 서비스 계정(또는 root)** 으로, 같은 CONFIG_DIR 을
- * 바라보게 실행해야 한다.
+ * users.json 을 직접 읽고 쓰므로 **포탈 서비스 계정**으로, 같은 CONFIG_DIR 을 바라보게 실행해야 한다 —
+ * 래퍼가 번들 Node · CONFIG_DIR · 서비스 계정 강등을 처리한다(root 로 node 를 직접 실행하면 users.json · secrets-key 가 root 소유가 되어
+ * 포탈이 읽거나 저장하지 못한다 — 보안 잔여 11-27 M3 부터 도구가 그 실행을 거절한다).
  *
- * 사용법:
- *   node server/src/tools/otp-enroll.js --list
- *   node server/src/tools/otp-enroll.js <username>                  # 시크릿 발급(등록 시작)
- *   node server/src/tools/otp-enroll.js <username> --confirm 123456 # 앱 코드로 확정
- *   node server/src/tools/otp-enroll.js <username> --disable        # OTP 해제(재등록용)
+ * 사용법(설치본 — 래퍼):
+ *   sudo vmware-portal-otp --list
+ *   sudo vmware-portal-otp <username>                  # 시크릿 발급(등록 시작)
+ *   sudo vmware-portal-otp <username> --confirm 123456 # 앱 코드로 확정
+ *   sudo vmware-portal-otp <username> --disable        # OTP 해제(재등록용)
+ *   (git 소스: 앱 폴더의 ./otp-enroll.sh 가 같은 인자를 받는다)
  *
- * 오프라인 설치본 예:
- *   sudo CONFIG_DIR=/etc/vmware-portal node /opt/vmware-portal/app/server/src/tools/otp-enroll.js admin
+ * 보안 잔여 11-27 M3: 자격증명 저장 방식 = 암호화이면 OTP 키가 users.json 에 봉인된다. 도구는 portal.env 의 SECRETS_KEY 를 직접 읽고
+ *   (래퍼가 명령줄로 넘기지 않는다 — sudo 로그), 키를 만들지 않으며, 포탈이 남긴 키 확인 값으로 같은 키일 때만 새로 봉인한다(tools/portalEnvKey.js).
  */
 import process from 'node:process';
 import { config } from '../config.js';
 import { loadUsers, getUser, listUsers, beginTotpEnroll, confirmTotpEnroll, disableTotp } from '../auth/auth.js';
 import { isAdminTier } from '../auth/roles.js';
+import { prepareConsoleTool } from './portalEnvKey.js';
 
 const argv = process.argv.slice(2);
 const has = (flag) => argv.includes(flag);
@@ -51,12 +54,18 @@ OTP 콘솔 등록 도구 (admin/operator 는 OTP 전용 로그인)
   process.exit(0);
 }
 
+// 보안 잔여 11-27 M3: 어떤 users.json 읽기보다 먼저 — root 직접 실행 거절 · portal.env 의 SECRETS_KEY · 키를 만들지 않는 도구 모드.
+const prep = prepareConsoleTool(config.configDir);
+if (prep.issue) die(prep.issue);
+if (prep.note) console.warn(`\n⚠ ${prep.note}`);
+
 loadUsers(); // 시드(관리자/수퍼관리자/데모 계정) 보장 후 조회
 
 if (has('--list')) {
   console.log('\n사용자 목록:\n');
   for (const u of listUsers()) {
-    const otp = u.totpEnabled ? 'OTP 등록됨' : (u.hasPassword ? '비밀번호만' : '자격증명 없음');
+    // 보안 잔여 11-27 M3: 키를 복호하지 못한 시드는 '등록됨' 이지만 로그인할 수 없다 — 그대로 말한다.
+    const otp = u.totpEnabled ? (u.otpUnreadable ? 'OTP 등록됨(키 복호 실패 — 로그인 불가, 다시 등록하세요)' : 'OTP 등록됨') : (u.hasPassword ? '비밀번호만' : '자격증명 없음');
     // v2.674: 저장 역할 super_admin 도 관리자 등급이다(v2.643) — 예전 비교는 등록 필요 표시를 빠뜨렸다. 이름이 11자라 칸도 넓혔다.
     const note = (isAdminTier(u.role) || u.role === 'operator') && !u.totpEnabled ? '  ← OTP 등록 필요(로그인 불가)' : '';
     console.log(`  ${u.username.padEnd(20)} ${String(u.role).padEnd(11)} ${otp}${note}`);
