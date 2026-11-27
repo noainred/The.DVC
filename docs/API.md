@@ -1475,14 +1475,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/ps-inspect/run` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/psInspect.js:108](../server/src/routes/api/psInspect.js#L108) |
 | PUT | `/tools/ps-inspect/settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/psInspect.js:117](../server/src/routes/api/psInspect.js#L117) |
 | GET | `/tools/ps-inspect/top-nodes` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/psInspect.js:77](../server/src/routes/api/psInspect.js#L77) |
-| GET | `/tools/rack` | 권한 `tools` | [server/src/routes/api/rack.js:751](../server/src/routes/api/rack.js#L751) |
-| GET | `/tools/rack/mask-census` | 권한 `tools` | [server/src/routes/api/rack.js:769](../server/src/routes/api/rack.js#L769) |
-| GET | `/tools/rack/mask-seen` | 권한 `tools` | [server/src/routes/api/rack.js:790](../server/src/routes/api/rack.js#L790) |
-| POST | `/tools/rack/op` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/rack.js:868](../server/src/routes/api/rack.js#L868) |
-| GET | `/tools/rack/room/:id` | 권한 `tools` | [server/src/routes/api/rack.js:843](../server/src/routes/api/rack.js#L843) |
-| GET | `/tools/rack/room/:id/xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/rack.js:851](../server/src/routes/api/rack.js#L851) |
-| GET | `/tools/rack/versions` | 권한 `tools` | [server/src/routes/api/rack.js:808](../server/src/routes/api/rack.js#L808) |
-| GET | `/tools/rack/versions/:vid` | 권한 `tools` | [server/src/routes/api/rack.js:821](../server/src/routes/api/rack.js#L821) |
+| GET | `/tools/rack` | 권한 `tools` | [server/src/routes/api/rack.js:762](../server/src/routes/api/rack.js#L762) |
+| GET | `/tools/rack/mask-census` | 권한 `tools` | [server/src/routes/api/rack.js:780](../server/src/routes/api/rack.js#L780) |
+| GET | `/tools/rack/mask-seen` | 권한 `tools` | [server/src/routes/api/rack.js:801](../server/src/routes/api/rack.js#L801) |
+| POST | `/tools/rack/op` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/rack.js:879](../server/src/routes/api/rack.js#L879) |
+| GET | `/tools/rack/room/:id` | 권한 `tools` | [server/src/routes/api/rack.js:854](../server/src/routes/api/rack.js#L854) |
+| GET | `/tools/rack/room/:id/xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/rack.js:862](../server/src/routes/api/rack.js#L862) |
+| GET | `/tools/rack/versions` | 권한 `tools` | [server/src/routes/api/rack.js:819](../server/src/routes/api/rack.js#L819) |
+| GET | `/tools/rack/versions/:vid` | 권한 `tools` | [server/src/routes/api/rack.js:832](../server/src/routes/api/rack.js#L832) |
 | GET | `/tools/relaycheck` | 권한 `tools` | [server/src/routes/api/relaycheck.js:20](../server/src/routes/api/relaycheck.js#L20) |
 | POST | `/tools/relaycheck/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:47](../server/src/routes/api/relaycheck.js#L47) |
 | PUT | `/tools/relaycheck/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:40](../server/src/routes/api/relaycheck.js#L40) |
