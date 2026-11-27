@@ -11,7 +11,8 @@
 //   기간 바이트는 perfDb.portBytesMulti(heavyQuery — 기억·합류·감시). 응답에 스위치·스토리지 관리 주소는 싣지 않는다(이름·id 뿐 — 비-admin 은 이름=주소 가림).
 import { requirePerm, toolActorOf } from '../../auth/auth.js';
 import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
-import { maskErrText } from './cvp.js';
+import { shortOf as cvpShortOf } from '../../cvp/portmap.js';   // v3.53 반증 F9 — IP 이름은 통째로
+import { maskErrText, maskForeignMacs } from './cvp.js';
 import { hostFlowOut, FLOW_SHOWN_STATES, staleMsOf } from '../../sanswitch/flowView.js';
 import { listFlows, SHOW_EVERY_MS as FLOW_SHOW_EVERY_MS } from '../../sanswitch/flowJobs.js';
 import { loadSettings as loadCvpSettings } from '../../cvp/settings.js';
@@ -292,7 +293,7 @@ export function registerHostSan(api) {
       for (const n of v.dev?.nics || []) { const x = String(n?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, ''); if (x.length === 12) vmMacList.push(x); }
       if (vmMacList.length >= 1024) break;
     }
-    let l2 = { uplinks: [], conflicts: [] }; let l2Info = null; let fdbTruncated = false;
+    let l2 = { uplinks: [], conflicts: [] }; let l2Info = null; let fdbTruncated = false; let shortAmbiguous = false; let ambiguousShown = false;
     try {
       // 반증 L-3: NIC MAC 과 VM MAC 을 따로 묻는다 — 한 번에 물으면 VM MAC 행이 상한을 채워 NIC MAC 행이 빠졌다.
       const fdbNic = await cdb.fdbByMacs(terms.macs);
@@ -305,7 +306,16 @@ export function registerHostSan(api) {
       // 반증 H-1: MAC 근거 후보 포트의 LLDP 이웃 — 이웃이 다른 장비(peer-link · spine)면 그 포트는 버린다.
       const cand = [...new Map(fdbRows.map((r) => [`${r.agent}\u0000${r.cvpId}\u0000${r.key}\u0000${r.port}`, r])).values()];
       const portLldp = cand.length ? ((await cdb.lldpByPorts(cand)).rows || []).filter(own) : [];
-      l2 = matchL2({ host: h, lldpRows, fdbRows, vmMacs: vmMacList, portTotals, portLldp });
+      // v3.53(사용자 결정): 이 호스트가 볼 CVP 범위(같은 법인 · 법인 미지정 CVP 가 있으면 전체)에 짧은 이름이 같은 다른 호스트가 있으면 짧은 이름 LLDP 근거를 쓰지 않는다
+      //   반증 F8: 법인을 모르는 vCenter 의 호스트도 센다(그 호스트가 어느 CVP 스위치에 물렸는지 모른다) · F9: IP 이름은 통째로(portmap.shortOf — 첫 옥텟으로 자르면 다른 IP 끼리 겹침이 됐다)
+      const anyUnassigned = matchServers.some((sv) => !String(sv.datacenterId || ''));
+      const myShort = cvpShortOf(h.name);
+      const collide = myShort.length >= 3 ? (snap.hosts || []).filter((x) => x.id !== h.id && cvpShortOf(x.name) === myShort
+        && (anyUnassigned || !hostCorp || !String(datacenterOfVcenter(x.vcenterId) || '') || String(datacenterOfVcenter(x.vcenterId) || '') === hostCorp)) : [];
+      shortAmbiguous = collide.length > 0;
+      // 반증 F10: 화면 안내 표지는 그 계정이 볼 수 있는 호스트와 겹칠 때만 — 범위 밖 호스트의 존재를 흘리지 않는다(근거 제외는 그대로 한다)
+      ambiguousShown = collide.some((x) => inUserScope(req.user, snap, x.vcenterId));
+      l2 = matchL2({ host: h, lldpRows, fdbRows, vmMacs: vmMacList, portTotals, portLldp, shortAmbiguous });
       const ownerKeys = matchServers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
       l2Info = { ...(await cdb.l2Status(ownerKeys)), ...(fdbTruncated ? { fdbTruncated: true } : {}) };
     } catch (e) { console.warn(`[hostsan] CVP LLDP·MAC 테이블 조회 실패: ${e.message}`); l2Info = { error: true }; }
@@ -356,21 +366,27 @@ export function registerHostSan(api) {
     const admin = isAdminReq(req);
     const cvpHosts = admin ? [] : listCvpServers().map((x) => x.host).filter(Boolean);
     const mk = (v) => (admin || v == null ? v : maskErrText(String(v), cvpHosts));
+    // v3.47(5회차 A3-F3): 근거 문구의 MAC 은 **이 호스트 NIC MAC 일 때만** 그대로(같은 화면 NIC 표가 보인다) — 짧은 이름이 겹친 다른 호스트(범위 밖일 수 있다)의
+    //   LLDP 행이 근거로 붙으면 그 호스트 NIC MAC 이 범위 계정에 나갔다. 이름 겹침 자체(귀속이 틀림)는 v2.924 부터의 매칭 문제라 따로 남긴다.
+    const ownMacs = new Set((terms.macs || []).map((x) => String(x).toLowerCase()));
+    const mkS = (x) => maskForeignMacs(mk(x), ownMacs);
     const mkEv = (v) => {   // 근거는 문구(LLDP 이웃 이름 · MAC 테이블 요약)이거나 객체 — 글자 칸만 가린다
       if (admin || v == null) return v;
-      if (typeof v === 'string') return mk(v);
-      return typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === 'string' ? mk(x) : x])) : v;
+      if (typeof v === 'string') return mkS(v);
+      return typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === 'string' ? mkS(x) : x])) : v;
     };
     if (!admin) events = events.map((e) => ({ ...e, title: mk(e.title), desc: mk(e.desc) }));
     res.set('Cache-Control', 'no-store').json({
       ok: true, host: { id: h.id, name: h.name, vcenterId: h.vcenterId },
-      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: mk(u.desc ?? ''), nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
+      // v3.47(5회차 수정 검토 V4): 포트 설명(desc)에도 남의 MAC 가림(mkS) — 근거(evidence)만 가리면 같은 행 설명에 그 MAC 이 원문으로 남았다
+      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: admin ? (u.desc ?? '') : mkS(u.desc ?? ''), nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
         evidence: mkEv(u.evidence || null), l2At: u.l2At ?? null, also: (u.also || []).slice(0, 4).map((x) => ({ basis: x.basis, label: BASIS_LABEL[x.basis]?.label || '', evidence: mkEv(x.evidence || null) })),
         oper: u.oper, admin: u.admin, speedBps: u.speedBps, vlan: u.vlan, lag: u.lag, inBps: u.inBps, outBps: u.outBps, inUtil: u.inUtil, outUtil: u.outUtil, inErr: u.inErr, outErr: u.outErr,
         inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: dayOf(u), hour: hourOf(u), rateTs: u.rateTs, ts: u.ts })),
       conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated, ...(q.termsTruncated ? { termsTruncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
       servers: matchServers.length, hostCorpMatched: !!hostCorp, vmNicMacs: vmMacs, corpLimited: corp != null, corpMissing: corp === '', direction: { in: '서버 송신', out: '서버 수신' },
       ep: epInfo, epDisagree: ep.disagree.slice(0, 16),   // v2.935(C-③): EndpointLocation 현황 · LLDP 와 다른 NIC
+      ...(ambiguousShown ? { lldpNameAmbiguous: true } : {}),   // v3.53: 같은 짧은 이름의 다른 호스트가 있어 짧은 이름 LLDP 근거를 쓰지 않았다
       l2: l2Info,   // v2.924(B-②): { fdbDevices, lldpDevices, lastAt } — 0 이면 'LLDP·MAC 테이블 수집 전'(엣지 업그레이드 · 30분 주기) · error 면 조회 실패
     });
   });

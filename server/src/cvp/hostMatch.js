@@ -162,7 +162,12 @@ const mac12 = (m) => { const h = normMac(m); return h.length === 12 ? h : null; 
  *   lldpRows: db.lldpByNames 행 · fdbRows: db.fdbByMacs 행 · vmMacs: 이 호스트 VM vNIC MAC(정규화 12자) · portTotals: db.fdbPortTotals(장비 → 포트 → 학습 MAC 수)
  * @returns {{ uplinks:object[], conflicts:object[] }}  uplinks[]: { agent, cvpId, key, hostname, port, nic, basis, evidence }
  */
-export function matchL2({ host = {}, lldpRows = [], fdbRows = [], vmMacs = [], portTotals = new Map(), portLldp = [] } = {}) {
+/**
+ * v3.53(사용자 결정 2026-11-26 '이름 겹치면 LLDP 근거 제외'): shortAmbiguous — 같은 법인(이 호스트가 볼 CVP 범위) 안에 **짧은 이름이 같은 다른 호스트**가 있으면
+ *   LLDP 이웃 이름을 짧은 이름으로만 맞춘 행은 근거로 쓰지 않는다(전체 이름 일치 · 섀시 MAC 일치는 그대로). CVP 범위가 법인 단위라 같은 법인의 다른 vCenter 호스트
+ *   'esx01' 의 LLDP 행이 이 호스트 업링크 '확정' 으로 붙었다(v2.924 부터 · 5회차 A3-F3).
+ */
+export function matchL2({ host = {}, lldpRows = [], fdbRows = [], vmMacs = [], portTotals = new Map(), portLldp = [], shortAmbiguous = false } = {}) {
   const terms = hostMatchTerms(host);
   const byPort = new Map();
   const put = (row, basis, nic, evidence) => {
@@ -182,7 +187,9 @@ export function matchL2({ host = {}, lldpRows = [], fdbRows = [], vmMacs = [], p
   for (const r of Array.isArray(lldpRows) ? lldpRows : []) {
     const lc = String(r.sysLc || r.sysName || '').toLowerCase(); const sh = String(r.sysShort || lc.split('.')[0]);
     const cmac = mac12(r.chassisId);
-    const byName = sameHost(lc, sh);
+    // 짧은 이름으로만 맞춘 것(한쪽이라도 도메인 없음)은 같은 짧은 이름의 다른 호스트가 있으면 근거가 아니다
+    const viaShort = !(lc.includes('.') && String(terms.full || '').includes('.'));
+    const byName = sameHost(lc, sh) && !(shortAmbiguous && viaShort);
     const byChassis = !!cmac && terms.macs.includes(cmac);
     if (!byName && !byChassis) continue;
     const pid = String(r.portId || '').toLowerCase(); const pmac = mac12(r.portId);

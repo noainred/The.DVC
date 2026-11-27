@@ -26,6 +26,11 @@ const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), pre
 const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
 after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
+// 2026-11-26: 프로젝트 모듈을 불러오기 **전에** 설정 폴더를 임시 폴더로 잡는다. 예전에는 R3 안에서야 CONFIG_DIR 을 바꿨는데, 앞의 R2 가
+//   vmTags 라우트를 불러 config.js 가 기본 폴더(실제 `server/config`)로 이미 굳었고 logs/db.js 는 config.configDir 를 쓰므로 R3 의 대입이
+//   닿지 않아 vcenter-logs.db 를 그 폴더에 남겼다(v3.41.1 arch2582 와 같은 꼴 · 고정: test/configDirPerFile.test.js).
+process.env.CONFIG_DIR = tmpDir('rebut71-cfg-');
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (rel) => stripComments(fs.readFileSync(path.join(SRC, rel), 'utf8'));

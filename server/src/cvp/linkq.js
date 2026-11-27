@@ -11,6 +11,8 @@
  * 플랩은 수집 주기마다 oper 가 up → down/nolink 로 바뀐 횟수라 주기보다 짧은 플랩은 놓친다(화면이 밝힌다).
  */
 import { intfOfPartName } from './portmap.js';
+import { rxLimitsOf } from './opticstrend.js';
+import { createYielder } from '../util/timeSlice.js';
 
 export const VERDICTS = Object.freeze(['replace', 'flap', 'peer', 'observe']);
 export const FLAP_MIN_DEFAULT = 3;
@@ -27,8 +29,11 @@ export function opticMapOf(parts) {
     const o = p.optic && typeof p.optic === 'object' ? p.optic : null;
     const intf = (o && typeof o.intf === 'string' && o.intf) || intfOfPartName(p.name);
     if (!intf || m.has(intf)) continue;
-    const rx = o?.rx ?? p.dom?.rxPower ?? null;
-    m.set(intf, { present: p.state !== 'absent', rx: rx == null || !Number.isFinite(Number(rx)) ? null : Number(rx) });
+    // 5회차 A1-5: 실시간 판정이 광량을 판정하지 않은 칸(부품을 읽을 때 링크 없음 · 브레이크아웃 레인 일부만 링크)의 Rx 는 쓰지 않는다 — '교체' 근거가 되면 안 된다.
+    //   optic 이 없는 옛 기록은 예전처럼 dom 값.
+    const judgedRx = !o || (o.linked === true && o.lanesPartial !== true);
+    const rx = judgedRx ? (o?.rx ?? p.dom?.rxPower ?? null) : null;
+    m.set(intf, { present: p.state !== 'absent', rx: rx == null || !Number.isFinite(Number(rx)) ? null : Number(rx), optic: o, ...(judgedRx ? {} : { rxSkipped: true }) });
   }
   return m;
 }
@@ -44,11 +49,24 @@ const opticOf = (om, port) => {
  *   err:Map<string,{inErr,outErr,inDrop,outDrop,errDays,days}>, flap:Map<string,{downs:number,byDay:Array}>, warnDbm:number, flapMin?:number }} a
  * @returns {{ rows:object[], counts:object, omitted:number }}
  */
-export function rankLinks({ ports = [], devices = new Map(), err = new Map(), flap = new Map(), warnDbm = -10, flapMin = FLAP_MIN_DEFAULT } = {}) {
+export function rankLinks(opts = {}) {
+  const g = rankGen(opts); let r;
+  while (!(r = g.next()).done) { /* 동기 — 조각 없이 끝까지 */ }
+  return r.value;
+}
+/** 요청 경로용 — 포트마다 시간 기준 양보(5회차 A4 관찰: 1,500대 · 오류 포트 수천에서 한 덩어리 35~140ms). 결과는 rankLinks 와 같다. */
+export async function rankLinksAsync(opts = {}, { check = null } = {}) {
+  const y = createYielder(15); const g = rankGen(opts); let r;
+  // 수정 검토(미확인 → 반영): 기다리는 요청이 없으면 멈춘다(heavyGate ctx.check — 버려진 계산이 끝까지 돌지 않게)
+  while (!(r = g.next()).done) { await y(); if (check) check(); }
+  return r.value;
+}
+function* rankGen({ ports = [], devices = new Map(), err = new Map(), flap = new Map(), warnDbm = -10, faultDbm = -14, flapMin = FLAP_MIN_DEFAULT } = {}) {
   const counts = { replace: 0, flap: 0, peer: 0, observe: 0, judged: 0, noData: 0, up: 0 };
   const rows = [];
   const omCache = new Map();
   for (const p of Array.isArray(ports) ? ports : []) {
+    yield;
     if (!p || /^management/i.test(String(p.port))) continue;
     const dk = devKey(p.agent, p.cvpId, p.key);
     const k = `${dk}\u0000${p.port}`;
@@ -69,7 +87,10 @@ export function rankLinks({ ports = [], devices = new Map(), err = new Map(), fl
     const rx = o && o.present ? o.rx : null;
     const copper = om != null && o === null;   // 트랜시버 목록을 읽었는데 그 포트가 없다 = 구리(또는 목록에 없는 포트)
     let verdict;
-    if (hasErr && rx != null && rx <= warnDbm) verdict = 'replace';
+    // v3.47(D-7): 교체 판정의 Rx 기준은 그 광모듈의 장비 임계(LowWarn — 없으면 LowAlarm)가 먼저, 없으면 포탈 주의 임계(실시간 GBIC 판정과 같은 순서)
+    const lim = o && o.present ? rxLimitsOf(o.optic, { warnDbm, faultDbm }) : null;
+    const rxLow = lim ? (lim.warnDbm ?? lim.faultDbm) : null;
+    if (hasErr && rx != null && rxLow != null && rx <= rxLow) verdict = 'replace';
     else if (downs >= flapMin) verdict = 'flap';
     else if (hasErr) verdict = 'peer';
     else verdict = 'observe';
@@ -79,7 +100,7 @@ export function rankLinks({ ports = [], devices = new Map(), err = new Map(), fl
       oper: p.oper || 'unknown', admin: p.admin || 'unknown', verdict,
       errs: up ? errs : null, inErr: e?.inErr ?? null, outErr: e?.outErr ?? null, drops: e && (e.inDrop != null || e.outDrop != null) ? (e.inDrop ?? 0) + (e.outDrop ?? 0) : null,
       errDays: e?.errDays ?? 0, days: e?.days ?? 0, downs, flapDays: f ? f.byDay : [],
-      rx, rxRead: rx != null, copper, xcvrRead: om != null,
+      rx, rxRead: rx != null, copper, xcvrRead: om != null, ...(lim ? { rxBasis: lim.basis, rxLowDbm: rxLow } : {}),
     });
   }
   const pri = Object.fromEntries(VERDICTS.map((v, i) => [v, i]));

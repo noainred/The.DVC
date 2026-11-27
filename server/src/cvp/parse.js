@@ -11,6 +11,7 @@
  * 상태 판정: 부품은 partfault 와 같은 다섯 이름(ok/warn/fault/unknown/absent). 상태 단어는 storage/healthWord.js 하나.
  */
 import { healthWord } from '../storage/healthWord.js';
+import { rxLimitsOf } from './opticstrend.js';   // v3.47 수정 검토 V6 — Rx 낮은 쪽 기준은 추세 · 링크 품질과 같은 함수
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { pushAll } from '../util/pushAll.js';   // v2.924(반증 L-4)
@@ -407,7 +408,11 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
       }
       if (x.text) detailBits.push(x.text);
       // 최종 판정(광량 포함)은 judgeOptics 가 포트 링크 상태를 보고 한다 — 여기서는 재료만 싣는다.
-      if (dom) domJudge = { otherState: x.otherState, envState: x.envState, rxDevice: x.rxDevice };
+      // v3.47(결정 D-7): Rx **낮은 쪽** 장비 임계(LowWarn · LowAlarm)도 싣는다 — GBIC 추세 · 링크 품질이 실시간 판정과 같은 기준을 쓰게(opticstrend.rxLimitsOf).
+      // 수정 검토 V6: 추세 · 엣지 정제와 같은 dBm 범위(-60 ~ +15) — 범위 밖 임계는 실시간도 쓰지 않는다(예전: 실시간만 -61 을 장비 임계로 써서 추세와 어긋났다)
+      const dbm = (v) => { const n = numOrNull(v); return n != null && n >= -60 && n <= 15 ? n : null; };
+      const lw = x.rxThresholds ? dbm(x.rxThresholds.loW) : null; const la = x.rxThresholds ? dbm(x.rxThresholds.loA) : null;
+      if (dom) domJudge = { otherState: x.otherState, envState: x.envState, rxDevice: x.rxDevice, rxHigh: x.rxHigh ?? null, ...(lw != null || la != null ? { rxLow: { warnDbm: lw, faultDbm: la } } : {}) };
       media = xcvrTypeText(unwrap(pick(f, ['mediaTypeString', 'mediaType', 'xcvrMediaType', 'media', 'xcvrType', 'transceiverType'])));
     }
     parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}), ...(pw ? { power: pw } : {}), ...(media ? { media } : {}) });
@@ -460,7 +465,7 @@ function judgeVal(v, { hiA, loA, hiW, loW }) {
  * rxDevice = Rx 를 장비 임계로 판정한 결과(null 이면 장비 임계 없음). Rx 는 링크 상태를 알아야 판정할 수 있어 judgeOptics 가 마무리한다.
  */
 export function xcvrDom(flat) {
-  const values = {}; const bits = []; let otherState = null; let envState = null; let rxDevice = null; const rxTh = {};
+  const values = {}; const bits = []; let otherState = null; let envState = null; let rxDevice = null; let rxHigh = null; const rxTh = {};
   for (const { key, label } of DOM_FIELDS) {
     const v = numOrNull(unwrap(pick(flat, [key, `${key}Dbm`, `${key}Value`])));
     if (v == null) continue;
@@ -469,13 +474,13 @@ export function xcvrDom(flat) {
     const th = (suf) => numOrNull(unwrap(pick(flat, [`${key}${suf}`])));
     const t = { hiA: th('HighAlarm'), loA: th('LowAlarm'), hiW: th('HighWarn'), loW: th('LowWarn') };
     const has = Object.values(t).some((x) => x != null);
-    if (key === 'rxPower') { if (has) { rxDevice = judgeVal(v, t); Object.assign(rxTh, t); } continue; }
+    if (key === 'rxPower') { if (has) { rxDevice = judgeVal(v, t); rxHigh = judgeVal(v, { hiA: t.hiA, hiW: t.hiW }); Object.assign(rxTh, t); } continue; }
     if (has) {
       otherState = worse(otherState, judgeVal(v, t));
       if (ENV_KEYS.has(key)) envState = worse(envState, judgeVal(v, t));
     }
   }
-  return { values: bits.length ? values : null, text: bits.join(' · '), otherState, envState, rxDevice, rxThresholds: Object.keys(rxTh).length ? rxTh : null };
+  return { values: bits.length ? values : null, text: bits.join(' · '), otherState, envState, rxDevice, rxHigh, rxThresholds: Object.keys(rxTh).length ? rxTh : null };
 }
 
 /** 부품 이름(`all › Ethernet49 › domInfo` 등)에서 인터페이스 이름을 뽑는다. */
@@ -525,15 +530,24 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     // v2.656: 링크가 내려간 것을 '확인한' 포트 — Rx 에 더해 Tx·바이어스도 판정하지 않는다(온도·전압만). 포트 상태를 모르면 예전 판정 그대로.
     const linkDown = portsKnown && known && !linked && !lanesPartial;
     const other = linkDown ? (p.domJudge?.envState ?? null) : (p.domJudge?.otherState ?? null);
-    const basis = p.domJudge?.rxDevice ? 'device' : 'portal';
+    // 5회차 A1-6: 장비가 Rx **높은 쪽** 임계만 주면 낮은 쪽은 포탈 임계로 본다(예전: basis 'device' 로 낮은 Rx 를 '정상' 이라 했다 — 추세 · 링크 품질은 포탈 기준으로 장애였다).
+    //   낮은 쪽 장비 임계(rxLow)가 있으면 예전 그대로 장비 판정. 기준은 opticstrend.rxLimitsOf 와 같은 순서.
+    //   수정 검토 V6: 낮은 쪽은 **추세 · 링크 품질과 같은 함수**(opticstrend.rxLimitsOf — dBm 범위 · 뒤집힘 처리까지 같다), 높은 쪽은 장비 임계(rxHigh)로 — 판정 코어 하나.
+    const lim = rxLimitsOf(p.domJudge?.rxLow ? { devWarnDbm: p.domJudge.rxLow.warnDbm, devFaultDbm: p.domJudge.rxLow.faultDbm } : null, { warnDbm, faultDbm });
+    const basis = lim.basis;
     let rxState = null;
-    if (rx != null && linked) rxState = p.domJudge?.rxDevice || (rx <= faultDbm ? 'fault' : rx <= warnDbm ? 'warn' : 'ok');
+    if (rx != null && linked) {
+      const low = lim.faultDbm != null && rx <= lim.faultDbm ? 'fault' : lim.warnDbm != null && rx <= lim.warnDbm ? 'warn' : 'ok';
+      rxState = worse(p.domJudge?.rxHigh ?? null, low) || low;
+    }
     const judged = rxState != null || other != null;
     let state = p.state;
     if (p.state !== 'absent' && judged) state = worse(other, rxState) || p.state;
     const optic = {
       intf, rx, tx: numOrNull(p.dom.txPower), linked, ...(lanesPartial ? { lanesPartial: true } : {}), portKnown: portsKnown && known, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
       ...(basis === 'portal' && rxState != null ? { warnDbm, faultDbm } : {}),
+      // v3.47(D-7): 장비가 준 Rx 낮은 쪽 임계(링크 상태와 무관 — 추세는 링크가 내려간 날에도 그 광모듈의 기준을 안다). 엣지 정제 화이트리스트에도.
+      ...(p.domJudge?.rxLow?.warnDbm != null ? { devWarnDbm: p.domJudge.rxLow.warnDbm } : {}), ...(p.domJudge?.rxLow?.faultDbm != null ? { devFaultDbm: p.domJudge.rxLow.faultDbm } : {}),
     };
     let detail = p.detail || '';
     if (linkDown) detail = `${detail}${detail ? ' · ' : ''}링크 없음 — 광량·Tx·바이어스 판정 안 함`;

@@ -1,16 +1,20 @@
-import { test, before, after } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { guestIps } from '../src/gpu/sshCollect.js';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gpu-ipovr-'));
-process.env.CONFIG_DIR = tmp;
+// 2026-11-26: 예전에는 `import { guestIps } from '../src/gpu/sshCollect.js'` 가 정적 import 라 **호이스팅돼** 아래 CONFIG_DIR 대입보다
+//   먼저 돌았다 — 그때 config.js 가 기본 폴더(실제 `server/config`)로 굳어 gpu-guest.json(시험 자격증명 설정)을 그 폴더에 남겼다.
+//   src 모듈은 CONFIG_DIR 을 잡은 뒤 동적 import 로 부른다(v3.41.1 arch2582 와 같은 꼴 · 고정: test/configDirPerFile.test.js).
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+process.env.CONFIG_DIR = tmpDir('gpu-ipovr-');
 
-let settings;
-before(async () => { settings = await import('../src/gpu/settings.js'); });
-after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
+const { guestIps } = await import('../src/gpu/sshCollect.js');
+const settings = await import('../src/gpu/settings.js');
 
 test('guestIps: preferIp 지정 시 그 IP 하나만 반환(순차 폴백 안 함)', () => {
   const vm = { ipAddresses: ['10.0.0.5', '192.168.1.9'], ipAddress: '10.0.0.5' };

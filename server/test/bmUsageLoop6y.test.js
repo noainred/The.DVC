@@ -140,13 +140,38 @@ test('A3 수명 끝 직전 전환 — 후보 만료 뒤 2일 안의 전환도 �
   assert.deepEqual(await allModes(K, [W], now), { fast: true, exact: true, memo: true, async: true }, '전환이 후보 만료 뒤(3시간)여도 본다');
 });
 
+test('A3 지난 후보 발생 — 전환 직후, 이미 지난 발생(전환 전 오프셋)이 만든 덮임으로 소유자를 요구하지 않는다(2026-11-26 재현 · 사례 77)', async () => {
+  // 바르샤바 서머타임 시작(2027-03-28) 다음 날. 후보(시드니 07:30 · 3.5시간)의 03-27 20:30Z 발생은 now − 1일(03-28 03:00Z)보다 앞에 끝났다 — 그 발생과 서울 · 바르샤바 매일 창이
+  //   만든 24시간(03-27 18:00Z ~)의 덮임은 13시간이지만, 전환 뒤로는 바르샤바 창이 한 시간 당겨져 앞으로의 어느 24시간도 12시간을 넘지 않는다(독립 격자가 증명).
+  //   예전 windowOver 는 기준점 둘레를 앞으로 2일 넓히며 그 지난 발생을 세어 true(운영자 403) 였다.
+  const now = Date.UTC(2027, 2, 29, 3);
+  const g = [['mw-r6y000077a', 'Asia/Seoul', { kind: 'server', keys: ['P1'] }, { kind: 'weekly', days: all7, time: '03:00', durMin: 270 }, 0],
+    ['mw-r6y000077b', 'Europe/Warsaw', { kind: 'server', keys: ['P1'] }, { kind: 'weekly', days: all7, time: '00:30', durMin: 450 }, 0],
+    ['mw-r6y0000770', 'Australia/Sydney', { kind: 'server', keys: ['P1'] }, { kind: 'weekly', days: [0, 2, 3, 4, 5, 6], time: '07:30', durMin: 210 }, -23 * DAY],
+    ['mw-r6y0000771', 'America/New_York', { kind: 'server', keys: ['P2'] }, { kind: 'once', start: '2027-06-16T20:00', end: '2027-06-17T14:00' }, -49 * DAY]];
+  const group = g.map(([id, tz, target, schedule, dc]) => ST.normalizeWindow({ id, name: 'p', reason: 'p', tz, vcenterId: 'vcA', target, schedule, scopes: { hold: true }, at: now - 100 * DAY, confirmedAt: now + dc }));
+  const cand = group.find((w) => w.id === 'mw-r6y0000770');
+  assert.equal(brute(cand, group, now), false, '독립 격자: 지금 − 1일 뒤의 후보 발생으로는 12시간을 넘지 않는다');
+  assert.deepEqual(await allModes(cand, group, now), { fast: false, exact: false, memo: false, async: false });
+  // 대조 — 하루 앞(전환 전 · 그 발생이 아직 지금 − 1일 안)에는 넘는다: 지난 발생만 빼고 지금의 발생은 그대로 센다
+  const before = Date.UTC(2027, 2, 28, 1);
+  const g2 = g.map(([id, tz, target, schedule, dc]) => ST.normalizeWindow({ id, name: 'p', reason: 'p', tz, vcenterId: 'vcA', target, schedule, scopes: { hold: true }, at: before - 100 * DAY, confirmedAt: before + dc }));
+  const c2 = g2.find((w) => w.id === 'mw-r6y0000770');
+  const t2 = brute(c2, g2, before);
+  assert.deepEqual(await allModes(c2, g2, before), { fast: t2, exact: t2, memo: t2, async: t2 }, `전환 전날(독립 격자 ${t2})과 같은 답`);
+  assert.equal(t2, true, '전환 전날에는 그 발생이 지금 − 1일 안이라 넘는다(이 수정이 지금의 발생까지 빼지 않았다는 대조)');
+});
+
 test('A3 무작위 대조 — 빠른 = 정확 = 메모 = 비동기 = 독립 격자(바르샤바 · 뉴욕 · 시드니 · 서울 · 전환이 36~92일 뒤인 now 포함)', async () => {
   let seed = 20261115;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const TZS = ['Europe/Warsaw', 'America/New_York', 'Australia/Sydney', 'Asia/Seoul'];
   // 전환이 36일 밖 · 수명 안인 시각(01-20 · 02-05 · 08-10) · 36일 안(03-10 · 09-01) · 실제 시각(T0)
-  const NOWS = [NOW_A3, Date.UTC(2027, 1, 5, 15), Date.UTC(2027, 7, 10, 9), Date.UTC(2027, 2, 10, 12), Date.UTC(2027, 8, 1, 0), T0];
+  // 2026-11-26 시험 위생 점검: 전환 **직후** 며칠(지난 발생이 전환 전 오프셋)을 고정 시각으로 넣는다 — 예전에는 실제 시각(T0)이 그 며칠에 걸릴 때만 드러났다
+  //   (03-15 뉴욕 · 03-29 바르샤바 · 10-04 시드니 실행에서 실패 — 제품이 지난 후보 발생까지 세던 것, 아래 'A3 지난 후보 발생' 시험).
+  const NOWS = [NOW_A3, Date.UTC(2027, 1, 5, 15), Date.UTC(2027, 7, 10, 9), Date.UTC(2027, 2, 10, 12), Date.UTC(2027, 8, 1, 0), T0,
+    Date.UTC(2027, 2, 15, 3, 30), Date.UTC(2027, 2, 29, 3), Date.UTC(2027, 9, 4, 3, 30)];
   const KEYSETS = [['P1'], ['P2'], ['P1', 'P2']];
   const hm = (ms, tz) => S.fmtLocal(tz, ms).slice(11, 16);
   const general = (i, now) => {
