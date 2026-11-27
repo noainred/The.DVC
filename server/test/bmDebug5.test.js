@@ -107,13 +107,21 @@ test('7회차 성능 P1 — 묶음 안 판정은 첫 판정 · (앞 판정 끝 �
   } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); for (const b of boxes) C.removeInventory(`jl-${b}`); void P; }
 });
 
-test('7회차 성능 P2 — 상한 1 에서 정규 주기가 읽던 그 서버를 기다린 이벤트도 주기 도중 자리를 가로채지 않는다', async (t) => {
+test('7회차 성능 P2(v3.52 전용 자리로 바뀜) — 상한 1 에서 정규 주기가 읽던 그 서버를 기다린 이벤트는 그 방문이 끝난 뒤 전용 자리로 읽고 · 주기 꼬리를 기다리지 않는다', async (t) => {
   const { config } = await import('../src/config.js');
   const keep = config.idrac.pollConcurrency;
   config.idrac.pollConcurrency = 1;
   const log = []; let xSeen = null; const xStarted = new Promise((r) => { xSeen = r; });
+  const fly = new Map(); let peak = 0; let total = 0; let sameBox = 0;
   const app = express();
-  app.use('/bmc/:box', async (req, res) => { log.push(req.params.box); if (req.params.box === 'x') xSeen(); await new Promise((r) => setTimeout(r, 15)); res.status(404).end(); });
+  app.use('/bmc/:box', async (req, res) => {
+    const b = req.params.box; log.push(b);
+    fly.set(b, (fly.get(b) || 0) + 1); total += 1; peak = Math.max(peak, total); if (fly.get(b) > 1) sameBox += 1;
+    if (b === 'x') xSeen();
+    await new Promise((r) => setTimeout(r, 15));
+    fly.set(b, fly.get(b) - 1); total -= 1;
+    res.status(404).end();
+  });
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   t.after(() => { config.idrac.pollConcurrency = keep; srv.closeAllConnections?.(); srv.close(); });
   const base = `http://127.0.0.1:${srv.address().port}/bmc`;
@@ -123,8 +131,12 @@ test('7회차 성능 P2 — 상한 1 에서 정규 주기가 읽던 그 서버�
   const cyc = P.pollNowManual();
   await xStarted;   // 주기가 x 를 읽는 중 — 이벤트는 그 방문이 끝나기를 기다린다
   const ev = P.pollNowForEvent(['p2-x']);
-  await Promise.all([cyc, ev]);
-  assert.ok(log.lastIndexOf('x') > log.lastIndexOf('r3'), `x 의 이벤트 읽기는 주기의 r2 · r3 뒤(순서 ${log.filter((b, i) => b !== log[i - 1]).join('→')})`);
+  const [, e] = await Promise.all([cyc, ev]);
+  assert.deepEqual(e.skipped, [], '주기가 읽던 서버는 기다렸다 읽는다(건너뛰지 않음)');
+  assert.ok(log.lastIndexOf('x') > log.indexOf('r2') && log.lastIndexOf('x') < log.lastIndexOf('r3'), `x 의 이벤트 읽기는 주기의 x 방문 뒤 · 주기 끝 전(순서 ${log.filter((b, i) => b !== log[i - 1]).join('→')})`);
+  assert.ok(peak <= 2, `전체 동시 요청 ≤ 상한 1 + 전용 1(최대 ${peak})`);
+  assert.equal(sameBox, 0, '같은 장비에 동시 세션을 열지 않는다');
+  assert.deepEqual(P._slotStateForTest(), { n: 0, ev: 0, ded: 0, q: 0, qe: 0 }, '자리 누수 없음');
 });
 
 test('8회차 엣지 #1 — 재전송이 5회 연속 겹쳐 끝나도 마지막에 합류한 urgent 는 다음 push 에 싣는다', async () => {

@@ -400,10 +400,12 @@ export function eventText(ev, labels = {}) {
   return ev.event || '';
 }
 
-/** 알림 상태 한 줄. **상한으로 빠진 건수를 밝힌다**(조용한 상한 금지). */
+/** 알림 상태 한 줄. **상한으로 빠진 건수를 밝힌다**(조용한 상한 금지). v3.52 설계 ③ — 발송은 판정 뒤 큐에서 차례로 하므로 ‘발송 대기’ 가 있다. */
 export function notifyNote(last) {
   const nt = last?.notify;
   if (!nt) return '';
+  if (nt.pending) return `알림 ${num(nt.queued)}건 발송 대기(판정 순서대로 차례로 보냅니다)`;
+  if (num(nt.queueDropped)) return `**알림 대기열이 넘쳐 ${num(nt.queueDropped)}건은 보내지 않았습니다** — 알림 채널 응답을 확인하십시오`;
   const bits = [`알림 ${num(nt.sent)}건 발송`];
   if (num(nt.capped)) bits.push(`**상한으로 ${num(nt.capped)}건은 보내지 않았습니다**`);
   if (num(nt.dropped)) bits.push(`채널 미설정 등으로 ${num(nt.dropped)}건 미발송`);

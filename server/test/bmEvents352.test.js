@@ -135,7 +135,7 @@ test('받기 — 서버 모름은 거절 · 고리 200(내부 길이) · 위험 
   const body = src.slice(src.indexOf('runCheck: async (reason, ids) => {'), src.indexOf('let _deps = DEFAULT_DEPS;'));
   // 그 서버만 폴링 → 판정 순서(디버깅 1회차 성능 P2). 강제 재읽기 표지는 다시 시도를 다 쓴 서버에만(scheduleCheck — 5회차 엣지 #3)
   assert.ok(body.indexOf('pollNowForEvent(ids, { onRefreshed: J.kick })') > 0 && src.indexOf('runPartFaultsNow') > 0, '그 서버만 폴링 · 다시 읽은 서버마다 판정(6회차 엣지 #2 — 판정 고리)');
-  assert.match(src, /if \(left\.length\) \{ try \{ const C = await import\('\.\/invCache\.js'\); for \(const id of left\) C\.markInventoryStale\(id, \{ event: true \}\);/);
+  assert.match(src, /if \(giveUp\.length\) \{ try \{ const C = await import\('\.\/invCache\.js'\); for \(const id of giveUp\) C\.markInventoryStale\(id, \{ event: true \}\);/);
   const C = await import('../src/idrac/invCache.js');
   C.setInventory('srv-st', { collectedAt: Date.now() });
   assert.equal(C.inventoryStale('srv-st', 3600_000), false);

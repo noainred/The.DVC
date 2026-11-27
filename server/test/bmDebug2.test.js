@@ -257,7 +257,9 @@ test('3회차 엣지 — 이름 맞춤은 목록을 한 번만 · 이벤트 표�
   C.markInventoryStale('led-1'); C.markInventoryStale('ev-1', { event: true });
   assert.deepEqual([C.isForcedStale('led-1'), C.isForcedStale('ev-1'), C.inventoryStale('led-1', 1e12)], [false, true, true], 'LED 는 다시 읽되 urgent 표지는 아니다');
   C.removeInventory('led-1'); C.removeInventory('ev-1');
-  assert.match(src('../src/idrac/poller.js'), /if \(only\) \{\n\s*if \(_eventRunning\) return BUSY;/, '수동 · 정규는 이벤트 읽기를 기다리지 않는다');
+  // v3.52 설계 ④ — 이벤트 묶음끼리도 막지 않는다(예전 _eventRunning 단일 실행 가드는 없어졌다). 수동 · 정규는 여전히 이벤트 읽기를 기다리지 않는다
+  assert.match(src('../src/idrac/poller.js'), /if \(only\) \{\s*const eventLeft = new Set\(\[\.\.\.only\]\.map\(String\)\);/, '수동 · 정규는 이벤트 읽기를 기다리지 않는다');
+  assert.doesNotMatch(src('../src/idrac/poller.js'), /_eventRunning/, '이벤트 묶음 단일 실행 가드 없음(설계 ④)');
   assert.match(src('../src/routes/bmEvents.js'), /if \(eventSubStore\.loadError\(\)\) \{ noteUnreadable\(\); return res\.status\(503\)\.end\(\); \}/);
 });
 
@@ -277,7 +279,8 @@ test('3회차 화면 · 성능 — 등록부 못 읽음 503 은 ‘모름’ 잠
     const s = { enabled: true, base: 'https://portal.example.test', secret: 'E'.repeat(43), ctxKey: 'F'.repeat(43) };
     for (let i = 0; i < E.EVT_BATCH_MAX; i += 1) E.acceptEvents(s, { context: E.contextOf(s, `q-${i}`), events: [{ sev: 'critical' }] });
     E.acceptEvents(s, { context: E.contextOf(s, 'q-over'), events: [{ sev: 'critical' }] });
-    assert.match(src('../src/idrac/eventSub.js'), /const ids = \[\.\.\._staleIds\]; _staleIds\.clear\(\);   /, '묶음마다 미룬 서버 집합을 비우지 않는다(화면 R3)');
+    assert.match(src('../src/idrac/eventSub.js'), /const ids = \[\.\.\._staleIds\]\.filter\(\(id\) => !_inflightIds\.has\(id\)\);\s*if \(!ids\.length\) return;\s*for \(const id of ids\) \{ _staleIds\.delete\(id\); _inflightIds\.add\(id\); \}/, '묶음마다 미룬 서버 집합을 비우지 않는다(화면 R3)');
+    assert.deepEqual(src('../src/idrac/eventSub.js').split('\n').filter((l) => l.includes('_deferredIds.clear()') && !l.includes('function _resetEventsForTest')), [], '미룬 서버 집합은 시험 초기화에서만 비운다');
     assert.equal(E.eventStatus().deferred, 1);
   } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); }
 });

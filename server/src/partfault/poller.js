@@ -16,7 +16,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { runScan } from './scan.js';
 import { transition } from './transition.js';
 import { openFaults, applyTransition, partFaultDbStatus, markNotified, resetInfo } from './db.js';
-import { notifyTransition, countDropped } from './notify.js';
+import { notifyTransition, countDropped, transitionItems, NOTIFY_MAX_PER_RUN } from './notify.js';
 import { partFaultEnabled } from './settings.js';
 
 // v2.599 T2599-02: 상한도 둔다(2^31 초과 → 1ms 루프).
@@ -69,6 +69,60 @@ export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {})
   return _busy;
 }
 
+/**
+ * v3.52 설계 ③(사용자 결정 2026-11-27) — **알림 발송은 판정 가드 밖의 순차 큐**에서 한다.
+ *   예전에는 runOnce 가 판정(재진입 가드) 안에서 알림을 차례로 보내고 기다려, 웹훅 · 메일이 느리거나 응답하지 않으면 그동안 다음 판정
+ *   (이벤트 뒤 곧 판정 · 엣지 urgent 보고)이 밀렸다(9회차 엣지 #2 · 11회차 정정 — 릴리스 노트의 ‘늦어지지 않는다’ 는 거짓이었다).
+ *   · 발송 일꾼은 하나 — 판정 순서대로(FIFO) 보낸다(같은 부품의 열림 → 해소가 뒤바뀌지 않게) · 채널마다 동시 POST 를 만들지 않는다(notify.js 순차 규약).
+ *   · 발송 표시(markNotified)는 그 판정의 알림을 보낸 뒤에 — 보내기 전에 표시하지 않는다.
+ *   · 대기량 상한(NOTIFY_QUEUE_MAX_ITEMS — 판정마다 NOTIFY_MAX_PER_RUN 까지 센다)을 넘으면 **가장 오래된 대기 판정부터** 보내지 않는다 —
+ *     조용히 버리지 않는다(그 판정의 notify.queueDropped · 상태 notifyQueue.overflowDropped · 경고 로그). 채널이 오래 응답하지 않을 때 메모리를 지킨다.
+ *   · 프로세스가 다시 시작하면 대기 중인 알림은 사라진다(예전에도 보내던 중의 알림은 같았다) — 발송 표시가 없는 채로 남는다.
+ */
+export const NOTIFY_QUEUE_MAX_ITEMS = 2_000;
+const _nq = [];   // 기다리는 발송 { at, reason, tr, weight, view } — 일꾼이 꺼내 간 것은 없다
+let _nqRunning = false;
+const _nqStat = { enqueued: 0, done: 0, overflowDropped: 0, lastDoneAt: null };
+const ND0 = { notifyTransition, markNotified };
+let ND = ND0;
+export function _setNotifyDepsForTest(d) { ND = d ? { ...ND0, ...d } : ND0; }
+export async function _notifyIdleForTest() { while (_nqRunning || _nq.length) await new Promise((r) => setTimeout(r, 5)); }
+export const _enqueueNotifyForTest = (tr, reason = 'test') => enqueueNotify(tr, reason);
+export const _notifyQueueStatusForTest = () => notifyQueueStatus();
+export function _resetNotifyForTest() { _nq.length = 0; Object.assign(_nqStat, { enqueued: 0, done: 0, overflowDropped: 0, lastDoneAt: null }); }
+function enqueueNotify(tr, reason) {
+  const total = transitionItems(tr).length;
+  const view = { pending: true, queued: total, sent: 0, skipped: 0, capped: 0, total, results: [] };   // 판정 결과에 실리는 살아 있는 표지 — 일꾼이 끝나면 채운다
+  _nq.push({ at: Date.now(), reason, tr, weight: Math.min(total, NOTIFY_MAX_PER_RUN), view });
+  _nqStat.enqueued += 1;
+  let waiting = _nq.reduce((a, j) => a + j.weight, 0);
+  while (waiting > NOTIFY_QUEUE_MAX_ITEMS && _nq.length > 1) {
+    const old = _nq.shift(); waiting -= old.weight; _nqStat.overflowDropped += old.weight;
+    Object.assign(old.view, { pending: false, queueDropped: old.weight, doneAt: Date.now() });
+    console.warn(`[partfault] 알림 대기열이 넘쳐(${NOTIFY_QUEUE_MAX_ITEMS}건) 가장 오래된 판정(${old.reason})의 알림 ${old.weight}건을 보내지 않았습니다 — 알림 채널 응답을 확인하십시오`);
+  }
+  if (!_nqRunning) drainNotify().catch((e) => console.warn(`[partfault] 알림 일꾼 실패: ${String(e?.message || e).slice(0, 160)}`));
+  return view;
+}
+async function drainNotify() {
+  if (_nqRunning) return;
+  _nqRunning = true;
+  try {
+    while (_nq.length) {
+      const job = _nq.shift();
+      let note;
+      try { note = await ND.notifyTransition(job.tr); } catch (e) { note = { sent: 0, skipped: 0, capped: 0, results: [], total: job.view.total, error: String(e?.message || e).slice(0, 200) }; }
+      try {
+        if (job.tr.opened?.length) await ND.markNotified(job.tr.opened.map((p) => ({ agent: p.agent || '', partKey: p.partKey })));
+      } catch (e) { console.warn(`[partfault] 발송 표시 실패: ${String(e?.message || e).slice(0, 160)}`); }
+      Object.assign(job.view, { ...note, dropped: countDropped(note?.results), pending: false, doneAt: Date.now() });
+      _nqStat.done += 1; _nqStat.lastDoneAt = Date.now();
+      console.log(`[partfault] 알림(${job.reason}) ${Number(note?.sent) || 0}건 발송${note?.capped ? `(상한 ${note.capped}건 제외)` : ''}${note?.error ? ` · 실패 ${note.error}` : ''} · 대기 ${Date.now() - job.at}ms`);
+    }
+  } finally { _nqRunning = false; }
+}
+const notifyQueueStatus = () => ({ waiting: _nq.length, waitingItems: _nq.reduce((a, j) => a + j.weight, 0), running: _nqRunning, maxItems: NOTIFY_QUEUE_MAX_ITEMS, ..._nqStat });
+
 let _lastJudgeCost = null;   // 마지막 runOnce 의 판정 몫 ms(알림 발송 제외)
 async function runOnce({ notify = true, reason = 'timer' } = {}) {
   const t0 = Date.now();
@@ -113,8 +167,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     //   저장 설정으로 켠 경우는 예전 그대로. 전이·이벤트 기록은 그대로 한다.
     const demoOnly = partFaultEnabled().source === 'demo';
     if (notify && !demoOnly && (tr.opened.length || tr.closed.length || tr.updated.some((u) => !u.sameState))) {
-      note = await notifyTransition(tr);
-      if (tr.opened.length) await markNotified(tr.opened.map((p) => ({ agent: p.agent || '', partKey: p.partKey })));
+      note = enqueueNotify(tr, reason);   // 판정 가드 밖 순차 큐(설계 ③) — 이 판정은 발송을 기다리지 않는다 · note 는 일꾼이 끝나면 채워지는 표지
     }
 
     _last = {
@@ -122,7 +175,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
       local: local.scanned, edgeAgents: edge.agents,
       stats: tr.stats, saved,
       ...(auto?.enabled ? { issues: { created: auto.created, attached: auto.attached, commented: auto.commented, review: auto.review, capped: auto.capped } } : {}),
-      notify: note ? { ...note, dropped: countDropped(note.results) } : null,
+      notify: note,   // 살아 있는 표지(발송 대기 → 끝나면 sent · dropped …) — 복사하지 않는다
       ...(demoOnly ? { demo: true, notifySuppressed: 'demo' } : {}),
       // v2.954(점검 D-2): 정비 창 보류 판정을 못 한 엣지 장비(중앙이 그 엣지 대상을 모름 — 재시작 뒤 · 베어메탈 엣지 인출 전). 보류하지 않았다는 사실을 숨기지 않는다.
       ...(maint?.targetsUnknown ? { maintTargetsUnknown: maint.targetsUnknown } : {}),
@@ -133,7 +186,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
       + (tr.stats.heldRegistryUnreadable ? `/등록부손상 ${tr.stats.heldRegistryUnreadable}` : '')
       + (tr.stats.heldMaintenance || tr.stats.maintDeferred ? `/정비창 ${tr.stats.heldMaintenance}(새 장애 보류 ${tr.stats.maintDeferred})` : '')
       + (maint?.targetsUnknown ? ` · 정비창 판정 못 함(엣지 대상 모름) ${maint.targetsUnknown.devices}대/${maint.targetsUnknown.agents.length}엣지` : '')
-      + (note ? ` · 알림 ${note.sent}건${note.capped ? `(상한 ${note.capped}건 제외)` : ''}` : '')
+      + (note ? ` · 알림 ${note.queued}건 발송 대기열에` : '')
       + (auto?.enabled ? ` · 이슈 생성 ${auto.created}/붙임 ${auto.attached}/댓글 ${auto.commented}${auto.capped ? `/상한 ${auto.capped}` : ''}` : ''));
     return { ok: true, ..._last };
   } catch (e) {
@@ -193,7 +246,7 @@ export async function partFaultStatus() {
   const en = partFaultEnabled();
   return {
     role: isEdge() ? 'edge' : 'central',
-    enabled: en.enabled, source: en.source, intervalMs: intervalMs(), busy: !!_busy,
+    enabled: en.enabled, source: en.source, intervalMs: intervalMs(), busy: !!_busy, notifyQueue: notifyQueueStatus(),
     last: _last, ...(_lastSkip ? { lastSkip: _lastSkip } : {}), db: await partFaultDbStatus(), reset: await resetInfo().catch(() => null),
   };
 }

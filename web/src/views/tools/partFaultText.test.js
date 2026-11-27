@@ -273,6 +273,11 @@ describe('notifyNote / lastRunText — 상한과 실패를 숨기지 않는다',
     expect(t).toContain('3건 미발송');
   });
   it('알림이 없으면 빈 문자열', () => { expect(notifyNote({})).toBe(''); });
+  it('v3.52 설계 ③ — 발송 대기 · 대기열 넘침을 숨기지 않는다', () => {
+    expect(notifyNote({ notify: { pending: true, queued: 3, sent: 0 } })).toBe('알림 3건 발송 대기(판정 순서대로 차례로 보냅니다)');
+    expect(notifyNote({ notify: { pending: false, queueDropped: 7, sent: 0 } })).toMatch(/\*\*알림 대기열이 넘쳐 7건은 보내지 않았습니다\*\*/);
+    expect(notifyNote({ notify: { pending: false, sent: 2, capped: 0, dropped: 0 } })).toBe('알림 2건 발송');
+  });
   it('점검 이력이 없으면 지어내지 않는다', () => {
     expect(lastRunText(null)).toBe('점검 이력 없음');
     expect(lastRunText({ last: { at: 1000, error: 'x' } }, 2000)).toContain('직전 점검 실패');

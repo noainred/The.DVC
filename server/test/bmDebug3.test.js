@@ -155,14 +155,22 @@ test('6회차 엣지 #2 — 느린 서버가 든 묶음에서도 빠른 서버�
   } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); C.removeInventory('j-s'); C.removeInventory('j-f'); }
 });
 
-test('6회차 성능 P1 — 동시 상한 1 에서 주기 도중 온 이벤트 읽기는 그 주기의 다음 서버보다 먼저 자리를 잡지 않는다(정규 대기자 먼저)', async (t) => {
+test('6회차 성능 P1(v3.52 전용 자리로 바뀜) — 동시 상한 1 에서 주기 도중 온 이벤트 읽기는 전용 자리로 바로 읽고 · 정규 주기 자리를 쥐지 않는다(전체 동시 ≤ 상한 + 1)', async (t) => {
   const express = (await import('express')).default;
   const { config } = await import('../src/config.js');
   const keep = config.idrac.pollConcurrency;
   config.idrac.pollConcurrency = 1;
   const log = []; let firstR1 = null; const r1Seen = new Promise((r) => { firstR1 = r; });
+  const fly = new Map(); let peak = 0; let total = 0; let sameBox = 0;
   const app = express();
-  app.use('/bmc/:box', async (req, res) => { log.push(req.params.box); if (req.params.box === 'r1') firstR1(); await new Promise((r) => setTimeout(r, 15)); res.status(404).end(); });
+  app.use('/bmc/:box', async (req, res) => {
+    const b = req.params.box; log.push(b);
+    fly.set(b, (fly.get(b) || 0) + 1); total += 1; peak = Math.max(peak, total); if (fly.get(b) > 1) sameBox += 1;
+    if (b === 'r1') firstR1();
+    await new Promise((r) => setTimeout(r, 15));
+    fly.set(b, fly.get(b) - 1); total -= 1;
+    res.status(404).end();
+  });
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   t.after(() => { config.idrac.pollConcurrency = keep; srv.closeAllConnections?.(); srv.close(); });
   const base = `http://127.0.0.1:${srv.address().port}/bmc`;
@@ -174,7 +182,8 @@ test('6회차 성능 P1 — 동시 상한 1 에서 주기 도중 온 이벤트 �
   const ev = P.pollNowForEvent(['p1-x']);
   const [m] = await Promise.all([cyc, ev]);
   assert.equal(m.ran, true);
-  const firstX = log.indexOf('x');
-  const lastR = Math.max(log.lastIndexOf('r2'), log.lastIndexOf('r3'));
-  assert.ok(firstX > lastR, `주기의 r2 · r3 를 다 읽은 뒤에야 x 를 읽는다(순서 ${[...new Set(log)].join('→')})`);
+  assert.ok(log.indexOf('x') < log.indexOf('r2'), `이벤트 읽기는 주기의 다음 서버를 기다리지 않는다(순서 ${[...new Set(log)].join('→')})`);
+  assert.ok(peak <= 2, `전체 동시 요청 ≤ 상한 1 + 전용 1(최대 ${peak})`);
+  assert.equal(sameBox, 0, '같은 장비에 동시 세션을 열지 않는다');
+  assert.deepEqual(P._slotStateForTest(), { n: 0, ev: 0, ded: 0, q: 0, qe: 0 }, '자리 누수 없음');
 });

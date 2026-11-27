@@ -92,14 +92,21 @@ export function alertOf(p, { closed = false } = {}) {
  * @param {{notifyClosed?:boolean, max?:number}} [opt]
  * @returns {{sent:number, capped:number, results:Array, skipped:number}}
  */
-export async function notifyTransition(tr, { notifyClosed = true, max = 200 } = {}) {
+/** 전이 → 보낼 알림 항목(순서 그대로 — 열림 · 변화 · 해소). 발송 큐(poller.js 설계 ③)가 대기량을 셀 때도 같은 규칙을 쓴다. */
+export function transitionItems(tr, { notifyClosed = true } = {}) {
   const items = [];
   // v2.612 LEFT2612-04: 장비 키만 바뀐 같은 장애(migratedFrom · 옛 키 key-migrated 닫힘)는 새 사건이 아니다 — 다시 알리지 않는다.
   //   단 상태가 달라졌으면(warn→fault 등) 그것은 알린다.
-  for (const p of tr.opened || []) if (!(p.migratedFrom && p.prevState === p.state)) items.push({ p, closed: false });
+  for (const p of tr?.opened || []) if (!(p.migratedFrom && p.prevState === p.state)) items.push({ p, closed: false });
   // 악화(warn→fault)는 새 사건이다 — 알린다. 호전(fault→warn)도 상태가 바뀐 것이므로 알린다.
-  for (const p of tr.updated || []) if (!p.sameState) items.push({ p, closed: false });
-  if (notifyClosed) for (const p of tr.closed || []) if (p.closeReason !== 'key-migrated') items.push({ p, closed: true });
+  for (const p of tr?.updated || []) if (!p.sameState) items.push({ p, closed: false });
+  if (notifyClosed) for (const p of tr?.closed || []) if (p.closeReason !== 'key-migrated') items.push({ p, closed: true });
+  return items;
+}
+
+export const NOTIFY_MAX_PER_RUN = 200;   // 판정 한 번에 보내는 알림 상한(넘친 것은 capped 로 밝힌다)
+export async function notifyTransition(tr, { notifyClosed = true, max = NOTIFY_MAX_PER_RUN } = {}) {
+  const items = transitionItems(tr, { notifyClosed });
 
   const results = [];
   let sent = 0; let skipped = 0;

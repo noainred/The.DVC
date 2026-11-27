@@ -30,7 +30,7 @@ const edgeReport = (nOpen, urgent) => ({
 });
 const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)); } return !!fn(); };
 
-test('엣지 urgent 의 곧 판정이 5회차(알림 중)에 합류해도 다시 잡은 판정은 곧(5초 바닥) 돈다 — 지금: 앞 회차 알림 대기 × 20(상한 60초) 뒤', async (t) => {
+test('엣지 urgent 의 곧 판정이 5회차(알림 중)에 합류해도 다시 잡은 판정은 곧(5초 바닥) 돈다 — 지금: 앞 회차 알림 대기 × 20(상한 60초) 뒤 · v3.52 설계 ③ 뒤로는 연속 합류 자체가 없고 그 장애 알림은 발송 큐 차례로 12초 안', async (t) => {
   const boxes = ['s1', 's2', 's3', 's4', 's5'];
   const psu = Object.fromEntries(boxes.map((b) => [b, 'OK']));
   const app = express();
@@ -76,7 +76,9 @@ test('엣지 urgent 의 곧 판정이 5회차(알림 중)에 합류해도 다시
     const ok = await waitFor(() => whHits.some((h) => h.at >= tE && h.title.includes('synth-edge0')), 70_000);
     const hit = whHits.find((h) => h.at >= tE && h.title.includes('synth-edge0'));
     const lat = (hit?.at ?? Date.now()) - tE;
-    assert.ok(caps - c0 >= 1, `5회 상한 경고 ${caps - c0}번 — 이 장면은 상한 회차에 합류해야 재현`);
+    // v3.52 설계 ③ 뒤로는 판정이 알림 발송(웹훅 3초)을 기다리지 않아 이벤트가 진행 중 판정에 줄줄이 합류하지 않는다 — 5회 상한에 닿지 않는다.
+    //   (설계 ③ 전에는 이 장면이 상한 회차 합류를 재현했다 — 그때의 불변조건 ‘다시 잡은 판정은 곧’ 은 곧 판정 몫 유지가 지키고, 아래 지연 상한은 그대로 본다)
+    assert.equal(caps - c0, 0, `5회 상한 경고 ${caps - c0}번 — 판정이 발송을 기다리지 않으면 연속 합류가 생기지 않는다`);
     // 기대: 5회차 남은 알림(≤ 3초) + 5초 바닥 + 여유 = 12초 안
     assert.ok(ok && lat < 12_000, `엣지 urgent → 그 장애 알림 ${ok ? `${lat}ms` : '70초 안에 없음'}(기대 < 12,000ms) · 판정 ${judges.slice(j0).map((j) => `${((j.at - t0) / 1000).toFixed(1)}s(${j.reason})`).join(' · ')}`);
   } finally { E._setEventDepsForTest(null); await new Promise((r) => setTimeout(r, 4_000)); E._resetEventsForTest(); }

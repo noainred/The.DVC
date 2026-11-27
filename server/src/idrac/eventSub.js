@@ -35,6 +35,7 @@ export const SUB_TIMEOUT_MS = 30_000;
 export const SUB_CONCURRENCY = 4;
 export const EVT_JUDGE_FIRST_HOLD_MS = 1_000;   // 묶음의 첫 판정은 묶음이 끝나거나 이 시간이 지날 때까지 모은다(빠른 서버 여러 대를 한 보고에 — 7회차 엣지 #1)
 export const EVT_JUDGE_GAP_MS = 15_000;   // 한 묶음 안에서 앞 판정이 **끝난 뒤** 다음 판정까지 최소 간격(묶음 끝 판정은 이 간격 없이 한 번 — 6회차 엣지 #2 · 7회차 성능 P1: 2초 시작↔시작이면 큰 묶음에서 판정 · push 가 쉬지 않고 이어졌다)
+export const EVT_BATCH_CONC = 3;   // 함께 도는 ‘바로 점검’ 묶음 상한(v3.52 설계 ④ — 느린 서버가 낀 묶음이 끝날 때까지 다른 서버의 이벤트가 기다리지 않게 · 장비 세션 상한은 폴러 자리가 지킨다)
 export const EVT_BATCH_MAX = 500;   // 한 번 ‘바로 점검’ 에서 다시 읽는 서버 상한(넘친 것은 정규 주기 — deferred 로 센다)
 export const SUB_SERVERS_MAX = 2000;
 // 글자 · 수만(객체 · 배열은 '' — String({toString:1}) 이 던지던 길 · 반증 A6)
@@ -153,9 +154,11 @@ export const wantsCheck = (events) => events.some((e) => e.sev === 'critical' ||
 
 // ───────── 받은 기록(메모리) · 바로 점검 ─────────
 const _ring = [];
-const _stat = { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false };   // deferred — 바로 읽기 상한을 넘어 다음 정규 주기로 미룬 서버(P7)   // dropped — 한 번에 32건을 넘어 버린 수(반증 B13)
-let _timer = null; let _pendingReason = ''; let _busyRetries = 0;
-const _staleIds = new Set();   // 이번 묶음에서 다시 읽을 서버(위험 · 주의를 보낸 서버)
+const _stat = { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false, inflight: 0 };   // deferred — 바로 읽기 상한을 넘어 다음 정규 주기로 미룬 서버(P7)   // dropped — 한 번에 32건을 넘어 버린 수(반증 B13)
+let _timer = null; let _pendingReason = ''; let _inflight = 0; let _lastStart = null;
+const _staleIds = new Set();   // 다음 묶음에서 다시 읽을 서버(위험 · 주의를 보낸 서버)
+const _inflightIds = new Set(); // 도는 묶음이 맡은 서버 — 새 묶음에 넣지 않는다(그 묶음이 끝나면 다음 묶음이 다시 읽는다 · 같은 장비 세션 1)
+const _retries = new Map();     // 서버 → 다시 시도 수(정규 주기 · 다른 묶음과 겹쳐 못 읽음 — BUSY_RETRY_MAX 까지 · 묶음이 여럿이라 서버마다 센다)
 const _deferredIds = new Set(); // 묶음 상한을 넘어 정규 주기로 미룬 서버(다시 시작 전까지 한 대로 센다 · 상한 5,000)
 const DEFAULT_DEPS = {
   now: () => Date.now(),
@@ -219,31 +222,50 @@ function judgeLoop(reason) {
 }
 let _deps = DEFAULT_DEPS;
 export function _setEventDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
-export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _deferredIds.clear(); _busyRetries = 0; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }
+export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _deferredIds.clear(); _inflightIds.clear(); _retries.clear(); _inflight = 0; _lastStart = null; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false, inflight: 0 }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }
 export const noteRejected = () => { _stat.rejected += 1; };
 export const noteUnreadable = () => { _stat.unreadable = (_stat.unreadable || 0) + 1; };   // 설정 · 등록부를 못 읽어 503 으로 답한 수(거절과 따로)
 const BUSY_RETRY_MAX = 5;
 /**
- * 바로 점검 — 묶음 간격(debounceMs) 안에 여러 번 와도 한 번. 간격은 **앞 점검이 끝난 때부터** 잰다(점검이 길어도 쉬지 않고 연달아 돌지 않게 — 반증 A14).
- * 점검 중에 온 신호는 끝난 뒤 한 번 더로 묶는다. 폴링이 바빠 못 돌았으면 간격 뒤 다시(최대 BUSY_RETRY_MAX 번).
+ * 바로 점검 — 묶음 간격(debounceMs) 안에 여러 번 와도 한 번. 도는 묶음이 없으면 간격은 **앞 점검이 끝난 때부터** 잰다(점검이 길어도 쉬지 않고 연달아 돌지 않게 — 반증 A14).
+ * 묶음은 EVT_BATCH_CONC 개까지 함께 돈다(v3.52 설계 ④): 도는 묶음이 있으면 간격은 **마지막 묶음이 시작한 때부터** — 느린 서버 하나가 낀 묶음이 끝날 때까지
+ *   다른 서버의 이벤트가 기다리지 않는다(묶음 시작은 여전히 간격마다 하나까지). 도는 묶음이 맡은 서버는 새 묶음에 넣지 않고 그 묶음이 끝난 뒤 다시 읽는다.
+ * 정규 주기 · 다른 묶음과 겹쳐 못 읽은 서버는 간격 뒤 다시(서버마다 최대 BUSY_RETRY_MAX 번 — 넘으면 다음 정규 주기가 다시 읽게 표시).
  */
 function scheduleCheck(reason) {
   _pendingReason = reason;
-  if (_timer || _stat.running) return false;
+  if (_timer || _inflight >= EVT_BATCH_CONC) return false;
+  let ready = false;
+  for (const id of _staleIds) if (!_inflightIds.has(id)) { ready = true; break; }
+  if (!ready) return false;   // 도는 묶음이 맡은 서버뿐 — 그 묶음이 끝나면 다시 잡는다
   const gap = _deps.debounceMs;
-  const since = _stat.checkedAt == null ? Infinity : _deps.now() - _stat.checkedAt;
-  const wait = since >= gap ? 0 : gap - since;
+  const now = _deps.now();
+  const since = _inflight
+    ? (_lastStart == null ? Infinity : now - _lastStart)
+    : (_stat.checkedAt == null ? Infinity : now - _stat.checkedAt);
+  const wait = since >= gap ? 0 : Math.max(0, gap - Math.max(0, since));   // 시계가 뒤로 가면 지난 시간 0(간격만큼만)
   _timer = setTimeout(() => {
-    _timer = null; _stat.running = true; _stat.checks += 1;
-    const ids = [..._staleIds]; _staleIds.clear();   // 미룬 서버 집합은 비우지 않는다 — 다음 묶음에서 또 넘쳐도 한 대로(화면 ‘미룬 서버 N대’ — 다시 시작하면 0 부터: 디버깅 3회차 화면 R3)
-    Promise.resolve().then(() => _deps.runCheck(_pendingReason || 'event', ids)).then(async (r) => {
-      const left = r?.busy ? ids : (Array.isArray(r?.retry) ? r.retry : []);
-      if (left.length && _busyRetries < BUSY_RETRY_MAX) { _busyRetries += 1; for (const id of left) _staleIds.add(id); return true; }
+    _timer = null;
+    if (_inflight >= EVT_BATCH_CONC) return;
+    const ids = [..._staleIds].filter((id) => !_inflightIds.has(id));   // 미룬 서버 집합은 비우지 않는다 — 다음 묶음에서 또 넘쳐도 한 대로(화면 ‘미룬 서버 N대’ — 다시 시작하면 0 부터: 디버깅 3회차 화면 R3)
+    if (!ids.length) return;
+    for (const id of ids) { _staleIds.delete(id); _inflightIds.add(id); }
+    _inflight += 1; _stat.inflight = _inflight; _stat.running = true; _stat.checks += 1; _lastStart = _deps.now();
+    const reason0 = _pendingReason || 'event';
+    Promise.resolve().then(() => _deps.runCheck(reason0, ids)).then(async (r) => {
+      const left = new Set((r?.busy ? ids : (Array.isArray(r?.retry) ? r.retry : [])).map(String));
+      for (const id of ids) if (!left.has(id)) _retries.delete(id);
+      const giveUp = [];
+      for (const id of left) {
+        const n = (_retries.get(id) || 0) + 1;
+        if (n <= BUSY_RETRY_MAX) { _retries.set(id, n); _staleIds.add(id); } else { _retries.delete(id); giveUp.push(id); }
+      }
       // 다시 시도를 다 썼다 — 그 서버들은 다음 정규 주기가 인벤토리를 다시 읽게 표시한다(잃지 않음 · urgent 표지)
-      if (left.length) { try { const C = await import('./invCache.js'); for (const id of left) C.markInventoryStale(id, { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
-      _busyRetries = 0; return false;
+      if (giveUp.length) { try { const C = await import('./invCache.js'); for (const id of giveUp) C.markInventoryStale(id, { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
+      return left.size > giveUp.length;
     }, (e) => { console.warn(`[bm-events] 바로 점검 실패 — ${String(e?.message || e).slice(0, 160)}`); return false; }).then((again) => {
-      _stat.running = false; _stat.checkedAt = _deps.now();
+      for (const id of ids) _inflightIds.delete(id);
+      _inflight -= 1; _stat.inflight = _inflight; _stat.running = _inflight > 0; _stat.checkedAt = _deps.now();
       if (again || _staleIds.size) scheduleCheck(_pendingReason || 'event');
     });
   }, wait);
