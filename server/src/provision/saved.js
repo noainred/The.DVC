@@ -70,9 +70,12 @@ export function addSaved({ spec, source, user, memo = '', tags = [] } = {}) {
   return entry;
 }
 
-/** Distinct vCenters present in saved jobs (for the filter tabs). allowed=scope 제한(null=전체). */
-export function savedVcenters(allowed = null) {
-  return [...new Set(load().map((e) => e.vcenterId).filter(Boolean))]
+/**
+ * Distinct vCenters present in saved jobs (for the filter tabs). allowed=scope 제한(null=전체).
+ * include(함수|null): 보이는 항목 판정(보안 잔여 11-27 L7 반증 2회차 M-1 — 데모 계정은 자기 것만). 탭도 보이는 항목으로만 만든다(뺀 항목의 vCenter 를 탭 이름으로 흘리지 않게).
+ */
+export function savedVcenters(allowed = null, include = null) {
+  return [...new Set(load().filter((e) => !include || include(e)).map((e) => e.vcenterId).filter(Boolean))]
     .filter((id) => !allowed || allowed.has(id)).sort();
 }
 
@@ -81,20 +84,24 @@ export function savedVcenters(allowed = null) {
 //   GET 이 **옛 메모**를 돌려줬다(실측). 원소 사본 + 배열 필드 사본이면 충분하다(깊은 중첩 없음).
 const copyOf = (e) => (e ? { ...e, ...(Array.isArray(e.tags) ? { tags: [...e.tags] } : {}) } : e);
 /**
- * Paginated list. { vcenterId?, limit=10, offset=0, allowed? } → { total, items, vcenters }.
+ * Paginated list. { vcenterId?, limit=10, offset=0, allowed?, include? } → { total, items, vcenters, excluded? }.
  * allowed(Set|null): 사용자 scope 로 허용된 vCenter id 집합. 요청 vcenterId 필터보다 먼저
  * 적용해 범위 밖 저장 작업(spec 에 자격증명·토폴로지 포함)이 새지 않게 한다(v2.313 감사 반영).
  * vcenterId 가 없는 레거시 저장 작업은 범위 계정에 노출하지 않는다(vCenter 귀속 없는 데이터 규칙).
  */
-export function listSaved({ vcenterId = '', limit = 10, offset = 0, allowed = null } = {}) {
+export function listSaved({ vcenterId = '', limit = 10, offset = 0, allowed = null, include = null } = {}) {
   let items = load();
   if (allowed) items = items.filter((e) => e.vcenterId && allowed.has(e.vcenterId));
+  // 보안 잔여 11-27 L7(반증 2회차 M-1): include 로 뺀 개수(범위 안에서 — 범위 밖과 따로 센다). include 가 없으면 싣지 않는다.
+  const inScope = items.length;
+  if (include) items = items.filter((e) => include(e));
+  const excluded = inScope - items.length;
   if (vcenterId) items = items.filter((e) => e.vcenterId === vcenterId);
   const total = items.length;
   const lim = Math.max(1, Math.min(200, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
   // 74회차 F9: 읽기 오류면 빈 목록이 '저장된 작업 없음' 이 아니라는 사실을 함께 싣는다(사유에 경로 · 원문 없음).
-  return { total, offset: off, limit: lim, items: items.slice(off, off + lim).map(copyOf), vcenters: savedVcenters(allowed), ...(readErr ? { readError: true, reason: writeBlocked() } : {}) };
+  return { total, offset: off, limit: lim, items: items.slice(off, off + lim).map(copyOf), vcenters: savedVcenters(allowed, include), ...(include ? { excluded } : {}), ...(readErr ? { readError: true, reason: writeBlocked() } : {}) };
 }
 
 export function getSaved(id) { return copyOf(load().find((e) => e.id === id)) || null; }

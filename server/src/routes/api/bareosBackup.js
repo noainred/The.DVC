@@ -279,6 +279,17 @@ function scopedJobs(user) {
   return { jobs, omitted: all.length - jobs.length, scoped: !!allowed };
 }
 
+/**
+ * 보안 잔여 11-27 L7(반증 2회차 S-1 — 재현): 백업 대상 1건이 이 사용자의 목록에 보이는가. 데모 계정은 **데모 대상(demo:true — 데모 Director 의 원장 행)만**.
+ *   이 도구는 adminOnly 라 operator 판본이 없고, 데모 계정은 요청 문맥이 role admin 이라 사람이 등록한 Director 에 걸린 대상의 FD 클라이언트 · 스토리지 · 풀 ·
+ *   잡 이름(Director 설정의 법인 매핑 — 설정 탭은 데모 계정에 READ_DENY)과 만든 포탈 계정을 받았다. 백업 실행(routes/api/backupRun.js runShownTo)과 같은 원칙 —
+ *   사람이 등록한 장비의 기록은 데모 계정에 싣지 않는다(DEMO_ONLY_REASON). 데모 대상이어도 만든 계정 이름은 demoAccountView 로 가린다.
+ *   다른 역할은 바꾸지 않는다.
+ */
+export const bareosJobShownTo = (user, j) => !isDemoGuest(user) || j?.demo === true;
+/** 대상의 포탈 계정 칸(만든 사람 · 실행 · 취소 · 복원을 보낸 사람) — 원장 머리말(bareos/registry.js)의 by 는 모두 포탈 계정이다. */
+const BAREOS_JOB_ACCOUNT_KEYS = ['createdBy', 'by'];
+
 /** :id 로 원장 job 을 찾고 범위를 판정한다. 실패 시 응답을 보내고 null. */
 function jobFor(req, res, { write = true } = {}) {
   const job = getJob(String(req.params.id || ''));
@@ -443,7 +454,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => memoJson(req, res, 'bar
 /**
  * 목록 캐시 열쇠 — '세대가 바뀌면 무엇이 지워지는가'(루트 CLAUDE.md 캐시 규칙)에 대한 답:
  *  · 사람마다 다른 칸: 조회 범위(scopeKey — 범위 계정이 전체 범위 관리자의 캐시를 받지 않게) · 쓰기 범위(대상별 writable · settingsWritable) ·
- *    역할 · 관리자 판본(isAdminDetailUser — Director 주소·콘솔·오류 원문을 보이는가) · 데모 모드.
+ *    역할 · 관리자 판본(isAdminDetailUser — Director 주소·콘솔·오류 원문을 보이는가) · 데모 계정(dg — 데모 대상만 · 계정 가림, 보안 잔여 11-27 L7) · 데모 모드.
  *  · 원장 rev(대상 추가·삭제·실행 결과·대기 — 폴러·엣지 회신이 반영할 때마다 오른다) · 설정 rev(Director·매핑·기본값) · 그룹 rev · 정책 수집 rev · 백업 표시 rev ·
  *    손상 표지(원장·설정·그룹·표시) · 폴러 at·busy 와 Director 별 상태(엣지 회신은 at 없이 ok·relay 만 바꾼다) · 인증 정지(수동 연결 시험이 폴러 없이 바꾼다).
  *  · 스냅샷 세대(memoJson 이 앞에 붙인다 — VM 이름·위치 drift · 게스트 OS · GPU 장치(v2.873) · 그룹 다음 회차 시각). 이 밖의 값이 바뀌어도 늦어야 스냅샷 한 주기다.
@@ -461,7 +472,7 @@ function bareosListKey(req) {
   } catch { auth = 'err'; }
   const bad = (f) => { try { return f() ? 1 : 0; } catch { return 1; } };
   return [
-    `s=${scopeKey(req.user, snap)}`, `w=${w}`, `r=${req.user?.role || ''}`, `a=${isAdminDetailUser(req.user) ? 1 : 0}`, `d=${isDemoActive() ? 1 : 0}`,
+    `s=${scopeKey(req.user, snap)}`, `w=${w}`, `r=${req.user?.role || ''}`, `a=${isAdminDetailUser(req.user) ? 1 : 0}`, `dg=${isDemoGuest(req.user) ? 1 : 0}`, `d=${isDemoActive() ? 1 : 0}`,
     `g=${registryRev()}`, `c=${settingsRev()}`, `gr=${groupsRev()}`, `po=${policyRev()}`, `m=${marksRev()}`,
     `e=${bad(registryLoadError)}${bad(settingsLoadError)}${bad(groupsLoadError)}${bad(marksUnreadable)}`,
     `p=${p.at || 0}:${p.busy ? 1 : 0}`, `pd=${dirs}`, `as=${auth}`,
@@ -471,7 +482,9 @@ function bareosListKey(req) {
 function bareosListView(req) {
   const settings = effectiveSettings();
   const demo = isDemoActive();
-  const { jobs, omitted, scoped } = scopedJobs(req.user);
+  const { jobs: inScopeJobs, omitted, scoped } = scopedJobs(req.user);
+  const jobs = inScopeJobs.filter((j) => bareosJobShownTo(req.user, j));
+  const demoHidden = inScopeJobs.length - jobs.length;   // 데모 판본에서 뺀 대상(사람이 등록한 Director) — 범위 밖과 따로 센다
   // Director 주소·콘솔 이름은 전 법인 설정(설정 탭과 같은 등급) — 범위 계정·데모 계정에는 가리고 법인 이름만 보인다(v2.743 AUTHZ-02 와 같은 원칙).
   const showAddr = addrVisible(req);
   const detail = !scopedVcenterIds(req.user, store.get()) && isAdminDetailUser(req.user);
@@ -498,7 +511,7 @@ function bareosListView(req) {
   const now = Date.now();
   // v2.866: finishedRuns 원문은 싣지 않고 마지막 성공(lastOk — 복원 › 폴더 표)만 계산해 싣는다
   // v2.867 cancel = 멈추는 중(취소를 보낸 실행 — cancelState.cancelInfo · 지금 도는 실행일 때만). 원장 칸 cancelReq 는 그대로 싣지 않는다(판정 한 곳)
-  const views = jobs.map(({ finishedRuns, cancelReq, ...j }) => ({ ...viewJob(j, vmById, settings), lastOk: lastOkOf(j.lastRun, finishedRuns), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j), cancel: cancelInfo({ ...j, cancelReq }, now) }));
+  const views = demoAccountView(req.user, jobs.map(({ finishedRuns, cancelReq, ...j }) => ({ ...viewJob(j, vmById, settings), lastOk: lastOkOf(j.lastRun, finishedRuns), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j), cancel: cancelInfo({ ...j, cancelReq }, now) })), BAREOS_JOB_ACCOUNT_KEYS);
   let settingsWritable = false;
   try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
   const rawPoller = pollerStatus();
@@ -521,6 +534,7 @@ function bareosListView(req) {
     mappedVcenters: mapped,
     jobs: views,
     ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}),
+    ...(demoHidden ? { demoOnly: true, demoMasked: { jobs: demoHidden } } : {}),
     poller,
     relayLimits: relayLimits(),   // v2.824 엣지 대행 Director 의 화면 시한(서버 대기 시간 — 숫자를 화면에 박지 않는다)
     cancelWaitMs: CANCEL_WAIT_MS,   // v2.867 '멈추지 않음' 기준(화면 문구 — 숫자를 박지 않는다)
@@ -1185,12 +1199,12 @@ const idsOf = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => String(x
  */
 // v2.866 폴더별 VM 수 — restoreFolderCounts(모듈 위쪽) · 폴더 표를 열 때 한 번 읽는다(폴링 없음 · 조회 범위 안 vCenter 만)
 api.get('/tools/bareos-backup/restore-folders', adminOnly, (req, res) => memoJson(req, res, 'bareos-restore-folders', (snap) => {
-  const { jobs } = scopedJobs(req.user);
+  const jobs = scopedJobs(req.user).jobs.filter((j) => bareosJobShownTo(req.user, j));   // 보안 잔여 11-27 L7(반증 2회차 S-1): 목록과 같은 대상만 센다(캐시 열쇠 dg)
   const allowed = scopedVcenterIds(req.user, snap);
   const vms = allowed ? (snap?.vms || []).filter((v) => allowed.has(String(v.vcenterId))) : (snap?.vms || []);
   const vcNames = Object.fromEntries((snap?.vcenters || []).filter((v) => !allowed || allowed.has(String(v.id))).map((v) => [v.id, v.name || v.id]));
   return { ok: true, folders: restoreFolderCounts(jobs, vms), vcNames, inventoryAt: snap?.generatedAt ?? null };
-}, { extraKey: `${scopeKey(req.user, store.get())}|g=${registryRev()}` }));   // v2.870 감사 A5-03: 원장 세대(대상을 더하고 빼면 304 로 옛 수가 남지 않게)
+}, { extraKey: `${scopeKey(req.user, store.get())}|g=${registryRev()}|dg=${isDemoGuest(req.user) ? 1 : 0}` }));   // v2.870 감사 A5-03: 원장 세대(대상을 더하고 빼면 304 로 옛 수가 남지 않게)
 api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res) => {
   const ids = idsOf(req.body?.ids);
   if (!ids.length) return res.status(400).json({ ok: false, reason: '복원 지점을 볼 VM 을 고르세요.' });

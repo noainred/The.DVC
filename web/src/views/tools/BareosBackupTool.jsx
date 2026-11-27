@@ -30,6 +30,7 @@ import {
 import { LogModal } from './BareosJobLog.jsx';   // v2.872 작업 로그 창 — 통합 에러 로그 서랍과 같은 본문
 import { takeBareosHandoff, OPS_SEGMENTS, opsTopOf, opsTabOf, LEGACY_OPS_TAB, takeTargetFocus, legacyOpsHash, runsBoardOpen, settingsHomeOk, legacySettingsHash, BAREOS_SETTINGS_HASH } from './bareosViewText.js';
 import { targetPolicyText, targetPolicyShort, VERDICT } from './bareosPolicyText.js';   // v2.840 '적용 정책' 한 줄
+import { demoOmitNote } from '../demoOmitText.js';   // 보안 잔여 11-27 L7(반증 2회차): 데모 계정 판본에서 뺀 대상 안내
 
 /**
  * 특수 기능 › Bareos VM 백업(v2.820, 도구 키 bareos-backup — admin 전용 · v2.823 법인별 Director).
@@ -121,6 +122,7 @@ export default function BareosBackupTool() {
       </div>}
       {data.settingsLoadError && <Note tone="bad">설정 파일을 읽지 못했습니다(손상본 보존) — {data.settingsLoadError.reason}</Note>}
       {data.registryLoadError && <Note tone="bad">백업 대상 원장을 읽지 못했습니다(손상본 보존 — 새 대상 추가를 막았습니다) — {data.registryLoadError.reason}</Note>}
+      {tab !== 'settings' && demoOmitNote(data, 'jobs') && <Note>{demoOmitNote(data, 'jobs')}</Note>}
       <div>
       {tab === 'targets' && <TargetsTab d={data} reload={reload} handoff={handoff} focus={focus} goRuns={() => setTab('runs')} goRestore={(id) => { setRestorePre(id); setTab('restore'); }} />}
       {tab === 'restore' && <BareosRestore d={data} reload={reload} preselect={restorePre} onPreselectUsed={() => setRestorePre('')} />}

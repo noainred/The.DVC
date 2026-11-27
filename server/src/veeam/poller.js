@@ -14,7 +14,7 @@ import { withDeadline, deadlineMs } from '../util/deadline.js';
 import { poolSettled } from '../util/pool.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { createChangeLogger } from '../util/logThrottle.js';
-import { serversForThisNode, getServerWithSecret, listServers, registryLoadError, accessFingerprint } from './registry.js';
+import { serversForThisNode, getServerWithSecret, listServers, registryLoadError, accessFingerprint, isDemoVeeamServerId } from './registry.js';
 import { collectVeeamServer } from './client.js';
 import { putResult, pruneExcept } from './store.js';
 
@@ -41,7 +41,7 @@ export function onVeeamCollected(fn) { _listeners.add(fn); return () => _listene
 export async function collectOne(server, { manual = false } = {}) {
   const cur = getServerWithSecret(server.id);
   const full = { ...(cur || server) };
-  if (String(full.id).startsWith('mock-')) return null;
+  if (isDemoVeeamServerId(full.id)) return null;   // 데모 서버 판정은 registry.js 하나(백업 실행 데모 판본과 같은 규칙)
   const target = accessFingerprint(full);
   // 시작 때 등록부에 있던 서버만 대조한다(등록부 밖 원소로 부른 호출은 예전 그대로).
   const moved = () => { if (!cur) return false; const now = getServerWithSecret(full.id); return !now || accessFingerprint(now) !== target; };

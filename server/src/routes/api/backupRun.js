@@ -16,7 +16,7 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { listRegistry as listVcenters } from '../../vcenter/registry.js';
-import { serversForVcenter, listServers, getServerWithSecret, registryLoadError } from '../../veeam/registry.js';
+import { serversForVcenter, listServers, getServerWithSecret, registryLoadError, isDemoVeeamServerId } from '../../veeam/registry.js';
 import { reauth } from './reauth.js';
 import { veeamMatchFor } from './veeam.js';
 import { runStatusOf, planBackup, portalJobName, veeamHostFor, vmSizeOf } from '../../veeam/run/plan.js';
@@ -61,7 +61,7 @@ export function busyFlags(busy) {
  *   되고, 화면(데모 vCenter 의 VM 목록)은 그대로 열린다. 사람 서버가 없으면 관리자와 같은 응답이다(뺀 것이 없으면 표지도 없다).
  *   판정은 이 세 함수 하나 — 서버 목록(serversFor) · 실행 기록(runShownTo) · 포탈 백업 기록(portalRecordShownTo). 설정 탭(/settings)은 READ_DENY.
  */
-export const isDemoVeeamServerId = (id) => /^mock-/i.test(String(id || ''));
+export { isDemoVeeamServerId };   // 판정 코어는 veeam/registry.js(폴러와 같은 규칙 — 반증 2회차 nit)
 export function serversFor(req, vcenterId) {
   const all = serversForVcenter(vcenterId);   // enabled · 등록 순서 · 비밀 없음
   return isDemoGuest(req?.user) ? all.filter((d) => isDemoVeeamServerId(d.id)) : all;

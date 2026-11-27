@@ -6,6 +6,7 @@ import { STable } from '../components/STable.jsx';
 import { queryKey, keepRowsOnError } from './queryKeyText.js'; // v2.612 RECENT2612-06
 import { readFailText } from './readFailText.js'; // v2.733(C5-02): 원본 목록 조회 실패를 '0개 일치' 로 그리지 않는다
 import { PLACEMENT_HINT, notAppliedText, jobStatusLabel, vmStatusLabel, doneCountLabel, liveSubmitNote, startIndexOut, LOCKED_PLACEMENT_NOTE, lockedPlacementText, jobProgressPct } from './provisionText.js'; // 74회차 F5 · F6 · F8 · 75회차(시작 번호 0) · 결정 74 ① ②
+import { demoOmitNote } from './demoOmitText.js'; // 보안 잔여 11-27 L7(반증 2회차): 데모 계정 판본에서 뺀 저장 작업 안내
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
@@ -494,6 +495,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
       {loadErr && <div className="banner warn" style={{ marginBottom: 8 }}>저장된 작업 목록을 읽지 못했습니다: {loadErr} — 아래는 직전에 받은 목록입니다.</div>}
       {opErr && <div className="banner warn" style={{ marginBottom: 8 }}>{opErr}</div>}
       {data.readError && <div className="banner warn" style={{ marginBottom: 8 }}>{data.reason || '저장된 작업 파일을 읽지 못했습니다.'} — 저장된 작업이 없다는 뜻이 아닙니다.</div>}
+      {demoOmitNote(data, 'saved') && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{demoOmitNote(data, 'saved')}</div>}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <span className={vc === '' ? 'login-btn' : 'logout-btn'} style={{ cursor: 'pointer', padding: '5px 12px', fontSize: 12, borderRadius: 6 }} onClick={() => { setVc(''); setLimit(10); }}>전체 ({data.vcenters ? '' : ''}{vc === '' ? data.total : ''})</span>
         {(data.vcenters || []).map((id) => (
@@ -506,7 +508,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
         <STable>
           <thead><tr><th>시작</th><th>이름 패턴</th><th>원본</th><th>vCenter</th><th>대수</th><th>메모 · 태그</th><th className="right">작업</th></tr></thead>
           <tbody>
-            {items.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>{data.readError ? '—' : '저장된 작업이 없습니다. VM을 생성하면 자동 저장됩니다.'}</td></tr>}
+            {items.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>{data.readError ? '—' : demoOmitNote(data, 'saved') ? '데모 계정에 표시할 저장된 작업이 없습니다.' : '저장된 작업이 없습니다. VM을 생성하면 자동 저장됩니다.'}</td></tr>}
             {items.map((e) => (
               <tr key={e.id}>
                 <td className="muted" style={{ fontSize: 12 }}>{new Date(e.createdAt).toLocaleString()}</td>

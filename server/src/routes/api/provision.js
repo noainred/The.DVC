@@ -4,6 +4,7 @@ import { listSources, listJobsScoped, getJob, jobsStoreError } from '../../provi
 import { getPlacement } from '../../provision/placement.js';
 import { listSaved, getSaved, savedReadError } from '../../provision/saved.js';
 import { requirePerm } from '../../auth/auth.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 
@@ -12,6 +13,19 @@ import { store } from '../../store.js';
 // 임의 vCenter 라이브 SOAP 유발). scopeOf: null=제한 없음(전체), Set=허용 vCenter id.
 const scopeOf = (req) => scopedVcenterIds(req.user, store.get());
 const canProvision = requirePerm('vm.provision');
+
+/**
+ * 보안 잔여 11-27 L7(반증 2회차 M-1 — 재현): 저장된 작업 1건이 이 사용자에게 보이는가. 데모 계정은 **자기가 만든 것만**(사실상 0건 — 데모 계정은 작업을 만들 수 없다).
+ *   저장 작업은 VM 을 만들 때마다 자동으로 남고(createJob → addSaved) 작성 포탈 계정(createdBy) · 화면 입력 전체(정적 IP 목록 · 게이트웨이 · DNS · 도메인 · 이름 패턴)를 담는다.
+ *   데모 계정은 요청 문맥이 role admin 이라 vm.provision 게이트를 통과했고(operator 는 기본 권한에 vm.provision 이 없어 403 — operator 판본이 없다),
+ *   같은 작업의 /provision/jobs 는 v2.744 AUTHZ-01 로 '남의 작업' 을 숨기는데 이 경로로 그 결정을 비켜 갔다. 목록 · 단건 · vCenter 탭이 이 판정 하나를 쓴다.
+ *   다른 역할은 바꾸지 않는다(vm.provision 을 가진 계정은 예전처럼 범위 안 저장 작업 전부 — 팀 재사용 기능).
+ */
+export function savedShownTo(user, e) {
+  if (!isDemoGuest(user)) return true;
+  const me = String(user?.username || '');
+  return !!e && me !== '' && String(e.createdBy || '') === me;
+}
 
 export function registerProvision(api) {
 
@@ -43,7 +57,11 @@ api.post('/provision/preview', canProvision, (req, res) => {
 });
 // Saved provisioning jobs (reusable). ?vcenterId= filters; ?limit=&offset= paginate.
 api.get('/provision/saved', canProvision, (req, res) => {
-  res.json(listSaved({ vcenterId: req.query.vcenterId, limit: req.query.limit, offset: req.query.offset, allowed: scopeOf(req) }));
+  const user = req.user;
+  const include = isDemoGuest(user) ? (e) => savedShownTo(user, e) : null;
+  const { excluded, ...out } = listSaved({ vcenterId: req.query.vcenterId, limit: req.query.limit, offset: req.query.offset, allowed: scopeOf(req), include });
+  // 데모 판본에서 뺀 것은 밝힌다(조용한 제외 금지) — 뺀 것이 없으면 관리자와 같은 모양.
+  res.json({ ...out, ...(excluded > 0 ? { demoOnly: true, demoMasked: { saved: excluded } } : {}) });
 });
 api.get('/provision/saved/:id', canProvision, (req, res) => {
   const item = getSaved(req.params.id);
@@ -56,6 +74,7 @@ api.get('/provision/saved/:id', canProvision, (req, res) => {
   // 범위 밖(또는 vCenter 귀속 없는) 저장 작업은 존재를 숨기고 404(403 이 아닌 — 존재 은닉).
   const allowed = scopeOf(req);
   if (allowed && (!item.vcenterId || !allowed.has(item.vcenterId))) return res.status(404).json({ ok: false, reason: '저장된 작업을 찾을 수 없습니다.' });
+  if (!savedShownTo(req.user, item)) return res.status(404).json({ ok: false, reason: '저장된 작업을 찾을 수 없습니다.' });   // 보안 잔여 11-27 L7(반증 2회차 M-1) — 존재 은닉
   res.json(item);
 });
 

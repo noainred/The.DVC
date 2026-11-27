@@ -174,7 +174,7 @@ export function demoMaskedNote(d, kind) {
   if (!d || d.demoOnly !== true || !d.demoMasked || typeof d.demoMasked !== 'object') return null;
   const n = d.demoMasked[kind];
   if (!Number.isInteger(n) || n <= 0) return null;
-  if (kind === 'servers') return `데모 계정에는 사람이 등록한 Veeam 서버 ${n}대를 표시하지 않습니다 — 데모 Veeam 서버가 없어 VM 은 Veeam 연결 없음으로 보입니다.`;
+  if (kind === 'servers') return `데모 계정에는 사람이 등록한 Veeam 서버 ${n}대를 표시하지 않습니다 — 그 서버에만 연결된 VM 은 Veeam 연결 없음으로 보입니다.`;   // 반증 2회차 nit: '데모 서버가 없다' 고 단정하지 않는다
   if (kind === 'runs') return `데모 계정에는 사람이 등록한 Veeam 서버로 보낸 요청 ${n}건을 표시하지 않습니다.`;
   if (kind === 'vms') return `데모 계정에는 사람이 등록한 Veeam 서버로 백업한 VM ${n}대를 표시하지 않습니다.`;
   return null;

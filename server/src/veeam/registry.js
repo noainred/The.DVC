@@ -183,6 +183,12 @@ export function serversForThisNode({ servers = load().servers, agentName = confi
 }
 /** 특정 엣지 몫(중앙의 config 서빙용 — 비밀번호 포함: 엣지가 Veeam 에 로그인해야 한다). */
 export function serversForAgent(agentName) { return coreForAgent(load().servers, agentName); }
+/**
+ * 데모(mock) Veeam 서버인가 — 판정 코어 하나(보안 잔여 11-27 L7 반증 2회차 nit). 폴러(collectOne — 데모 서버는 수집하지 않는다)와
+ *   백업 실행 데모 판본(routes/api/backupRun.js — 데모 계정에는 데모 서버만)이 같은 함수를 쓴다(예전 둘이 대소문자 규칙이 달랐다 — 'MOCK-…' 는
+ *   폴러가 실제 서버로 수집하면서 데모 판본에는 데모로 실렸다). 대소문자를 구분한다(폴러의 예전 규칙).
+ */
+export const isDemoVeeamServerId = (id) => String(id ?? '').startsWith('mock-');
 /** 이 vCenter 에 연결된 서버(비밀 없음). */
 export function serversForVcenter(vcenterId) {
   return load().servers.filter((d) => d.enabled !== false && Array.isArray(d.vcenterIds) && d.vcenterIds.includes(vcenterId)).map(redact);

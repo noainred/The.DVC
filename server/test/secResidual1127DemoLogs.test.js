@@ -239,6 +239,25 @@ function harnessScript(phase) {
       const vm1 = (snap.vms || []).find((v) => v.vcenterId === vcs[0] && v.template !== true);
       return (await import(${J('bareos/groups.js')})).addGroup({ name: 'grp-q', vcenterId: vcs[0], vmIds: [vm1.id], schedule: { enabled: false, time: '02:00' } }, { by: 'grpuserq' });
     });
+    // 반증 2회차: 하네스가 시드하지 않던 등록부 8개(반증 하네스 그대로) — 시드가 없는 등록부는 ③-a 에서 통과로 보인다(S-1 교훈).
+    //   M-1 프로비저닝 저장 작업(작성 계정 prvuserq · 정적 IP 계획) · S-1 Bareos 백업 대상(사람 Director — client · createdBy, 데모 대상 — createdBy).
+    await tryi('xEm', async () => (await import(${J('veeam/em/registry.js')})).saveEm({ name: 'em-realq', host: '10.66.40.40', username: 'emuserQ', password: 'pw-EM-qq' }));
+    await tryi('xNsx', async () => (await import(${J('nsx/registry.js')})).addManager({ id: 'nsx-realq', name: 'nsx-realq', host: 'https://10.66.41.41', username: 'nsxuserQ', password: 'pw-NS-qq', vcenterId: vcs[0] || '' }));
+    await tryi('xIsidu', async () => { const FC = await import(${J('cvp/formChoices.js')}); const IS = await import(${J('isidu/settings.js')});
+      return IS.saveSettings({ targets: [{ id: 'tisiq', label: 'isi-realq', path: '/ifs/data/q', host: '10.66.42.42', username: 'isiuserQ', agent: '', datacenterId: '' }] }, { devices: [], agents: [], dcs: [], pickAgent: FC.pickAgent, pickDatacenter: FC.pickDatacenter, ssrfBlockReason: () => null }); });
+    await tryi('xRelay', async () => { (await import(${J('relaytopo/store.js')})).saveTopology({ main: { name: 'Main', privateIp: '10.66.43.1' }, sites: [{ dc: 'dc-realq', edge: { privateIp: '10.66.43.2', ssh: { username: 'rlyuserQ', password: 'pw-RL-qq' } }, irs: { privateIp: '10.66.43.3' }, note: 'n 10.66.43.9' }] }); return { ok: true }; });
+    await tryi('xDeploy', async () => (await import(${J('agent/deployRegistry.js')})).saveTarget({ host: '10.66.44.44', username: 'dpluserQ', password: 'pw-DP-qq', name: 'dpl-realq' }));
+    await tryi('xProv', async () => { const vmx = (snap.vms || []).find((v) => v.vcenterId === vcs[0]); return (await import(${J('provision/saved.js')})).addSaved({ spec: { vcenterId: vcs[0], namePattern: 'prv-realq-{n}', count: 1, guest: { ipMode: 'static', ipList: ['10.66.45.45'], gateway: '10.66.45.1', domain: 'corpq.example', dnsServers: ['10.66.45.2'] } }, source: { id: vmx && vmx.id, name: vmx && vmx.name, vcenterId: vcs[0] }, user: { username: 'prvuserq' }, memo: '' }); });
+    await tryi('xBareosJob', async () => { const ST = await import(${J('bareos/settings.js')}); const d = ST.loadSettings().directors.find((x) => x.name === 'bd-realq'); const vmz = (snap.vms || []).filter((v) => v.vcenterId === vcs[0])[2];
+      ST.saveSettings({ sites: [{ vcenterId: vcs[0], directorId: d.id, client: 'cl-realq-fd', storage: 'File', pool: 'Full' }] });   // 법인 매핑(진행 현황은 매핑된 법인마다 행을 만든다)
+      const BR = await import(${J('bareos/registry.js')});
+      const j = BR.addJob({ vcenterId: vcs[0], vmId: vmz.id, vmName: vmz.name, dc: '', folder: '', directorId: d.id, bareosJob: 'bj-realq', client: 'cl-realq-fd', storage: 'File', pool: 'Full', schedule: 'Daily', level: 'Incremental', createdBy: 'bjbyuserq', demo: false });
+      BR.markPending(j.id, { jobid: 777, level: 'I', by: 'pendbyuserq' });   // 진행 현황(live)의 실행 행에 실리게(Client · Pool · Storage)
+      return j; });
+    await tryi('xBareosDemoJob', async () => { const vmz = (snap.vms || []).filter((v) => v.vcenterId === vcs[0])[3];
+      const j = (await import(${J('bareos/registry.js')})).addJob({ vcenterId: vcs[0], vmId: vmz.id, vmName: vmz.name, dc: '', folder: '', directorId: 'mock-bareos-dir', bareosJob: 'bj-mockdemo', client: 'mockdemo-fd', storage: 'File', pool: 'Full', schedule: 'Daily', level: 'Incremental', createdBy: 'bjdemouserq', demo: true });
+      seedIds.bareosDemoJob = j.id; return j; });
+    await tryi('xFocusBy', async () => (await import(${J('focusmon/registry.js')})).addTarget({ name: 'fm2-realq', host: '10.66.46.46', username: 'fm2userQ', password: 'pw-FN-qq', os: 'linux' }, { agents: [], by: 'fmbyuserq', corps: [] }));
     ` : ''}
     const mk = (u) => auth.createUser(u, { trusted: true });
     mk({ username: 'fadm', role: 'admin', password: 'Passw0rd!long1' });
@@ -306,7 +325,9 @@ function harnessScript(phase) {
         '/api/overview/cards', '/api/tools/disk-bad', '/api/tools/server-info', '/api/tools/server-cmd/output?id=x', '/api/admin/ipam/scan/ranges',
         '/api/admin/central/token-apply/jobs', '/api/tools/bm-usage/ssh-keys', '/api/tools/storage-usage/mail', '/api/admin/idrac/trend/export.csv',
         ...BACKUP_VIEWS, '/api/tools/backup-run/settings', '/api/tools/backup-run/runs/' + encodeURIComponent(seedIds.veeamRun || 'x'), '/api/tools/bareos-backup/health/settings',
-        '/api/tools/vm-clone', '/api/tools/bareos-backup/groups/tree?vcenterId=' + encodeURIComponent(vcs[0] || '')])
+        '/api/tools/vm-clone', '/api/tools/bareos-backup/groups/tree?vcenterId=' + encodeURIComponent(vcs[0] || ''),
+        '/api/provision/saved', '/api/provision/saved/' + encodeURIComponent(seedIds.xProv || 'x'), '/api/tools/bareos-backup', '/api/tools/bareos-backup/restore-folders',
+        '/api/tools/bareos-backup/live'])
         out.views[p] = { demo: await pick('demo', p), fadm: await pick('fadm', p), oper: await pick('oper', p) };
       // M-1 절대형 · 겹친 슬래시(원시 소켓 — fetch 는 대상을 정규화한다)
       out.raw = {};
@@ -631,7 +652,8 @@ test('③-l 순수 판정 — 데모 Veeam 서버 · 실행 기록(모든 그룹
   const { isDemoVeeamServerId, runShownTo, portalRecordShownTo } = await import('../src/routes/api/backupRun.js');
   const demo = { user: { role: 'admin', demoGuest: true } };
   const adm = { user: { role: 'admin' } };
-  assert.equal(isDemoVeeamServerId('mock-vbr-1'), true); assert.equal(isDemoVeeamServerId('MOCK-x'), true);
+  assert.equal(isDemoVeeamServerId('mock-vbr-1'), true);
+  assert.equal(isDemoVeeamServerId('MOCK-x'), false, '반증 2회차 nit: 폴러(collectOne)와 같은 규칙 — 대소문자 구분(MOCK- 는 폴러가 실제로 수집한다)');
   for (const bad of ['vbr-abc', '', null, undefined, 'xmock-1']) assert.equal(isDemoVeeamServerId(bad), false, String(bad));
   const run = (g, v) => ({ groups: g.map((serverId) => ({ serverId })), vms: v.map((serverId) => ({ serverId, vcenterId: 'vc-a' })) });
   assert.equal(runShownTo(demo, run(['mock-1'], ['mock-1']), null), true);
@@ -662,6 +684,85 @@ test('③-m demoAccountView — 데모만 · 일반 객체와 배열만 내려�
   assert.deepEqual([...ACCOUNT_KEYS].sort(), ['by', 'createdBy', 'deletedBy', 'savedBy', 'updatedBy', 'user']);
   assert.equal(demoAccountView(demo, null), null);
   assert.deepEqual(demoAccountView(demo, [{ by: 'q' }]), [{ by: '' }]);
+});
+
+test('③-n 반증 2회차 M-1 — 프로비저닝 저장 작업: 데모 계정은 자기가 만든 것만(뺀 개수 · 탭도 보이는 것만) · 단건 404 · 관리자 무변경', () => {
+  const h = harness('full');
+  const V = h.views;
+  const L = V['/api/provision/saved'];
+  assert.equal(L.oper.st, 403, 'operator 는 vm.provision 이 없어 403 — operator 판본이 없다(구현 1회차 근거 정정)');
+  assert.equal(L.demo.st, 200, L.demo.txt.slice(0, 200));
+  const d = body(L.demo);
+  assert.deepEqual(d.items, []); assert.equal(d.total, 0); assert.deepEqual(d.vcenters, [], '뺀 작업의 vCenter 를 탭으로 흘리지 않는다');
+  assert.equal(d.demoOnly, true); assert.ok(Number.isInteger(d.demoMasked?.saved) && d.demoMasked.saved >= 1, JSON.stringify(d.demoMasked));
+  assert.equal('excluded' in d, false, '내부 개수 칸은 싣지 않는다');
+  for (const c of ['prvuserq', '10.66.45.45', '10.66.45.1', '10.66.45.2', 'prv-realq']) assert.equal(L.demo.txt.includes(c), false, `데모에 ${c}`);
+  const f = body(L.fadm);
+  assert.ok(f.items.some((e) => e.createdBy === 'prvuserq' && e.name === 'prv-realq-{n}'), '대조: 관리자는 전부 본다');
+  assert.equal('demoOnly' in f, false); assert.equal('demoMasked' in f, false); assert.equal('excluded' in f, false);
+  const one = V[`/api/provision/saved/${encodeURIComponent(h.seedIds.xProv)}`];
+  assert.ok(one, '단건 경로'); assert.equal(one.demo.st, 404); assert.equal(one.fadm.st, 200); assert.equal(one.oper.st, 403);
+  assert.equal(one.demo.txt.includes('prvuserq'), false);
+});
+
+test('③-n 반증 2회차 S-1 — Bareos 백업 대상: 데모 계정은 데모 대상만(뺀 개수) · 데모 대상의 만든 계정은 비운다 · 관리자 무변경 · 캐시 판본 분리', () => {
+  const h = harness('full');
+  const V = h.views;
+  const B = V['/api/tools/bareos-backup'];
+  assert.equal(B.oper.st, 403);
+  assert.equal(B.demo.st, 200, B.demo.txt.slice(0, 200));
+  const d = body(B.demo);
+  assert.deepEqual(d.jobs.map((j) => j.bareosJob), ['bj-mockdemo']);
+  assert.equal(d.jobs[0].createdBy, '', '데모 대상이어도 만든 포탈 계정은 비운다(키는 남긴다)');
+  assert.equal(d.demoOnly, true); assert.deepEqual(d.demoMasked, { jobs: 1 });
+  for (const c of ['bjbyuserq', 'cl-realq', 'bj-realq', 'bjdemouserq']) assert.equal(B.demo.txt.includes(c), false, `데모에 ${c}`);
+  assert.ok(d.directors.every((x) => x.jobs === 0 || x.id === 'mock-bareos-dir'), '법인별 대상 수도 보이는 대상만');
+  const f = body(B.fadm);
+  assert.deepEqual(f.jobs.map((j) => j.bareosJob).sort(), ['bj-mockdemo', 'bj-realq']);
+  assert.ok(f.jobs.some((j) => j.createdBy === 'bjbyuserq') && f.jobs.some((j) => j.createdBy === 'bjdemouserq'));
+  assert.equal('demoOnly' in f, false); assert.equal('demoMasked' in f, false);
+  // 같은 경로 · 형제 경로(진행 현황 · 복원 폴더)도 사람 Director 의 대상을 싣지 않는다
+  assert.ok(V['/api/tools/bareos-backup/live'].fadm.txt.includes('cl-realq'), '대조: 관리자 진행 현황에는 사람 Director 대상의 실행 행이 있다(시드가 실행 중)');
+  for (const p of ['/api/tools/bareos-backup/live', '/api/tools/bareos-backup/restore-folders']) {
+    assert.equal(V[p].demo.st, 200, `${p} ${V[p].demo.txt.slice(0, 160)}`);
+    for (const c of ['bjbyuserq', 'cl-realq', 'bj-realq', 'bjdemouserq', 'pendbyuserq']) assert.equal(V[p].demo.txt.includes(c), false, `${p} 데모에 ${c}`);
+  }
+  // 복원 폴더는 '대상이 있는 vCenter' 의 인벤토리 폴더 수 — 두 대상이 같은 vCenter 라 판본이 같다(대상 판정 연결은 ④-d 소스 스윕이 고정)
+  assert.deepEqual(body(V['/api/tools/bareos-backup/restore-folders'].demo).folders, body(V['/api/tools/bareos-backup/restore-folders'].fadm).folders);
+  // ③-a 스윕은 관리자 응답이 캐시된 뒤 데모로 다시 부른다 — 그 응답도 데모 판본이어야 한다(dg 열쇠)
+  const sw = h.sweep.find((x) => x.url === '/api/tools/bareos-backup');
+  assert.ok(sw && !sw.demo.includes('bjbyuserq') && !sw.demo.includes('cl-realq'), '관리자 → 데모 순서에서도 데모 판본');
+});
+
+test('③-o 반증 2회차 순수 판정 — savedShownTo(데모 = 자기 것만, 빈 이름 금지) · bareosJobShownTo(데모 = demo:true 만)', async () => {
+  const { savedShownTo } = await import('../src/routes/api/provision.js');
+  const { bareosJobShownTo } = await import('../src/routes/api/bareosBackup.js');
+  const demo = { username: 'thedvcdemp', role: 'admin', demoGuest: true };
+  const adm = { username: 'a', role: 'admin' };
+  const op = { username: 'o', role: 'operator' };
+  assert.equal(savedShownTo(demo, { createdBy: 'thedvcdemp' }), true);
+  assert.equal(savedShownTo(demo, { createdBy: 'prvuserq' }), false);
+  assert.equal(savedShownTo(demo, { createdBy: 'unknown' }), false);
+  assert.equal(savedShownTo({ role: 'admin', demoGuest: true, username: '' }, { createdBy: '' }), false, '빈 이름끼리 같다고 보지 않는다');
+  assert.equal(savedShownTo(demo, null), false);
+  assert.equal(savedShownTo(adm, { createdBy: 'prvuserq' }), true); assert.equal(savedShownTo(op, { createdBy: 'prvuserq' }), true, '다른 역할은 바꾸지 않는다');
+  assert.equal(bareosJobShownTo(demo, { demo: true }), true);
+  for (const j of [{ demo: false }, {}, { demo: 'true' }, { demo: 1 }, null]) assert.equal(bareosJobShownTo(demo, j), false, JSON.stringify(j));
+  assert.equal(bareosJobShownTo(adm, { demo: false }), true); assert.equal(bareosJobShownTo(op, {}), true);
+  // listSaved include — 범위 안에서 뺀 수(범위 밖과 따로) · 탭(vcenters)도 보이는 것만 · include 없으면 칸 없음
+  const SV = await import('../src/provision/saved.js');
+  SV.addSaved({ spec: { vcenterId: 'vc-a', namePattern: 'pa' }, source: { vcenterId: 'vc-a' }, user: { username: 'thedvcdemp' } });
+  SV.addSaved({ spec: { vcenterId: 'vc-b', namePattern: 'pb' }, source: { vcenterId: 'vc-b' }, user: { username: 'other' } });
+  SV.addSaved({ spec: { vcenterId: 'vc-c', namePattern: 'pc' }, source: { vcenterId: 'vc-c' }, user: { username: 'other' } });
+  const inc = (e) => savedShownTo(demo, e);
+  const r1 = SV.listSaved({ include: inc });
+  assert.deepEqual(r1.items.map((e) => e.name), ['pa']); assert.equal(r1.total, 1); assert.equal(r1.excluded, 2); assert.deepEqual(r1.vcenters, ['vc-a']);
+  const r2 = SV.listSaved({ include: inc, allowed: new Set(['vc-a', 'vc-b']) });
+  assert.equal(r2.excluded, 1, '범위 밖(vc-c)은 뺀 수에 넣지 않는다');
+  const r3 = SV.listSaved({ include: inc, vcenterId: 'vc-b' });
+  assert.equal(r3.total, 0); assert.equal(r3.excluded, 2, '뺀 수는 vCenter 필터 전 기준');
+  const r4 = SV.listSaved({});
+  assert.equal('excluded' in r4, false); assert.deepEqual(r4.vcenters, ['vc-a', 'vc-b', 'vc-c']);
 });
 
 /* ─────────────────────────── ④ 소스 스윕 ─────────────────────────── */
@@ -698,6 +799,26 @@ test('④-c 반증 1회차 S-2 소스 — 계정 이름 가림을 건 라우트(
     ['routes/api/focusMonAudit.js', /res\.json\(demoAccountView\(req\.user, \{\s*\n?\s*ok: true, now: Date\.now\(\), mock:/, /jobs: demoAccountView\(req\.user, jobs, \['by'\]\)/, /runs: demoAccountView\(req\.user, runs\.map\(/, /run: demoAccountView\(req\.user, \{ \.\.\.lastView\(row\)/],
   ];
   for (const [f, ...res] of need) { const s = read(f); for (const re of res) assert.ok(re.test(s), `${f} ${re}`); }
+});
+
+test('④-d 반증 2회차 소스 — 저장 작업 · Bareos 대상 · 데모 Veeam 판정의 사용처', () => {
+  const pv = read('routes/api/provision.js');
+  assert.ok(/listSaved\(\{[^}]*\ballowed: scopeOf\(req\), include \}\)/.test(pv), 'listSaved 는 include(데모 판정)와 함께');
+  assert.equal([...pv.matchAll(/\blistSaved\(/g)].length, 1);
+  assert.ok(/getSaved\(req\.params\.id\)[\s\S]*?if \(!savedShownTo\(req\.user, item\)\) return res\.status\(404\)/.test(pv), '단건도 같은 판정');
+  const bb = read('routes/api/bareosBackup.js');
+  assert.ok(/const jobs = inScopeJobs\.filter\(\(j\) => bareosJobShownTo\(req\.user, j\)\)/.test(bb));
+  assert.ok(/const views = demoAccountView\(req\.user, jobs\.map\(/.test(bb));
+  assert.ok(/`dg=\$\{isDemoGuest\(req\.user\) \? 1 : 0\}`/.test(bb), '목록 캐시 열쇠에 데모 계정 축');
+  assert.ok(/const jobs = scopedJobs\(req\.user\)\.jobs\.filter\(\(j\) => bareosJobShownTo\(req\.user, j\)\)/.test(bb), '복원 폴더');
+  assert.ok(/\|dg=\$\{isDemoGuest\(req\.user\) \? 1 : 0\}` \}\)\)/.test(bb), '복원 폴더 캐시 열쇠');
+  assert.equal([...bb.matchAll(/\bscopedJobs\(req\.user\)/g)].length, 2, '목록 · 복원 폴더 둘 다 판정을 거친다(새 사용처는 여기에 더할 것)');
+  assert.ok(/jobDigests\(\)\.filter\(\(j\) => allow\.has\(j\.vcenterId\) && bareosJobShownTo\(req\.user, j\)\)/.test(read('routes/api/bareosLive.js')), '진행 현황');
+  // 데모 Veeam 판정 코어 하나 — 폴러와 백업 실행이 같은 함수
+  assert.ok(/if \(isDemoVeeamServerId\(full\.id\)\) return null;/.test(read('veeam/poller.js')));
+  assert.equal(/startsWith\('mock-'\)/.test(read('veeam/poller.js')), false);
+  assert.ok(/export const isDemoVeeamServerId = \(id\) => String\(id \?\? ''\)\.startsWith\('mock-'\);/.test(read('veeam/registry.js')));
+  assert.equal(/\/\^mock-\/i/.test(read('routes/api/backupRun.js')), false, '백업 실행에 사본 판정이 없다');
 });
 
 test('④ L7 소스 — iDRAC 조회 캐시 열쇠는 idracViewSig · sc.allowed 직접 사용처 허용 목록 · /assignments GET 이 demoRegistryView', () => {

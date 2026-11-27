@@ -6,7 +6,7 @@ import { requireRole } from '../../auth/auth.js';
 import { isDemoGuest, isAdminDetailUser, demoAccountView } from '../../auth/demoGuest.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
-import { bareosAccess } from './bareosBackup.js';
+import { bareosAccess, bareosJobShownTo } from './bareosBackup.js';
 import { effectiveSettings, isDemoActive } from '../../bareos/service.js';
 import { directorById, directorConn, settingsRev } from '../../bareos/settings.js';
 import { jobDigests, registryLoadError, registryRev } from '../../bareos/registry.js';
@@ -236,7 +236,8 @@ export function registerBareosLive(api) {
       const now = Date.now();
       const sites = settings.sites.filter((s) => bareosAccess(req.user, s.vcenterId, { write: false }) === 0);
       const allow = new Set(sites.map((s) => s.vcenterId));
-      const digests = jobDigests().filter((j) => allow.has(j.vcenterId));
+      // 보안 잔여 11-27 L7(반증 2회차 S-1): 데모 계정은 데모 대상만 — 실행 행의 Client · Pool · Storage · Director 상태 문구가 사람이 등록한 Director 의 것이다(목록과 같은 판정 bareosJobShownTo · 캐시 열쇠 g)
+      const digests = jobDigests().filter((j) => allow.has(j.vcenterId) && bareosJobShownTo(req.user, j));
       const vms = new Map((snap?.vms || []).filter((v) => allow.has(v.vcenterId)).map((v) => [v.id, v]));
       const groupOf = new Map();
       const groups = listGroups().filter((g) => allow.has(g.vcenterId));

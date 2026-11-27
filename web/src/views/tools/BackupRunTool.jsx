@@ -128,7 +128,8 @@ function VmPanel({ vcId, initialIds, onHandoffUsed }) {
             <Badge cls={s.authStopped ? 'red' : 'green'}>{s.authStopped ? '인증 정지' : '연결 등록됨'}</Badge>
             <span className="muted">{s.via === 'edge' ? `엣지${s.agent ? ` ${s.agent}` : ''} 경유` : '중앙 직접'}{s.active ? ' · 백업 요청 진행 중' : ''}{s.busyUnknown ? ' · 진행 여부 모름(실행 기록 읽기 오류 — 새 요청은 막힘)' : ''}{s.repositorySet ? '' : ' · 포탈 전용 잡 저장소 미지정'}</span>
           </span>
-        )) : <span className="muted">이 vCenter 를 맡는 Veeam B&amp;R 서버가 없습니다 — 설정 › Veeam 백업 서버에서 연결 vCenter 를 지정하세요.</span>}
+        )) : demoMaskedNote(d, 'servers') ? null : <span className="muted">이 vCenter 를 맡는 Veeam B&amp;R 서버가 없습니다 — 설정 › Veeam 백업 서버에서 연결 vCenter 를 지정하세요.</span>}
+        {/* 반증 2회차 nit: 데모 판본(뺀 서버가 있음)에서는 데모 계정이 열 수 없는 설정 안내 대신 아래 안내 한 줄만 */}
         {demoMaskedNote(d, 'servers') ? <span className="muted" style={{ flexBasis: '100%', fontSize: 12 }}>{demoMaskedNote(d, 'servers')}</span> : null}
         <span className="muted" style={{ flexBasis: '100%', fontSize: 12, overflowWrap: 'anywhere' }}>
           Veeam 이 이 vCenter 를 부르는 이름: <b className="mono">{d.hostName?.name || '—'}</b> ({HOST_HOW[d.hostName?.how || ''] || '모름'}) · 포탈 전용 잡 이름: <span className="mono">{d.jobName}</span>
