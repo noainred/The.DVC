@@ -120,6 +120,11 @@ export const config = {
   vmCfgScan: process.env.VM_CFG_SCAN !== 'false',
   vmCfgRefreshMs: clampIntervalMs(numEnv(process.env.VM_CFG_REFRESH_MS, 1_800_000), 1_800_000, 60_000),
   vmCfgPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.VM_CFG_PER_CYCLE, 1_000)) || 1_000)),
+  // v3.54(실제 OS 1단계): VMware Tools 가 보고한 실제 설치 OS(guestDetailedData) · 어플라이언스 제품 정보(vAppConfig.product).
+  //   게스트 계정이 필요 없다. OS 는 거의 바뀌지 않아 6시간 주기 · 주기당 상한(vmcfg/collect.js). VM_OS_SCAN=false 로 끈다.
+  vmOsScan: process.env.VM_OS_SCAN !== 'false',
+  vmOsRefreshMs: clampIntervalMs(numEnv(process.env.VM_OS_REFRESH_MS, 21_600_000), 21_600_000, 300_000),
+  vmOsPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.VM_OS_PER_CYCLE, 1_000)) || 1_000)),
   vmDevRefreshMs: clampIntervalMs(numEnv(process.env.VM_DEV_REFRESH_MS, 21_600_000), 21_600_000, 300_000),
   vmDevPerCycle: Math.max(1, Math.min(1_000, Math.trunc(numEnv(process.env.VM_DEV_PER_CYCLE, 150)) || 150)),
   // v2.699(A1·A9·A11·A12): 호스트 구성·보안(서비스·NTP·DNS·syslog·잠금 정책·MOB·허용 수준·인증서 만료·재부팅 필요).
