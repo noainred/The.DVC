@@ -12,7 +12,7 @@ import { powerResult, powerProbe, applyScannedPower } from '../power.js';
 import { normalizeResourceList, resourceProbe } from '../resources.js';
 import { pushAll } from '../../util/pushAll.js';
 import { buildIfaces, ifaceProbe, restFcPorts, restEthPorts, restIscsiIfs, restFileIfs } from '../ifaces.js';   // v3.35.0 인터페이스
-import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
+import { restPortOf } from '../endpoint.js'; // v3.54: 기종별 REST 포트(env)는 storage/endpoint.js 표 하나 — 설정 카탈로그 · 포탈 서비스 상태가 같은 값을 쓴다
 
 const entries = (v) => (v?.entries || []).map((e) => e.content || {});
 /** 미해결 알람 한 페이지 크기(v2.599 C2599-07). */
@@ -204,7 +204,7 @@ export async function collect(device, { signal = null } = {}) {
     const { collectViaSsh } = await import('./unitySsh.js');
     return collectViaSsh(device);
   }
-  const get = makeGetter(device, { port: envPort(process.env.STORAGE_UNITY_PORT, 443), headers: { 'X-EMC-REST-CLIENT': 'true' }, signal });
+  const get = makeGetter(device, { port: restPortOf('unity480'), headers: { 'X-EMC-REST-CLIENT': 'true' }, signal });
   const raw = {};
   const snap = emptySnapshot(device);
   const sect = { system: 'config', cap: 'capacity', sps: 'nodes', users: 'accounts', alerts: 'alerts' };

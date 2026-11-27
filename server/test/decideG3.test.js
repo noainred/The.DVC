@@ -250,8 +250,10 @@ test('57 · 58 env 상한 — 포트는 1~65535 정수 · 시한 · 개수의 In
   const src = (f) => stripComments(fs.readFileSync(path.join(SRC, f), 'utf8'));
   for (const f of ['storage/collectors/xtremio.js', 'storage/collectors/unity.js', 'storage/collectors/arrayPerf.js', 'storage/collectors/powerstore.js', 'storage/collectors/vplex.js']) {
     assert.doesNotMatch(src(f), /Number\(process\.env\.STORAGE_[A-Z]+_PORT\)\s*\|\|/, `${f}: 포트 env 를 Number()||443 으로 읽지 않는다`);
-    assert.match(src(f), /envPort\(process\.env\.STORAGE_[A-Z]+_PORT, 443\)/);
+    // v3.55(포탈 서비스 상태 모니터링): 수집기의 포트 env 사본을 storage/endpoint.js 표 하나로 모았다 — 판정(1~65535 정수만)은 그 표가 envPort 로 한다.
+    assert.match(src(f), /restPortOf\(/, `${f}: 포트는 storage/endpoint.js restPortOf 로`);
   }
+  assert.match(src('storage/endpoint.js'), /return envPort\(env\?\.\[spec\[0\]\], spec\[1\]\);/, 'endpoint.js 가 envPort 로 env 포트를 자른다');
   for (const [f, k] of [['storage/poller.js', 'STORAGE_DEVICE_TIMEOUT_MS'], ['storage/poller.js', 'STORAGE_AREAS_TIMEOUT_MS'], ['storage/collectors/cliSsh.js', 'STORAGE_CLI_SESSION_BUDGET_MS'],
     ['storage/collectRequests.js', 'STORAGE_DEVICE_TIMEOUT_MS'], ['sanswitch/healthHistory.js', 'SANHEALTH_MAX_RUNS'], ['sanswitch/storageCheckHistory.js', 'SANSTORAGE_CHECK_MAX_RUNS'],
     ['sanswitch/activityLog.js', 'SANSWITCH_ACTIVITY_MAX'], ['sanswitch/perfActivityLog.js', 'SANSW_PERF_ACTIVITY_MAX']]) {

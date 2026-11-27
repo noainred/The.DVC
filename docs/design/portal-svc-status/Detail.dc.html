@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>포탈 서비스 상태 모니터링 — 대상 상세</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#7fb2ff}a:hover{color:#b3d1ff}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height: 1180px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: system-ui, 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; font-size: 14px; padding: 24px 28px 40px">
+<div style="max-width: 1384px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px">
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+<div style="font-size: 12px; color: #8b9bb4"><a href="Main.dc.html" style="text-decoration: none">포탈 서비스 상태 모니터링</a> › US-EAST › vCenter</div>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+<h1 style="margin: 0; font-size: 22px; font-weight: 700">vc-use-01</h1>
+<span style="display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px; border-radius: 999px; background: rgba(245,158,11,0.16); color: #fbbf24; font-size: 12px; font-weight: 600"><span aria-hidden="true">▲</span>지연</span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #c8d6e8">198.51.100.24:20444</span>
+<span style="padding: 2px 7px; border-radius: 6px; border: 1px solid #4b6a9b; color: #9fcaff; font-size: 11px">기본 포트 아님</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font-size: 13px; cursor: pointer">이 대상만 지금 측정</button>
+<button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font-size: 13px; cursor: pointer">측정에서 제외</button>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<div style="font-size: 12px; color: #8b9bb4">지금 연결 시간</div>
+<div style="font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #fbbf24">1,930 ms</div>
+<div style="font-size: 12px; color: #8b9bb4">평소 820 ms 의 2.4배</div>
+</div>
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<div style="font-size: 12px; color: #8b9bb4">24시간 성공률</div>
+<div style="font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace">100 %</div>
+<div style="font-size: 12px; color: #8b9bb4">1,440회 중 실패 0회</div>
+</div>
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<div style="font-size: 12px; color: #8b9bb4">등록 출처</div>
+<div style="font-size: 15px; font-weight: 600">vCenter 등록부</div>
+<div style="font-size: 12px; color: #8b9bb4">직접 수집 · 등록부의 주소:포트 그대로</div>
+</div>
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<div style="font-size: 12px; color: #8b9bb4">측정하는 곳</div>
+<div style="font-size: 15px; font-weight: 600">중앙 포탈</div>
+<div style="font-size: 12px; color: #8b9bb4">TCP 연결 · 60초마다 · 시한 2.5초</div>
+</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between">
+<div style="font-size: 14px; font-weight: 600">연결 시간 추이 <span style="font-weight: 400; color: #8b9bb4; font-size: 12px">TCP 연결이 맺어지기까지 · 6분 칸 평균</span></div>
+<div style="display: flex; gap: 6px">
+<button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #4b9bff; background: #1668d8; color: #ffffff; font-size: 12px; cursor: pointer">24시간</button>
+<button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #c8d6e8; font-size: 12px; cursor: pointer">7일</button>
+<button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #c8d6e8; font-size: 12px; cursor: pointer">30일</button>
+</div>
+</div>
+<svg viewBox="0 0 1340 260" style="width: 100%; height: auto; display: block" role="img" aria-label="최근 24시간 연결 시간. 대부분 800ms 안팎이다가 09:31 부터 1,900ms 대로 올랐다.">
+<g stroke="#1f2a40" stroke-width="1">
+<line x1="60" y1="20" x2="1330" y2="20"></line><line x1="60" y1="75" x2="1330" y2="75"></line><line x1="60" y1="130" x2="1330" y2="130"></line><line x1="60" y1="185" x2="1330" y2="185"></line><line x1="60" y1="240" x2="1330" y2="240"></line>
+</g>
+<g fill="#8b9bb4" font-size="11" font-family="JetBrains Mono, monospace" text-anchor="end">
+<text x="52" y="24">2,000</text><text x="52" y="79">1,500</text><text x="52" y="134">1,000</text><text x="52" y="189">500</text><text x="52" y="244">0 ms</text>
+</g>
+<g fill="#8b9bb4" font-size="11" font-family="JetBrains Mono, monospace" text-anchor="middle">
+<text x="60" y="256">어제 09:47</text><text x="377" y="256">15:47</text><text x="695" y="256">21:47</text><text x="1012" y="256">03:47</text><text x="1310" y="256">09:47</text>
+</g>
+<line x1="60" y1="149.8" x2="1330" y2="149.8" stroke="#8b9bb4" stroke-width="1" stroke-dasharray="4 4"></line>
+<text x="1326" y="143" fill="#8b9bb4" font-size="11" text-anchor="end">평소 820 ms</text>
+<line x1="60" y1="59.6" x2="1330" y2="59.6" stroke="#f59e0b" stroke-width="1" stroke-dasharray="2 5"></line>
+<text x="66" y="53" fill="#fbbf24" font-size="11">지연 판정선 1,640 ms (평소 × 2)</text>
+<rect x="1315" y="20" width="15" height="220" fill="rgba(245,158,11,0.10)"></rect>
+<polyline fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round" points="60,150 110,148 160,152 210,149 260,147 310,151 360,150 410,146 460,149 510,153 560,150 610,148 660,144 710,150 760,151 810,149 860,147 910,150 960,152 1010,149 1060,148 1110,151 1160,150 1210,147 1260,149 1300,150 1315,148"></polyline>
+<polyline fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linejoin="round" points="1315,148 1319,40 1324,31 1330,28"></polyline>
+<circle cx="1330" cy="28" r="4" fill="#f59e0b"></circle>
+</svg>
+<div style="display: flex; gap: 1px" role="img" aria-label="24시간 상태 띠. 마지막 30분 칸만 지연.">
+<span style="flex: 47; height: 14px; border-radius: 2px; background: #22c55e"></span>
+<span style="flex: 1; height: 14px; border-radius: 2px; background: #f59e0b"></span>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 16px">
+<div style="flex: 3 1 520px; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; overflow: hidden">
+<div style="padding: 12px 16px; border-bottom: 1px solid #1f2a40; display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 14px; font-weight: 600">같은 주소의 다른 포트</div>
+<div style="font-size: 12px; color: #8b9bb4; line-height: 1.5">등록부에 198.51.100.24 로 올라 있는 대상 전부입니다. 같은 주소에서 한 포트만 나쁘면 회선보다 그 포트 뒤쪽을 먼저 볼 근거가 됩니다. 포탈은 포트 뒤에 무엇이 있는지 알지 못합니다.</div>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 560px; border-collapse: collapse; font-size: 13px">
+<thead><tr style="background: #0f1626; color: #8b9bb4; text-align: left; font-size: 12px">
+<th style="padding: 9px 12px; font-weight: 600">상태</th><th style="padding: 9px 12px; font-weight: 600">종류</th><th style="padding: 9px 12px; font-weight: 600">이름</th><th style="padding: 9px 12px; font-weight: 600">포트</th><th style="padding: 9px 12px; font-weight: 600; text-align: right">연결 시간</th><th style="padding: 9px 12px; font-weight: 600; text-align: right">평소</th>
+</tr></thead>
+<tbody>
+<tr style="border-top: 1px solid #1f2a40"><td style="padding: 9px 12px; color: #4ade80; white-space: nowrap"><span aria-hidden="true">●</span> 정상</td><td style="padding: 9px 12px">엣지 포탈</td><td style="padding: 9px 12px">edge-us-east</td><td style="padding: 9px 12px; font-family: 'JetBrains Mono', monospace">20443</td><td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">815 ms</td><td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace; color: #8b9bb4">818 ms</td></tr>
+<tr style="border-top: 1px solid #1f2a40; background: rgba(245,158,11,0.07)"><td style="padding: 9px 12px; color: #fbbf24; white-space: nowrap"><span aria-hidden="true">▲</span> 지연</td><td style="padding: 9px 12px">vCenter</td><td style="padding: 9px 12px">vc-use-01 (이 대상)</td><td style="padding: 9px 12px; font-family: 'JetBrains Mono', monospace">20444</td><td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace; color: #fbbf24">1,930 ms</td><td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace; color: #8b9bb4">820 ms</td></tr>
+<tr style="border-top: 1px solid #1f2a40"><td style="padding: 9px 12px; color: #4ade80; white-space: nowrap"><span aria-hidden="true">●</span> 정상</td><td style="padding: 9px 12px">CVP</td><td style="padding: 9px 12px">cvp-use</td><td style="padding: 9px 12px; font-family: 'JetBrains Mono', monospace">20445</td><td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">818 ms</td><td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace; color: #8b9bb4">821 ms</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div style="flex: 2 1 380px; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; overflow: hidden">
+<div style="padding: 12px 16px; border-bottom: 1px solid #1f2a40; font-size: 14px; font-weight: 600">상태가 바뀐 기록</div>
+<div style="display: flex; flex-direction: column">
+<div style="display: flex; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #1f2a40"><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8b9bb4; white-space: nowrap">오늘 09:31</span><span style="font-size: 13px"><span style="color: #4ade80">정상</span> → <span style="color: #fbbf24">지연</span> · 1,870 ms</span></div>
+<div style="display: flex; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #1f2a40"><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8b9bb4; white-space: nowrap">10-30 02:14</span><span style="font-size: 13px"><span style="color: #ff8585">끊김</span> → <span style="color: #4ade80">정상</span> · 6분 만에 복구</span></div>
+<div style="display: flex; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #1f2a40"><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8b9bb4; white-space: nowrap">10-30 02:08</span><span style="font-size: 13px"><span style="color: #4ade80">정상</span> → <span style="color: #ff8585">끊김</span> · 연결 거부</span></div>
+<div style="display: flex; gap: 12px; padding: 10px 16px"><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8b9bb4; white-space: nowrap">10-12 14:02</span><span style="font-size: 13px">등록부에서 자동 등록 · 포트 20444</span></div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

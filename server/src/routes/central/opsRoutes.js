@@ -13,6 +13,7 @@ import { applyCaptureResult, captureAgentOfReq, takeCaptureJobs } from '../../ce
 import { REJECT_KIND } from '../../central/ingestReject.js';
 import { listInventory } from '../../central/inventory.js';
 import { putEdgeLinkReport } from '../../central/linkCheckEdge.js';
+import { edgeConfigFor as svcStatusEdgeConfigFor, putEdgeReport as putSvcStatusEdgeReport } from '../../svcstatus/service.js'; // v3.54 포탈 서비스 상태 모니터링 — 엣지 측정 배정 · 수신
 import { setLogQueryResult, takeLogQueries, vcenterOfReq } from '../../central/logQueries.js';
 import { setPingResults, takePingJobs } from '../../central/pingJobs.js';
 import { listCollectors as listCollectorsForLinks, registryLoadError as collectorsRegistryLoadError } from '../../collector/registry.js';
@@ -551,5 +552,46 @@ export function registerOpsRoutes(centralRouter, deps) {
       timeouts: { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs },
       links, count: links.length,
     });
+  });
+
+  /*
+   * v3.54 포탈 서비스 상태 모니터링 — `GET /svc-status-config` 는 **그 엣지가 잴 대상**(자기 몫 · 토큰 없음)을 중앙이 계산해 내려주고,
+   * `POST /svc-status` 는 그 측정을 받는다(인증된 agent · 배정 대조 · 행 나이로 시각 환산 — svcstatus/service.js).
+   * ⚠ 개별 토큰만(공유 토큰으로는 어느 엣지의 측정인지 신뢰할 수 없다) · 설정을 처음부터 못 읽었을 때만 503(제외 · 꺼짐을 모른다).
+   *   등록부 하나를 못 읽은 것은 503 이 아니다 — 엣지는 상태 없이 매 틱 목록을 받으므로 503 은 읽힌 종류까지 멈춘다(그 종류만 빠지고 heldEmpty 로 알린다).
+   */
+  centralRouter.get('/svc-status-config', requireCentral(), async (req, res) => {
+    if (req.centralAuth.mode !== 'agent') {
+      return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(설정 > 엣지 토큰).' });
+    }
+    const agent = String(req.centralAuth.agent || '');
+    const reqAgent = String(req.query.agent || '').trim();
+    if (reqAgent && reqAgent.toLowerCase() !== agent.toLowerCase()) {
+      return res.status(403).json({ ok: false, reason: `요청한 agent('${reqAgent.slice(0, 64)}')가 이 토큰의 엣지('${agent}')와 다릅니다.` });
+    }
+    try {
+      const out = await svcStatusEdgeConfigFor(agent);
+      res.set('Cache-Control', 'no-store');
+      if (out.status === 503) return res.status(503).set(PERSISTENT_503_HEADERS).json(out.body);
+      res.status(out.status).json(out.body);
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) });
+    }
+  });
+
+  centralRouter.post('/svc-status', requireCentral(), async (req, res) => {
+    if (req.centralAuth.mode !== 'agent') {
+      return res.status(403).json({
+        ok: false,
+        reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(공유 CENTRAL_TOKEN 으로는 어느 엣지의 측정인지 신뢰할 수 없습니다). 설정 > 엣지 토큰에서 이 엣지의 토큰을 발급해 주세요.',
+      });
+    }
+    try {
+      const out = await putSvcStatusEdgeReport(req.centralAuth.agent, req.body || {});
+      if (out?.dbUnavailable || out?.registryUnreadable) return res.status(503).set(PERSISTENT_503_HEADERS).json(out);
+      res.json(out);
+    } catch (e) {
+      res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
+    }
   });
 }

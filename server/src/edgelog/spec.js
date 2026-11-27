@@ -66,6 +66,7 @@ export const STATUS_SPEC = Object.freeze([
    *   **새 엣지 워커를 만들면 이 표에 함께 넣을 것.**
    */
   { key: 'push.linkCheck', label: '통신 점검', group: 'push', mod: '../agent/linkCheckWorker.js', fn: 'linkCheckWorkerStatus' },
+  { key: 'push.svcStatus', label: '포탈 서비스 상태 측정', group: 'push', mod: '../agent/svcStatusWorker.js', fn: 'svcStatusWorkerStatus' }, // v3.54 — 담당 대상 TCP 측정 → 중앙
   /*
    * ⚠ v2.561 에 추가 — 이 워커도 표에 없었다. 중앙의 `getLogQueryResult` 는 결과가 없으면
    *   **영원히 `{state:'pending'}`** 이라(`central/logQueries.js:57`) 사용자는 '엣지 로그 조회' 가

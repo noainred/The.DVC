@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-20T11:54:44.104Z",
-  "count": 131,
+  "generatedAt": "2026-11-27T12:31:35.473Z",
+  "count": 132,
   "tools": [
     {
       "k": "service-hub",
@@ -180,6 +180,14 @@
     },
     {
       "k": "xfer-speed",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "svc-status",
       "adminOnly": true,
       "perm": null,
       "external": null,
