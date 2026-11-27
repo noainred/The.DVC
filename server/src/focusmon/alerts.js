@@ -327,10 +327,11 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
     for (const t of ruleTargets(r, targets, recordIds)) {
       const key = `${r.id}|${t.id}`;
       const p0 = prev[key] || null;
-      const j = judge(pointsFor(store, r, t.id, now), { ...r, op: METRICS[r.metric].op }, p0, now);
+      const pts = pointsFor(store, r, t.id, now);
+      const j = judge(pts, { ...r, op: METRICS[r.metric].op }, p0, now);
       const retry = j.event === 'fire' || j.event === 'resolve' ? (p0?.retryOf === j.event ? (p0.retry || 0) : 0) : 0;
       next[key] = { state: j.state, since: j.since, ...(j.firedAt ? { firedAt: j.firedAt } : {}), ...(j.state === 'hold' ? { was: j.was ?? p0?.was ?? 'ok' } : {}), value: j.value, at: now };
-      if (j.event === 'fire' || j.event === 'resolve' || j.event === 'hold') fires.push({ r, t, j, key, p0, retry });
+      if (j.event === 'fire' || j.event === 'resolve' || j.event === 'hold') fires.push({ r, t, j, key, p0, retry, npts: pts.length });
     }
   }
   // 덮지 않게 된(규칙을 끄거나 수집이 끝난) 짝은 상태에서 뺀다 — 다시 덮이면 '새로' 판정한다
@@ -348,7 +349,10 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
     if (f.retry > 0) continue; // 다시 보내는 것 — 사건은 처음 한 번만
     const kindText = j.event === 'fire' ? '발생' : j.event === 'resolve' ? '해제' : '판정 보류';
     // v3.57.0 묶음 B: 판정 구간이 기계 경계(주소 · 노드를 고친 순간) 뒤에서 시작하면 보류의 까닭은 '아직 새 서버 값이 없음' 이다(수집 끊김으로 단정하지 않는다)
-    const afterMove = (Number(store.resetAtOf?.(t.id)) || 0) >= now - r.durMin * 60_000 - 120_000;
+    //   반증 AE-1: 경계 뒤 표본이 하나라도 왔으면(왔다가 끊김) 그것은 '아직 없음' 이 아니다 — 경계 뒤 표본이 하나도 없을 때만
+    //   (경계 뒤 '지금 값' 도 없어야 — 판정 창보다 오래전에 왔다 끊긴 경우도 '아직 없음' 이 아니다)
+    const noneSince = r.metric === 'app' ? store.latestProcsOf?.(t.id) == null : store.latestOf?.(t.id) == null;
+    const afterMove = f.npts === 0 && noneSince && (Number(store.resetAtOf?.(t.id)) || 0) >= now - r.durMin * 60_000 - 120_000;
     const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : j.cut ? ' · 서비스 목록이 상한에서 잘려 이 이름을 못 봄(수집은 됨)'
       : afterMove ? ' · 접속처를 바꾼 뒤 새 서버 값이 아직 없음' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
     store.queueEvent(t.id, 'alert', `${r.name} — ${condText(r)} · ${kindText}${valText}${f.suppressed ? ' · 정비 창이라 보내지 않음' : ''}`.slice(0, 300), now, { id: `al:${r.id}:${t.id}:${j.event}:${now}`, scope: 'server' });

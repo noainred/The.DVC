@@ -196,6 +196,26 @@ export function decodeBlock(buf) {
  * 표본 상한(MAX_N)을 넘는 것은 appendToBlock 이 버린다. 메타는 b 를 기준으로 파일시스템 이름을 합친다.
  */
 export function mergeBlocks(a, b) {
+  // 반증 SD-1: 겹치지 않는 두 묶음(재시작 경로의 보통 경우 — 앞 프로세스가 쓴 앞부분 + 재시작 뒤 받은 뒷부분)은 열 배열을 그대로 잇는다(표본마다 appendToBlock 을 돌지 않는다).
+  //   결과는 아래 일반 길과 같다(시험이 무작위 묶음으로 대조) — 열 순서 · 열 상한(MAX_KEYS — 먼저 본 열부터) · 같은 시각 없음 · 표본 상한 안일 때만.
+  const [x, y] = a.ts.length && b.ts.length && a.ts[a.ts.length - 1] < b.ts[0] ? [a, b] : a.ts.length && b.ts.length && b.ts[b.ts.length - 1] < a.ts[0] ? [b, a] : [null, null];
+  if (x && x.ts.length + y.ts.length <= MAX_N) {
+    const n = x.ts.length + y.ts.length; const cols = new Map();
+    const val = (arr, i) => { const v = arr ? arr[i] : null; return v == null || Number.isNaN(v) ? null : v; };
+    for (const k of [...a.cols.keys(), ...b.cols.keys()]) {
+      if (cols.has(k)) continue;
+      if (cols.size >= MAX_KEYS) break;
+      const xa = x.cols.get(k); const ya = y.cols.get(k); const arr = new Array(n);
+      for (let i = 0; i < x.ts.length; i++) arr[i] = val(xa, i);
+      for (let i = 0; i < y.ts.length; i++) arr[x.ts.length + i] = val(ya, i);
+      cols.set(k, arr);
+    }
+    return { minute: b.minute, ts: [...x.ts, ...y.ts], cols, meta: a.meta && b.meta ? mergeMeta(a.meta, b.meta) : (b.meta || a.meta || null) };
+  }
+  return mergeBlocksSlow(a, b);
+}
+/** 일반 길(겹치거나 상한을 넘는 경우 · 시험 대조용으로 내보낸다). */
+export function mergeBlocksSlow(a, b) {
   const out = newBlock(b.minute);
   for (const src of [a, b]) {
     for (let i = 0; i < src.ts.length; i++) {

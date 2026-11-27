@@ -651,6 +651,7 @@ let keysLoaded = false;
 export const STATUS_EVENT_WINDOW_MS = 10 * 60_000;
 export const STATUS_EVENT_BURST = 6;
 const STATUS_EV_AT = new Map(); // `${targetId}|${종류}` → { from, n, held } — 창 시작 시각 · 그 창에 적은 수 · 줄인 수
+const FRESH_EP = new Set(); // 기계를 바꾼 대상 — 첫 안정 상태를 앞 상태 없이도 사건으로(반증 AE-2)
 const STATUS_TEXT = Object.freeze({ auth: '키 로그인 거부 — 수집을 멈췄습니다', hostkey: '호스트키 승인 필요 — 장비 신뢰 확인' });
 export function setStatus(id, st, now = Date.now()) {
   // v3.13.0(⑭ 자동 사건): 키 로그인 거부 · 호스트키 승인 필요로 **바뀐 순간**만(같은 상태가 이어지면 다시 적지 않는다)
@@ -658,15 +659,21 @@ export function setStatus(id, st, now = Date.now()) {
   //   앞 상태를 모르면(기동 직후 · 엣지 첫 동기화) 적지 않는다 — 재시작마다 같은 사건이 되풀이되지 않게
   //   반증 F2: 다시 시도할 때마다 'connecting' 을 거쳐 같은 상태로 돌아온다 — 견주는 것은 'connecting' 을 뺀 **안정 상태**(호스트키 대기 중 60초마다 사건이 쌓였다)
   const stable = prev ? (prev.state === 'connecting' ? (prev.stable ?? null) : prev.state) : null;
-  if ((st?.state === 'auth' || st?.state === 'hostkey') && stable && stable !== st.state) {
+  // 반증 AE-2: 기계를 바꾼 뒤 첫 안정 상태는 앞 상태를 몰라도 적는다(새 서버의 키 거부 · 호스트키 승인 필요가 사건에 남지 않았다) — 그 대상 표시는 첫 안정 상태에서 지운다
+  const fresh = stable == null && FRESH_EP.has(String(id));   // 앞 안정 상태를 모를 때만(연결 중 → 첫 안정 상태 포함)
+  if (st?.state && st.state !== 'connecting') FRESH_EP.delete(String(id));
+  if ((st?.state === 'auth' || st?.state === 'hostkey') && ((stable && stable !== st.state) || fresh)) {
     const k = `${String(id)}|${st.state}`; let w = STATUS_EV_AT.get(k);
-    let carried = 0;
-    if (!w || now - w.from >= STATUS_EVENT_WINDOW_MS || now < w.from) { carried = w?.held || 0; w = { from: now, n: 0, held: 0 }; } // 새 창(시계가 거꾸로 가면 새로)
+    if (!w || now - w.from >= STATUS_EVENT_WINDOW_MS || now < w.from) {
+      // 새 창(시계가 거꾸로 가면 새로) — 반증 AE-5: 앞 창에서 줄인 수는 **그 창이 끝난 시각**의 사건 한 줄로(몇 시간 뒤 사건 글에 붙이지 않는다)
+      if (w?.held) queueEvent(id, st.state, `${STATUS_TEXT[st.state].split(' — ')[0]} — 그 10분 동안 ${w.held}번 더 바뀜(줄여 적음)`, Math.min(now, w.from + STATUS_EVENT_WINDOW_MS));
+      w = { from: now, n: 0, held: 0 };
+    }
     if (w.n >= STATUS_EVENT_BURST) {
       counters.statusEventsHeld += 1; w.held += 1;
       if (w.held === 1) queueEvent(id, st.state, `${STATUS_TEXT[st.state].split(' — ')[0]} — 10분 안에 ${STATUS_EVENT_BURST}번 넘게 바뀌어 이 종류는 줄여 적습니다(지금 상태 칸은 그대로 맞습니다)`, now);
     } else {
-      queueEvent(id, st.state, carried ? `${STATUS_TEXT[st.state]}(앞 10분 동안 ${carried}번 더 — 줄여 적음)` : STATUS_TEXT[st.state], now);
+      queueEvent(id, st.state, STATUS_TEXT[st.state], now);
       w.n += 1;
     }
     STATUS_EV_AT.delete(k); STATUS_EV_AT.set(k, w);
@@ -675,6 +682,21 @@ export function setStatus(id, st, now = Date.now()) {
   ST.set(String(id), { ...st, at: now, stable: st?.state === 'connecting' ? stable : (st?.state ?? null) });
 }
 export function statusOf(id) { return ST.get(String(id)) || null; }
+/**
+ * 끝난 창에서 줄인 상태 사건 수를 그 창 끝 시각의 한 줄로(v3.57.0 반증 AE-5 — 다음 같은 종류 변화가 몇 시간 뒤에 오거나 오지 않으면 수가 엉뚱한 곳에 붙거나 사라졌다).
+ * 중앙 1분 틱이 부른다(상태 사건은 중앙만 적는다). 적은 수.
+ */
+export function flushHeldStatusEvents(now = Date.now()) {
+  let n = 0;
+  for (const [k, w] of STATUS_EV_AT) {
+    if (!w.held || now - w.from < STATUS_EVENT_WINDOW_MS) continue;
+    const i = k.lastIndexOf('|'); const id = k.slice(0, i); const kind = k.slice(i + 1);
+    if (!STATUS_TEXT[kind]) continue;
+    queueEvent(id, kind, `${STATUS_TEXT[kind].split(' — ')[0]} — 그 10분 동안 ${w.held}번 더 바뀜(줄여 적음)`, w.from + STATUS_EVENT_WINDOW_MS);
+    w.held = 0; n += 1;
+  }
+  return n;
+}
 
 const _keysReader = makeJsonFileReader(() => path.join(config.configDir, KEYS_FILE), { parse: (t) => t, preserve: false, tag: 'focusmon-keys' });   // 107회차
 function loadKeys() {
@@ -798,6 +820,7 @@ export function forgetTargetState(id, { machineChanged = false, now = Date.now()
   if (e) e.hello = null;
   if (machineChanged) {
     noteResetAt(k, now, now);
+    FRESH_EP.add(k); if (FRESH_EP.size > 5000) FRESH_EP.delete(FRESH_EP.values().next().value);
     if (e) { e.latest = null; e.latestProcs = null; }
     EDGE_FENCE.set(k, { at: now, syncs: 0, oldHost });
     if (EDGE_FENCE.size > 5000) EDGE_FENCE.delete(EDGE_FENCE.keys().next().value);
@@ -842,5 +865,5 @@ export function edgeFenceSynced(ids = []) { for (const id of ids) { const f = ED
 
 export function _resetForTest() {
   T.clear(); writeQ.length = 0; qEv = 0; KM.clear(); KMT.clear(); KMR.clear(); S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
-  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); EDGE_FENCE.clear(); STALE_TEST.clear(); RESET.clear(); loadFixes.length = 0;
+  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); EDGE_FENCE.clear(); STALE_TEST.clear(); RESET.clear(); FRESH_EP.clear(); loadFixes.length = 0;
 }

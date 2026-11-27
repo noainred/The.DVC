@@ -77,4 +77,6 @@ export function tuneTick({ targets = [], loadOf, settings = {}, now = Date.now()
 export function procEveryFor(id, base) { const v = T.get(String(id)); return v?.pe != null ? coarser(v.pe, base) : base; }
 export function recentTunes() { return HIST.slice(); }
 export function tuneStateOf(id) { const v = T.get(String(id)); return v ? { ...v } : null; }
+/** 기계가 바뀐 대상(v3.57.0 반증 AE-4) — 예전 서버의 조절 상태(주기 · 24시간 낮추지 않음 잠금)를 새 서버에 물려주지 않는다. */
+export function forgetTune(id) { return T.delete(String(id)); }
 export function _resetForTest() { T.clear(); HIST.length = 0; }

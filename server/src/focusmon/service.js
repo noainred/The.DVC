@@ -17,7 +17,7 @@ import { DEMO_TARGETS, isDemoTarget } from './mock.js';
 import { recordTick, flushOnExit, recorderStatus } from './recorder.js';
 import { every } from '../util/longTimer.js';
 import { startAuditService } from './audit/service.js';
-import { tuneTick, procEveryFor } from './tune.js'; // v3.16.0 ⑯ C3 수집 부하 자동 조절
+import { tuneTick, procEveryFor, forgetTune } from './tune.js'; // v3.16.0 ⑯ C3 수집 부하 자동 조절
 import { alertCycle, forgetTargetAlerts } from './alerts.js'; // v3.16.0 ⑯ C1 지속 시간 조건 알림
 import { maintStateForTarget } from './maintMatch.js'; // v3.16.0 ⑯ 반증 H2 — 법인(DataCenter) → vCenter 들로 정비 창 판정
 import { corpResolver } from './audit/corp.js';
@@ -78,6 +78,7 @@ export async function minuteTick(now = Date.now(), { send = null, maintJudge = n
   //   규칙 파일 손상과 같이 이 주기를 건너뛴다(판정 · 조절 모두 — 대상이 없다는 뜻이 아니다).
   if (registryLoadError()) return { skipped: 'registry-unreadable' };
   pruneOrphans(now);
+  store.flushHeldStatusEvents(now);   // 반증 AE-5 — 끝난 창에서 줄인 상태 사건 수를 그 창 끝 시각의 한 줄로
   const settings = getSettings();
   const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
   const targets = allTargets().filter((t) => recordIds.has(t.id));
@@ -165,6 +166,9 @@ export function targetEndpointChanged(before, after) {
 export function targetsEndpointChanged(pairs = [], now = Date.now()) {
   const list = (Array.isArray(pairs) ? pairs : []).filter((p) => Array.isArray(p) && p[1]?.id);
   if (!list.length) return;
+  // 반증 AE-4: 수집 조절 상태는 틱 **앞에서** 지운다 — 틱이 예전 서버의 주기(procEvery)로 새 수집기를 열지 않게
+  const moved = (b, a) => !b || String(b.host || '') !== String(a.host || '') || String(b.agent || '').toLowerCase() !== String(a.agent || '').toLowerCase();
+  for (const [before, after] of list) if (moved(before, after)) forgetTune(after.id);
   tick1(now);
   const wake = new Map();   // 소문자 → 저장된 글자
   for (const [before, after] of list) {
