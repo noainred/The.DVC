@@ -2290,3 +2290,15 @@
 - 알림 단계 회차의 DB 열기: 파일 없음(ENOENT) + 기록 있음 → 못 읽음 · 열었는데 0건 + 기록 있음 + **DB 이력 없음** → 못 읽음(빈 새 DB) · 기록 0건이면 DB 를 열지(만들지) 않는다. 시간 유예는 쓰지 않는다.
 - 비관리자 판본: `hook.last.result` 도 `last` 와 같이 가린다(`hookView`). 설정 못 읽음 표지는 DB 순서로 계산한다.
 - 알림 본문의 안 간 사유는 짧은 분류(`shortWhy`) · 요약 ‘보낸 결과 N건’ 은 그 사이 확인을 뺀다.
+
+### v3.52 설계 과제 반영(2026-11-27 — 사용자 결정 · 기록은 `docs/rules/audits.md` ‘v3.52 물리서버 기능 설계 과제’)
+
+- **이벤트 전용 자리**(`idrac/poller.js EVENT_DEDICATED_SLOTS = 1`): 이벤트 읽기는 전용 자리(상한 밖)를 먼저 잡고(토큰 'd'), 차 있으면 공용 자리(몫 · 정규 먼저 — 토큰 's').
+  `releaseSlot('event', 토큰)` 로 받은 자리에 돌려준다(섞으면 카운트가 샌다). **전체 iDRAC 동시 세션 ≤ IDRAC_POLL_CONCURRENCY + 1** · 같은 장비 세션 1 은 그대로.
+- **이벤트 묶음 동시**(`idrac/eventSub.js EVT_BATCH_CONC = 3`): 폴러의 이벤트 단일 실행 가드(`_eventRunning`)는 없다 — 묶음끼리 막지 않고 `_eventPending` 은 서버별 카운트(Map).
+  eventSub 는 도는 묶음의 서버(`_inflightIds`)를 새 묶음에 넣지 않고 그 묶음이 끝난 뒤 다시 읽는다. 간격은 도는 묶음이 있으면 **마지막 시작**부터 · 없으면 마지막 끝부터(반증 A14 그대로).
+  다시 시도 수는 서버마다(`_retries` · BUSY_RETRY_MAX). 폴러도 다른 묶음이 지금 읽는 서버는 skipped 로 돌려준다(방어).
+- **알림 발송 분리**(`partfault/poller.js enqueueNotify · drainNotify`): 판정(재진입 가드)은 알림을 기다리지 않는다. 일꾼 하나 · FIFO(판정 순서) · 발송 표시(markNotified)는 그 판정의 알림을 보낸 뒤.
+  `_last.notify` 는 일꾼이 채우는 **살아 있는 표지**(복사하지 말 것 — pending → sent · dropped). 대기량 상한 `NOTIFY_QUEUE_MAX_ITEMS`(판정마다 200 까지 셈)를 넘으면
+  가장 오래된 대기 판정을 빼고 센다(`queueDropped` · `notifyQueue.overflowDropped` · 경고). 재시작하면 대기 중 알림은 사라진다(발송 표시 없이 남음).
+- 회귀: `server/test/bmDesign352.test.js`(상한 1 · 3 동시 · 누수 · 묶음 동시 · 알림 큐 순서 · 넘침) · `bmDebug3`·`bmDebug5`(상한 1 시험을 전용 자리 불변조건으로 바꿈) · `bmDebug9`(판정이 발송을 기다리지 않아 5회 연속 합류가 없음).
