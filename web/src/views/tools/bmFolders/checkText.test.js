@@ -176,7 +176,7 @@ describe('펌웨어 기준선 구역', () => {
     expect(fwView({ state: 'none', rows: [], peers: 3 }).why).toMatch(/대조하는 구성요소\(BIOS · iDRAC · NIC · 저장장치 컨트롤러 · HBA\)가 없습니다/);
     expect(fwView({ state: 'none', rows: [], peers: 3 }).why).not.toMatch(/관리자가 기준을 지정/);
     const lone = fwView({ state: 'none', rows: [FW.rows[4]], peers: 1 });
-    expect(lone.why).toBe('같은 법인에 같은 모델 서버가 이 서버뿐이라 다수 버전이 없습니다 — 관리자가 기준을 지정하면 대조합니다.');
+    expect(lone.why).toBe('같은 법인 · 같은 모델에서 펌웨어를 읽은 서버가 이 서버뿐이라 다수 버전이 없습니다(모델을 모르거나 다른 서버의 펌웨어를 아직 못 읽었을 수 있습니다) — 관리자가 기준을 지정하면 대조합니다.');
     expect(lone.note).not.toMatch(/1대로 냅니다/);   // 혼자인데 ‘다수 버전은 1대로 냅니다’ 라고 쓰지 않는다
     // 인벤토리 읽은 시각을 그대로 넘긴다(없으면 null — 0 으로 만들지 않는다)
     expect(fwView(FW, { invAt: 123 }).invAt).toBe(123); expect(fwView(FW, { invAt: '' }).invAt).toBeNull(); expect(fwView(FW).invAt).toBeNull(); expect(fwView(null, { invAt: 5 }).invAt).toBeNull();

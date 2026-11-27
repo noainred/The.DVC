@@ -47,6 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { fileMissing } from '../util/fileMissing.js';
 import { partFaultRetention } from './settings.js'; // v2.613 PERSIST2613-06
 
 /*
@@ -186,6 +187,7 @@ function prepare(db) {
         hold_reason=excluded.hold_reason`),
     touch: db.prepare('UPDATE part_state SET last_seen=?, hold_reason=?, raw_state=COALESCE(?,raw_state) WHERE agent=? AND part_key=?'),
     markNotified: db.prepare('UPDATE part_state SET notified_at=? WHERE agent=? AND part_key=?'),
+    markNotifiedSeen: db.prepare('UPDATE part_state SET notified_at=? WHERE agent=? AND part_key=? AND first_seen=?'),
     del: db.prepare('DELETE FROM part_state WHERE agent=? AND part_key=?'),
     openList: db.prepare('SELECT * FROM part_state ORDER BY first_seen DESC LIMIT ?'),
     openByScope: db.prepare('SELECT * FROM part_state WHERE scope=? ORDER BY first_seen DESC LIMIT ?'),
@@ -205,6 +207,7 @@ function prepare(db) {
     evMaxAt: db.prepare('SELECT MAX(at) AS v FROM part_event'),
     stateStats: db.prepare('SELECT COUNT(*) AS n FROM part_state'),
     metaGet: db.prepare('SELECT v FROM meta WHERE k=?'),
+    lastEventOfKey: db.prepare('SELECT event FROM part_event WHERE agent=? AND part_key=? ORDER BY at DESC, id DESC LIMIT 1'),
     // v2.734 장애별·종류별 보기 — 기간 이벤트를 최신부터 조각으로 읽는다. (at, id) 행 값 비교는 ix_event_at 범위 탐색 그대로다
     //   (인덱스 항목은 rowid 를 끝 열로 가지므로 ORDER BY at DESC, id DESC 에 정렬 단계가 없다 — EXPLAIN 으로 확인, 테스트 고정).
     incFirst: db.prepare('SELECT * FROM part_event WHERE at>=? ORDER BY at DESC, id DESC LIMIT ?'),
@@ -215,6 +218,17 @@ function prepare(db) {
     idMax: db.prepare('SELECT MAX(id) AS m FROM part_event'),
     idMin: db.prepare('SELECT MIN(id) AS m FROM part_event'),
   };
+}
+
+/**
+ * 읽기 전용 열기 — 파일이 **정말 없으면**(ENOENT) 만들지 않고 null(디버깅 11회차 반증 D4 · 8회차 판정 #3 의 형제 경로).
+ *   상태 · 조회 · 발송 표시는 파일을 만들지 않는다 — 점검을 켠 적 없는 노드에 `part-faults.db` 가 생겨 ‘수집 안 함’ 이 ‘읽었고 0건’ 이 됐다.
+ *   파일을 만드는 것은 판정을 적는 applyTransition 하나다. 없음 밖의 실패(권한 · 링크 고리)는 열기로 넘긴다(그쪽이 오류를 밝힌다).
+ */
+async function openRead() {
+  if (x) return x;
+  if (fileMissing(DB_PATH())) return null;
+  return open();
 }
 
 async function open() {
@@ -254,7 +268,7 @@ function readReset(h) {
  *   없으면(새 파일이거나 재생성이 없었으면) `null`.
  */
 export async function resetInfo() {
-  const h = await open();
+  const h = await openRead();
   return h ? readReset(h) : null;
 }
 
@@ -268,7 +282,11 @@ function eventRowsCached(h, now = Date.now()) {
 }
 
 export async function partFaultDbStatus() {
-  const h = await open();
+  const h = await openRead();
+  // 아직 만들지 않은 DB(점검을 켠 적 없음 · 첫 판정 전) — 사용 불가가 아니다. 행은 정말로 0(파일이 없다) · 오류 없음
+  if (!h && !initError && !x && fileMissing(DB_PATH())) {
+    return { available: true, notCreated: true, path: DB_PATH(), retentionDays: retention().days, retentionSource: retention().source, schemaVersion: null, reset: null, error: '', openParts: 0, rows: 0, rowsAt: null, mn: null, mx: null };
+  }
   const c = h ? eventRowsCached(h) : null;
   return {
     available: !!h, path: h ? h.path : DB_PATH(), retentionDays: retention().days, retentionSource: retention().source,
@@ -290,10 +308,42 @@ export function partFaultDbExists() {
   if (x) return true;
   try { return fs.existsSync(DB_PATH()); } catch { return false; }
 }
+/**
+ * DB 파일이 **정말 없는가**(ENOENT 만 — util/fileMissing.js). 알림 단계 회차가 ‘열린 장애 0건’ 으로 기록을 지울지 가르는 자리라 existsSync 를 쓰지 않는다:
+ *   폴더 권한(EACCES) · 링크 고리(ELOOP) · 디스크(EIO)도 false 라 ‘없음’ 으로 떨어져 확인 · 보낸 단계 기록을 지웠다(디버깅 9회차 보안 #1). 그 밖의 실패는 열기로 넘겨 회차를 건너뛴다.
+ */
+export function partFaultDbMissing() { if (x) return false; return fileMissing(DB_PATH()); }
 
+/**
+ * 열쇠(`agent|partKey` — agent 소문자)마다 **DB 의 마지막 이벤트가 닫힘인가**(알림 단계 기록 정리의 근거 — 평소 닫힘 · 수동 닫기 · 키 이전 닫힘, v3.54 반증 13c).
+ *   마지막 이벤트가 열림 · 변화거나 이벤트가 없으면(새 DB · 보존 기간 밖) 근거가 아니다. 파일이 정말 없으면 빈 집합 · 못 열거나 못 읽으면 null.
+ */
+export const CLOSED_KEYS_MAX = 20_000;
+export async function partFaultClosedKeysOrNull(keys) {
+  const list = (Array.isArray(keys) ? keys : [...(keys || [])]).slice(0, CLOSED_KEYS_MAX);
+  if (!list.length) return new Set();
+  if (!x && fileMissing(DB_PATH())) return new Set();
+  const h = await open();
+  if (!h) return null;
+  try {
+    const out = new Set();
+    for (const k of list) {
+      const s0 = String(k); const i = s0.indexOf('|');
+      if (i < 0) continue;
+      const row = h.st.lastEventOfKey.get(s0.slice(0, i), s0.slice(i + 1));
+      if (row && row.event === 'close') out.add(s0);
+    }
+    return out;
+  } catch { return null; }
+}
+/** openFaults 와 같되 DB 를 못 열면 null(‘열린 장애 0건’ 과 가른다 — 알림 단계 회차가 빈 목록으로 기록을 지우지 않게 · 디버깅 7회차 판정 #3). */
+export async function openFaultsOrNull(o = {}) {
+  if (!x && fileMissing(DB_PATH())) return [];   // 파일이 정말 없으면 열린 장애도 없다(만들지 않는다 — 알림 단계 회차는 그 전에 ‘기록 있음 + 파일 없음’ 을 못 읽음으로 가른다)
+  const h = await open(); return h ? openFaults(o) : null;
+}
 /** 지금 열려 있는 장애 전량 — 전이 계산의 입력. `agent` 열이 함께 나온다(법인 축). */
 export async function openFaults({ scope = '', limit = 20_000 } = {}) {
-  const h = await open();
+  const h = await openRead();
   if (!h) return [];
   const rows = scope ? h.st.openByScope.all(scope, limit) : h.st.openList.all(limit);
   return rows.map(rowToPart);
@@ -306,7 +356,7 @@ export async function openFaults({ scope = '', limit = 20_000 } = {}) {
 export async function openFaultsOfDevice({ scope = 'idrac', agent = '', key = '', id = '', limit = 20 } = {}) {
   const k = String(key || '').trim().toUpperCase(); const d = String(id || '').trim();
   if (!k && !d) return [];
-  const h = await open();
+  const h = await openRead();
   if (!h) return [];
   return h.st.openOfDevice.all(String(scope), String(agent || '').trim().toLowerCase(), k, k, d, d, Math.max(1, Math.min(200, Number(limit) || 20))).map(rowToPart);
 }
@@ -392,7 +442,7 @@ export async function applyTransition(tr, { now = Date.now() } = {}) {
  * @returns {Promise<number>} **실제로 갱신된 행 수**(요청 수가 아니다 — 0 이면 키가 맞지 않은 것이다).
  */
 export async function markNotified(items, { now = Date.now() } = {}) {
-  const h = await open();
+  const h = await openRead();
   if (!h || !items?.length) return 0;
   let n = 0;
   h.db.exec('BEGIN');
@@ -401,7 +451,9 @@ export async function markNotified(items, { now = Date.now() } = {}) {
       const agent = typeof it === 'string' ? '' : agentOf(it);
       const key = typeof it === 'string' ? it : String(it?.partKey || '');
       if (!key) continue;
-      n += Number(h.st.markNotified.run(now, agent, key)?.changes || 0);
+      // 처음 감지 시각을 주면 그 행일 때만(그 판정이 연 장애 — 늦게 끝난 발송이 뒤 판정이 다시 연 행에 찍지 않게: 반증 12b #4)
+      const seen = typeof it === 'string' ? null : (Number.isFinite(it?.firstSeen) ? it.firstSeen : null);
+      n += Number((seen == null ? h.st.markNotified.run(now, agent, key) : h.st.markNotifiedSeen.run(now, agent, key, seen))?.changes || 0);
     }
     h.db.exec('COMMIT');
   } catch { try { h.db.exec('ROLLBACK'); } catch { /* */ } return 0; }
@@ -414,7 +466,7 @@ export async function markNotified(items, { now = Date.now() } = {}) {
  * @param {{sinceMs?:number, limit?:number, partKey?:string|{agent?:string, partKey:string}, agent?:string}} [o]
  */
 export async function recentEvents({ sinceMs = 30 * 86_400_000, limit = 500, partKey = '', agent = '' } = {}) {
-  const h = await open();
+  const h = await openRead();
   if (!h) return [];
   const key = typeof partKey === 'object' && partKey ? String(partKey.partKey || '') : String(partKey || '');
   const ag = typeof partKey === 'object' && partKey ? agentOf(partKey) : String(agent || '');
@@ -444,7 +496,9 @@ const evRow = (r) => ({
  * @returns {Promise<{available:boolean, events:Array, openRows:Array, startLookup:Function|null, truncated:boolean, coveredSince:number|null, read:number, error?:string}>}
  */
 export async function incidentInputs({ sinceAbs = 0, maxEvents = 100_000, chunk = 5_000, yielder = null } = {}) {
-  const h = await open();
+  const h = await openRead();
+  // 아직 만들지 않은 DB(점검을 켠 적 없음 · 첫 판정 전) — ‘열 수 없음’ 이 아니라 기록이 없는 것(반증 13c N3 — 상태는 notCreated 인데 장애별 보기만 ‘DB 를 열 수 없습니다’ 였다)
+  if (!h && !initError && !x && fileMissing(DB_PATH())) return { available: true, notCreated: true, events: [], openRows: [], startLookup: null, truncated: false, coveredSince: null, read: 0 };
   if (!h) return { available: false, events: [], openRows: [], startLookup: null, truncated: false, coveredSince: null, read: 0,
     error: initError ? String(initError.message || initError).slice(0, 200) : lockRetry.note() };
   const since = Math.max(0, Math.trunc(Number(sinceAbs) || 0));
@@ -474,7 +528,7 @@ export async function incidentInputs({ sinceAbs = 0, maxEvents = 100_000, chunk 
 
 /** 결과 기억 키 — 이벤트가 쌓이거나(MAX) 정리되면(MIN) 바뀐다. 열린 장애 수는 진행 중 판정이 바뀌는 근거라 함께 싣는다. */
 export async function incidentMarks() {
-  const h = await open();
+  const h = await openRead();
   if (!h) return null;
   return { min: h.st.idMin.get()?.m ?? null, max: h.st.idMax.get()?.m ?? null, open: h.st.stateStats.get()?.n ?? null };
 }

@@ -23,6 +23,7 @@
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { store } from '../../store.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';
 import { logAudit } from '../../audit.js';
 import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL, SCOPES_OUT_OF_RANGE,
   KEY_KIND_LABEL, KEY_KIND_NOTE, DEVICE_KEY_KIND_LABEL, DEVICE_KEY_KIND_NOTE, HOLD_REASON, PUSH_PROTOCOL } from '../../partfault/types.js';
@@ -34,7 +35,7 @@ import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js'
 import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent, partFaultSettingsWriteRefusal } from '../../partfault/settings.js';
 import { hookStatus } from '../../partfault/hooks.js';
 import { escalationStore, loadEscalationState, escalationStateError, escalationMarkOf, partOfAckId, ackEscalation, agentKeyOf, ESC_POLICIES_MAX, ESC_STEPS_MAX, ESC_EMAILS_MAX, ESC_AFTER_MIN, ESC_AFTER_MAX, ESC_DAYS, ESC_RETRY_MAX } from '../../partfault/escalation.js';   // v3.51 알림 단계 · 당직(⑪)
-import { escalationRunStatus, ESC_TICK_MS } from '../../partfault/escalationRun.js';
+import { escalationRunStatus, escalationMarksNow, ESC_TICK_MS, forgetEscalationOrphans } from '../../partfault/escalationRun.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -70,6 +71,7 @@ const t = (v) => String(v ?? '').trim();
 import { cmpVersion } from '../../util/cmpVersion.js';
 import { pageArgs } from '../../util/pageArgs.js';   // v2.607 DB2607-04
 import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
+import { numOrNull } from '../../util/numOrNull.js';
 
 export { cmpVersion };
 
@@ -149,12 +151,40 @@ export function edgesNow() {
  * open[] 은 maskPartRow 로 가리면서 같은 응답의 last.notify.results 로 원문이 나가던 형제 경로다(v2.601 AUTHZ-2601-02).
  * 비-admin 에는 결과 목록 대신 개수만 준다.
  */
+// 비관리자 판본은 오류 문구에 든 서버 절대 경로도 가린다(DB 오류 · 저장 사유 — ‘mkdir /…/dbdir’ 원문이 운영자 · 데모 응답에 실렸다 — 디버깅 10회차 보안 #3).
+//   길이를 먼저 자르고 겹치지 않는 문자 집합으로만 반복(선형 — ReDoS 없음)
+const PATH_RE = /(?:\/[^\s'"`/]+){2,}\/?|[A-Za-z]:\\[^\s'"`]+/g;
+export const hidePaths = (v) => (typeof v === 'string' ? v.slice(0, 400).replace(PATH_RE, '…') : v);
+// 바뀐 것만 복사한다(copy-on-write) — 바뀌지 않은 경로는 원본을 그대로 공유(관리자 응답과 같은 _last · maskRegistryUnreadable 과 같은 규약)
+function hidePathsDeep(v, depth = 0) {
+  if (typeof v === 'string') { const h = hidePaths(v); return h === v.slice(0, 400) && v.length <= 400 ? v : h; }
+  if (depth > 5 || !v || typeof v !== 'object') return v;
+  if (Array.isArray(v)) {
+    let changed = false;
+    const arr = v.map((x) => { const y = hidePathsDeep(x, depth + 1); if (y !== x) changed = true; return y; });
+    return changed ? arr : v;
+  }
+  let out = null;
+  for (const k of Object.keys(v)) {
+    const x = v[k]; const y = hidePathsDeep(x, depth + 1);
+    if (y !== x) { out ||= { ...v }; out[k] = y; }
+  }
+  return out || v;
+}
+/** 알림 발송 큐 상태 — 건수 필드만(아는 키 · 수만). */
+export function queueView(q) {
+  if (!q || typeof q !== 'object') return null;
+  const out = {};
+  for (const k of ['waiting', 'maxItems', 'enqueued', 'sent', 'failed', 'skipped', 'overflowDropped', 'superseded', 'disabledSkipped', 'lastDoneAt']) out[k] = numOrNull(q[k]);   // Number(null) === 0 함정 — 못 읽은 값은 null
+  out.running = q.running === true;
+  return out;
+}
 export function lastView(last, isAdmin) {
   if (isAdmin || !last || typeof last !== 'object') return last ?? null;
-  const out = { ...last };
+  const out = { ...hidePathsDeep(last) };   // 바뀐 것이 없으면 hidePathsDeep 가 원본을 돌려준다 — 아래 notify 가림이 원본(_last)을 바꾸지 않게 얕은 복사
   if (out.notify && typeof out.notify === 'object') {
-    const { results, ...rest } = out.notify;
-    out.notify = { ...rest, resultsCount: Array.isArray(results) ? results.length : 0, resultsHidden: true };
+    const { results, error, ...rest } = out.notify;   // error — 발송 오류 원문(파트 키 · 주소가 섞일 수 있다 — 반증 13b N6). 있었다는 사실만
+    out.notify = { ...rest, resultsCount: Array.isArray(results) ? results.length : 0, resultsHidden: true, ...(error ? { error: '발송 오류(자세한 내용은 관리자 화면)' } : {}) };
   }
   return maskRegistryUnreadable(out);
 }
@@ -197,6 +227,13 @@ export function maskRegistryUnreadable(v, depth = 0) {
   }
   return out || v;
 }
+/** 파트 장애 훅 상태 — 마지막 결과(result)는 판정 결과 그대로라 last 와 같은 가림을 한다(같은 응답의 형제 경로 — 11회차 보안 #4: IP 파트 키 · 경로 · 등록부 상세). */
+export function hookView(h, isAdmin) {
+  if (isAdmin || !h || typeof h !== 'object' || !h.last || typeof h.last !== 'object') return h ?? null;
+  const last = { ...hidePathsDeep(h.last) };
+  if (last.result && typeof last.result === 'object') last.result = lastView(last.result, false);
+  return { ...h, last };
+}
 /** 엣지 push 상태(엣지 노드의 GET /tools/part-faults · /status) — 비-admin 은 등록부 손상 사유를 분류 문구로만(RG2744-05). */
 export function pushView(st, isAdmin) {
   return isAdmin ? st : maskRegistryUnreadable(st);
@@ -206,7 +243,7 @@ function dbView(db, isAdmin) {
   if (!db) return null;
   if (isAdmin) return db;
   const { path: _p, ...rest } = db;
-  return { ...rest, redacted: ['path'] };
+  return { ...rest, ...(typeof rest.error === 'string' ? { error: hidePaths(rest.error) } : {}), redacted: ['path'] };
 }
 
 /**
@@ -329,6 +366,7 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   const scope = t(req.query.scope);
   const isAdmin = isAdminReq(req);
   const [open, st] = await Promise.all([openFaults({ scope }).catch(() => []), partFaultStatus().catch(() => null)]);
+  const dbOrder = open.slice();   // 엔진(escalationRun)이 보는 순서(DB 순서) — 설정 못 읽음 표지의 키 이전 후보를 그 순서로 나눈다(11회차 판정 #5)
   open.sort((a, b) => (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || (b.firstSeenAt || 0) - (a.firstSeenAt || 0));
   const summary = { fault: 0, warn: 0 };
   const devices = new Set();
@@ -343,21 +381,27 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   }
   // v3.51 알림 단계 · 확인(⑪) — 가리기 전 원본 키로 표지를 만들고(확인 열쇠는 키를 싣지 않는 HMAC) 가린 행에 붙인다
   const escItems = loadEscalationState().items; const escSettings = escalationStore.get();
-  shown = shown.map((p, i) => ({ ...p, esc: escalationMarkOf(open[i], escItems, escSettings) }));
+  const escRun = await escalationMarksNow().catch(() => null);
+  const escRunK = escRun ? { ...escRun, openKeys: new Set(open.map((p) => `${String(p.agent || '').trim().toLowerCase()}|${p.partKey}`)) } : null;   // 설정 못 읽음 표지의 키 이전 후보에서 열린 장애를 뺀다(10회차 화면 D3)
+  const keyOfP = (p) => `${String(p.agent || '').trim().toLowerCase()}|${p.partKey}`;
+  const markByKey = new Map(dbOrder.map((p) => [keyOfP(p), escalationMarkOf(p, escItems, escSettings, escRunK)]));   // DB 순서로 계산 · 화면 순서로 붙인다
+  shown = shown.map((p, i) => ({ ...p, esc: markByKey.get(keyOfP(open[i])) || escalationMarkOf(open[i], escItems, escSettings, escRunK) }));
   res.json({
     ok: true, role, version: currentVersion(),
     open: shown, summary: { ...summary, devices: devices.size },
     ...(isAdmin ? {} : { addressHidden: true }),
     labels: LABELS,
-    poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: lastView(st.last, isAdmin) } : null,
+    // 알림 발송 큐 — 건수만(넘침 · 대신함 · 꺼짐으로 안 보냄은 가장 새 판정 표지에 실리지 않는다 — 반증 12b #1)
+    poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: lastView(st.last, isAdmin), notifyQueue: queueView(st.notifyQueue) } : null,
     db: dbView(st ? st.db : await partFaultDbStatus().catch(() => null), isAdmin),
     reset: st?.reset || null,
     edges: role === 'central' ? edgesNow() : null,
     push: role === 'edge' ? pushView(partFaultPushStatus(), isAdmin) : null,
-    hook: hookStatus(),
+    hook: hookView(hookStatus(), isAdmin),   // 11회차 보안 #4
     settings: isAdmin ? loadPartFaultSettings() : null,
-    escalation: { enabled: escalationStore.get().enabled, ...(escalationStateError() ? { stateError: escalationStateError() } : {}) },
-    canAck: ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user),   // 확인 단추 — 집행은 ack 라우트(writeRole)
+    escalation: { enabled: escalationStore.get().enabled, ...(escalationStore.loadError() ? { settingsUnreadable: true } : {}), ...(escalationStateError() ? { stateError: escalationStateError() } : {}) },   // 설정을 못 읽으면 ‘꺼짐’ 이 아니다(8회차 판정 #2)
+    // 확인 단추 — 확인 라우트와 같은 판정(쓰기 역할 ∧ 조회 · 쓰기 모두 전체 범위 ∧ 데모 아님). 쓰기 범위가 일부인 계정에 단추를 띄우면 누를 때 403 이었다(디버깅 9회차 보안 #2)
+    canAck: ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user) && (() => { try { return isFullReadWriteScope(req.user, store.get()); } catch { return false; } })(),
     // 96회차(93회차 F4 화면): 설정 파일 읽기 오류면 위 settings 는 기본값(꺼짐)이다 — 관리자가 끈 것이 아니다. 고정 문구 사유만(파일 조각 없음).
     ...(isAdmin && partFaultSettingsWriteRefusal() ? { settingsUnreadable: { reason: String(partFaultSettingsWriteRefusal().reason || '').slice(0, 300) } } : {}),
   });
@@ -444,7 +488,7 @@ api.post('/tools/part-faults/scan', writeRole, toolsPerm, fullScopeOnly, async (
 api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) => {
   const st = await partFaultStatus().catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
   res.json({ ok: true, ...st, last: lastView(st.last, isAdminReq(req)), db: dbView(st.db, isAdminReq(req)), version: currentVersion(),
-    push: config.agent.centralUrl ? pushView(partFaultPushStatus(), isAdminReq(req)) : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookStatus() });
+    push: config.agent.centralUrl ? pushView(partFaultPushStatus(), isAdminReq(req)) : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookView(hookStatus(), isAdminReq(req)) });
 });
 
 /**
@@ -504,11 +548,23 @@ api.get('/tools/part-faults/escalation', adminOnly, fullScopeOnly, async (_req, 
     tickMs: ESC_TICK_MS, limits: { policies: ESC_POLICIES_MAX, steps: ESC_STEPS_MAX, emails: ESC_EMAILS_MAX, afterMin: ESC_AFTER_MIN, afterMax: ESC_AFTER_MAX, days: ESC_DAYS, retries: ESC_RETRY_MAX } });
 });
 api.put('/tools/part-faults/escalation', adminOnly, fullScopeOnly, async (req, res) => {
+  if (config.agent.centralUrl) return res.status(409).json({ ok: false, reason: '엣지에서는 알림 단계 · 당직을 저장하지 않습니다 — 단계 알림은 중앙이 보냅니다(중앙 포탈에서 설정).' });   // 디버깅 1회차 엣지 #6
   const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
   const r = escalationStore.save(b, { by: req.user?.username || '' });
   if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason });
   logAudit({ user: req.user?.username, action: '파트 장애 알림 단계 · 당직 설정 저장', detail: `${r.value.enabled ? '켜짐' : '꺼짐'} · 정책 ${r.value.policies.length} · 당직표 ${Object.keys(r.value.oncall).length}${r.turnedOn ? ' · 이번에 켬' : r.turnedOff ? ' · 이번에 끔' : ''}`, ip: req.ip });
   res.json({ ok: true, settings: r.value });
+});
+
+/**
+ * 닫힘을 확인할 수 없는 진행 기록 정리(v3.54 반증 14c M2) — 그 장비가 다시 보이지 않아(재배정 · 철수 · 등록 삭제) 근거가 영영 생기지 않는 기록. 남아 있으면 같은 부품의
+ *   다음 장애가 옛 확인 · 단계를 이어받는다. 전체 범위 관리자 · 감사 · 엣지는 409(단계 알림은 중앙).
+ */
+api.post('/tools/part-faults/escalation/forget-orphans', adminOnly, fullScopeOnly, async (req, res) => {
+  if (config.agent.centralUrl) return res.status(409).json({ ok: false, reason: '엣지에서는 알림 단계 기록이 없습니다 — 중앙 포탈에서 정리하십시오.' });
+  const r = await forgetEscalationOrphans();
+  logAudit({ user: req.user?.username, action: '파트 장애 알림 단계 — 닫힘을 모르는 기록 정리', detail: r.ok ? `${r.removed}건 지움` : String(r.reason || '실패').slice(0, 120), ip: req.ip });
+  res.status(r.ok ? 200 : 409).json(r);
 });
 
 /** 키 체계 변경으로 이력을 새로 시작했는지(v2.548 스키마 v2) — 화면 배지 근거. */

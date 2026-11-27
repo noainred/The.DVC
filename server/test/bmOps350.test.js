@@ -176,7 +176,7 @@ test('⑤ 장비 읽기 — 가장 새 300건 · 인증 실패 · 시한 · 경�
 const routes = new Map(); const admRoutes = new Map();
 registerBmFolders({ get: (p, ...h) => routes.set(`GET ${p}`, h), post: (p, ...h) => routes.set(`POST ${p}`, h) });
 svcinv.registerSvcInventory({ get: (p, ...h) => routes.set(`GET ${p}`, h), post: (p, ...h) => routes.set(`POST ${p}`, h) });
-registerBmAssets({ get: (p, ...h) => admRoutes.set(`GET ${p}`, h), post: (p, ...h) => admRoutes.set(`POST ${p}`, h) });
+registerBmAssets({ get: (p, ...h) => admRoutes.set(`GET ${p}`, h), post: (p, ...h) => admRoutes.set(`POST ${p}`, h), put: (p, ...h) => admRoutes.set(`PUT ${p}`, h) });   // v3.52 설정 PUT
 const ADMIN = { username: 'admin', role: 'admin', scope: { vcenters: [], regions: [], writeVcenters: [] } };
 const OPER = { username: 'oper1', role: 'operator', scope: { vcenters: [], regions: [], writeVcenters: [] } };
 const VIEWER = { username: 'viewer1', role: 'viewer', scope: { vcenters: [], regions: [], writeVcenters: [] } };

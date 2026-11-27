@@ -211,6 +211,7 @@ const lifeOf = (v, diskN = null) => {
   const n = capN(l.n, 1024); const read = capN(l.read, 1024); const min = capN(l.min, 100);
   // 정수 · read ≤ n · n ≤ 디스크 수(디스크 수를 알면 — 반증 A16)
   if (n == null || read == null || !Number.isInteger(n) || !Number.isInteger(read) || read > n || (diskN != null && n > diskN)) return {};
+  if (read > 0 && min == null) return {};   // 읽었다면서 가장 낮은 값이 없다 — 어긋난 값은 싣지 않는다(디버깅 2회차 엣지 #7)
   return { life: { n, read, min: read ? min : null } };
 };
 /** 엣지가 보낸 요약 → 아는 필드만. 형식이 아니면 null(지어내지 않는다). 문자열 수치는 받지 않는다(엣지는 수로 보낸다). */

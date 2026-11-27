@@ -54,6 +54,8 @@ import { createPortalServers, tlsListenerStatus } from './util/httpsServer.js'; 
 import { centralUrlTransport } from './collector/transportPolicy.js'; // 〃 엣지 CENTRAL_URL 평문 경고
 import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
+import { bmEventsRouter } from './routes/bmEvents.js';   // v3.52 물리서버 장애 바로 받기(Redfish 이벤트 수신 — 사용자 인증 없음 · 주소 비밀)
+import { scrubEventPath } from './idrac/eventSub.js';
 import { startSelfRegister } from './agent/selfRegister.js';
 import { centralRouter } from './routes/central.js';
 import publicApiRouter from './routes/publicApi.js';
@@ -318,7 +320,7 @@ app.use(rateLimit({ skip: (req) => {
 // (진단·로그 화면 회귀 방지). 클라이언트가 끊은 요청(finish 없이 close)은 로그에는 남기지 않고
 // 성능 측정에만 status 499 로 넣는다 — 웹 GET 은 20초에 스스로 끊으므로 그 사실이 튜닝의 핵심 단서다.
 app.use((req, res, next) => {
-  const url = req.originalUrl.split('?')[0];
+  const url = scrubEventPath(req.originalUrl.split('?')[0]);   // v3.52 이벤트 받는 주소의 비밀을 기록에 싣지 않는다(⑬)
   if (url === '/api/admin/logs') return next();
   const start = Date.now();
   // 성능 집계는 **API 요청만** 한다 — 정적 자산(해시 파일명)까지 넣으면 라우트 키가 빌드마다
@@ -482,6 +484,9 @@ if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRU
 //   먼저 돌아 토큰 없는 요청도 1MB 까지 읽고 파싱했으며 라우트에 적힌 한도는 한 번도 적용되지 않았다. 이 라우터의 POST 는 전부
 //   자기 파서를 갖는다(전역 파서에 기대는 경로 없음). ⚠ 이 줄을 아래로 되돌리지 말 것.
 app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
+// v3.52 물리서버 장애 바로 받기(⑬) — 장비(iDRAC)가 보내는 Redfish 이벤트. 사용자 인증이 없다(주소 비밀 · Context HMAC · 꺼지면 404).
+//   전역 JSON 파서보다 먼저 — 비밀을 본 뒤에만 본문(64KB)을 읽는다(collector 와 같은 이유). ⚠ authMiddleware 를 붙이지 말 것(장비는 세션이 없다).
+app.use('/api/bm-events', bmEventsRouter);
 app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)
@@ -564,7 +569,7 @@ app.use((err, req, res, _next) => {
   // 본문 파서(express.json)가 던지는 400/413 은 클라이언트 실수라 사유를 알려주는 편이 낫다.
   const clientFault = status >= 400 && status < 500;
   try {
-    pushLog(status >= 500 ? 'error' : 'warn', `unhandled ${req.method} ${(req.originalUrl || '').split('?')[0]} ${status}: ${err?.stack || err}`);
+    pushLog(status >= 500 ? 'error' : 'warn', `unhandled ${req.method} ${scrubEventPath((req.originalUrl || '').split('?')[0])} ${status}: ${err?.stack || err}`);
   } catch { /* 로깅 실패가 응답을 막지 않게 */ }
   // v2.591(3차 감사 PR-6): 엣지 push 가 **본문 파서 단계**에서 거부되면(413 한도 초과·400 깨진 JSON) 중앙 라우터의 수신 훅까지
   //   가지 못해 거부 기록(ingestReject)에 **아무것도 남지 않았다** — 데이터 흐름 지도·인벤토리 점검이 그 경로를 계속 '정상' 으로

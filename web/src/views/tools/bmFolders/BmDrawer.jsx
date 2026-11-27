@@ -22,6 +22,7 @@ import { WarrantySection, FwBiosSections } from './CheckSections.jsx';   // v3.4
 import { PeerSection } from './PeerSection.jsx';   // v3.48 같은 묶음 대비
 import { HealthSection, HwLogSection, CaseSection, AdvisorySection, LifeSection } from './OpsSections.jsx';   // v3.50 건강 점수 · 이벤트 로그 · 케이스 · 보안 권고 · v3.51 부품 수명
 import { ledText, LED_NOTE } from './opsText.js';
+import PowerSection from './PowerSection.jsx';   // v3.52 원격 전원 · 위치 LED(⑦ ⑥)
 import { useBoxWidth } from './useBoxWidth.js';
 import { unitText } from '../../unitText.js';
 import { usageTone, TONE_COLOR, TONE_TEXT } from '../../vms/vmHubText.js';
@@ -225,7 +226,7 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
           <DrawerSections r={r} hw={hw} trend={trend} corpName={corpName} scoped={scoped} onClose={onClose}
             afterTrend={<PeerSection r={r} peer={peer} />}
             afterGlance={<HealthSection r={r} rules={healthRules} />}
-            afterEnd={<><HwLogSection key={`hl:${r.key}`} r={r} /><CaseSection key={`cs:${r.key}`} r={r} /></>}
+            afterEnd={<><PowerSection key={`pw:${r.key}`} r={r} writable={writable} /><HwLogSection key={`hl:${r.key}`} r={r} /><CaseSection key={`cs:${r.key}`} r={r} /></>}
             afterIdent={<WarrantySection chk={chk} admin={admin && !scoped} />}
             afterSpec={<><FwBiosSections r={r} chk={chk} onBaseline={onBaseline} busy={baseBusy} baseNote={baseNote && baseNote.key === r.key ? baseNote : null} /><AdvisorySection r={r} chk={chk} /><LifeSection r={r} hw={hw} /></>} />
         </div>

@@ -72,6 +72,7 @@ export const SECRET_FILES = [
   'idrac.json',                    // iDRAC/OME 계정
   'idrac-scan-ranges.json',        // 법인별 iDRAC 스캔 계정
   'gpu-guest.json',                // GPU 게스트 OS 공용/VM별 계정
+  'bm-events.json',                // v3.52 물리서버 이벤트 구독 — 받는 주소 비밀 · Context 열쇠(파일 한정 추가 필드 — 디버깅 5회차 보안 #1)
   'gpu-physical.json',             // 물리 GPU 서버 SSH 계정
   'horizon.json',                  // Horizon 접속 계정
   'remote-access.json',            // 원격접속(HAProxy dataplane·SSH 프록시) 계정/키
@@ -109,7 +110,7 @@ export const SECRET_FILES = [
  * 봉인되어 버리는 이름을 **그 파일에서만** 봉인한다. 해당 파일의 load/save 는 이 집합을 openSecretsDeep/sealSecretsDeep 에
  * 넘기고, 모드 전환 마이그레이션도 같은 집합을 쓴다(한쪽만 하면 반쪽 상태 — 위 메모 규약).
  */
-export const FILE_EXTRA_SECRET_FIELDS = Object.freeze({ 'alerts.json': new Set(['url']) });
+export const FILE_EXTRA_SECRET_FIELDS = Object.freeze({ 'alerts.json': new Set(['url']), 'bm-events.json': new Set(['secret', 'ctxKey', 'prevCtxKey']) });
 
 /* ── 정책(모드·레벨·알고리즘) ─────────────────────────────────────────────── */
 

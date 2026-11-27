@@ -59,8 +59,15 @@ async function switchDb(file) {
 /* ─────────────────────────── ③ 새 파일 — 마커 없음 ─────────────────────────── */
 
 test('새 파일은 schema_version 2 이고 reset 마커가 없다', async (t) => {
+  // v3.54(반증 12c D4): 상태 조회는 파일을 만들지 않는다 — 아직 없으면 ‘만들지 않음’(사용 불가 아님 · 행 0). 파일은 판정을 적을 때 만든다
+  const st0 = await db.partFaultDbStatus();
+  if (st0.notCreated) {
+    assert.deepEqual([st0.available, st0.schemaVersion, st0.rows, st0.error], [true, null, 0, '']);
+    await db.applyTransition({ opened: [], updated: [], closed: [], held: [] });
+  }
   const st = await db.partFaultDbStatus();
   if (!st.available) return t.skip(`node:sqlite 없음 — ${st.error}`);
+  assert.equal(st.notCreated, undefined);
   assert.equal(st.schemaVersion, 2);
   assert.equal(st.reset, null);
   assert.equal(await db.resetInfo(), null);

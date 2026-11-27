@@ -143,6 +143,7 @@ test('② 파트 장애 전이 보류 — 닫지도 바꾸지도 열지도 않�
   // 폴러가 집합을 transition 에 넘긴다(소스 — 실제 파트 장애 폴러는 iDRAC 스캔이 필요해 여기서 돌리지 않는다)
   const src = fs.readFileSync(new URL('../src/partfault/poller.js', import.meta.url), 'utf8');
   assert.match(src, /partfaultMaintHold\(\[\.\.\.observed, \.\.\.prev\]\)/); assert.match(src, /maintHold: maint\.hold/);
+  assert.match(src, /partfaultMaintHoldPeek\(phantoms\.map/);   // v3.54(반증 14c M4) — 가상 전이의 장비는 부수 효과 없는 엿보기로 정비 창을 본다
 });
 
 test('③ 자동 집중 억제 — auto 는 maintenance(실제 판정기 · 창 파일) · 수동은 허용 · 인증 정지가 먼저', async (t) => {
