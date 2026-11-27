@@ -170,8 +170,8 @@ test('3 라우트(5회차 정확성 1): 보이지 않는 글자가 시리얼과 
   const sz = await room(OP_A);
   const lz = sz.places.find((x) => x.id === pz).link;
   assert.ok(lz && lz.serverId.startsWith('masked-') && !('name' in lz), `범위 계정: 이어져 있고 등록부 이름 키는 없다 — ${JSON.stringify(lz)}`);
-  assert.ok(!JSON.stringify(sz).replace(/​/g, '').toLowerCase().includes('zwt0002'), '범위 계정 응답 어디에도 등록부 이름 · 태그(보이지 않는 글자를 지우고 봐도)가 없다');
-  assert.equal(String((await room(ADMIN)).places.find((x) => x.id === pz).link?.name).replace(/​/g, ''), 'idrac-ZWT0002', '관리자 판본은 등록부 이름 그대로');
+  assert.ok(!JSON.stringify(sz).replace(/\u200b/g, '').toLowerCase().includes('zwt0002'), '범위 계정 응답 어디에도 등록부 이름 · 태그(보이지 않는 글자를 지우고 봐도)가 없다');
+  assert.equal(String((await room(ADMIN)).places.find((x) => x.id === pz).link?.name).replace(/\u200b/g, ''), 'idrac-ZWT0002', '관리자 판본은 등록부 이름 그대로');
 });
 
 test('4 순수: 낱말 경계 = 글자 갈래가 바뀌는 자리 — 한글 조사는 경계 · 같은 갈래는 이어진 낱말', () => {
