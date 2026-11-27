@@ -17,7 +17,7 @@
  *   반복하지 않고 하나씩 보낸다(웹훅 rate limit 로 통째로 버려지는 것을 막는다).
  */
 
-import { notify as sendAlert } from '../alerts.js';
+import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { PART_STATE_LABEL, PART_KIND_LABEL, SCOPE_LABEL, KEY_KIND_NOTE } from './types.js';
 
 const t = (v) => String(v ?? '').trim();
@@ -92,34 +92,63 @@ export function alertOf(p, { closed = false } = {}) {
  * @param {{notifyClosed?:boolean, max?:number}} [opt]
  * @returns {{sent:number, capped:number, results:Array, skipped:number}}
  */
-export async function notifyTransition(tr, { notifyClosed = true, max = 200 } = {}) {
+/** 전이 → 보낼 알림 항목(순서 그대로 — 열림 · 변화 · 해소). 발송 큐(poller.js 설계 ③)가 대기량을 셀 때도 같은 규칙을 쓴다. */
+export function transitionItems(tr, { notifyClosed = true } = {}) {
   const items = [];
   // v2.612 LEFT2612-04: 장비 키만 바뀐 같은 장애(migratedFrom · 옛 키 key-migrated 닫힘)는 새 사건이 아니다 — 다시 알리지 않는다.
   //   단 상태가 달라졌으면(warn→fault 등) 그것은 알린다.
-  for (const p of tr.opened || []) if (!(p.migratedFrom && p.prevState === p.state)) items.push({ p, closed: false });
+  for (const p of tr?.opened || []) if (!(p.migratedFrom && p.prevState === p.state)) items.push({ p, closed: false });
   // 악화(warn→fault)는 새 사건이다 — 알린다. 호전(fault→warn)도 상태가 바뀐 것이므로 알린다.
-  for (const p of tr.updated || []) if (!p.sameState) items.push({ p, closed: false });
-  if (notifyClosed) for (const p of tr.closed || []) if (p.closeReason !== 'key-migrated') items.push({ p, closed: true });
+  for (const p of tr?.updated || []) if (!p.sameState) items.push({ p, closed: false });
+  if (notifyClosed) for (const p of tr?.closed || []) if (p.closeReason !== 'key-migrated') items.push({ p, closed: true });
+  return items;
+}
 
-  const results = [];
-  let sent = 0; let skipped = 0;
-  /*
-   * ⚠ 상한은 **버리는 것이 아니라 밝히는 것**이다 — 넘친 개수를 `capped` 로 돌려주고
-   *   화면·로그가 "N건은 보내지 않았습니다" 라고 말한다(조용한 상한 금지 — CLAUDE.md 규약).
-   */
+export const NOTIFY_MAX_PER_RUN = 200;   // 판정 한 번에 보내는 알림 상한(넘친 것은 capped 로 밝힌다)
+/**
+ * 판정 → 보낼 알림(상한까지 · 본문을 지금 만든다). 발송 큐(poller.js 설계 ③)가 전이 전체(같은 상태 · 보류 목록)를 붙잡지 않게 알림만 담는다(반증 12b #2).
+ * ⚠ 상한은 **버리는 것이 아니라 밝히는 것**이다 — 넘친 개수를 `capped` 로 돌려주고 화면 · 로그가 "N건은 보내지 않았습니다" 라고 말한다(조용한 상한 금지).
+ */
+export function transitionAlerts(tr, { notifyClosed = true, max = NOTIFY_MAX_PER_RUN } = {}) {
+  const items = transitionItems(tr, { notifyClosed });
   const take = items.slice(0, max);
-  for (const it of take) {
-    const a = alertOf(it.p, { closed: it.closed });
+  return {
+    // fromKey — 판정(전이)이 단 키 이전 표지(migratedFrom): 장비 키가 바뀐 같은 장애의 옛 열쇠. 큐가 그 기다리던 알림을 대신하는 데 쓴다(14b M3).
+    //   장비 id(IP)로 ‘같은 물리 부품’ 을 따로 만들면 주소가 바뀌거나 재사용될 때 다른 서버의 알림을 묶었다(반증 16 — 판정은 둘을 구분하는데 큐만 묶었다)
+    alerts: take.map((it) => ({ partKey: it.p.partKey, agent: String(it.p.agent || ''), closed: it.closed, fromKey: !it.closed && it.p.migratedFrom ? `${String(it.p.agent || '').trim().toLowerCase()}|${it.p.migratedFrom}` : '', alert: alertOf(it.p, { closed: it.closed }) })),
+    total: items.length, capped: Math.max(0, items.length - take.length),
+  };
+}
+
+/**
+ * 알림을 **순차로** 보낸다(동시 POST 폭주를 만들지 않는다). 결과는 채널 결과로 가른다(alerts.deliveryOutcome) — 받은 채널이 하나라도 있으면 sent,
+ *   받은 채널 없이 오류면 failed, 억제 · 채널 없음 · 메일 꺼짐은 skipped. 예전에는 억제만 skipped 로 세고 웹훅 시한 초과도 ‘발송’ 으로 셌다(반증 12b 관찰).
+ * @param {Array<{partKey:string, closed:boolean, alert:object}>} list
+ * @param {{ note?: string }} [o] note — 본문 끝에 덧붙일 줄(발송 대기가 길었을 때 판정 시각)
+ */
+export async function sendAlerts(list, { note = '' } = {}) {
+  const results = [];
+  let sent = 0; let skipped = 0; let failed = 0;
+  for (const it of list || []) {
+    const a = note ? { ...it.alert, detail: `${it.alert.detail}\n${note}` } : it.alert;
     try {
       const r = await sendAlert(a);           // 순차 — 동시 POST 폭주를 만들지 않는다
-      const line = Array.isArray(r) ? r.join(' · ') : String(r);
-      results.push({ partKey: it.p.partKey, closed: it.closed, result: line });
-      if (/suppressed/.test(line)) skipped += 1; else sent += 1;
+      const arr = Array.isArray(r) ? r.map(String) : [String(r)];
+      const o = deliveryOutcome(arr);
+      results.push({ partKey: it.partKey, closed: it.closed, result: arr.join(' · '), outcome: o });
+      if (o === 'delivered') sent += 1; else if (o === 'failed') failed += 1; else skipped += 1;
     } catch (e) {
-      results.push({ partKey: it.p.partKey, closed: it.closed, result: `err ${String(e.message || e).slice(0, 120)}` });
+      results.push({ partKey: it.partKey, closed: it.closed, result: `err ${String(e.message || e).slice(0, 120)}`, outcome: 'failed' });
+      failed += 1;
     }
   }
-  return { sent, skipped, capped: Math.max(0, items.length - take.length), results, total: items.length };
+  return { sent, skipped, failed, results };
+}
+
+export async function notifyTransition(tr, { notifyClosed = true, max = NOTIFY_MAX_PER_RUN } = {}) {
+  const { alerts, total, capped } = transitionAlerts(tr, { notifyClosed, max });
+  const r = await sendAlerts(alerts);
+  return { ...r, capped, total };
 }
 
 /** 발송 결과 문자열에서 **조용히 버려진 것**을 센다(메일 60건/시간 상한 등). */

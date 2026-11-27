@@ -25,14 +25,17 @@ let _pending = 0;
 let _last = null;
 
 /** iDRAC 인벤토리(또는 스토리지·SAN 스냅샷)가 갱신됐다. 여러 번 불려도 한 번만 돈다. */
-export function onSnapshotRefreshed(source = 'idrac') {
+let _urgent = false;   // 묶인 갱신 가운데 장비 이벤트로 다시 읽은 서버가 있었다 — 엣지 push 에 urgent(중앙이 바로 판정 — 디버깅 2회차 엣지 #4)
+export function onSnapshotRefreshed(source = 'idrac', { urgent = false } = {}) {
   _pending += 1;
+  if (urgent) _urgent = true;
   if (_timer) return;
   _timer = setTimeout(async () => {
     const n = _pending; _pending = 0; _timer = null;
+    const ev = _urgent; _urgent = false;
     try {
       if (config.agent.centralUrl) {
-        _last = { at: Date.now(), source, batched: n, result: await pushPartFaultsNow({ reason: `hook:${source}` }) };
+        _last = { at: Date.now(), source, batched: n, result: await pushPartFaultsNow({ reason: ev ? 'event' : `hook:${source}` }) };
       } else {
         _last = { at: Date.now(), source, batched: n, result: await runPartFaultsNow({ reason: `hook:${source}` }) };
       }

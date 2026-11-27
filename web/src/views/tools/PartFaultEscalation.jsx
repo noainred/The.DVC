@@ -6,14 +6,15 @@
  *  · 바뀐 칸이 있는지 부모에게 알린다(onDirty — 닫기 전에 묻는다).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, putJson } from '../../api.js';
+import { fetchJson, putJson, postJson } from '../../api.js';
 import Select from '../../components/Select.jsx';
-import { ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL, DAY_LABEL, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults } from './partFaultEscText.js';
+import { ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL, DAY_LABEL, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults, escOrphanText } from './partFaultEscText.js';
 
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
 export default function PartFaultEscalation({ initial = null, onSaved = null, onDirty = null }) {
   const [st, setSt] = useState({ d: initial, err: '' });
+  const [orphanMsg, setOrphanMsg] = useState(null);
   const [form, setFormRaw] = useState(initial?.settings ? escToForm(initial.settings) : null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -45,6 +46,19 @@ export default function PartFaultEscalation({ initial = null, onSaved = null, on
   };
   const lim = d.limits || {};
   const results = escRunResults(d.run);
+  const orphanText = escOrphanText(d.run);
+  // 닫힘을 확인할 수 없는 기록 정리(반증 14c M2) — 결과로 숫자를 바로 고친다(다음 회차까지 기다리지 않게)
+  // 결과는 그 줄 자리에 말한다(패널 맨 아래 저장 옆이면 스크롤하지 않으면 못 봤다 — Chromium 관찰)
+  const forgetOrphans = async () => {
+    setBusy(true); setOrphanMsg(null);
+    try {
+      const r = await postJson('/tools/part-faults/escalation/forget-orphans', {});
+      if (!r || r.ok === false) throw new Error(r?.reason || '정리하지 못했습니다.');
+      const left = Math.max(0, (Number(d.run?.orphans) || 0) - (Number(r.removed) || 0));
+      setSt({ d: { ...d, run: d.run ? { ...d.run, orphans: left, ...(left ? {} : { orphanReasons: undefined }) } : d.run }, err: '' });
+      setOrphanMsg({ ok: true, text: `닫힘을 확인할 수 없는 기록 ${Number(r.removed) || 0}건을 정리했습니다${left ? ` — 남은 ${left}건은 다음 회차에 다시 셉니다` : ''}.` });
+    } catch (e) { setOrphanMsg({ ok: false, text: e?.message || String(e) }); } finally { setBusy(false); }
+  };
   return (
     <div className="card pfe" style={{ padding: 12, minWidth: 0 }}>
       <div className="flex wrap gap" style={{ alignItems: 'center' }}>
@@ -54,10 +68,17 @@ export default function PartFaultEscalation({ initial = null, onSaved = null, on
       </div>
       {results.length ? (
         <details className="pfe-res">
-          <summary>마지막 회차 보낸 결과 {results.length}건 · 안 감 {results.filter((x) => !x.ok).length}</summary>
-          <ul>{results.map((x) => <li key={x.key} className={x.ok ? '' : 'pfe-bad'}>{x.text}</li>)}</ul>
+          <summary>마지막 회차 보낸 결과 {results.filter((x) => !x.notSent).length}건 · 안 감 {results.filter((x) => !x.ok && !x.notSent).length}{results.some((x) => x.notSent) ? ` · 그 사이 확인돼 보내지 않음 ${results.filter((x) => x.notSent).length}` : ''}</summary>
+          <ul>{results.map((x) => <li key={x.key} className={x.ok || x.notSent ? (x.notSent ? 'muted' : '') : 'pfe-bad'}>{x.text}</li>)}</ul>
         </details>
       ) : null}
+      {orphanText ? (
+        <div className="flex wrap gap" style={{ alignItems: 'center', minWidth: 0 }}>
+          <span className="muted" style={{ fontSize: 12, minWidth: 0, flex: '1 1 240px' }}>{orphanText}</span>
+          <button type="button" className="logout-btn" disabled={busy} onClick={forgetOrphans}>이 기록 정리</button>
+        </div>
+      ) : null}
+      {orphanMsg ? <div className={orphanMsg.ok ? 'muted' : 'pfe-warn'} role="status" style={{ fontSize: 12 }}>{orphanMsg.text}</div> : null}
       <div className="muted pfe-note">{ESC_NOTE}</div>
       {d.unreadable ? <div className="pfe-warn" role="alert">설정 파일을 읽지 못했습니다(서비스 점검에서 확인) — 저장이 막힙니다.</div> : null}
       {d.stateError ? <div className="pfe-warn" role="status">{d.stateError}</div> : null}
@@ -69,7 +90,7 @@ export default function PartFaultEscalation({ initial = null, onSaved = null, on
               {['fault', 'warn'].map((k) => <label key={k} className="pfe-chk"><input type="checkbox" checked={!!p.states[k]} onChange={(e) => setP(i, { states: { ...p.states, [k]: e.target.checked } })} /> {ESC_STATE_LABEL[k]}</label>)}
               <button type="button" className="logout-btn" onClick={() => setForm({ ...form, policies: form.policies.filter((_, j) => j !== i) })}>정책 지우기</button>
             </div>
-            <input className="input pfe-wide" value={p.agentsText} placeholder="수집 주체(엣지 이름 — 쉼표로 · 비우면 모두)" onChange={(e) => setP(i, { agentsText: e.target.value })} aria-label={`정책 ${i + 1} 수집 주체`} />
+            <input className="input pfe-wide" value={p.agentsText} placeholder="수집 주체(엣지 이름 · ‘이 포탈’ — 쉼표로 · 비우면 모두)" onChange={(e) => setP(i, { agentsText: e.target.value })} aria-label={`정책 ${i + 1} 수집 주체`} />
             <div className="muted pfe-note">1단계 — 지금 부품 장애 알림(장애가 열릴 때)</div>
             {p.steps.map((s, k) => (
               <div key={k} className="pfe-step">

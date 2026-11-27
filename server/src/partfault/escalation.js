@@ -9,7 +9,7 @@
  *    엔진이 꺼져 있던 동안 여러 단계가 지났으면 **가장 높은 단계 하나만** 보낸다(낮은 단계는 건너뜀으로 적는다).
  *  · 한 번 도는 동안 보내는 수에 상한(ESC_SENDS_PER_RUN) — 넘친 것은 다음 회차로(조용히 버리지 않는다 · 수를 남긴다).
  *  · 법인 축은 **수집 주체**(부품 장애의 agent — '' = 이 포탈 · 엣지 이름)다. 부품 장애에는 vCenter 법인이 없다(설계와 다른 점 — README §13 에 적는다).
- *  · 요일은 **이 포탈 서버의 시각**으로 정한다(법인 현지 시각이 아니다 — 화면이 밝힌다).
+ *  · 요일은 **포탈 지역 시계**(util/dayKey.js localClock — DAY_OFFSET_MIN · 기본 한국 시각)로 정한다(프로세스 시간대 · 법인 현지 시각이 아니다 — 화면이 밝힌다).
  *
  * 파일: partfault-escalation.json(설정 — 백업 · 복원 그대로) · partfault-escalation-state.json(진행 기록 — 복원 때 지금 것 유지: 되돌리면 보낸 단계를 다시 보낸다).
  */
@@ -22,6 +22,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { readJsonFile } from '../util/jsonFileRead.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { localClock } from '../util/dayKey.js';
 
 export const ESC_POLICIES_MAX = 20;
 export const ESC_STEPS_MAX = 4;
@@ -97,7 +98,8 @@ export function normalizeEscalation(body, { lenient = false } = {}) {
     for (const a of agentSrc.slice(0, 64)) {
       const k = agentKeyOf(a);
       if (k == null) { if (lenient) continue; return fail(`${where}: 수집 주체 이름이 틀렸습니다(64자 · 쉼표 · 세미콜론 · 제어 문자 없이).`); }
-      if (k !== ESC_ALL && !agents.includes(k)) agents.push(k);
+      if (k === ESC_ALL) { if (!lenient && agentSrc.length > 1) return fail(`${where}: ‘모두(*)’ 는 다른 수집 주체와 함께 줄 수 없습니다(비우면 모두).`); continue; }   // 조용히 버리지 않는다(디버깅 1회차 판정 #11)
+      if (!agents.includes(k)) agents.push(k);
     }
     const stateSrc = Array.isArray(p.states) ? p.states : [];
     if (!lenient && stateSrc.some((x) => !ESC_STATES.includes(x))) return fail(`${where}: 모르는 대상 상태가 있습니다(이상 · 주의만).`);
@@ -137,6 +139,7 @@ export function normalizeEscalation(body, { lenient = false } = {}) {
   for (const [k, v] of Object.entries(oc).slice(0, 128)) {
     const ak = agentKeyOf(k);
     if (ak == null || !isObj(v) || !Array.isArray(v.days)) { if (lenient) continue; return fail(`당직표: 수집 주체 ‘${String(k).slice(0, 40)}’ 의 형식이 틀렸습니다.`); }
+    if (!lenient && Object.hasOwn(oncall, ak)) return fail(`당직표: 수집 주체 ‘${ak === ESC_ALL ? '모두' : ak || '이 포탈'}’ 의 표가 둘 이상입니다(대소문자만 다른 이름 포함).`);   // 뒤 것만 남기지 않는다(판정 #11)
     const days = [];
     for (let i = 0; i < 7; i += 1) {
       const d = isObj(v.days[i]) ? v.days[i] : {};
@@ -187,27 +190,76 @@ export const escalationStore = {
 //   since = 엔진이 그 장애를 **정책 대상으로 처음 본 때**(켠 때 · 정책을 고친 때 · 상태가 바뀐 때 옛 장애에 쏟아지지 않게 — 반증 A2).
 //   sig = 수집 주체|장비군|장비 id|종류|부품 id — 장비 키만 바뀐 같은 장애(migratedFrom)가 기록 · 확인을 이어받게(반증 A4).
 export const ESC_RETRY_MAX = 3;
+const ESC_SENT_MAX = ESC_STEPS_MAX * (ESC_RETRY_MAX + 2) * 2;   // 기록 한 건의 보낸 줄 상한(정책 둘이 오가는 장애까지 — 최근 것을 남긴다 · 60 이면 회차 비용이 3배였다: 3회차 성능 R7)
 let _state = null; let _stateErr = ''; let _stateReadError = false;
 const KINDS = ['ok', 'fail', 'skip', 'give'];
 const itemShape = (x) => {
   if (!isObj(x)) return null;
   const since = numOrNull(x.since);
   if (since == null) return null;
-  const sent = (Array.isArray(x.sent) ? x.sent : []).filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < ESC_STEPS_MAX).slice(0, ESC_STEPS_MAX * (ESC_RETRY_MAX + 2))
-    .map((e) => [e[0], numOrNull(e[1]), typeof e[2] === 'string' ? e[2].slice(0, 120) : '', KINDS.includes(e[3]) ? e[3] : 'ok']);
-  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80) };
+  // 보낸 단계는 **정책별로** 적는다(e[4] = 정책 id) — 정책이 오가도 진행을 지우지 않고, 다른 정책의 단계를 ‘보냄’ 으로 세지 않는다(디버깅 2회차 판정 #1).
+  //   정책을 적지 않은 옛 줄은 그 기록의 정책(pol)으로 본다. 최근 것을 남긴다(앞에서 자르면 새 줄을 잃는다).
+  const pol = str(x.pol, 40);
+  const sent = (Array.isArray(x.sent) ? x.sent : []).filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < ESC_STEPS_MAX).slice(-ESC_SENT_MAX)
+    .map((e) => [e[0], numOrNull(e[1]), typeof e[2] === 'string' ? e[2].slice(0, 120) : '', KINDS.includes(e[3]) ? e[3] : 'ok', typeof e[4] === 'string' ? e[4].slice(0, 40) : pol]);
+  // ps = 정책별 시작 시각(그 정책 대상으로 처음 본 때) — 정책마다 자기 시각부터 센다(디버깅 3회차 판정 #1). 옛 기록은 없음(처음 정책을 볼 때 since 로 잇는다)
+  const ps = {};
+  if (isObj(x.ps)) for (const [k, v] of Object.entries(x.ps).slice(0, ESC_POLICIES_MAX * 2)) { const n = numOrNull(v); if (typeof k === 'string' && k.length <= 40 && n != null) ps[k] = n; }
+  const lp = Array.isArray(x.lp) ? x.lp.filter((v) => typeof v === 'string' && v.length <= 40).slice(0, ESC_POLICIES_MAX) : undefined;
+  const pk = pkShape(x.pk);
+  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80), pol, ps, ...(lp ? { lp } : {}), ...(pk ? { pk } : {}) };
 };
-export function loadEscalationState() {
+/**
+ * 기록에 남기는 그 부품의 판정 재료(v3.54 반증 13c) — DB 에 열려 있지 않은 기록을 판정 폴러가 ‘가상의 열린 장애’ 로 같은 전이에 넣어 닫힘을 가린다
+ *   (장비 실패 · 컬렉션 실패 · 정비 창 · 등록부 손상 · 보고 없음이면 전이가 보류 — 기록도 남는다). 아는 글자 필드만 · 길이 상한.
+ */
+const PK_FIELDS = ['scope', 'deviceId', 'deviceKey', 'deviceKeyKind', 'deviceName', 'kind', 'partId', 'keyKind', 'label', 'state'];
+function pkShape(x) {
+  if (!isObj(x)) return null;
+  const o = {};
+  for (const f of PK_FIELDS) if (typeof x[f] === 'string') o[f] = x[f].slice(0, 200);
+  return o.scope && o.deviceId && o.kind && o.partId ? o : null;
+}
+export const pkOf = (p) => pkShape(Object.fromEntries(PK_FIELDS.map((f) => [f, p?.[f] == null ? undefined : String(p[f])])));
+/**
+ * 진행 기록 → 판정 폴러의 가상 열린 장애(닫힘 근거용 — poller.js). 판정 재료(pk)가 있으면 그것으로, 없으면 열쇠(agent|partKey)와 sig(agent|장비군|장비 id|종류|부품 id)로
+ *   만든다(업그레이드 전 기록 · 확인 단추가 만든 기록 — 반증 14c M1). 둘 다 없으면 null(닫힘을 가릴 수 없다).
+ */
+export function phantomOf(key, v) {
+  const k = String(key); const i = k.indexOf('|');
+  if (i < 0 || !v) return null;
+  const agent = k.slice(0, i); const partKey = k.slice(i + 1);
+  if (!partKey) return null;
+  const base = { agent, partKey, firstSeenAt: numOrNull(v.since) ?? 0, lastSeenAt: numOrNull(v.since) ?? 0 };
+  if (v.pk) return { ...v.pk, ...base, state: v.pk.state || 'fault' };
+  const parts = String(v.sig || '').split('|');
+  if (parts.length < 5) return null;
+  const [, scope, deviceId, kind, ...rest] = parts;
+  const partId = rest.join('|');
+  if (!scope || !deviceId || !kind || !partId) return null;
+  return { ...base, scope, deviceId, kind, partId, state: 'fault' };
+}
+// 읽기 오류는 캐시하지 않는다 — 파일을 고치면 다음 재읽기(30초 간격)에 풀린다(v3.52 디버깅 1회차 성능 P4: 예전에는 재시작 전까지 멈췄다)
+export const ESC_STATE_RETRY_MS = 30_000;
+let _stateRetryAt = 0; let _stateErrUntil = 0;
+export const ESC_STATE_NOTE_MS = 24 * 3600_000;
+export function loadEscalationState(now = Date.now()) {
   if (_state) return _state;
+  if (_stateReadError && now < _stateRetryAt) return { v: 1, items: {}, enabledAt: null };
   const items = {}; let enabledAt = null;
   // 읽기는 공용 판정(util/jsonFileRead.js) — 없음 · 읽기 오류 · 손상(보존은 공용이 한다)을 가른다(97회차 스윕)
   const r = readJsonFile(STATE_FILE(), { parse: (text) => { const d = JSON.parse(text); if (!isObj(d) || !isObj(d.items)) throw new Error('진행 기록 꼴이 아닙니다'); return d; } });
   if (r.kind === 'read-error') {
     // 읽기 오류(권한 등 — 없음이 아님)는 보내지도 쓰지도 않는다: 보낸 단계를 모르는 채 쓰면 원본을 덮고, 보내면 같은 단계를 매 회차 다시 보낸다(반증 A6)
-    _stateReadError = true; _stateErr = `진행 기록을 읽지 못해(${String(r.error?.code || 'error')}) 단계 알림을 멈췄습니다 — 파일 권한을 확인하십시오.`;
-  } else if (r.kind === 'corrupt') {
+    _stateReadError = true; _stateRetryAt = now + ESC_STATE_RETRY_MS;
+    _stateErr = `진행 기록을 읽지 못해(${String(r.error?.code || 'error')}) 단계 알림을 멈췄습니다 — 파일 권한을 확인하십시오(고치면 ${ESC_STATE_RETRY_MS / 1000}초 안에 다시 읽습니다).`;
+    return { v: 1, items: {}, enabledAt: null };
+  }
+  if (_stateReadError) { _stateReadError = false; _stateErr = ''; }   // 다시 읽혔다 — 멈춤 안내를 지운다
+  if (r.kind === 'corrupt') {
     // 손상 — 공용이 옆으로 보존했다. 빈 기록으로 시작한다(새 기록은 since = 지금이라 열린 장애에 바로 쏟아지지 않는다 — 정한 분이 지난 뒤 2단계부터 다시)
     _stateErr = '진행 기록이 손상돼 보존본을 남기고 새로 시작했습니다 — 열린 장애는 지금부터 다시 셉니다(이미 보낸 2단계가 한 번 더 갈 수 있습니다).';
+    _stateErrUntil = now + ESC_STATE_NOTE_MS;   // 손상 안내는 하루 보인다 — 재시작 전까지 남지 않게(성능 P4 ②) · 바로 지우면 아무도 못 본다
   } else if (r.kind === 'ok') {
     enabledAt = numOrNull(r.value.enabledAt);
     for (const [k, v] of Object.entries(r.value.items).slice(0, ESC_ITEMS_MAX)) { const it = itemShape(v); if (it && typeof k === 'string' && k.length <= 600) items[k] = it; }
@@ -220,9 +272,9 @@ export function saveEscalationState(st) {
   _state = st;
   try { fs.mkdirSync(path.dirname(STATE_FILE()), { recursive: true }); atomicWriteFileSync(STATE_FILE(), JSON.stringify(st)); return true; } catch { return false; }
 }
-export const escalationStateError = () => _stateErr;
+export const escalationStateError = (now = Date.now()) => (_stateErr && (_stateReadError || now < _stateErrUntil) ? _stateErr : '');
 export const escalationStateUnreadable = () => { loadEscalationState(); return _stateReadError; };
-export function _resetEscalationStateForTest() { _state = null; _stateErr = ''; _stateReadError = false; }
+export function _resetEscalationStateForTest() { _state = null; _stateErr = ''; _stateReadError = false; _stateRetryAt = 0; _stateErrUntil = 0; }
 export { STATE_NAME as ESC_STATE_FILE_NAME };
 
 // ───────── 판정(순수) ─────────
@@ -238,9 +290,12 @@ export function policyFor(settings, p) {
   }
   return null;
 }
-/** 그 수집 주체의 오늘 당직(이 포탈 서버 시각의 요일) — 수집 주체 표 → ‘모두’ 표. 없으면 null. */
+/** 그 수집 주체의 오늘 당직(포탈 지역 시계의 요일) — 수집 주체 표 → ‘모두’ 표. 없으면 null. */
 export function oncallFor(settings, agent, now = Date.now()) {
-  const dow = (new Date(now).getDay() + 6) % 7;   // 월=0 … 일=6
+  // 요일은 포탈 지역 시계(DAY_OFFSET — 프로세스 TZ 가 아니다: 패키지 유닛은 TZ 를 정하지 않는다 · perf-db ‘스케줄은 localClock’ — 디버깅 1회차 판정 #1)
+  const lc = localClock(now);
+  if (!lc.day) return null;
+  const dow = (new Date(`${lc.day}T00:00:00Z`).getUTCDay() + 6) % 7;   // 월=0 … 일=6
   const ag = String(agent || '').trim().toLowerCase();
   const oc = settings?.oncall;
   for (const k of [ag, ESC_ALL]) {
@@ -251,7 +306,9 @@ export function oncallFor(settings, agent, now = Date.now()) {
   return null;
 }
 /** 그 단계가 끝났는가 — 갔음 · 건너뜀 · 다시 시도 끝(안 간 것은 ESC_RETRY_MAX 번까지 다시). */
-const stepDone = (sent, i) => sent.some((e) => e[0] === i && e[3] !== 'fail') || sent.filter((e) => e[0] === i && e[3] === 'fail').length >= ESC_RETRY_MAX;
+// 정책을 적지 않은 줄('')은 어느 정책의 ‘보냄’ 도 아니다 — 옛 기록(v3.51)의 줄은 처음 보는 정책이 넘겨받는다(아래 adopt — 디버깅 3회차 판정 #2)
+const ofPol = (e, pol) => !pol || e[4] === pol;
+const stepDone = (sent, i, pol = '') => sent.some((e) => e[0] === i && e[3] !== 'fail' && ofPol(e, pol)) || sent.filter((e) => e[0] === i && e[3] === 'fail' && ofPol(e, pol)).length >= ESC_RETRY_MAX;
 
 /**
  * 이번 회차에 보낼 것(순수).
@@ -259,44 +316,105 @@ const stepDone = (sent, i) => sent.some((e) => e[0] === i && e[3] !== 'fail') ||
  *   hold = 정비 창 보류 장비 열쇠(holdKeyOf(수집 주체, deviceId)) — 그 장비의 장애는 이번 회차에 보내지 않는다(기록은 둔다)
  * @returns {{ sends:Array<{ key, part, policy, step, to, skipped:number[] }>, items:object, enabledAt:number|null, deferred:number, overCap:number, held:number }}
  */
-export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null }) {
+// 안 간 사유의 짧은 분류 — 결과 글자(‘메일 안 감(SMTP …)’ · ‘채널 실패(slack:500 …)’)를 그대로 자르면 낱말 중간에서 끊기고 괄호 짝이 어긋났다(11회차 화면 E2).
+//   첫 괄호 · 줄표 · 빗금 앞까지만 · 24자 넘으면 ‘…’
+export function shortWhy(t) {
+  const head = String(t || '').split(/[(/—]/)[0].replace(/\s+/g, ' ').trim();
+  return head.length > 24 ? `${head.slice(0, 24)}…` : head;
+}
+/** 기록 열쇠(`agent|partKey`)의 수집 주체(소문자). */
+export const agentOfEscKey = (k) => { const s = String(k); const i = s.indexOf('|'); return i < 0 ? '' : s.slice(0, i); };
+/**
+ * @param closed 열린 장애에 없는 기록 가운데 **닫힘 근거가 있는** 열쇠(escalationRun — DB 의 마지막 이벤트가 닫힘 · 판정 폴러의 가상 전이가 닫음).
+ *   null 이면 열린 장애에 없는 기록은 모두 닫힘으로 본다(호출부 호환). 근거가 없는 기록(장비 실패 · 정비 창 · 보고 없음 · 새 DB 의 아직 보지 못한 장비)은
+ *   손대지 않고 남긴다 — ‘열린 장애에 없음’ 은 닫힘이 아니다(11회차 반증 D1 · D2 · 13c N1). 키 이전 후보(sig)는 근거와 상관없이 모든 기록이다(13c N4 — 라우트 표지와 같은 집합).
+ */
+export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null, closed = null }) {
   const items = {};
-  const sends = []; let deferred = 0; let overCap = 0; let held = 0;
+  const sends = []; let deferred = 0; let overCap = 0; let held = 0; const heldKeys = [];
   const prev = state?.items || {};
   const list = Array.isArray(open) ? open : [];
   const openKeys = new Set(list.map(partKeyOf));
-  // 닫힌 장애의 기록 — 키만 바뀐 같은 장애가 이어받을 후보(sig). 꺼져 있어도 닫힌 것은 정리한다(다시 열린 장애가 옛 확인을 물려받지 않게 — 반증 A5)
+  // 닫힌(또는 닫힘을 모르는) 장애의 기록 — 키만 바뀐 같은 장애가 이어받을 후보(sig). 꺼져 있어도 닫힌 것은 정리한다(다시 열린 장애가 옛 확인을 물려받지 않게 — 반증 A5)
   const staleBySig = new Map();
-  for (const [k, v] of Object.entries(prev)) if (!openKeys.has(k) && v.sig) staleBySig.set(v.sig, v);
+  const notOpen = [];
+  for (const [k, v] of Object.entries(prev)) {
+    if (openKeys.has(k)) continue;
+    notOpen.push([k, v]);
+    if (v.sig) staleBySig.set(v.sig, [k, v]);
+  }
+  const consumed = new Set();
   const enabled = settings?.enabled === true;
   const enabledAt = numOrNull(settings?.enabledAt);
   // 다시 켰다(켠 시각이 바뀌었다) — 확인하지 않은 기록은 지금부터 다시 센다(옛 since 로 켜자마자 높은 단계가 가지 않게 — 반증 A5)
   const reEnabled = enabled && (numOrNull(state?.enabledAt) ?? null) !== enabledAt;
+  const reserved = list.reduce((n, p) => n + (Object.hasOwn(prev, partKeyOf(p)) ? 1 : 0), 0);   // 이미 기록이 있는 열린 장애(자리를 먼저 둔다)
+  let newCount = 0;
   for (const p of list) {
     const key = partKeyOf(p);
     const sig = partSigOf(p);
     let cur = Object.hasOwn(prev, key) ? prev[key] : null;
-    if (!cur && staleBySig.has(sig)) { cur = staleBySig.get(sig); staleBySig.delete(sig); }   // 키 이전 — 기록 · 확인을 이어받는다
-    if (cur && reEnabled && !cur.ackedAt) cur = { ...cur, since: now, sent: [] };
+    if (!cur && staleBySig.has(sig)) { const [k0, v0] = staleBySig.get(sig); cur = v0; consumed.add(k0); staleBySig.delete(sig); }   // 키 이전 — 기록 · 확인을 이어받는다
+    // 다시 켜면 그때 정책(lp)도 놓는다 — 보낸 줄을 비웠으니 넘겨받을 것이 없다(남기면 lp 정책이 ‘켠 때’ 부터 세어 앞 단계를 건너뛰었다 — 디버깅 6회차 판정 #2)
+    if (cur && reEnabled && !cur.ackedAt) { const { lp: _lp, ...rest } = cur; cur = { ...rest, since: now, sent: [], ps: {}, pol: rest.pol || '-' }; }
     const pol = enabled ? policyFor(settings, p) : null;
+    // 다른 정책으로 넘어감(예: 주의 → 이상 — 받는 곳이 다른 팀): 보낸 단계는 정책별로 세므로(stepDone) 새 정책의 단계는 아직 안 간 것이다(디버깅 1회차 판정 #3).
+    //   진행(since · 보낸 줄)은 지우지 않는다 — 1회차처럼 지우면 정책이 오가는 장애는 단계가 영영 가지 않았다(디버깅 2회차 판정 #1)
     // 정책 밖(꺼짐 · 맞는 정책 없음 · 상태가 바뀜)이어도 열려 있는 동안은 기록을 둔다 — 상태가 오가도 보낸 단계를 다시 보내지 않게(반증 A3)
-    if (!pol) { if (cur) items[key] = { ...cur, sig }; continue; }
-    if (!cur && Object.keys(items).length + Object.keys(prev).filter((k) => openKeys.has(k) && !Object.hasOwn(items, k)).length >= ESC_ITEMS_MAX) { overCap += 1; continue; }   // 상한 — 기록할 수 없는 장애에는 보내지 않는다(반증 A7)
-    const it = cur ? { ...cur, sig, sent: [...cur.sent] } : { since: now, sig, sent: [], ackedAt: null, ackBy: '' };
+    if (!pol) {
+      // 옛 기록(정책 열 · ps 없음)이 정책 밖에서 처음 보이면 ‘넘겨받지 않음’(-)으로 굳힌다 — 나중에 생긴 정책이 옛 since · 보낸 줄을 물려받아 가장 높은 단계로 바로 가지 않게(디버깅 4회차 판정 #1)
+      //   멈춘 회차(꺼짐 · 데모 · 점검 꺼짐 — enabled false)에서는 굳히지 않는다 · 굳힐 때 그때 있던 정책(lp)을 기억해 그 정책으로 돌아오면 이어받는다(디버깅 5회차 판정 #1)
+      //   그때 정책(lp)은 처음 본 회차에 멈춤과 관계없이 적는다 — 멈춘 동안 새로 만든 정책이 옛 since · 보낸 줄을 넘겨받지 않게(디버깅 6회차 판정 #1)
+      const isLeg = cur && !cur.pol && !Object.keys(cur.ps || {}).length;
+      if (isLeg && !Array.isArray(cur.lp)) cur = { ...cur, lp: (settings?.policies || []).map((x) => String(x?.id || '')).filter(Boolean).slice(0, ESC_POLICIES_MAX) };
+      if (enabled && isLeg) cur = { ...cur, pol: '-', sent: cur.sent.map((e) => (e[4] ? e : [e[0], e[1], e[2], e[3], '-'])) };
+      if (cur) {
+        // 정책 밖으로 이어받은 기록도 새 열쇠라 자리를 쓴다(디버깅 3회차 판정 #8)
+        if (!Object.hasOwn(prev, key)) { if (newCount + reserved >= ESC_ITEMS_MAX) continue; newCount += 1; }
+        items[key] = { ...cur, sig, ...(pkOf(p) ? { pk: pkOf(p) } : {}) };
+      }
+      continue;
+    }
+    // 상한 — 기록할 수 없는 장애에는 보내지 않는다(반증 A7). 이미 기록이 있는 열린 장애 수를 먼저 떼어 두고 새 것만 센다(O(N) — 판정 #13)
+    // 키만 바뀐 장애(이어받은 기록)도 새 열쇠라 자리를 하나 더 쓴다 — 기록 수로 센다(디버깅 2회차 판정 #9: 7,000 > 5,000 이 됐다)
+    if (!Object.hasOwn(prev, key)) { if (newCount + reserved >= ESC_ITEMS_MAX) { overCap += 1; continue; } newCount += 1; }
+    // 정책별 시작 시각 — 처음 그 정책 대상이 된 때부터 센다(다른 정책에서 오래 열려 있던 장애가 새 정책의 가장 높은 단계로 바로 가지 않게 — 3회차 판정 #1).
+    //   돌아온 정책은 그 시각을 그대로(오가도 진행을 잃지 않는다 — 2회차 판정 #1). 옛 기록(정책 열 없음)은 처음 보는 정책이 since · 보낸 줄을 넘겨받는다(업그레이드 연속 — 3회차 판정 #2)
+    //   넘겨받기는 정책 열(pol)과 떼어 본다 — lp 에 있고 · 그 정책 시작 시각이 없고 · 아직 아무도 가져가지 않은 ‘-’ 줄이 있으면(사이에 lp 밖 정책이 한 번 덮어도 — 디버깅 6회차 판정 #3).
+    //   lp 밖 정책은 지금부터 세고 옛 줄(‘’)은 ‘-’ 로 바꿔 둔다(뒤에 오는 lp 정책이 가져가게 — 6회차 판정 #1)
+    const inLp = cur && Array.isArray(cur.lp) && cur.lp.includes(pol.id) && cur.ps?.[pol.id] == null;
+    const legacy = cur && ((!cur.pol && !Object.keys(cur.ps || {}).length && (!Array.isArray(cur.lp) || cur.lp.includes(pol.id))) || (cur.pol === '-' && inLp) || (inLp && cur.sent.some((e) => e[4] === '-')));
+    const ps = { ...(cur?.ps || {}) };
+    if (ps[pol.id] == null) ps[pol.id] = legacy ? cur.since : now;
+    const sent0 = cur ? (legacy ? cur.sent.map((e) => (e[4] && e[4] !== '-' ? e : [e[0], e[1], e[2], e[3], pol.id])) : cur.sent.map((e) => (e[4] ? e : [e[0], e[1], e[2], e[3], '-']))) : [];
+    const it = cur ? { ...cur, sig, sent: sent0, pol: pol.id, ps } : { since: now, sig, sent: [], ackedAt: null, ackBy: '', pol: pol.id, ps };
+    const pk = pkOf(p); if (pk) it.pk = pk;   // 판정 재료 — 열려 있는 동안 늘 새것으로(13c)
     items[key] = it;
     if (it.ackedAt) continue;
-    if (hold && holdKeyOf && hold.has(holdKeyOf(p.agent, p.deviceId))) { held += 1; continue; }
-    const mins = (now - it.since) / 60_000;
+    if (hold && holdKeyOf && hold.has(holdKeyOf(p.agent, p.deviceId))) { held += 1; heldKeys.push(key); continue; }
+    const psince = it.ps[pol.id];
+    const mins = (now - psince) / 60_000;
     let due = -1;
-    pol.steps.forEach((s, i) => { if (mins >= s.afterMin && !stepDone(it.sent, i)) due = i; });
+    pol.steps.forEach((s, i) => { if (mins >= s.afterMin && !stepDone(it.sent, i, pol.id)) due = i; });
     if (due < 0) continue;
     if (sends.length >= maxSends) { deferred += 1; continue; }
-    const skipped = pol.steps.map((_, i) => i).filter((i) => i < due && !stepDone(it.sent, i));
+    const skipped = pol.steps.map((_, i) => i).filter((i) => i < due && !stepDone(it.sent, i, pol.id));
     const step = pol.steps[due];
     const oc = step.oncall ? oncallFor(settings, p.agent, now) : null;
-    sends.push({ key, part: p, policy: pol, step: due, skipped, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
+    const attempt = it.sent.filter((e) => e[0] === due && e[3] === 'fail' && ofPol(e, pol.id)).length + 1;   // 다시 시도 번호 — 채널 억제 열쇠에 넣는다(같은 열쇠면 억제 창에 막혀 다시 시도가 0번이었다 — 판정 #2)
+    // 알림 본문 · 결과 줄에 밝힐 건너뛴 단계 — 이번에 적을 skip(skipped)과, 첫 시도가 안 가 다시 보내는 회차라면 이미 적힌 skip 줄(받는 곳에 간 적 없음)까지(디버깅 9회차 화면 U3)
+    //   보냈으나 받는 곳에 가지 않은 단계(fail · give)는 ‘건너뜀’ 이 아니다 — 따로 밝힌다(9회차 판정 #4)
+    const has = (i, k) => it.sent.some((e) => e[0] === i && e[3] === k && ofPol(e, pol.id));
+    const before = pol.steps.map((_, i) => i).filter((i) => i < due && !has(i, 'ok'));
+    const undeliveredNote = before.filter((i) => has(i, 'fail') || has(i, 'give'));
+    // 안 간 사유(그 단계의 마지막 fail · give 줄 글자) — 보내지 않은 경우(당직 없음 등)도 있어 ‘보냈으나’ 라고 말하지 않는다(10회차 화면 D2)
+    const undeliveredWhy = Object.fromEntries(undeliveredNote.map((i) => { const last = it.sent.filter((e) => e[0] === i && (e[3] === 'fail' || e[3] === 'give') && ofPol(e, pol.id)).at(-1); return [i, shortWhy(last?.[2])]; }));
+    const skippedNote = before.filter((i) => !undeliveredNote.includes(i) && (skipped.includes(i) || has(i, 'skip')));
+    sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, skippedNote, undeliveredNote, undeliveredWhy, since: psince, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
   }
-  return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held };
+  // 열린 장애에 없고 이어받지도 않은 기록 — 닫힘 근거가 있으면 지우고(진짜 닫힘 — 반증 A5) 없으면 그대로 남긴다(닫힘을 모른다 — 13c N1)
+  if (closed != null) for (const [k, v] of notOpen) if (!consumed.has(k) && !closed.has(k) && !Object.hasOwn(items, k)) items[k] = v;
+  return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held, heldKeys };
 }
 /**
  * 보낸 결과를 기록에 적는다(순수 — 새 items). results[i] = { text, delivered:boolean }.
@@ -309,9 +427,10 @@ export function recordSends(items, sends, results, now = Date.now()) {
     const r = results[i] || {};
     if (r.notSent) return;   // 보내기 직전에 확인됨 — 적지 않는다
     const sent = [...it.sent];
-    for (const k of s.skipped) sent.push([k, now, '건너뜀(이 단계 시각이 지난 뒤 처음 본 회차라 더 높은 단계를 보냄)', 'skip']);   // 엔진 정지 · 회차 상한 미룸 모두(반증 B · S2)
-    const fails = sent.filter((e) => e[0] === s.step && e[3] === 'fail').length;
-    sent.push([s.step, now, String(r.text || '').slice(0, 120), r.delivered ? 'ok' : fails + 1 >= ESC_RETRY_MAX ? 'give' : 'fail']);
+    const pol = String(s.policy?.id || '').slice(0, 40);
+    for (const k of s.skipped) sent.push([k, now, '건너뜀(이 단계 시각이 지난 뒤 처음 본 회차라 더 높은 단계를 보냄)', 'skip', pol]);   // 엔진 정지 · 회차 상한 미룸 모두(반증 B · S2)
+    const fails = sent.filter((e) => e[0] === s.step && e[3] === 'fail' && ofPol(e, pol)).length;
+    sent.push([s.step, now, String(r.text || '').slice(0, 120), r.delivered ? 'ok' : fails + 1 >= ESC_RETRY_MAX ? 'give' : 'fail', pol]);
     out[s.key] = { ...it, sent };
   });
   return out;
@@ -333,7 +452,8 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
   const key = partKeyOf(p);
   const cur = Object.hasOwn(st.items, key) ? st.items[key] : null;
   if (cur?.ackedAt) return { ok: true, changed: false };
-  const next = { ...st, items: { ...st.items, [key]: { ...(cur || { since: now, sig: partSigOf(p), sent: [] }), ackedAt: now, ackBy: String(by).slice(0, 80) } } };
+  const pk = pkOf(p);   // 확인 단추가 만든 기록도 판정 재료를 싣는다(가상 전이 — 14c M1)
+  const next = { ...st, items: { ...st.items, [key]: { ...(cur || { since: now, sig: partSigOf(p), sent: [] }), ...(pk ? { pk } : {}), ackedAt: now, ackBy: String(by).slice(0, 80) } } };
   return saveEscalationState(next) ? { ok: true, changed: true } : { ok: false, reason: '진행 기록을 쓰지 못했습니다.' };
 }
 /**
@@ -341,13 +461,49 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
  *   tried(시도했으나 안 간 가장 높은 화면 단계 — step 보다 높을 때만), acked, ackBy?, ackedAt? }.
  *   정책 밖 장애에 ‘1단계(바로)’ · 확인 단추를 붙이지 않게(화면 판독 — 다음 단계가 없는 장애였다).
  */
-export function escalationMarkOf(p, items, settings = null) {
+/**
+ * run = 마지막 회차 { why, heldKeys:Set } — 회차가 보내지 않는 상태(데모 · 부품 장애 점검 꺼짐 · 진행 기록 못 읽음)면 paused 에 그 사유 · 정비 창 보류 장비면 held.
+ *   행 표지가 ‘보냅니다’ 라고 약속하지 않게(디버깅 1회차 화면 U7).
+ */
+// sig → 기록 색인 — 같은 items 객체(한 요청의 모든 행)에 한 번만 만든다(행마다 전부 훑으면 O(행 × 기록) — 5,000 × 5,000 에서 6초 동기 정지 · 10회차 보안 #2)
+//   후보는 엔진(escalationPlan staleBySig)과 같게 — **지금 열린 장애의 기록은 빼고** 같은 sig 가 여럿이면 마지막 것(10회차 화면 D3: 다른 열린 장애의 확인을 가져왔다)
+const _sigIdx = new WeakMap();
+function sigIndexOf(items, openKeys = null) {
+  const hit = _sigIdx.get(items);
+  if (hit && hit.openKeys === openKeys) return hit.m;
+  const m = new Map();
+  for (const [k, v] of Object.entries(items)) if (v?.sig && !(openKeys instanceof Set && openKeys.has(k))) m.set(v.sig, v);
+  _sigIdx.set(items, { openKeys, m });
+  return m;
+}
+export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
-  const ok = (it?.sent || []).filter((e) => e[3] === 'ok').map((e) => e[0]);
-  const bad = (it?.sent || []).filter((e) => e[3] === 'fail' || e[3] === 'give').map((e) => e[0]);
+  // 설정을 못 읽은 동안은 정책 · 대상 여부를 모른다 — ‘꺼짐 · 정책 밖’ 이 아니라 그 사유로(확인은 된다 — 진행 기록은 읽힌다 · 디버깅 8회차 판정 #2)
+  //   정책을 모르므로 ‘N단계까지 갔다’ 도 말하지 않는다(지난 회차 정책으로 세면 엔진 · 정상 표지와 다른 수가 됐다 — 디버깅 9회차 화면 U2)
+  //   못 읽는 동안은 회차가 키 이전(같은 sig)을 하지 않으므로 표지가 sig 로도 찾는다 — 확인한 장애가 ‘확인 안 함’ 으로 보이지 않게(9회차 판정 #3ⓑ)
+  if (run?.why === 'settings-unreadable') {
+    let rec = it;
+    if (!rec && items) {
+      const idx = sigIndexOf(items, run?.openKeys || null); const sg = partSigOf(p);
+      rec = idx.get(sg) || null;
+      if (rec && run?.openKeys instanceof Set) idx.delete(sg);   // 후보 하나는 장애 하나에만(엔진 staleBySig.delete 와 같게 — 10회차 판정 #1) · 요청마다 새 색인(openKeys 가 요청마다 새 Set)
+    }
+    return { ackId: ackIdOf(p), covered: false, step: null, acked: !!rec?.ackedAt, ...(rec?.ackedAt ? { ackedAt: rec.ackedAt, ackBy: rec.ackBy } : {}), paused: 'settings-unreadable' };
+  }
+  const curPol = (settings?.enabled ? policyFor(settings, p)?.id : '') || it?.pol || '';
+  // 지금 정책의 단계만 — 다른 정책에 간 단계를 이 정책의 진행으로 말하지 않는다(디버깅 2회차 판정 #1). 정책 열이 없는 옛 줄은 첫 회차가 넘겨받기 전까지 지금 정책 것으로 보인다(4회차 화면 E1)
+  //   옛 줄 · ‘-’ 줄은 엔진이 넘겨줄 정책(lp 에 있고 아직 시작 시각이 없는 정책 · lp 가 없으면 어느 정책이든)에만 센다 — 표지와 엔진이 같은 조건(디버깅 6회차 판정 #1 · #3)
+  const lpHas = Array.isArray(it?.lp) && it.lp.includes(curPol) && it?.ps?.[curPol] == null;
+  const mine = (it?.sent || []).filter((e) => ofPol(e, curPol) || (!e[4] && (!Array.isArray(it?.lp) || lpHas)) || (e[4] === '-' && lpHas));
+  const ok = mine.filter((e) => e[3] === 'ok').map((e) => e[0]);
+  const bad = mine.filter((e) => e[3] === 'fail' || e[3] === 'give').map((e) => e[0]);
   const step = ok.length ? Math.max(...ok) + 2 : null;
   const tried = bad.length && Math.max(...bad) + 2 > (step ?? 1) ? Math.max(...bad) + 2 : null;
   // 그 단계를 그만뒀는가(다시 시도 상한) — 화면이 ‘다시 시도 중’ 과 ‘그만둠’ 을 가른다(반증 B1)
-  const gaveUp = tried != null && (it?.sent || []).some((e) => e[0] === tried - 2 && e[3] === 'give');
-  return { ackId: ackIdOf(p), covered: !!(settings?.enabled && policyFor(settings, p)), step, ...(tried ? { tried, ...(gaveUp ? { gaveUp: true } : {}) } : {}), acked: !!it?.ackedAt, ...(it?.ackedAt ? { ackedAt: it.ackedAt, ackBy: it.ackBy } : {}) };
+  const gaveUp = tried != null && mine.some((e) => e[0] === tried - 2 && e[3] === 'give');
+  const covered = !!(settings?.enabled && policyFor(settings, p));
+  const why = covered && typeof run?.why === 'string' && run.why && run.why !== 'off' ? run.why : '';
+  const held = covered && !why && run?.heldKeys instanceof Set && run.heldKeys.has(partKeyOf(p));
+  return { ackId: ackIdOf(p), covered, step, ...(tried ? { tried, ...(gaveUp ? { gaveUp: true } : {}) } : {}), acked: !!it?.ackedAt, ...(it?.ackedAt ? { ackedAt: it.ackedAt, ackBy: it.ackBy } : {}),
+    ...(why ? { paused: why } : {}), ...(held ? { held: true } : {}) };
 }

@@ -70,6 +70,11 @@ jobs:
       - name: 웹 린트 (eslint — 훅 규칙 게이트)
         run: npm --prefix web run lint
 
+      # v3.52(디버깅 6회차 보안 축 제안 · 사용자 결정): 서버에는 린트가 없어 import 누락(secretScan safeLoadText — 손상 파일 하나로 평문 점검 500)이
+      #   21회차부터 숨어 있었다. 정의되지 않은 이름(no-undef)만 막는다 — 웹의 eslint 를 쓰므로 web 의존성 설치 뒤에 돈다.
+      - name: 서버 린트 (eslint — 정의되지 않은 이름 게이트)
+        run: npm --prefix server run lint
+
       - name: 웹 테스트 (vitest)
         run: npm --prefix web run test
 

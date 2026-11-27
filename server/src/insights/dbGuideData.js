@@ -3210,7 +3210,7 @@ export const DB_GUIDE_DATA = {
     "settings": [
       "설정 › 인프라 등록 › iDRAC 서버 등록: 전력을 읽을 서버 목록",
       "환경 변수 ‘IDRAC_POLL_INTERVAL_MS’: 수집 주기(기본 60초, 하한 5초)",
-      "환경 변수 ‘IDRAC_POLL_CONCURRENCY’: 동시 조회 수(기본 16)",
+      "환경 변수 ‘IDRAC_POLL_CONCURRENCY’: 동시 조회 수(기본 16 — 장비 이벤트 뒤 다시 읽기는 이 상한 밖 전용 자리 1개를 더 씁니다)",
       "환경 변수 ‘IDRAC_RETENTION_DAYS’: 보관 일수(기본 90, 0 이면 전부 보관)",
       "환경 변수 ‘IDRAC_RAW_RETENTION_DAYS’: 원본만 보관할 일수(기본 0 = 위 값과 같음)",
       "환경 변수 ‘IDRAC_DB_PATH’: 파일 위치 직접 지정",

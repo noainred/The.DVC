@@ -15,7 +15,8 @@ import { sanitizeHwLog } from '../idrac/hwLog.js';
 import { capStr } from '../util/capStr.js';   // 상주 문자열 절단은 capStr 하나(TIM2607-01)
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
-const TIMEOUT_MS = reqTimeoutMs(process.env.BM_HWLOG_PULL_TIMEOUT_MS, 40_000, { min: 10_000 });
+// 장비 시한(30초) < 당김 < 브라우저(60초) — 범위를 그 사이로 닫는다(디버깅 1회차 엣지 #8)
+const TIMEOUT_MS = reqTimeoutMs(process.env.BM_HWLOG_PULL_TIMEOUT_MS, 40_000, { min: 35_000, max: 55_000 });
 export const hwLogBodyOk = (b) => isObj(b) && b.ok === true && Array.isArray(b.rows);
 
 /**
@@ -31,6 +32,10 @@ export async function pullEdgeHwLog(agent, { id = '', k = '' } = {}) {
   if (!r.ok) {
     // 엣지가 ‘이 엣지의 서버가 아님’ 이라 답했으면(404 + code) 구버전과 가른다
     if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'not-found') return { ok: false, kind: 'not-found', reason: '그 엣지의 등록부에서 이 서버를 찾지 못했습니다.' };
+    // 겹침(409) · 등록부 못 읽음(503)은 전원 당김과 같은 갈래로(디버깅 2회차 엣지 #6)
+    if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'ambiguous') return { ok: false, kind: 'edge-ambiguous', reason: '그 엣지에 이 서버로 보이는 켜진 등록이 둘 이상입니다(같은 서비스 태그) — 어느 장비인지 몰라 읽지 않았습니다.' };
+    if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'registry-unreadable') return { ok: false, kind: 'edge-registry', reason: '그 엣지가 iDRAC 등록부를 읽지 못했습니다.' };
+    if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'busy') return { ok: false, kind: 'edge-busy', reason: '그 엣지에서 다른 이벤트 로그 읽기가 상한만큼 진행 중입니다.' };
     return { ok: false, kind: r.kind, reason: r.reason };
   }
   const body = sanitizeHwLog(r.body);

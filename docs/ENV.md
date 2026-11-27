@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **763개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **769개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-26)
@@ -666,11 +666,12 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (59)
+## 중앙(위임 수집) (60)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BM_HWLOG_PULL_TIMEOUT_MS` | `40000` |  | central/bmHwLogPull.js |
+| `BM_POWER_PULL_TIMEOUT_MS` | `45000` |  | central/bmPowerPull.js |
 | `BMUSAGE_PULL_STALE_MS` | `1800000` |  | central/bmUsageEdgePull.js |
 | `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmCapacityPull.js, central/bmComparePull.js 외 6 |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
@@ -744,11 +745,15 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (37)
+## API 라우트 (41)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BAREOS_BUNDLE_BASE_URL` | `''` |  | bareos/install/bundle.js, routes/api/bareosInstall.js |
+| `BM_POWER_EDGE_DISABLE` | `기본 아님('true' 일 때만 적용)` |  | routes/collector.js |
+| `BM_POWER_EDGE_ENABLE` | `기본 적용('true' 로 끄기)` |  | routes/collector.js |
+| `BM_POWER_EDGE_FORCE` | `기본 적용('true' 로 끄기)` |  | routes/collector.js |
+| `BM_POWER_EDGE_MAX` | `30` |  | routes/collector.js |
 | `BMUSAGE_PULL_BUDGET_MS` | `150000` |  | routes/api/bmUsage.js |
 | `BMUSAGE_PULL_CONCURRENCY` | `4` |  | routes/api/bmUsage.js |
 | `CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS` |  |  | routes/central.js |
@@ -810,10 +815,11 @@
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 | `HZSESS_NO_ENDPOINT_BACKOFF_MS` | `21600000` |  | horizon/sessionPoller.js |
 
-## iDRAC/전력 (17)
+## iDRAC/전력 (18)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `BM_POWER_DEVICE_TIMEOUT_MS` | `30000` |  | idrac/power.js |
 | `BMUSAGE_MAX_REPORTS` | `6` |  | idrac/redfish.js |
 | `BMUSAGE_REPORT_TTL_MS` | `21600000` |  | idrac/redfish.js |
 | `BMUSAGE_SENSOR_TTL_MS` | `21600000` |  | idrac/redfish.js |
@@ -952,4 +958,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 763
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 769

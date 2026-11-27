@@ -25,6 +25,8 @@ export function manualPollMessage(r) {
   // 않는다**(v2.602 powerNotStored). '성공' 으로만 세면 그 서버의 전력 이력이 비는 이유를 알 수 없다 — 개수와 함께 amber.
   const partial = Number(lr.powerPartial) > 0 ? Number(lr.powerPartial) : 0;
   const part = partial ? ` · 부분 전력(적재 안 함) ${partial}` : '';
+  // 장비 이벤트 읽기가 그때 읽던 서버는 이 주기에 건너뛴다(같은 iDRAC 세션 겹침 방지 — 그 서버는 이벤트 읽기가 방금 읽었다). 성공 · 실패에 넣지 않고 따로 센다(디버깅 6회차 화면 G3)
+  const evb = Number(lr.eventBusy) > 0 ? ` · 이벤트 읽기 중이라 건너뜀 ${Number(lr.eventBusy)}` : '';
   const tone = lr.failed ? 'red' : (partial ? 'amber' : 'green');
-  return { ok: !lr.failed, tone, text: `수동 1회 수집 — 성공 ${lr.ok ?? 0} · 실패 ${lr.failed ?? 0}${part}${auth}` };
+  return { ok: !lr.failed, tone, text: `수동 1회 수집 — 성공 ${lr.ok ?? 0} · 실패 ${lr.failed ?? 0}${part}${auth}${evb}` };
 }

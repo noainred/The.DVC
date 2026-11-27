@@ -137,6 +137,7 @@ export function registerStorageRoutes(centralRouter, deps) {
       return;
     }
     if (!r.ok) return res.status(r.refused ? 429 : 400).json(r); // v2.605(CEN2605-02): 엣지 수 상한 거절은 429(형제 수신과 같다)
+    if (req.body?.urgent === true) { try { (await import('../../partfault/poller.js')).runPartFaultsSoon('edge-event'); } catch { /* 판정 예약 실패가 수신을 막지 않는다 */ } }   // v3.52 ⑬ 장비 이벤트 뒤 보고 — 곧 판정(엣지 #5)
     // 응답에 중앙의 스위치 상태를 실어 보낸다 — 엣지가 '보냈는데 중앙이 꺼져 있다' 를 알 수 있게.
     const { partFaultEnabled } = await import('../../partfault/settings.js');
     // v2.607(감사 EDGE2607-02): 상한으로 버린 파트 수도 돌려준다 — 예전에는 중앙 보관분에만 있어 엣지가 알 수 없었다.

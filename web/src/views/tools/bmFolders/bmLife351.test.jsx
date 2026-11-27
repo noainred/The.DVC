@@ -47,7 +47,7 @@ describe('SSD 잔여 수명 — 글자', () => {
 describe('메모리 교정 오류 경고 — 글자', () => {
   it('슬롯별 · 덮었으면 기간 건수 · 덮지 못했으면 ‘읽은 기록 안’ 건수(B8) · 0 을 없음으로 쓰지 않음 · covered 가 없으면 덮지 못함(M04)', () => {
     const v = memCeView({ covered: true, days: 30, total: 3, slots: [['A1', 0], ['B3', 2]], unknownSlot: 1 });
-    expect([v.head, v.slots, v.unknown, v.note]).toEqual(['지난 30일 경고 기록 3건', [{ slot: 'A1', n: 0 }, { slot: 'B3', n: 2 }], 1, '']);
+    expect([v.head, v.slots, v.unknown, v.note]).toEqual(['지난 30일 경고 기록 3건', [{ slot: 'A1', n: 0, u: 0 }, { slot: 'B3', n: 2, u: 0 }], 1, '']);
     const p = memCeView({ covered: false, days: 30, total: 0, slots: [['A1', 0]], unknownSlot: 0 });
     expect(p.head).toBe('읽은 기록 안에는 경고 기록 없음'); expect(p.note).toContain('‘없음’ 이 아닙니다');
     expect(memCeView({ covered: false, days: 30, total: 3, slots: [] }).head).toBe('읽은 기록 안 경고 기록 3건(지난 30일을 다 읽지 못함)');
