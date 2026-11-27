@@ -283,13 +283,13 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   // v3.57.0 묶음 B 반증 F2(재현): 주소 · 담당 노드를 고친 뒤 깨우기 동기화가 예전 서버의 밀린 표본을 실어 와 지운 지금 값 · OS 를 다시 채우고 '재부팅' 사건을 만들었다.
   //   엣지는 수집기를 연 기계 열쇠(ep)를 값마다 붙인다 — 지금 열쇠와 다르면 받지 않는다(oldEp). 열쇠가 없는 옛 엣지는 바뀐 뒤 동기화 두 번 받지 않는다(store.edgeFenced).
   const epNow = new Map([...mine].map(([id, t]) => [id, store.machineKeyOf(t)]));
-  const oldEp = (id, ep) => (typeof ep === 'string' && store.MACHINE_KEY_RE.test(ep) ? ep !== epNow.get(id) : store.edgeFenced(id, now));
-  const skipOld = (id, ep) => { if (!oldEp(id, ep)) return false; got.oldEp = (got.oldEp || 0) + 1; return true; };
+  const oldEp = (id, ep, hello = null) => (typeof ep === 'string' && store.MACHINE_KEY_RE.test(ep) ? ep !== epNow.get(id) : store.edgeFenced(id, now, hello));
+  const skipOld = (id, ep, hello = null) => { if (!oldEp(id, ep, hello)) return false; got.oldEp = (got.oldEp || 0) + 1; return true; };
   for (const x of arr(b.samples, MAX_SAMPLES)) {
     if (!isObj(x) || typeof x.id !== 'string') { got.bad += 1; continue; }
     if (!mine.has(x.id)) { got.foreign += 1; continue; }
     if (!accepting.has(x.id)) { got.idle += 1; continue; }
-    if (skipOld(x.id, x.ep)) continue;
+    if (skipOld(x.id, x.ep, isObj(x.hello) ? cleanHello(x.hello) : null)) continue;
     const c = (perTarget.get(x.id) || 0) + 1; perTarget.set(x.id, c);
     if (c > MAX_PER_TARGET) { got.bad += 1; continue; }
     const ts = toCentral(x.t); const s = cleanSample(x.s);
@@ -317,8 +317,12 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   }
   for (const x of arr(b.tests, 50)) {
     if (!isObj(x) || !mine.has(x.id) || !isObj(x.result)) continue;
-    // 시험은 접속처 전체(노드 · 주소 · 포트 · 계정)의 결과 — 엣지가 돌려준 표지가 지금 접속처와 다르면 예전 접속처의 것이다(옛 엣지는 표지 없음 — 예전처럼 받는다)
-    if (typeof x.ep === 'string' && /^[a-f0-9]{12}$/.test(x.ep) && x.ep !== endpointKey(mine.get(x.id))) { got.oldEp = (got.oldEp || 0) + 1; continue; }
+    // 시험은 접속처 전체(노드 · 주소 · 포트 · 계정)의 결과 — 엣지가 돌려준 표지가 지금 접속처와 다르면 예전 접속처의 것이다
+    //   반증 EDGE-F2: 버린 결과 때문에 새 시험이 60초(다시 배달 간격) 늦지 않게 바로 다시 배달한다(엣지는 같은 서버의 시험이 돌고 있으면 새 시험을 건너뛴다) ·
+    //   표지가 없는 옛 엣지: 접속처를 바꿀 때 엣지에서 돌던 시험이 있었으면 그 뒤 첫 결과 하나는 그것이다(store.takeStaleTest — 시험은 표본보다 늦게 끝나 울타리만으로는 못 막는다) ·
+    //   기계가 바뀐 직후(울타리 동안)의 결과도 받지 않는다 — 예전 주소의 '연결됨' 이 새 주소의 결과로 남지 않게
+    const tagged = typeof x.ep === 'string' && /^[a-f0-9]{12}$/.test(x.ep);
+    if (tagged ? x.ep !== endpointKey(mine.get(x.id)) : (store.takeStaleTest(x.id, now) || store.edgeFenced(x.id, now))) { got.oldEp = (got.oldEp || 0) + 1; store.redeliverTest(x.id); continue; }
     const r = x.result;
     store.putTestResult(x.id, { ok: r.ok === true, kind: enumOr(r.kind, TEST_KINDS, 'unreachable'), error: r.error ? strOf(r.error, 240) : '', hello: cleanHello(r.hello), ms: n(r.ms), via: 'edge' }, now);
   }

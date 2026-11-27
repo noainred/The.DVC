@@ -256,16 +256,21 @@ test('E4 — 엣지 워커: 받은 시험의 접속처 표지를 결과에 그�
   const out = sub(`const http = await import('node:http');
     const worker = await import(${J('agent/focusMonWorker.js')}); const mock = await import(${J('focusmon/mock.js')}); const { config } = await import(${J('config.js')});
     const id = mock.DEMO_TARGETS[0].id; const EP = 'c'.repeat(12);
-    const srv = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, now: Date.now(), validUntil: Date.now() + 30000, targets: [], tests: [{ id, host: '10.10.20.11', port: 22, username: 'dvcmon', ep: EP }] })); }); });
+    const MK = 'e'.repeat(16);
+    const zlib = await import('node:zlib'); const sent = []; const sentT = [];
+    const srv = http.createServer((req, res) => { const cs = []; req.on('data', (c) => cs.push(c)); req.on('end', () => {
+      try { let b = Buffer.concat(cs); if (req.headers['content-encoding'] === 'gzip') b = zlib.gunzipSync(b); const j = JSON.parse(b.toString('utf8')); for (const x of j.samples || []) sent.push(x.ep || '-'); for (const x of j.tests || []) sentT.push(x); } catch { /* */ }
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, now: Date.now(), validUntil: Date.now() + 30000, targets: [{ id, host: '10.10.20.11', port: 22, username: 'dvcmon', interval: 1, procEvery: 5, ep: MK }], tests: [{ id, host: '10.10.20.11', port: 22, username: 'dvcmon', ep: EP }] })); }); });
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     config.agent.centralUrl = 'http://127.0.0.1:' + srv.address().port; config.agent.centralToken = 'tok'; config.agent.name = 'edge-t';
     const r = await worker.syncOnce();
-    await new Promise((x) => setTimeout(x, 200));
-    const tests = worker._bufForTest().tests;
+    await new Promise((x) => setTimeout(x, 1300));
+    const tests = [...sentT, ...worker._bufForTest().tests]; const sEps = [...new Set([...sent, ...worker._bufForTest().samples.map((x) => x.ep || '-')])];
     worker.stopFocusMonWorker(); srv.close();
-    console.log(JSON.stringify({ ok: r?.ok ?? null, tests: tests.map((x) => ({ id: x.id === id, ep: x.ep || null, ok: x.result?.ok ?? null })) }));
+    console.log(JSON.stringify({ ok: r?.ok ?? null, tests: [...new Set(tests.map((x) => JSON.stringify({ id: x.id === id, ep: x.ep || null, ok: x.result?.ok ?? null })))].map((x) => JSON.parse(x)), sEps }));
     process.exit(0);`, { DATA_SOURCE: 'mock' });
   assert.equal(out.ok, true); assert.deepEqual(out.tests, [{ id: true, ep: 'c'.repeat(12), ok: true }]);
+  assert.deepEqual(out.sEps, ['e'.repeat(16)], '응답 대상의 열쇠를 수집기에 넘겨 표본에 붙인다');
 });
 
 test('K5 — 기계를 바꾼 직후 판정 보류의 까닭은 \'새 서버 값이 아직 없음\'(수집 끊김으로 단정하지 않는다)', () => {
@@ -325,13 +330,43 @@ test('E — 엣지 값마다 기계 열쇠(ep): 예전 서버 것은 받지 않�
     const epT0 = endpointKey(before); const epT1 = endpointKey(moved.target);
     edge.handleEdgeSync('edge-e', { sentAt: now, tests: [{ id, ep: epT0, result: { ok: true, kind: 'ok' } }] }, now); const tOld = store.testOf(id)?.result?.ok ?? null;
     edge.handleEdgeSync('edge-e', { sentAt: now, tests: [{ id, ep: epT1, result: { ok: false, kind: 'auth' } }] }, now); const tNew = store.testOf(id)?.result?.kind ?? null;
-    console.log(JSON.stringify({ ep0, ep1, same: ep0 === ep1, keyOk: ep1 === store.machineKeyOf(moved.target), afterOld, newer, tOld, tNew }));`, { DATA_SOURCE: 'live' });
+    const mk = { nodeDiff: store.machineKeyOf({ agent: 'a', host: 'h' }) !== store.machineKeyOf({ agent: 'b', host: 'h' }), caseSame: store.machineKeyOf({ agent: 'Edge', host: 'h' }) === store.machineKeyOf({ agent: 'edge', host: 'h' }), acct: store.machineKeyOf({ agent: 'a', host: 'h', username: 'x', port: 1 }) === store.machineKeyOf({ agent: 'a', host: 'h', username: 'y', port: 2 }) };
+    console.log(JSON.stringify({ ep0, ep1, same: ep0 === ep1, keyOk: ep1 === store.machineKeyOf(moved.target), afterOld, newer, tOld, tNew, mk }));`, { DATA_SOURCE: 'live' });
   assert.match(out.ep0, /^[a-f0-9]{16}$/); assert.equal(out.same, false); assert.equal(out.keyOk, true);
+  assert.deepEqual(out.mk, { nodeDiff: true, caseSame: true, acct: true }, '기계 열쇠 = 노드(대소문자 무시) + 주소 · 계정 · 포트는 넣지 않는다');
   assert.deepEqual({ latest: out.afterOld.latest, hello: out.afterOld.hello, st: out.afterOld.st, load: out.afterOld.load, procs: out.afterOld.procs }, { latest: false, hello: null, st: null, load: null, procs: false },
     '수정 전: 깨우기 동기화의 예전 서버 표본이 지운 지금 값 · OS 를 다시 채웠다(cpu 95 · hello old)');
   assert.equal(out.afterOld.acc.oldEp, 5, '표본 2 · 프로세스 1 · 상태 1 · 부하 1'); assert.equal(out.afterOld.acc.samples, 0);
   assert.deepEqual(out.newer, { cpu: 5, acc: 1 });
   assert.equal(out.tOld, null, '예전 접속처의 시험 결과는 새 접속처의 것이 아니다'); assert.equal(out.tNew, 'auth');
+});
+
+test('E6 — 예전 접속처의 시험 결과를 버리면 지금 시험을 바로 다시 배달 · 옛 엣지(표지 없음)의 결과는 울타리 동안 받지 않는다(반증 EDGE-F2)', () => {
+  const out = sub(`const registry = await import(${J('focusmon/registry.js')}); const store = await import(${J('focusmon/store.js')});
+    const edge = await import(${J('central/focusMonEdge.js')}); const svc = await import(${J('focusmon/service.js')}); const { endpointKey } = await import(${J('focusmon/audit/service.js')});
+    const t = registry.addTarget({ name: 'e-6', host: '10.7.2.1', port: 22, username: 'dvcmon', agent: 'edge-t' }, { agents: ['edge-t'] }).target; const id = t.id;
+    let now = Date.now();
+    store.requestEdgeTest(id, 'edge-t', now);
+    const r0 = edge.handleEdgeSync('edge-t', { sentAt: now }, now); const ep0 = r0.tests[0]?.ep;
+    const moved = registry.updateTarget(id, { host: '10.7.2.2' }, { agents: ['edge-t'] }).target;
+    now += 1000; svc.targetsEndpointChanged([[t, moved]], now);
+    store.requestEdgeTest(id, 'edge-t', now);
+    const r1 = edge.handleEdgeSync('edge-t', { sentAt: now }, now); const d1 = r1.tests.map((x) => x.ep);   // 새 시험 배달(엣지는 예전 시험이 돌고 있어 건너뜀)
+    now += 2000;
+    const r2 = edge.handleEdgeSync('edge-t', { sentAt: now, tests: [{ id, ep: ep0, result: { ok: true, kind: 'ok' } }] }, now);   // 예전 접속처 결과 도착 → 버림
+    const again = r2.tests.map((x) => x.ep);
+    const res1 = store.testOf(id)?.result ?? null;
+    // 옛 엣지(표지 없음): 같은 흐름 — 바꿀 때 돌던 시험의 결과는 울타리가 풀린 뒤에 와도 버리고, 그다음 결과(새 시험)는 받는다
+    const u = registry.addTarget({ name: 'e-7', host: '10.7.3.1', port: 22, username: 'dvcmon', agent: 'edge-t' }, { agents: ['edge-t'] }).target;
+    store.requestEdgeTest(u.id, 'edge-t', now); edge.handleEdgeSync('edge-t', { sentAt: now }, now);
+    const um = registry.updateTarget(u.id, { host: '10.7.3.2' }, { agents: ['edge-t'] }).target;
+    now += 1000; svc.targetsEndpointChanged([[u, um]], now); store.requestEdgeTest(u.id, 'edge-t', now);
+    for (let i = 0; i < 4; i++) { now += 2000; edge.handleEdgeSync('edge-t', { sentAt: now }, now); }   // 울타리가 풀릴 만큼 동기화
+    now += 2000; edge.handleEdgeSync('edge-t', { sentAt: now, tests: [{ id: u.id, result: { ok: true, kind: 'ok' } }] }, now);
+    const oldRes = store.testOf(u.id)?.result ?? null;
+    now += 2000; edge.handleEdgeSync('edge-t', { sentAt: now, tests: [{ id: u.id, result: { ok: false, kind: 'auth' } }] }, now);
+    console.log(JSON.stringify({ ep0ok: ep0 === endpointKey(t), d1: d1.length === 1 && d1[0] === endpointKey(moved), again: again.length === 1 && again[0] === endpointKey(moved), oldEp: r2.accepted.oldEp, res1, oldRes, newRes: store.testOf(u.id)?.result?.kind ?? null }));`, { DATA_SOURCE: 'live' });
+  assert.deepEqual(out, { ep0ok: true, d1: true, again: true, oldEp: 1, res1: null, oldRes: null, newRes: 'auth' }, '수정 전: 새 시험이 60초 뒤에야 다시 배달됐다 · 옛 엣지가 늦게 보낸 예전 접속처 결과가 새 주소의 결과로 남았다');
 });
 
 test('E2 — 표지를 싣지 않는 옛 엣지: 기계가 바뀐 뒤 그 엣지의 동기화 두 번은 받지 않고 세 번째부터 받는다 · 바뀐 적 없으면 그대로', () => {
@@ -348,6 +383,26 @@ test('E2 — 표지를 싣지 않는 옛 엣지: 기계가 바뀐 뒤 그 엣지
     one(96); one(97); one(5);
     console.log(JSON.stringify({ got, cpu: store.latestOf(id)?.sample?.cpu?.pct ?? null }));`, { DATA_SOURCE: 'live' });
   assert.deepEqual(out.got, [2, 1, 1, 2], '바뀐 대상만 두 번 거른다(다른 대상은 그대로)'); assert.equal(out.cpu, 5);
+});
+
+test('E7 — 옛 엣지 울타리: 표본의 호스트 이름으로 예전 서버를 가른다(응답이 닿지 않아 두 번이 모자란 경우 — 반증 EDGE-F1) · 같은 이름 복제는 상한 뒤 푼다', () => {
+  const out = sub(`const registry = await import(${J('focusmon/registry.js')}); const store = await import(${J('focusmon/store.js')});
+    const edge = await import(${J('central/focusMonEdge.js')}); const svc = await import(${J('focusmon/service.js')});
+    const mk = (name, host) => registry.addTarget({ name, host, port: 22, username: 'dvcmon', agent: 'edge-h' }, { agents: ['edge-h'] }).target;
+    const a = mk('h-a', '10.8.0.1'); const b = mk('h-b', '10.8.0.2');
+    store.startSession({ targets: [a.id, b.id], interval: 2, mode: 'watch', by: 't' });
+    let now = Date.now();
+    const one = (id, host) => { now += 2000; return edge.handleEdgeSync('edge-h', { sentAt: now, samples: [{ id, t: now - 100, s: { cpu: { pct: 1 } }, hello: { hostname: host, isLinux: true } }] }, now).accepted.samples; };
+    one(a.id, 'old-db'); one(b.id, 'clone');
+    for (const [t, h] of [[a, '10.8.0.11'], [b, '10.8.0.12']]) { const m = registry.updateTarget(t.id, { host: h }, { agents: ['edge-h'] }).target; svc.targetsEndpointChanged([[t, m]], now); }
+    const ga = []; for (let i = 0; i < 4; i++) ga.push(one(a.id, 'old-db'));   // 응답이 닿지 않아 엣지가 계속 예전 서버를 본다
+    ga.push(one(a.id, 'new-db')); ga.push(one(a.id, 'old-db'));             // 새 서버가 오면 푼다(그 뒤는 막지 않는다 — 엣지가 새 접속처를 적용했다)
+    const gb = []; for (let i = 0; i < 12; i++) gb.push(one(b.id, 'clone'));  // 같은 이름(복제) — 상한 뒤 푼다
+    console.log(JSON.stringify({ ga, gb }));`, { DATA_SOURCE: 'live' });
+  assert.deepEqual(out.ga, [0, 0, 0, 0, 1, 1], '수정 전: 동기화 두 번 뒤 예전 서버 표본을 받았다');
+  // 울타리는 바뀐 뒤 그 엣지의 동기화 수로 센다 — 위 a 의 6번이 이미 지났으므로 b 는 상한(10) − 6 = 4번 뒤부터 받는다
+  assert.equal(out.gb.indexOf(1), 4, `같은 이름(복제)은 바뀐 뒤 동기화 ${10}번이 지나면 받는다 — ${out.gb}`);
+  assert.ok(out.gb.slice(4).every((x) => x === 1));
 });
 
 test('E3 — 수집기 묶음 · 엣지 워커: 값마다 열쇠를 붙인다 · 같은 접속처에 열쇠만 바뀌면 다시 열지 않고 바꿔 붙인다', async () => {

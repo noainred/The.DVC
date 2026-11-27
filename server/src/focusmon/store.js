@@ -732,6 +732,15 @@ export function pendingTestsFor(agent, now = Date.now(), { busy = null } = {}) {
   for (const id of out) TESTS.get(id).deliveredAt = now;
   return out;
 }
+/** 예전 접속처의 결과를 버렸다 — 지금 시험(결과 없음)을 다음 동기화에 다시 배달한다(60초 기다리지 않게 · v3.57.0 반증 EDGE-F2). */
+export function redeliverTest(id) { const x = TESTS.get(String(id)); if (x && !x.result) x.deliveredAt = 0; }
+/** 접속처를 바꿀 때 엣지에서 돌고 있던 시험(시각) — 표지 없는 결과 하나를 그것으로 보고 버린다(시험 대기열 수명 안에서 한 번). */
+const STALE_TEST = new Map();
+export function takeStaleTest(id, now = Date.now()) {
+  const at = STALE_TEST.get(String(id)); if (at == null) return false;
+  STALE_TEST.delete(String(id));
+  return now - at < EDGE_TEST_TTL_MS && now >= at;
+}
 export function putTestResult(id, result, now = Date.now()) {
   const x = TESTS.get(String(id));
   TESTS.set(String(id), { ...(x || { agent: '', requestedAt: now }), result, at: now });
@@ -762,6 +771,8 @@ export function takeEdgeRetries(agent, now = Date.now()) {
  */
 export function forgetTargetState(id, { machineChanged = false, now = Date.now() } = {}) {
   const k = String(id);
+  // 반증 EDGE-F2: 엣지에 배달했는데 결과가 아직 없던 시험(예전 접속처로 돌고 있다) — 표지 없는 옛 엣지가 보낼 그 결과 하나를 새 접속처의 것으로 받지 않게 적어 둔다
+  const tx = TESTS.get(k); if (tx && tx.deliveredAt && !tx.result) { STALE_TEST.set(k, now); if (STALE_TEST.size > 5000) STALE_TEST.delete(STALE_TEST.keys().next().value); }
   ST.delete(k); TESTS.delete(k); RETRIES.delete(k);
   for (const sk of [...STATUS_EV_AT.keys()]) if (sk.startsWith(`${k}|`)) STATUS_EV_AT.delete(sk);
   const e = T.get(k); if (e) { e.lastUp = undefined; e.lastUpAt = undefined; } // 반증 F9 — 접속처가 바뀌면 옛 서버의 가동 시간으로 '재부팅' 을 만들지 않게
@@ -769,11 +780,12 @@ export function forgetTargetState(id, { machineChanged = false, now = Date.now()
   // 전체 점검 29회차 F1(재현): v3.16.0 의 커널 메시지 기준(KMT 부팅 id · 누계) · 읽기 상태(KM) · OOM 상한(KMR)과 hello(OS · 코어)가 남아,
   //   새 서버의 첫 확인이 그 서버 버퍼의 오류 전부를 '커널 오류 N줄(재부팅 뒤 버퍼)' 사건으로 적고 상세 머리글에 예전 서버의 OS 가 보였다.
   KM.delete(k); KMT.delete(k); KMR.delete(k);
+  const oldHost = typeof e?.hello?.hostname === 'string' && e.hello.hostname ? e.hello.hostname : null;   // 옛 엣지 울타리가 예전 서버 표본을 가르는 데 쓴다(아래)
   if (e) e.hello = null;
   if (machineChanged) {
     const x = e || entry(k);
     x.resetAt = Math.max(x.resetAt || 0, now); x.latest = null; x.latestProcs = null;
-    EDGE_FENCE.set(k, { at: now, syncs: 0 });
+    EDGE_FENCE.set(k, { at: now, syncs: 0, oldHost });
     if (EDGE_FENCE.size > 5000) EDGE_FENCE.delete(EDGE_FENCE.keys().next().value);
   }
 }
@@ -789,18 +801,26 @@ export function machineKeyOf(t) {
 /** 표지 형식(엣지가 돌려보내는 값 — 이 밖은 표지 없음으로 본다). */
 export const MACHINE_KEY_RE = /^[a-f0-9]{16}$/;
 /**
- * 표지를 싣지 않는 옛 엣지의 울타리 — 기계가 바뀐 뒤 그 대상을 맡은 엣지의 **동기화 두 번**(바뀐 뒤 첫 동기화 본문 · 그 응답을 기다리는 사이 모인 것)은
- * 그 대상의 표지 없는 값을 받지 않는다(새 서버 표본 몇 초를 잃을 수 있다 — 옛 엣지만 · 섞이는 것보다 낫다).
- * 반증 SD-5(재현): 처음 판은 2분이 지나면 저절로 풀려, 회선이 끊긴 사이 주소를 고치면 다시 붙은 엣지의 밀린 예전 서버 표본(시각은 경계 뒤로 옮겨진다)을 받았다 —
- *   이제는 **동기화 횟수로만** 푼다(엣지가 다시 붙어 두 번 동기화해야 풀린다). 상한 24시간은 지도 정리용(엣지 버퍼는 그보다 훨씬 짧다 — 밀린 표본 보존 10분).
+ * 표지를 싣지 않는 옛 엣지의 울타리 — 기계가 바뀐 뒤 그 대상의 표지 없는 값(표본 · 프로세스 · 상태 · 부하 · 시험)을 받지 않는다(옛 엣지만 · 섞이는 것보다 낫다).
+ *  · **표본의 호스트 이름(hello)으로 가를 수 있으면 그것으로**: 예전 서버 이름이면 예전 서버다(계속 막는다) · 다른 이름이 오면 새 서버가 왔다(그때 푼다).
+ *  · 이름으로 못 가르면(hello 없음 · 예전 이름을 모름) 그 엣지의 **동기화 두 번**(바뀐 뒤 첫 본문 · 응답을 기다리는 사이 모인 것) 뒤 푼다.
+ *    예전 이름과 같은 이름만 오면(복제한 서버 — 이름이 같다) `EDGE_FENCE_SAME_MAX` 번 뒤 푼다(새 서버 표본을 끝없이 버리지 않게).
+ *  · 반증 SD-5(재현): 처음 판은 2분이 지나면 저절로 풀려, 회선이 끊긴 사이 주소를 고치면 다시 붙은 엣지의 밀린 예전 서버 표본(시각은 경계 뒤로 옮겨진다)을 받았다 —
+ *    시간으로는 풀지 않는다(상한 24시간은 지도 정리용 — 엣지 버퍼는 훨씬 짧다). 반증 EDGE-F1: 응답이 엣지에 닿지 못하면 두 번으로는 모자랐다 — 이름 판정이 그 경우를 막는다.
  */
 export const EDGE_FENCE_SYNCS = 2;
+export const EDGE_FENCE_SAME_MAX = 10;
 export const EDGE_FENCE_MS = 24 * 3600_000;
-const EDGE_FENCE = new Map(); // targetId → { at, syncs }
-export function edgeFenced(id, now = Date.now()) {
-  const f = EDGE_FENCE.get(String(id));
+const EDGE_FENCE = new Map(); // targetId → { at, syncs, oldHost }
+/** @param {{hostname?:string}|null} hello  그 값과 함께 온 표본의 hello(표본만 — 다른 값은 null) */
+export function edgeFenced(id, now = Date.now(), hello = null) {
+  const k = String(id); const f = EDGE_FENCE.get(k);
   if (!f) return false;
-  if (f.syncs >= EDGE_FENCE_SYNCS || now - f.at > EDGE_FENCE_MS || now < f.at) { EDGE_FENCE.delete(String(id)); return false; }
+  const done = () => { EDGE_FENCE.delete(k); return false; };
+  if (now - f.at > EDGE_FENCE_MS || now < f.at) return done();
+  const hn = hello && typeof hello.hostname === 'string' && hello.hostname ? hello.hostname : null;
+  if (f.oldHost && hn) { if (hn !== f.oldHost) return done(); f.same = true; }   // 다른 이름 = 새 서버가 왔다 · 같은 이름 = 예전 서버(또는 같은 이름의 복제)
+  if (f.syncs >= (f.oldHost && f.same ? EDGE_FENCE_SAME_MAX : EDGE_FENCE_SYNCS)) return done();
   return true;
 }
 /** 그 엣지의 동기화 한 번을 마쳤다(응답 직전 — 맡은 대상만). */
@@ -808,5 +828,5 @@ export function edgeFenceSynced(ids = []) { for (const id of ids) { const f = ED
 
 export function _resetForTest() {
   T.clear(); writeQ.length = 0; qEv = 0; KM.clear(); KMT.clear(); KMR.clear(); S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
-  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); EDGE_FENCE.clear(); loadFixes.length = 0;
+  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); EDGE_FENCE.clear(); STALE_TEST.clear(); loadFixes.length = 0;
 }
