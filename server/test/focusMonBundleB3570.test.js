@@ -289,6 +289,23 @@ test('K5 — 기계를 바꾼 직후 판정 보류의 까닭은 \'새 서버 값
   assert.match(out[1], /판정 보류 · 값을 못 읽음\(수집 끊김 · 엣지 응답 없음\)$/);
 });
 
+test('K6 — \'아직 없음\' 은 경계 뒤 판정 점이 하나도 없고 경계 뒤 지금 값도 없을 때만(변이 2회차 생존 AE1 두 건)', () => {
+  const out = sub(`const alerts = await import(${J('focusmon/alerts.js')});
+    const now = Date.now(); const texts = [];
+    alerts.writeRule('create', { name: '앱', metric: 'app', app: 'nginx.service', threshold: 1, durMin: 5, severity: 'crit', scope: { kind: 'record' } }, { by: 'a' });
+    const q = (_t, _k, text) => { texts.push(text); return 'x'; };
+    // ① 경계 뒤 표본은 왔다(서비스 지도 없음 — 값은 모름) · 지금 값 기억은 없음 → 점이 있으니 '아직 없음' 이 아니다
+    const id1 = 'fm-k6k6k6k601';
+    await alerts.alertCycle({ store: { memBlocks: () => [], memProcs: () => new Map([[1, [{ t: now - 10_000, apps: {} }]]]), resetAtOf: () => now - 30_000, queueEvent: q }, targets: [{ id: id1, name: 'h1' }], recordIds: new Set([id1]), now });
+    alerts.writeRule('create', { name: 'CPU', metric: 'cpu', threshold: 90, durMin: 5, severity: 'crit', scope: { kind: 'record' } }, { by: 'a' });
+    // ② 판정 창 안의 점은 없지만 경계 뒤 지금 값이 있다(창보다 조금 앞에 왔다 끊김) → '아직 없음' 이 아니다
+    const id2 = 'fm-k6k6k6k602'; const reset = now - 5 * 60_000 - 100_000;
+    await alerts.alertCycle({ store: { memBlocks: () => [], memProcs: () => new Map(), resetAtOf: () => reset, latestOf: () => ({ ts: reset + 5_000, sample: {} }), latestProcsOf: () => ({ ts: reset + 5_000, list: [] }), queueEvent: q }, targets: [{ id: id2, name: 'h2' }], recordIds: new Set([id2]), now });
+    console.log(JSON.stringify(texts.filter((x) => /판정 보류/.test(x))));`);
+  assert.ok(out.length >= 2, JSON.stringify(out));
+  for (const x of out) assert.match(x, /값을 못 읽음\(수집 끊김 · 엣지 응답 없음\)$/, x);
+});
+
 test('F — 실패한 발송의 되돌리기는 그 사이 지운 짝(주소를 고침)을 되살리지 않는다(반증 alerts F1 · service F3)', async () => {
   const out = sub(`const alerts = await import(${J('focusmon/alerts.js')});
     const now = Date.now(); const id = 'fm-ffffffff01';
@@ -590,6 +607,7 @@ test('A3 — 알림 탭 OOM · 커널 오류 표는 기계 경계 뒤 사건만 
 
 test('S4 — 합쳐 쓴 분은 메모리 묶음 · 조회 기억도 합친 값(반증 SD-4) · 합치기는 트랜잭션 밖에서(SD-1)', () => {
   const out = sub(`const store = await import(${J('focusmon/store.js')}); const db = await import(${J('focusmon/db.js')}); const rec = await import(${J('focusmon/recorder.js')}); const Q = await import(${J('focusmon/query.js')});
+    rec._setFreeSpaceForTest(() => ({ free: 1e12, total: 2e12 }));   // 정정(변이 2회차): 이 줄 없이는 컨테이너 디스크 여유 5% 경계로 기록기가 멈춰 '기록기 틱도 맞춘다' 를 보지 못했다
     const M0 = Math.floor(Date.now() / 60_000) * 60_000 - 3 * 60_000; const id = 'fm-s4s4s4s4s4';
     for (let i = 0; i < 10; i++) store.ingestSample(id, M0 + i * 2000, { cpu: { pct: 10 } }, null, M0 + i * 2000);
     store.closeAll(); await db.writeBlocks(store.drainWrites(1000));
@@ -605,10 +623,42 @@ test('S4 — 합쳐 쓴 분은 메모리 묶음 · 조회 기억도 합친 값(�
     for (let i = 0; i < 3; i++) store.ingestSample(id, M0 + 50_000 + i * 1000 + 500, { cpu: { pct: 40 } }, null, M0 + 80_000);
     store.flushReopened(id); await rec.recordTick(Date.now());
     const memTick = store.memBlocks(id).find((b) => b.minute === M0 / 60_000).ts.length;
-    console.log(JSON.stringify({ merged: w.merged.length, pre: rows.filter((r) => r._data).length, memBefore, memAfter, memTick }));`, { DATA_SOURCE: 'live' });
+    console.log(JSON.stringify({ merged: w.merged.length, pre: rows.filter((r) => r._data).length, memBefore, memAfter, memTick, writes: rec.recorderStatus().writes }));`, { DATA_SOURCE: 'live' });
+  assert.equal(out.writes, 1, '기록기가 실제로 썼다');
   assert.equal(out.merged, 1); assert.ok(out.pre >= 2, '원본 · 요약을 트랜잭션 밖에서 미리 합쳤다');
   assert.equal(out.memBefore, 5); assert.equal(out.memAfter, 15, '수정 전: 메모리(최근 31분 화면)는 재시작 뒤 5표본뿐');
   assert.equal(out.memTick, 18, '기록기 틱도 맞춘다');
+});
+
+test('M5 — 기록기 틱(recordTick)이 합쳐 쓴 분을 메모리 묶음에 맞춘다(손으로 맞추지 않아도 — 변이 2회차 생존 SD4)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')}); const db = await import(${J('focusmon/db.js')}); const rec = await import(${J('focusmon/recorder.js')});
+    rec._setFreeSpaceForTest(() => ({ free: 1e12, total: 2e12 }));   // 실행 환경의 디스크 여유(5% 경계)에 흔들리지 않게 — 기록기가 '여유 부족' 으로 멈추면 맞춤을 보지 못한다
+    const M0 = Math.floor(Date.now() / 60_000) * 60_000 - 3 * 60_000; const id = 'fm-m5m5m5m5m5';
+    for (let i = 0; i < 10; i++) store.ingestSample(id, M0 + i * 2000, { cpu: { pct: 10 } }, null, M0 + i * 2000);
+    store.closeAll(); await db.writeBlocks(store.drainWrites(1000));
+    store._resetForTest();
+    for (let i = 0; i < 5; i++) store.ingestSample(id, M0 + 40_000 + i * 2000, { cpu: { pct: 30 } }, null, M0 + 70_000);
+    store.closeMinutes(M0 + 60_000 + store.GRACE_MS + 1, new Set([id]));
+    const before = store.memBlocks(id).find((b) => b.minute === M0 / 60_000).ts.length;
+    await rec.recordTick(Date.now());
+    const after = store.memBlocks(id).find((b) => b.minute === M0 / 60_000).ts.length;
+    console.log(JSON.stringify({ before, after, pending: store.pendingWrites(), writes: rec.recorderStatus().writes }));`, { DATA_SOURCE: 'live' });
+  assert.equal(out.before, 5); assert.equal(out.pending, 0); assert.equal(out.writes, 1, '기록기가 실제로 썼다(멈춤이 아니다)');
+  assert.equal(out.after, 15, '기록기가 합친 묶음을 메모리에 맞추지 않으면 최근 31분 화면이 재시작 뒤 받은 5표본뿐');
+});
+
+test('M4 — 합쳐 쓸 묶음이 많아도(재시작 뒤 대상 2000개) 미리 합치기가 이벤트 루프에 양보한다(반증 SD-1 · 변이 2회차 생존 — 양보 없음)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')}); const db = await import(${J('focusmon/db.js')});
+    const M0 = Math.floor(Date.now() / 60_000) * 60_000 - 5 * 60_000;
+    const fill = (pct, off) => { for (let k = 0; k < 2000; k++) { const id = 'fm-m4m' + String(k).padStart(7, '0'); for (let i = 0; i < 6; i++) { const ts = M0 + off + i * 4000; store.ingestSample(id, ts, { cpu: { pct }, mem: { pct }, load: { l1: 1 } }, null, ts); } } store.closeAll(); };
+    fill(10, 0); await db.writeBlocks(store.drainWrites(100000));
+    store._resetForTest(); fill(30, 30_000);
+    const rows = store.drainWrites(100000);
+    let spins = 0, done = false; const spin = () => { spins += 1; if (!done) setImmediate(spin); }; setImmediate(spin);
+    const w = await db.writeBlocks(rows); done = true;
+    console.log(JSON.stringify({ merge: rows.filter((r) => r.merge).length, merged: w.merged?.length ?? null, spins }));`, { DATA_SOURCE: 'live' });
+  assert.equal(out.merge, 4000); assert.equal(out.merged, 2000);
+  assert.ok(out.spins >= 3, `합치기 동안 다른 일이 돌 틈이 없었다(spins=${out.spins}) — 대상 2000개 재시작이면 수백 ms 를 한 번에 막는다`);
 });
 
 test('S5 — 옛 엣지 울타리는 시간이 지나도 풀리지 않고 동기화 두 번에 풀린다(회선이 끊긴 사이 주소를 고친 경우 — 반증 SD-5)', () => {
@@ -620,6 +670,40 @@ test('S5 — 옛 엣지 울타리는 시간이 지나도 풀리지 않고 동기
     store.edgeFenceSynced([id]); const c = store.edgeFenced(id, t0 + 32 * 60_000);
     console.log(JSON.stringify({ a, b, c }));`);
   assert.deepEqual(out, { a: true, b: true, c: false }, '수정 전: 2분 뒤 저절로 풀려 다시 붙은 엣지의 밀린 예전 서버 표본을 받았다');
+});
+
+test('S8 — 기계 경계는 뒤로 가지 않고(늦게 읽은 옛 사건) · 기동(startFocusMon)이 DB 의 최근 사건으로 되살린다(변이 2회차 생존 SD3 두 건)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')}); const db = await import(${J('focusmon/db.js')}); const svc = await import(${J('focusmon/service.js')});
+    const now = Date.now(); const id = 'fm-s8s8s8s8s8';
+    const a = store.noteResetAt(id, now - 60_000, now);
+    const b = store.noteResetAt(id, now - 120_000, now);   // 더 옛 경계 — 되돌리지 않는다
+    const keep = store.resetAtOf(id) === now - 60_000;
+    const t = { id, name: 's', host: '10.8.8.1', port: 22, username: 'u', agent: '' };
+    svc.targetsEndpointChanged([[t, { ...t, host: '10.8.8.2' }]], now - 1800_000);
+    await db.writeBlocks(store.drainWrites(1000));
+    store._resetForTest();
+    const gone = store.resetAtOf(id);
+    svc.startFocusMon();
+    let back = 0; for (let i = 0; i < 100 && !back; i++) { await new Promise((r) => setTimeout(r, 30)); back = store.resetAtOf(id); }
+    svc.stopFocusMon();
+    console.log(JSON.stringify({ a, b, keep, gone, back: back === now - 1800_000 }));
+    process.exit(0);`, { DATA_SOURCE: 'live' });
+  assert.deepEqual(out, { a: true, b: false, keep: true, gone: 0, back: true }, '경계를 옛 값으로 되돌리면 예전 서버 표본이 다시 지금 값이 된다 · 기동이 되살리지 않으면 재시작 뒤 경계가 없다');
+});
+
+test('S9 — 1분 틱(minuteTick)이 끝난 창의 줄인 상태 사건 수를 적는다(다음 사건을 기다리지 않는다 — 변이 2회차 생존 AE5)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')}); const svc = await import(${J('focusmon/service.js')});
+    const now = Date.now(); const id = 'fm-s9s9s9s9s9';
+    store.setStatus(id, { state: 'ok' }, now);
+    for (let i = 0; i < 20; i++) store.setStatus(id, { state: i % 2 ? 'ok' : 'auth' }, now + 1000 + i * 1000);
+    store.drainWrites(1000);
+    const r = await svc.minuteTick(now + 1000 + store.STATUS_EVENT_WINDOW_MS + 1);
+    const ev = store.drainWrites(1000).filter((x) => x.kind === 'e' && x.target === id).map((x) => x.text);
+    svc.stopFocusMon?.();
+    console.log(JSON.stringify({ skipped: r?.skipped ?? null, ev }));
+    process.exit(0);`, { DATA_SOURCE: 'live', CENTRAL_URL: '' });
+  assert.equal(out.skipped, null);
+  assert.ok(out.ev.some((x) => /그 10분 동안 \d+번 더 바뀜/.test(x)), JSON.stringify(out.ev));
 });
 
 test('C — 잘린 서비스 목록 때문의 보류는 세 번째 칸 cut · 판정은 그대로 보류 · 사건 문구가 목록 잘림을 말한다', async () => {
