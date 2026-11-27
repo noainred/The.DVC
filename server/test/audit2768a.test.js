@@ -48,7 +48,7 @@ test('C5-02 — 복원은 예약만 하고, 재시작 전 캐시 모듈의 저�
   assert.equal(r.pendingRestart, true);
   assert.ok(r.staged.includes('central-agent-tokens.json'), JSON.stringify(r.staged));
   // 재시작 전: 파일은 아직 복원 전(바로 덮지 않는다) · edge-a 의 pull(touch 저장)이 일어나도 예약은 그대로 남는다
-  assert.equal(TOK.resolveAgentByToken(a.token), 'edge-a');
+  assert.equal(TOK.resolveAgentByToken(a.token, { record: true }), 'edge-a');   // 보안 잔여 11-27 L4: touch 저장 경로는 record:true(centralRouter 인증 미들웨어와 같은 호출)
   assert.deepEqual(tokenAgents(), ['edge-a']);
   assert.ok(fs.existsSync(path.join(BACKUPS, SR.STAGED_NAME)), '예약 파일이 있어야 한다');
   assert.equal(SR.stagedRestoreStatus({ configDir: DIR }).pending?.source, m.name);

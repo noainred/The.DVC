@@ -267,12 +267,12 @@ export function getCentralAuthStats() {
  * '자기 agent 데이터만' 접근하도록 강제한다(엣지 1대 침해로 전 사이트 자격증명이 새는 것 차단).
  */
 /**
- * v2.538: export 한다 — index.js 의 BIG_JSON 게이트가 **본문을 파싱하기 전에** 이 함수로 토큰을 본다.
- * 순수(부작용 없음): 토큰 파일 캐시 조회 + 상수시간 비교뿐. sharedStats 갱신은 아래 use() 가 한다.
+ * v2.538: export 한다 — index.js 의 BIG_JSON 게이트가 **본문을 파싱하기 전에** 이 함수로 토큰을 본다. 보안 잔여 11-27 L4(정정 — 예전 '순수(부작용 없음)' 는 틀렸다: 게이트 · 아래 use() · index.js 오류 처리기가 각자 사용 시각을 디스크에 썼다):
+ * 기본은 사용 시각을 기록하지 않는다(게이트 · 오류 처리기는 인자 하나). 기록(lastUsedAt · 60초 스로틀)은 `{ record: true }`(엄격히 true)를 주는 아래 centralRouter.use 한 곳뿐 · sharedStats 갱신도 use() 가 한다. 캐시가 무효일 때의 동기 파일 읽기(손상이면 보존 rename)는 남는다 — resolveAgentByToken 머리말.
  */
-export function resolveCentralAuth(req) {
+export function resolveCentralAuth(req, opts) {
   const t = req.get('X-Central-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  const bound = resolveAgentByToken(t);
+  const bound = resolveAgentByToken(t, { record: opts?.record === true });
   if (bound) return { ok: true, mode: 'agent', agent: bound };
   if (config.central.token && tokenMatches(t, config.central.token)) {
     if (REQUIRE_AGENT_TOKEN) return { ok: false, reason: '공유 CENTRAL_TOKEN은 비활성입니다(CENTRAL_REQUIRE_AGENT_TOKEN=true) — 이 엣지의 개별 토큰을 사용하세요.' };
@@ -345,7 +345,7 @@ function registerBindingDenied(req, name) {
 
 // 인증 1회 해석 + agent 바인딩 강제(모든 라우트 공통). 라우트별 authed(req)는 이 결과를 읽는다.
 centralRouter.use((req, res, next) => {
-  const auth = resolveCentralAuth(req);
+  const auth = resolveCentralAuth(req, { record: true });   // 보안 잔여 11-27 L4: 개별 토큰 사용 시각(lastUsedAt)을 기록하는 **유일한** 곳 — 인증 성공 직후 · 이름 바인딩 대조 전(뜻 보존 · secResidual1127Csp T4)
   req.centralAuth = auth;
   if (!auth.ok) return next(); // 각 라우트가 404/403을 구분해 응답(하위호환 유지)
   // v2.977(전체 점검 — 심층 방어): agent 는 **글자 하나만**. `?agent[]=edge-b` · 본문 agent:['edge-b'] 는 strAgent 가 '' 로 읽어 아래 대조를 건너뛰고,

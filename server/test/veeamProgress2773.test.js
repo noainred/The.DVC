@@ -147,7 +147,7 @@ test('라우트: GET /admin/veeam/servers 의 서버마다 progress — 실제 p
   s = r.servers.find((x) => x.agent === 'AZ-IRS');
   assert.equal(s.progress.steps.find((x) => x.key === 'token').state, 'warn');
   assert.match(s.progress.steps.find((x) => x.key === 'token').action, /CENTRAL_TOKEN/);
-  assert.equal(String(T.resolveAgentByToken(issued.token)).toLowerCase(), 'az-irs');   // 엣지가 개별 토큰으로 접속(touch → lastUsedAt)
+  assert.equal(String(T.resolveAgentByToken(issued.token, { record: true })).toLowerCase(), 'az-irs');   // 엣지가 개별 토큰으로 접속(touch → lastUsedAt · 보안 잔여 11-27 L4: 기록은 record:true — centralRouter 인증 미들웨어와 같은 호출)
   P.recordPull('AZ-IRS', '/veeam-config', { status: 200, verified: true });
   r = await (await fetch(base)).json();
   s = r.servers.find((x) => x.agent === 'AZ-IRS');

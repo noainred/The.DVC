@@ -183,9 +183,17 @@ function touch(entry) {
 /**
  * 제시된 토큰이 어느 엣지의 개별 토큰인지 해석. 상수시간 비교(해시 32바이트 고정)로,
  * 등록된 항목 전부를 순회해도 일치 위치가 타이밍으로 새지 않는다.
+ *
+ * 보안 잔여 11-27 L4: **기본은 사용 시각을 기록하지 않는다**(디스크 쓰기 없음). 예전에는 해석할 때마다 touch → save(동기 원자적 쓰기)를
+ *   해서, 본문을 읽기 전 판정(index.js bigJsonGate)과 오류 처리기까지 각자 디스크를 썼다 — '부작용 없는 조회' 라던 두 주석이 틀렸다.
+ *   기록은 `opts.record === true`(엄격히 true — truthy 로 켜지지 않는다)를 준 호출만 한다: centralRouter 인증 미들웨어 한 곳
+ *   (routes/central.js — 인증 성공 직후 · 이름 바인딩 대조 전이라 lastUsedAt 의 뜻은 예전과 같다). 60초 스로틀 · 읽기 오류 중 저장 거절은 그대로다.
+ *   ⚠ '순수' 가 아니다: 캐시가 없거나 무효이면 load() 가 파일을 동기로 읽고, 손상 파일이면 공용 읽기 판정이 원본을 `.corrupt.*` 로 옮긴다.
+ * @param {string} token
+ * @param {{ record?: boolean }} [opts]
  * @returns {string|null} agent 이름(원래 표기) 또는 null
  */
-export function resolveAgentByToken(token) {
+export function resolveAgentByToken(token, opts) {
   const t = String(token || '');
   if (!t) return null;
   const h = sha256(t);
@@ -198,7 +206,7 @@ export function resolveAgentByToken(token) {
     if (crypto.timingSafeEqual(stored, h)) found = e;
   }
   if (!found) return null;
-  touch(found);
+  if (opts?.record === true) touch(found);
   return found.agent;
 }
 

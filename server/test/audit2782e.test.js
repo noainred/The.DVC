@@ -53,7 +53,7 @@ test('G-I1 재발급(회전)의 save 실패 — 옛 항목을 되돌린다(옛 �
   assert.throws(() => T.issueAgentToken('edge-c', { note: 'rotate' }));
   const now = T.listAgentTokens().find((t) => t.agent === 'edge-c');
   assert.deepEqual(now, before, '교체가 되돌려지지 않았다');
-  assert.equal(T.resolveAgentByToken(old.token), 'edge-c'); // touch 의 save 실패는 인증에 영향 없음
+  assert.equal(T.resolveAgentByToken(old.token, { record: true }), 'edge-c'); // touch 의 save 실패는 인증에 영향 없음(보안 잔여 11-27 L4: 기록 경로는 record:true 일 때만 — 붙이지 않으면 이 단언이 touch 를 타지 않는다)
   fixSave(snap);
   T._resetAgentTokenCache();
   assert.equal(T.resolveAgentByToken(old.token), 'edge-c');

@@ -5,10 +5,16 @@
  * 라우터의 토큰 검사보다 **먼저** 돈다. 토큰 없는 요청도 16MB 를 다 읽고 JSON.parse 한 뒤에야
  * 403 을 받는다 — 무인증 메모리 증폭(실측 무토큰 15MB ×6 동시 → RSS +238MB).
  *
- * 해법: 파싱 전에 "이 요청이 이미 유효한 토큰/세션을 들고 있는가" 만 본다(부작용 없는 조회).
+ * 해법: 파싱 전에 "이 요청이 이미 유효한 토큰/세션을 들고 있는가" 만 본다.
  *  - 예 → 큰 파서 실행(그 뒤 전역 1MB 파서는 `req._body` 로 건너뛴다)
  *  - 아니오 → next() (본문은 읽지 않는다). 이어지는 전역 1MB 파서가 Content-Length > 1MB 면
  *    본문을 읽지 않고 413 을 내고, 그 아래면 라우터 인증이 401/403 을 낸다.
+ * ⚠ 판정기의 부작용(보안 잔여 11-27 L4 — 예전 '부작용 없는 조회' 는 틀렸다):
+ *   · central 판정(routes/central.js resolveCentralAuth — 인자 하나)은 **사용 시각을 기록하지 않는다**. 예전에는 유효 토큰이면
+ *     agentTokens touch → 동기 원자적 쓰기(에이전트당 60초 스로틀)를 본문을 읽기도 전에 했다. 기록은 centralRouter 인증 미들웨어 한 곳이다.
+ *     토큰 캐시가 없거나 무효일 때의 동기 파일 읽기(손상이면 보존 rename)는 남는다.
+ *   · session 판정(auth.js resolveTokenUser)의 부작용은 sessionState 의 '처음 본 활동 시각' 기록 하나다 — 멱등이고, 곧 이어지는
+ *     authMiddleware 가 같은 일을 하며, 판정 결과를 바꾸지 않는다(저장은 묶어서 나중에).
  *
  * ⚠ 이것은 **권한 판정이 아니다** — 인증·인가는 여전히 각 라우터가 한다. 여기서 허용해도 라우터가
  *   거부할 수 있고, 여기서 거부해도(파싱 생략) 라우터가 다시 본다. 두 판정이 어긋나도 안전한 쪽
@@ -16,7 +22,8 @@
  * ⚠ 마운트 안에서는 `req.path` 가 마운트 기준(`/`)이라 `req.baseUrl + req.path` 로 전체 경로를 본다.
  *
  * @param {import('express').RequestHandler} parser  express.json({limit:big})
- * @param {{ central:(req)=>boolean, session:(req)=>boolean }} resolvers  경로 계열별 '이미 인증됐나' 판정
+ * @param {{ central:(req)=>({ok:boolean, agent?:string}|boolean), session:(req)=>(object|false), sessionAllowed?:(req, user, full)=>boolean }} resolvers
+ *   경로 계열별 '이미 인증됐나' 판정 — 불리언이나 신원 객체(central {ok, agent} · session 사용자 객체)를 돌려준다(아래 ident).
  */
 /**
  * v2.617: 동시 해석 상한. 2026-09-26 운영 중앙이 기동 약 5분 뒤 한 코어 100%·RSS 5GB 로 멈췄다(GC 헛돎 추정 — 확정 아님).
