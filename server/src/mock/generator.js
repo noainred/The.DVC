@@ -388,6 +388,47 @@ function mkVmCfg(vm, powered) {
     question: powered && i % 97 === 0 ? { text: 'msg.uuid.altered: This virtual machine might have been moved or copied.' } : null,
   };
 }
+// v3.54(실제 OS 1단계): VMware Tools 보고 실제 설치 OS(inventory/guestDetail.js parseVmGosProps 와 같은 모양) — 데모 전용 분포.
+//   설정값(guestOS)과 실제 OS 가 다른 경우(CentOS 로 설정한 Rocky · Alma, RHEL 로 설정한 Rocky)와 보고가 없는 경우(Tools 11.2 미만 ·
+//   한 번도 보고하지 않음)가 고루 나오게 idx 로 결정한다. 어플라이언스(vCenter · NSX)는 Photon OS + 제품 정보.
+//   ⚠ Windows 의 실제 보고 글자는 아직 실측 전이다(문서에 예시가 없다 — 1단계 점검이 모은다). 아래 Windows 값은 그림용 가정이다.
+const DEMO_LINUX_OS = {
+  rocky94: { familyName: 'Linux', distroName: 'Rocky Linux', distroVersion: '9.4', prettyName: 'Rocky Linux 9.4 (Blue Onyx)', kernelVersion: '5.14.0-427.13.1.el9_4.x86_64' },
+  rocky810: { familyName: 'Linux', distroName: 'Rocky Linux', distroVersion: '8.10', prettyName: 'Rocky Linux 8.10 (Green Obsidian)', kernelVersion: '4.18.0-553.el8_10.x86_64' },
+  alma94: { familyName: 'Linux', distroName: 'AlmaLinux', distroVersion: '9.4', prettyName: 'AlmaLinux 9.4 (Seafoam Ocelot)', kernelVersion: '5.14.0-427.13.1.el9_4.x86_64' },
+  stream9: { familyName: 'Linux', distroName: 'CentOS Stream', distroVersion: '9', prettyName: 'CentOS Stream 9', kernelVersion: '5.14.0-447.el9.x86_64' },
+  rhel94: { familyName: 'Linux', distroName: 'Red Hat Enterprise Linux', distroVersion: '9.4', prettyName: 'Red Hat Enterprise Linux 9.4 (Plow)', kernelVersion: '5.14.0-427.13.1.el9_4.x86_64' },
+  ubu2204: { familyName: 'Linux', distroName: 'Ubuntu', distroVersion: '22.04', prettyName: 'Ubuntu 22.04.4 LTS', kernelVersion: '5.15.0-105-generic' },
+  ubu2404: { familyName: 'Linux', distroName: 'Ubuntu', distroVersion: '24.04', prettyName: 'Ubuntu 24.04.1 LTS', kernelVersion: '6.8.0-45-generic' },
+  sles15: { familyName: 'Linux', distroName: 'SLES', distroVersion: '15.5', prettyName: 'SUSE Linux Enterprise Server 15 SP5', kernelVersion: '5.14.21-150500.55.65-default' },
+  deb12: { familyName: 'Linux', distroName: 'Debian GNU/Linux', distroVersion: '12', prettyName: 'Debian GNU/Linux 12 (bookworm)', kernelVersion: '6.1.0-25-amd64' },
+  photon4: { familyName: 'Linux', distroName: 'VMware Photon OS', distroVersion: '4.0', prettyName: 'VMware Photon OS/Linux', kernelVersion: '5.10.224-1.ph4-esx' },
+  win2022: { familyName: 'Windows', distroName: 'Windows', distroVersion: '10.0', prettyName: 'Microsoft Windows Server 2022 Datacenter', kernelVersion: '20348.2700' },
+  win2019: { familyName: 'Windows', distroName: 'Windows', distroVersion: '10.0', prettyName: 'Microsoft Windows Server 2019 Standard', kernelVersion: '17763.6293' },
+};
+function mkVmGos(vm, powered, toolsVersion) {
+  const i = vm.idx;
+  const at = Date.now() - (i % 360) * 60_000;
+  const t = Number(toolsVersion);
+  const tools112 = Number.isFinite(t) && (t >> 10 > 11 || (t >> 10 === 11 && ((t >> 5) & 31) >= 2));
+  const appliance = i % 53 === 0;
+  const vapp = appliance ? (i % 106 === 0
+    ? { name: 'VMware vCenter Server', vendor: 'VMware Inc.', version: '8.0.3.00300', fullVersion: '8.0.3.00300 Build 24322831' }
+    : { name: 'NSX Manager', vendor: 'VMware Inc.', version: '4.1.2.3.0', fullVersion: '4.1.2.3.0.22667789' }) : null;
+  if (!tools112 || i % 13 === 0) return { at, asked: true, detailed: null, extra: null, raw: null, vapp };
+  const g = String(vm.guestOS || '');
+  let k;
+  if (appliance) k = 'photon4';
+  else if (/CentOS/i.test(g)) k = i % 5 < 3 ? (i % 2 ? 'rocky94' : 'rocky810') : i % 5 === 3 ? 'alma94' : 'stream9';
+  else if (/Red Hat/i.test(g)) k = i % 5 === 0 ? 'rocky810' : 'rhel94';
+  else if (/Ubuntu/i.test(g)) k = i % 3 === 0 ? 'ubu2404' : 'ubu2204';
+  else if (/SUSE/i.test(g)) k = 'sles15';
+  else if (/Debian/i.test(g)) k = 'deb12';
+  else if (/2019/.test(g)) k = 'win2019';
+  else k = 'win2022';
+  const d = DEMO_LINUX_OS[k];
+  return { at, asked: true, detailed: { architecture: 'X86', bitness: '64', ...d }, extra: null, raw: null, vapp };
+}
 // v2.862: 디스크의 데이터스토어는 그 사이트의 실제 데이터스토어 이름(데모 — Bareos 복원 검증이 홈 데이터스토어 여유를 인벤토리로 본다). 이름을 모르면 예전 값.
 /** v2.898 데모 스냅샷 트리 — n 개를 한 줄기(+ 넷째는 둘째의 형제 가지)로. 현재 위치는 마지막 노드. 시각은 오래된 것부터. */
 function mkSnapTree(i, n) {
@@ -805,6 +846,7 @@ export function generateSnapshot() {
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
         // v2.906: 로컬 데이터스토어에는 그 호스트(마운트 목록의 한 대)의 VM 디스크만 — 예전에는 모든 호스트 VM 이 로컬 DS 에 놓여 마운트 카드가 '공유 호스트 24대' 였다(화면 판독)
+        ...(vm.idx % 41 === 0 ? {} : { gos: mkVmGos(vm, powered, TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length]) }),   // v3.54 실제 OS(Tools 보고)
         ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks, SITES.indexOf(site)) }),
         ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });

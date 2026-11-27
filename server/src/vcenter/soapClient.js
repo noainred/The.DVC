@@ -43,6 +43,8 @@ import { inventoryViaUpdates, updateSessionStatus } from './updateSession.js';  
 import { refreshTagInv, getTagInv, TAG_BUDGET_MS } from '../tags/collect.js';   // v2.703(A15)
 import { eventDetail, detailJson } from '../vmchanges/eventDetail.js';   // v2.702(A7·A8)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
+/** v3.54: 호출별 SOAP API 판의 형식(예 '8.0.2.0') — 이 꼴이 아니면 기본 판으로 보낸다(헤더에 아무 글자나 싣지 않는다). */
+const SOAP_VERSION_RE = /^\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2}$/;
 import { vmPlacement } from './vmPlacement.js';   // v2.820: Bareos 연동 — VM 의 정확한 데이터센터·폴더 경로
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
@@ -197,7 +199,8 @@ export class VimSoapClient {
   }
 
   // v2.765(2-a): timeoutMs — 이 호출만의 건별 시한(정리 호출을 짧게). 없으면 vc.timeoutMs(기본 30초).
-  async #call(body, { ignoreExternal = false, isLogin = false, timeoutMs = null } = {}) {
+  // v3.54: soapVersion — 이 호출만의 vSphere API 판(예: '8.0.2.0' — guestDetailedData). 형식이 아니면 기본 판. 다른 호출은 그대로 8.0.0.1.
+  async #call(body, { ignoreExternal = false, isLogin = false, timeoutMs = null, soapVersion = null } = {}) {
     const perCall = effectiveRequestTimeoutMs(this.vc?.timeoutMs, 30_000);
     const res = await fetch(this.url, {
       method: 'POST',
@@ -205,7 +208,7 @@ export class VimSoapClient {
       dispatcher: vcDispatcher, // vCenter 전용 TLS 정책 — 전역 디스패처 오염 제거(감사 C1/C3)
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
-        SOAPAction: '"urn:vim25/8.0.0.1"',
+        SOAPAction: `"urn:vim25/${typeof soapVersion === 'string' && SOAP_VERSION_RE.test(soapVersion) ? soapVersion : '8.0.0.1'}"`,
         ...(this.cookie ? { Cookie: this.cookie } : {}),
       },
       body: ENVELOPE(body),
@@ -306,14 +309,15 @@ export class VimSoapClient {
    * 도중에 실패하면 CancelRetrievePropertiesEx 로 서버 쪽 결과 세트를 버린다(best effort). Ex 가 없는 서버(MethodNotFound)는
    * 이 클라이언트 동안 예전 방식으로 되돌린다. VC_PROPS_PAGING=false 면 예전 방식만 쓴다.
    */
-  async #retrieveSpec(specSetXml, { asyncParse = false } = {}) {
+  async #retrieveSpec(specSetXml, { asyncParse = false, soapVersion = null } = {}) {
     const pc = this.sc.propertyCollector;
     const parse = (xml) => (asyncParse ? parseObjectContentAsync(xml) : parseObjectContent(xml));
-    const legacy = async () => parse(await this.#call(`<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this>${specSetXml}</RetrieveProperties>`));
+    const sv = soapVersion ? { soapVersion } : {};   // v3.54: 첫 요청 · 이어 받기 · 취소 · 예전 방식 모두 같은 판으로
+    const legacy = async () => parse(await this.#call(`<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this>${specSetXml}</RetrieveProperties>`, sv));
     if (!config.vcPropsPaging || this.noRetrieveEx) return legacy();
     let first;
     try {
-      first = await this.#call(`<RetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this>${specSetXml}<options><maxObjects>${config.vcPropsPageSize}</maxObjects></options></RetrievePropertiesEx>`);
+      first = await this.#call(`<RetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this>${specSetXml}<options><maxObjects>${config.vcPropsPageSize}</maxObjects></options></RetrievePropertiesEx>`, sv);
     } catch (err) {
       if (err?.fault === 'MethodNotFound' || /RetrievePropertiesEx/.test(String(err?.message || ''))) { this.noRetrieveEx = true; return legacy(); }
       throw err;
@@ -326,12 +330,12 @@ export class VimSoapClient {
         if (xml) pushAll(out, await parse(xml));
         if (!token) break;
         if (++pages > config.vcPropsMaxPages) throw new Error(`속성 조회 페이지가 ${config.vcPropsMaxPages}개를 넘었습니다(VC_PROPS_MAX_PAGES)`);
-        const next = await this.#call(`<ContinueRetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this><token>${token}</token></ContinueRetrievePropertiesEx>`);
+        const next = await this.#call(`<ContinueRetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this><token>${token}</token></ContinueRetrievePropertiesEx>`, sv);
         ({ xml, token } = retrieveResultToObjectXml(next));
       }
     } catch (err) {
       if (token) {
-        try { await this.#call(`<CancelRetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this><token>${token}</token></CancelRetrievePropertiesEx>`, { ignoreExternal: true }); } catch { /* best effort */ }
+        try { await this.#call(`<CancelRetrievePropertiesEx xmlns="urn:vim25"><_this type="PropertyCollector">${pc}</_this><token>${token}</token></CancelRetrievePropertiesEx>`, { ignoreExternal: true, ...sv }); } catch { /* best effort */ }
       }
       throw err;
     }
@@ -361,14 +365,14 @@ export class VimSoapClient {
     return parseObjectContent(await this.#call(body));
   }
 
-  /** RetrieveProperties for an explicit list of objects of one type (chunked). */
-  async retrieveManyObjectProps(type, refs, paths, chunk = 250) {
+  /** RetrieveProperties for an explicit list of objects of one type (chunked). opts.soapVersion(v3.54) — 이 요청만의 API 판. */
+  async retrieveManyObjectProps(type, refs, paths, chunk = 250, { soapVersion = null } = {}) {
     const out = [];
     for (let i = 0; i < refs.length; i += chunk) {
       const slice = refs.slice(i, i + chunk);
       const objectSets = slice.map((r) => `<objectSet><obj type="${type}">${r}</obj></objectSet>`).join('');
       const specSet = `<specSet><propSet><type>${type}</type>${paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>${objectSets}</specSet>`;
-      pushAll(out, await this.#retrieveSpec(specSet));
+      pushAll(out, await this.#retrieveSpec(specSet, soapVersion ? { soapVersion } : {}));
     }
     return out;
   }
@@ -2387,6 +2391,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         ...snapshotInfo(p['snapshot'], p['layoutEx.file']),
         ...(cfgEntry?.cfg ? { cfg: cfgEntry.cfg } : {}),
         ...(cfgEntry?.dev ? { dev: cfgEntry.dev } : {}),
+        // v3.54(실제 OS 1단계): VMware Tools 보고 실제 설치 OS · 어플라이언스 제품 정보(inventory/guestDetail.js). 캐시에 없으면 키 없음(= 미수집).
+        ...(cfgEntry?.os ? { gos: cfgEntry.os } : {}),
         ...((() => { const e = powered ? contentionGet(vc.id, 'vm', o.ref) : null; return e ? { perfc: e } : {}; })()),
       });
     }

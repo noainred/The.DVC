@@ -1,5 +1,6 @@
 // VM 구성 속성 캐시(B10, v2.697) — vCenter 별 · VM moref 별. 인메모리(재시작하면 비고 몇 주기에 걸쳐 다시 찬다 —
 // 그동안 vm.cfg 가 없으면 화면은 '수집 중' 이라 말한다. 0·false 로 채우지 않는다).
+// 종류(kind): cfg(구성 속성) · dev(장치 위생) · os(v3.54 — 실제 설치 OS · 어플라이언스 제품 정보, inventory/guestDetail.js).
 //
 // 왜 30초 인벤토리 요청에 싣지 않는가: 속성 16개 × 5,850 VM 은 매 주기 응답을 수 MB 늘리고, 장치 목록은 VM 당 수 KB 라
 // 매 주기 수십 MB 다(28 vCenter · RTT 800ms 회선). 구성은 거의 바뀌지 않으므로 **오래된 것부터 주기당 상한만큼**
@@ -56,9 +57,9 @@ export function statusOf(vcId) { return _status.get(vcId) || null; }
 export function vmCfgStatus() {
   const vcenters = [];
   for (const [vcId, m] of _byVc) {
-    let cfg = 0; let dev = 0;
-    for (const e of m.values()) { if (e.cfg) cfg += 1; if (e.dev) dev += 1; }
-    vcenters.push({ vcenterId: vcId, vms: m.size, cfg, dev, ...(_status.get(vcId) || {}) });
+    let cfg = 0; let dev = 0; let os = 0;
+    for (const e of m.values()) { if (e.cfg) cfg += 1; if (e.dev) dev += 1; if (e.os) os += 1; }
+    vcenters.push({ vcenterId: vcId, vms: m.size, cfg, dev, os, ...(_status.get(vcId) || {}) });
   }
   return { vcenters: vcenters.slice(0, 64), omitted: Math.max(0, vcenters.length - 64) };
 }
