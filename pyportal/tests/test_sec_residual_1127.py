@@ -1037,7 +1037,8 @@ class UnderAttackTest(InboundCase):
             user = self._keepalive_user(self._port)
             self._attack(_slow_reader, 16, 4.5)
             results = self._use(user, 3.8, 0.6)   # 반증 경계: 요청 사이 0.6초 쉼 > 되찾기 0.5초 — 그래도 느린 공격 연결이 먼저 끊긴다
-        self.assertGreaterEqual(len(results), 4)
+            drops = dict(getattr(srv, "inbound_drops", {}))
+        self.assertGreaterEqual(len(results), 4, "느린 읽기 공격 중 기존 keep-alive: {} · {}".format(results, drops))   # 2026-11-27 전체 실행 1회 2건 — 원인 판독용
         self.assertTrue(all(ok for ok, _ in results), "느린 읽기 공격 중 기존 keep-alive 가 끊겼다: {}".format(results))
         self.assertLess(max(d for _, d in results), 0.5, results)
 
@@ -1259,6 +1260,26 @@ class QuietCloseTest(InboundCase):
             time.sleep(0.2)
         self.assertNotIn("Traceback", err.getvalue() + out.getvalue())
         self.assertNotIn("Exception occurred", err.getvalue() + out.getvalue())
+
+    def test_http09_request_line_leaves_no_traceback(self):
+        """반증 4회차 should(재현 — 파이썬 3.13): 'GET /' 한 줄(HTTP/0.9)이면 3.13 stdlib 가 headers 를 dict 로 둬 _drain_body 의
+        get_all 이 AttributeError → 미인증 요청 한 줄마다 traceback 32줄(수정 전 a821fd9e 는 200). 3.11 · 3.12 는 헤더를 읽어 시한으로 조용히 닫힌다."""
+        err = io.StringIO()
+        with _capture(), mock.patch("sys.stderr", new=err):
+            srv, port = self._server(header=1.0, max_connections=4)
+            for _ in range(3):
+                s = _open(port)
+                self.addCleanup(s.close)
+                s.sendall(b"GET /\r\n")
+                _read_all(s, 3)
+                s.close()
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                with srv._cond:
+                    if not srv._admitted:
+                        break
+                time.sleep(0.02)
+        self.assertNotIn("Traceback", err.getvalue(), err.getvalue()[-1500:])
 
     def test_deadline_inside_a_route_closes_quietly(self):
         """fix1: 라우트 응답을 쓰는 중의 쓰기 시한 · 자리 되찾기(InboundDeadline)는 _dispatch 의 최종 except 가 500 을 덧쓰거나
@@ -1486,6 +1507,25 @@ class ReclaimScoreTest(InboundCase):
         c.enter("body", t + 6.0)
         c.enter("write", t + 9.0)                  # 로그인 세션의 본문은 덮어써도 쌓지 않는다
         self.assertAlmostEqual(c.slow_score(t + 9.0), 1.1, delta=1e-6, msg="로그인 세션 본문을 쌓았다")
+
+    def test_overwrite_clears_phase_before_adding(self):
+        """반증 4회차 nit(변이 m_nonull 생존): enter 가 덮어쓴 단계를 누계에 더할 때 phase 를 **먼저** 비운다 — 아니면 add_slow 직후 읽는
+        쪽(입장 표의 되찾기 판정 — 다른 스레드)이 '새 누계 + 앞 단계 진행분' 을 이중으로 센다(leave 와 같은 순서)."""
+        from hub.inbound import ConnPhase
+
+        class Probe(ConnPhase):
+            __slots__ = ("seen",)
+
+            def add_slow(self, seconds, now):
+                super().add_slow(seconds, now)
+                self.seen = self.slow_score(now + 0.1)
+
+        c = Probe(half_life=0)
+        c.enter("header", 0.0)
+        c.enter("write", 0.6)
+        self.assertAlmostEqual(c.seen, 0.6, delta=1e-9, msg="덮어쓴 단계를 누계에 더하는 순간 진행분을 이중으로 셌다")
+        c.leave("write", 0.7)
+        self.assertAlmostEqual(c.seen, 0.7, delta=1e-9, msg="leave 도 같은 순서")
 
     def test_expect_100_header_drip_counts_on_a_real_socket(self):
         """반증 3회차 R3-1(실소켓): 같은 헤더를 0.6초 흘린 뒤 연결 누계 — Expect 가 있어도 없을 때와 같게 쌓인다(수정 전 0.0)."""

@@ -274,7 +274,10 @@ class HubHandler(BaseHTTPRequestHandler):
         # 보안 잔여 11-27 L12: Content-Length 는 엄격히(RFC 9112 §6.3) — int() 는 '1_0'·'+5'·' -1' 을 받아들이고, 잘못된 값에도 연결을
         #   재사용해 남은 바이트가 다음 요청으로 파싱됐다. 서로 다른 중복 · 숫자 밖 · 12자리 초과는 라우팅 전 400 + 연결 종료.
         #   반증 1회차 N1: 앞뒤 공백은 OWS(SP · HTAB)만 — str.strip() 은 '\xa0'·'\x0b'·'\x1c' 까지 지워 '2\xa0' 를 2 로 받았다.
-        values = [str(v).strip(" \t") for v in (self.headers.get_all("Content-Length") or [])]
+        #   반증 4회차 should(재현 — 3.13): HTTP/0.9 요청 줄('GET /')이면 stdlib 가 headers 를 {}(dict — get_all 없음)로 둬 AttributeError →
+        #   _dispatch 밖이라 미인증 한 줄로 traceback 32줄이 찍혔다(a821fd9e 는 200). get_all 이 없으면 Content-Length 없음과 같다.
+        getter = getattr(self.headers, "get_all", None)
+        values = [str(v).strip(" \t") for v in ((getter("Content-Length") if callable(getter) else None) or [])]
         if not values:
             values = ["0"]
         if len(set(values)) != 1 or not re.fullmatch(r"[0-9]{1,12}", values[0]):

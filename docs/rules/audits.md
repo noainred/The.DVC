@@ -5949,8 +5949,12 @@ B 18건(높음 1 — 엣지 포탈에서 이벤트 구독 창에 닿을 수 없�
   반증 1회차 must 0(should 3 — 공유 문서 · 22.23.5 실행 시험 0건 · Chromium). 시험 `secResidual1127Runtime` 11(수정 전 11/11 실패) · 변이 40/40. 핀 두 줄은 SHASUMS256.txt.sig GPG 서명(5BE8A3F6…D356) 확인 뒤 복사.
 - **G5 L12**(pyportal 허브 수신 단계 시한 · 연결 자리 선획득 — 311a9d92 · 42ddbdb2 · 4cfd640e · 0ba0f92c): 설계 반증 must 3(keep-alive 로 무기한 · 즉시 거절의 빈자리 복권 · 선언 길이로 늘어나는 본문 시한) →
   반증 1회차 must 1(M1 공격 중 기존 정상 keep-alive 가 자리를 잃음 — 느린 읽기에서 수정 전보다 악화) → 느린 단계 우선 되찾기 · 응답 쓰기 시한 · 미인증 큰 본문 선거절 → 반증 2회차 must 1(R2-1 단계 갈아타기로 되찾기 회피 — 새 사용자 0%) →
-  연결 단위 누계(반감기) · 계정당 보호 상한 → 반증 3회차 must 1(R3-1 `Expect: 100-continue` 한 줄로 헤더 드립분이 누계에서 빠짐) → 덮어쓴 단계 진행분도 누계에. 반증 4회차(3회차 수정분)는 이 기록을 쓸 때 판정 보고를 보지 못했다
-  (재현 실행 기록만 있음 — 메인 확인). 시험 `pyportal/tests/test_sec_residual_1127.py`(1회차 26 → 53+) · 변이 29/30(stock.close 등가) · 23/23 · 13/13(3회차 수정분 변이 기록은 보지 못함) · pyportal 전량 473 OK(3회차 수정 뒤).
+  연결 단위 누계(반감기) · 계정당 보호 상한 → 반증 3회차 must 1(R3-1 `Expect: 100-continue` 한 줄로 헤더 드립분이 누계에서 빠짐) → 덮어쓴 단계 진행분도 누계에(`ConnPhase.enter`). 반증 4회차 **must 0**(R3-1 막힘 — 단위 0.593 · keep-alive 8/8 · 새 사용자 28/28 ·
+  RTT 0 · 0.8초 정상 클라이언트 점수 수정 전과 같음 · 변이 6/7 — 생존 `phase=None 선행 제거` 는 결정적 시험 `test_overwrite_clears_phase_before_adding` 으로 메움) ·
+  should 1(재현 — 1회차 8708d24f 부터의 회귀: **파이썬 3.13** 은 HTTP/0.9 요청 줄 `GET /` 에 headers 를 dict 로 둬 `_drain_body` 의 `get_all` 이 AttributeError →
+  미인증 한 줄마다 traceback 32줄 · 응답 없음. a821fd9e 는 200) → `getattr(..., 'get_all')` 없으면 Content-Length 없음과 같게 + `test_http09_request_line_leaves_no_traceback`
+  (수정 전 실패 · 3.11 · 3.12 · 3.13 통과 — CI 는 3.9 · 3.12 라 이 경로를 실제로 타지 않는다). 시험 `pyportal/tests/test_sec_residual_1127.py`(1회차 26 → 56) ·
+  변이 29/30(stock.close 등가) · 23/23 · 13/13 · 6/7+1 · pyportal 전량 475(3.13 — 그중 느린 읽기 공격 keep-alive 시험이 전체 실행 1회에서 2건으로 실패 · 단독 13/13 통과 — 시간 민감 간헐로 판정, 실패 메시지에 결과 · drops 를 싣게 함).
 - **G6 L13 · L4**(CSP connect-src · 본문 전 판정의 디스크 쓰기 — 7aab3bc1): 설계 반증 must 0(should 6 · nit 5) · 반증 1회차 must 0(should 1 — 생성 문서 · nit 3 · Chromium 153 실측으로 옛 정책은 외부 wss 통과 · 새 정책은 위반).
   시험 `secResidual1127Csp` 15(수정 전 11 실패 · 4는 회귀 고정) · 변이 25/26(남은 1 등가 — IPv6 '[' 거부 줄).
 - **G7 L7 · L8**(데모 계정의 관리자 등록부 가림 · 관리자 로그 뷰어 비밀값 가림): 반증 중 — 메인이 추가.
