@@ -94,7 +94,8 @@ test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을
   // v3.50(55개): 물리서버 제조사 케이스 기록(bm-cases.json) · 보안 권고 표(bm-advisories.json — bmcheck/store.js).
   // v3.51(56개): 부품 장애 알림 단계 · 당직 설정(partfault-escalation.json — partfault/escalation.js). 엣지에 배포하는 설정이 아니라 FILES(⑤) 에는 넣지 않는다.
   // v3.52(58개): 물리서버 원격 전원 · LED 켜기(bm-power.json — idrac/remotePowerSettings.js) · 이벤트 구독(bm-events.json — idrac/eventSub.js). 엣지에 배포하지 않는다(FILES ⑤ 밖).
-  assert.equal(calls.length, 58, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
+  // v3.57(59개): 포탈 서비스 상태 모니터링 설정(svc-status-settings.json — svcstatus/settings.js). 엣지에는 파일을 배포하지 않고(중앙이 계산한 자기 몫만 내린다) FILES(⑤) 에는 넣지 않는다.
+  assert.equal(calls.length, 59, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });
 

@@ -85,6 +85,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'link-check': 'link-check',        // LinkCheck.jsx 전용(v2.552) — 중앙↔엣지·vCenter 통신 점검(adminOnly)
   'portal-check': 'portal-check',    // PortalCheck.jsx 전용(v2.560) — 토큰 점검(adminOnly+fullScope)
   'comm-map': 'comm-map',            // CommMap.jsx 전용(v2.584) — 통신 지도(중앙↔엣지 시각화, adminOnly+fullScope)
+  'svc-status': 'svc-status',        // SvcStatusTool.jsx 전용(v3.54) — 포탈 서비스 상태 모니터링(adminOnly+fullScope · 등록부 주소:포트 TCP 감시)
   'xfer-speed': 'xfer-speed',        // XferSpeedTool.jsx 전용(v2.735) — 법인 간 전송 속도(adminOnly+fullScope)
   'focus-mon': 'focus-mon',          // FocusMonTool.jsx 전용(v2.976) — 집중 모니터링(adminOnly+fullScope · 쓰기는 조회·쓰기 전체 범위)
   'isilon-dirusage': 'isilon-dirusage', // IsilonDirUsageTool.jsx 전용(v2.736) — 아이실론 디렉터리 사용량(adminOnly+fullScope)

@@ -63,6 +63,7 @@ export const MIGRATABLE = [
   { file: 'bmstor-io.db', label: '베어메탈 스토리지 디스크 I/O 시계열(원시·15분·1시간 집계, v3.8.0)' },
   { file: 'cvp.db', label: 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)' },
   { file: 'vm-dns.db', label: 'VM DNS 서버 설정 변경 이력(바뀐 것만 — v2.696)' },
+  { file: 'svc-status.db', label: '포탈 서비스 상태 모니터링 측정 이력(등록부 주소:포트 TCP 연결 — 원시 8일 + 30분 칸 + 최신값 · 상태 변화, v3.54)' },
   { file: 'xfer-speed.db', label: '법인 간 전송 속도 측정 이력(중앙↔엣지 10MB 왕복 — 원시 + 일 요약, v2.735)' },
   { file: 'usage.db', label: '기능 사용 현황 — 사용자 × 화면 × 날 열람 수 · 머문 시간 일 집계(v2.913)' },
   { file: 'periodic.db', label: '정기 점검 보고 보관함 — 일일 · 주간 · 월간 · 분기 회차 · 전달 기록(v3.32)' },

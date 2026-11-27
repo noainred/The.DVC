@@ -49,7 +49,7 @@ export const READ_DENY = [
   // v2.720(감사 B2-03): 같은 이유(전 법인 엣지 주소·내부 IP)로 — 저장된 엣지 콘솔 로그·노드 상태(edge-log), 엣지 주소·인증서 주체·
   //   응답 조각(link-check), RMA 에이전트 허용 IP·명령 이력(rma), 전 사이트 내부 IP 가 든 HAProxy 관리 블록(relaytopo/render).
   //   데모 계정 화면에서 이 도구들은 403(demoGuest 표지 → 데모 안내)으로 보인다 — 의도다.
-  '/api/tools/edge-log', '/api/tools/link-check', '/api/tools/rma', '/api/tools/relaytopo/render',
+  '/api/tools/edge-log', '/api/tools/link-check', '/api/tools/svc-status/settings', '/api/tools/rma', '/api/tools/relaytopo/render',
   // v2.743(감사 AUTHZ-01): 데모 계정이 관리자 판본을 받던 설정·등록부 조회 — 가림 헬퍼를 거치지 않는 admin 전용 응답이라 막는다.
   //   CVP 서버 등록부(관리 IP·계정명 — CVP 도구의 '설정' 탭) · SAN 포트 사용량 설정(DB 절대 경로) · vCenter 로그 보관 설정(설정 탭 —
   //   DB 절대 경로) · IP 원장 공유 DB 위치(절대 경로 — operator 도 adminOnly 라 403 이다) · 중앙 자신의 콘솔 로그·상태(edge-log 와 같은

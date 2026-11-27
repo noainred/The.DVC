@@ -81,6 +81,7 @@ import { registerCommMap } from './api/commMap.js'; // 통신 지도(중앙↔�
 import { registerDataFlow } from './api/dataFlow.js'; // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
 import { registerDeviceFlow } from './api/deviceFlow.js'; // 3단 지도(장비 → 엣지 → 메인, v2.588)
 import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack PDU 2G, v2.424)
+import { registerSvcStatus } from './api/svcStatus.js'; // 포탈 서비스 상태 모니터링(등록부 → 주소:포트 TCP 감시 · v3.54)
 import { registerRack } from './api/rack.js';             // 랙 실장도(원장 · 조회 · 관리자 편집 · 엑셀 내보내기, 설계 docs/design/rack-elevation)
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
@@ -225,6 +226,7 @@ registerCommMap(api);
 registerDataFlow(api);
 registerDeviceFlow(api);
 registerPdu(api);
+registerSvcStatus(api);
 registerRack(api);
 registerSerialLookup(api);
 registerRma(api);

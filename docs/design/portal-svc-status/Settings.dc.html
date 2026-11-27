@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>포탈 서비스 상태 모니터링 — 자동 등록 · 측정 설정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#7fb2ff}a:hover{color:#b3d1ff}
+button,input,select{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height: 1120px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: system-ui, 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; font-size: 14px; padding: 24px 28px 40px">
+<div style="max-width: 1384px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px">
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="font-size: 12px; color: #8b9bb4"><a href="Main.dc.html" style="text-decoration: none">포탈 서비스 상태 모니터링</a> › 자동 등록 · 설정</div>
+<h1 style="margin: 0; font-size: 22px; font-weight: 700">자동 등록 · 측정 설정</h1>
+<div style="font-size: 13px; color: #8b9bb4; line-height: 1.55; max-width: 900px">대상은 손으로 넣지 않습니다. 아래 등록부에서 계산하며, 등록부에 장비를 더하거나 주소·포트를 바꾸면 다음 측정 주기에 대상도 따라 바뀝니다. 관리자만 볼 수 있는 화면입니다.</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; overflow: hidden">
+<div style="padding: 12px 16px; border-bottom: 1px solid #1f2a40; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between">
+<div style="font-size: 14px; font-weight: 600">대상을 가져오는 등록부</div>
+<div style="font-size: 12px; color: #8b9bb4">마지막 동기화 09:47:12 · 대상 15개</div>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 1100px; border-collapse: collapse; font-size: 13px">
+<thead><tr style="background: #0f1626; color: #8b9bb4; text-align: left; font-size: 12px">
+<th style="padding: 9px 12px; font-weight: 600">측정</th>
+<th style="padding: 9px 12px; font-weight: 600">종류</th>
+<th style="padding: 9px 12px; font-weight: 600">등록부(설정 화면)</th>
+<th style="padding: 9px 12px; font-weight: 600; text-align: right">등록</th>
+<th style="padding: 9px 12px; font-weight: 600; text-align: right">대상</th>
+<th style="padding: 9px 12px; font-weight: 600">접속처를 정하는 규칙</th>
+<th style="padding: 9px 12px; font-weight: 600">측정하는 곳</th>
+</tr></thead>
+<tbody>
+<tr style="border-top: 1px solid #1f2a40">
+<td style="padding: 10px 12px"><input type="checkbox" checked aria-label="엣지 포탈 측정"></td>
+<td style="padding: 10px 12px; white-space: nowrap">엣지 포탈</td>
+<td style="padding: 10px 12px; color: #c8d6e8">수집 서버</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">4</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">4</td>
+<td style="padding: 10px 12px; color: #c8d6e8; line-height: 1.5">등록된 URL 의 주소:포트. 포트가 없으면 https 는 443, http 는 80</td>
+<td style="padding: 10px 12px; color: #c8d6e8">중앙 포탈</td>
+</tr>
+<tr style="border-top: 1px solid #1f2a40">
+<td style="padding: 10px 12px"><input type="checkbox" checked aria-label="vCenter 측정"></td>
+<td style="padding: 10px 12px; white-space: nowrap">vCenter</td>
+<td style="padding: 10px 12px; color: #c8d6e8">vCenter 관리</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">4</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">4</td>
+<td style="padding: 10px 12px; color: #c8d6e8; line-height: 1.5">등록된 주소 + 등록된 포트. 포트가 비어 있으면 443</td>
+<td style="padding: 10px 12px; color: #c8d6e8; line-height: 1.5">직접 수집은 중앙 · 엣지 수집은 <span style="color: #67e8f9">그 법인 엣지</span></td>
+</tr>
+<tr style="border-top: 1px solid #1f2a40">
+<td style="padding: 10px 12px"><input type="checkbox" checked aria-label="CVP 측정"></td>
+<td style="padding: 10px 12px; white-space: nowrap">CVP</td>
+<td style="padding: 10px 12px; color: #c8d6e8">CVP 서버</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">2</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">2</td>
+<td style="padding: 10px 12px; color: #c8d6e8; line-height: 1.5">등록된 주소:포트. 포트가 없으면 443</td>
+<td style="padding: 10px 12px; color: #c8d6e8; line-height: 1.5">담당 엣지가 지정돼 있으면 <span style="color: #67e8f9">그 엣지</span>, 아니면 중앙</td>
+</tr>
+<tr style="border-top: 1px solid #1f2a40">
+<td style="padding: 10px 12px"><input type="checkbox" checked aria-label="스토리지 측정"></td>
+<td style="padding: 10px 12px; white-space: nowrap">스토리지</td>
+<td style="padding: 10px 12px; color: #c8d6e8">스토리지 장비</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">5</td>
+<td style="padding: 10px 12px; text-align: right; font-family: 'JetBrains Mono', monospace">5</td>
+<td style="padding: 10px 12px; color: #c8d6e8; line-height: 1.5">등록된 주소:포트. 포트가 없으면 수집 방식의 포트(REST 는 기종별 포트 · SSH 는 등록된 SSH 포트)</td>
+<td style="padding: 10px 12px; color: #c8d6e8; line-height: 1.5">담당 엣지가 지정돼 있으면 <span style="color: #67e8f9">그 엣지</span>, 아니면 중앙</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div style="padding: 10px 16px; border-top: 1px solid #1f2a40; font-size: 12px; color: #8b9bb4; line-height: 1.55">‘사용 안 함’ 으로 등록된 장비는 대상에 올리되 측정하지 않고 ‘꺼짐’ 으로 따로 보입니다. 등록부 파일을 읽지 못하면 그 종류의 대상을 지우지 않고 마지막 목록을 유지하며 화면 위에 알립니다.</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 16px">
+<div style="flex: 1 1 420px; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<div style="font-size: 14px; font-weight: 600">측정</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="s-int" style="font-size: 12px; color: #8b9bb4">측정 주기(초)</label><input id="s-int" type="number" value="60" style="height: 40px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 14px; font-family: 'JetBrains Mono', monospace"></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="s-to" style="font-size: 12px; color: #8b9bb4">연결 시한(초)</label><input id="s-to" type="number" value="2.5" style="height: 40px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 14px; font-family: 'JetBrains Mono', monospace"></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="s-fail" style="font-size: 12px; color: #8b9bb4">끊김 판정 — 연속 실패(회)</label><input id="s-fail" type="number" value="3" style="height: 40px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 14px; font-family: 'JetBrains Mono', monospace"></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="s-slow" style="font-size: 12px; color: #8b9bb4">지연 판정 — 평소의 몇 배</label><input id="s-slow" type="number" value="2" style="height: 40px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 14px; font-family: 'JetBrains Mono', monospace"></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="s-keep" style="font-size: 12px; color: #8b9bb4">기록 보관(일)</label><input id="s-keep" type="number" value="90" style="height: 40px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 14px; font-family: 'JetBrains Mono', monospace"></div>
+</div>
+<div style="font-size: 12px; color: #8b9bb4; line-height: 1.55">‘평소’ 는 대상마다 최근 7일 연결 시간의 중앙값입니다. 폴란드 · 미국 동부처럼 원래 800ms 를 넘는 대상이 늘 ‘지연’ 으로 뜨지 않게 고정 기준 대신 대상별 기준을 씁니다. 연결 시한은 평소가 큰 대상에서 자동으로 늘립니다.</div>
+</div>
+
+<div style="flex: 1 1 420px; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<div style="font-size: 14px; font-weight: 600">알림</div>
+<label style="display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; min-height: 44px"><input type="checkbox" checked style="margin-top: 3px"><span>끊김으로 바뀔 때 · 복구될 때 메일을 보냅니다<br><span style="color: #8b9bb4; font-size: 12px">같은 대상은 상태가 바뀔 때 한 번만. 같은 시각에 한 법인 대상이 여럿 끊기면 한 통으로 묶습니다.</span></span></label>
+<label style="display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; min-height: 44px"><input type="checkbox" style="margin-top: 3px"><span>지연으로 바뀔 때도 보냅니다</span></label>
+<label style="display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; min-height: 44px"><input type="checkbox" checked style="margin-top: 3px"><span>‘못 잼’ 이 30분 넘게 이어지면 보냅니다<br><span style="color: #8b9bb4; font-size: 12px">엣지가 측정값을 올리지 않는 상태를 조용히 두지 않기 위한 것입니다.</span></span></label>
+<div style="display: flex; flex-direction: column; gap: 6px"><label for="s-mail" style="font-size: 12px; color: #8b9bb4">받는 사람</label><input id="s-mail" type="text" placeholder="[받는 사람 메일 주소]" style="height: 40px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 14px"></div>
+</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; overflow: hidden">
+<div style="padding: 12px 16px; border-bottom: 1px solid #1f2a40; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between">
+<div style="font-size: 14px; font-weight: 600">측정에서 제외한 대상</div>
+<div style="font-size: 12px; color: #8b9bb4">등록부에서는 지워지지 않습니다 · 제외한 대상은 메인 화면 합계에 넣지 않고 개수만 밝힙니다</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 16px">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-width: 0"><span style="color: #c8d6e8">스토리지</span><span style="font-family: 'JetBrains Mono', monospace">IN-CHE</span><span>xio-che-lab</span><span style="font-family: 'JetBrains Mono', monospace; color: #c8d6e8">10.70.3.44:443</span><span style="font-size: 12px; color: #8b9bb4">제외 11-18 · 사유: 이전 작업 중</span></div>
+<button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 13px; cursor: pointer">다시 측정</button>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end">
+<a href="Main.dc.html" style="height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font-size: 13px; display: inline-flex; align-items: center; text-decoration: none">취소</a>
+<button type="button" style="height: 40px; padding: 0 18px; border-radius: 8px; border: 1px solid #4b9bff; background: #1668d8; color: #ffffff; font-size: 13px; font-weight: 600; cursor: pointer">저장</button>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -170,6 +170,7 @@ import { startBmFoldersPull } from './agent/bmFoldersPull.js'; // v2.996 물리�
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
+import { startSvcStatusPoller } from './svcstatus/poller.js';   // 포탈 서비스 상태 모니터링(v3.54) — 중앙 전용 · 기본 켜짐
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startIpamReport } from './ipam/report.js';   // v3.7.0 IP 관리 정기 보고(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
@@ -196,6 +197,7 @@ import { startXferSpeedPoller } from './xferspeed/poller.js';
 import { startFocusMon, stopFocusMon } from './focusmon/service.js';   // 집중 모니터링(v2.976) — 사람이 시작한 수집만 · 1초/10초 틱
 import { startFocusMonWorker, stopFocusMonWorker } from './agent/focusMonWorker.js'; // 〃 엣지 워커(CENTRAL_URL 없으면 자기기동 안 함)
 import './central/focusMonEdge.js'; // 〃 엣지 깨우기 구현 등록(service.setWakeImpl)   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
+import { startSvcStatusWorker } from './agent/svcStatusWorker.js'; // 포탈 서비스 상태 — 엣지가 재는 대상(현지 vCenter · 담당 CVP · 스토리지)
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { startPowerWatch } from './vmpower/watcher.js';            // VM 전원 구간 관측(v3.39.0) — 달력 · 드로어 '전원 상태'
@@ -448,6 +450,7 @@ app.use('/api/central/curuser', BIG_JSON);
 // 통신 점검 엣지 보고(v2.552) — 링크 최대 500개 × 단계 6개 상세라 1MB 기본을 넘을 수 있다.
 // 413 은 재시도 대상이 아니라 **그 엣지 측정분의 조용한 전량 소실**이 된다(v2.517 규약).
 app.use('/api/central/link-check', BIG_JSON);
+app.use('/api/central/svc-status', BIG_JSON);   // v3.54 포탈 서비스 상태 — 엣지 측정 보고(대상 수천 개 × 행 · gzip 해제 뒤 1MB 를 넘을 수 있다)
 // ⚠⚠ v2.574 SEC-11 — IP 스캔 결과. 중앙의 `slice(0, 8000)`(`routes/central.js:1336`)은 **파싱 후**라
 //   보호가 되지 않고, 엣지(`agent/ipScanWorker.js:36`)는 자르지 않는다. 실측(실제 레코드 형태
 //   `{ip, openPorts[], services[], hostname}` — `ipam/scan.js:269`, 레코드당 133B):
@@ -694,6 +697,8 @@ const stagger = [
   startBmUsagePoller,
   startLinkCheckPoller,
   startLinkCheckWorker,
+  startSvcStatusPoller,
+  startSvcStatusWorker,
   startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, startIpamReport, startPeriodicReport, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
   startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만

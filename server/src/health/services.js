@@ -60,6 +60,7 @@ import * as m_agentScanner from '../agent/scanner.js';
 import * as m_bmUsagePoller from '../bmusage/poller.js';
 import * as m_linkCheckPoller from '../linkcheck/poller.js';
 import * as m_xferSpeedPoller from '../xferspeed/poller.js';
+import * as m_svcStatusPoller from '../svcstatus/poller.js';   // v3.54 포탈 서비스 상태 모니터링(중앙 전용)
 import * as m_isiduPoller from '../isidu/poller.js';   // v2.736 아이실론 디렉터리 사용량
 import * as m_focusMonService from '../focusmon/service.js'; // v2.976 집중 모니터링(사람이 시작한 SSH 수집 — 1초 틱)
 import * as m_pingMonitor from '../ping/monitor.js';   // v2.964 Ping 연속 측정
@@ -120,6 +121,7 @@ const MODS = Object.freeze({
   '../bmusage/poller.js': m_bmUsagePoller,
   '../linkcheck/poller.js': m_linkCheckPoller,
   '../xferspeed/poller.js': m_xferSpeedPoller,
+  '../svcstatus/poller.js': m_svcStatusPoller,
   '../isidu/poller.js': m_isiduPoller,
   '../focusmon/service.js': m_focusMonService,
   '../ping/monitor.js': m_pingMonitor,
@@ -153,6 +155,8 @@ export const CENTRAL_ONLY_SPEC = Object.freeze([
   { key: 'collect.cvpFaults', label: 'CVP 장애 전이 판정', group: 'collect', mod: '../cvp/faultScan.js', fn: 'cvpFaultScanStatus', centralOnly: true },
   // v2.735: 법인 간 전송 속도 — 중앙이 엣지와 10MB 를 주고받는다(엣지 노드에서는 폴러가 돌지 않는다).
   { key: 'collect.xferSpeed', label: '법인 간 전송 속도 측정', group: 'collect', mod: '../xferspeed/poller.js', fn: 'xferSpeedStatus', centralOnly: true },
+  // v3.54: 포탈 서비스 상태 모니터링 — 중앙이 재는 대상(엣지가 재는 대상은 push.svcStatus).
+  { key: 'collect.svcStatus', label: '포탈 서비스 상태 측정', group: 'collect', mod: '../svcstatus/poller.js', fn: 'svcStatusPollerStatus', centralOnly: true },
 ]);
 
 /** 고정 항목이 이미 다루는 spec 키 — 같은 폴러를 두 줄로 그리지 않는다(고정 항목 쪽에 `specKey` 를 단다). */
