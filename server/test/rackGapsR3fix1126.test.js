@@ -149,7 +149,7 @@ test('관찰: 시리얼 기록을 열 때 못 채웠으면 가림 재료를 읽�
   db.exec('DROP TRIGGER seen_fail');
   const got = await R.corpSerials('kr');
   assert.ok(got.includes('sn12345678') && got.includes('1234'), '읽을 때 다시 채웠다');
-  assert.equal(db.prepare("SELECT v FROM rack_meta WHERE k = 'seenKeys'").get().v, R.RACK_META_VERSIONS.seenKeys);   // 2026-11-27: 비교 키가 폭에 무관해져 판 번호가 올랐다
+  assert.equal(db.prepare("SELECT v FROM rack_meta WHERE k = 'seenKeys'").get().v, 2);   // 2026-11-27: 비교 키가 폭에 무관해져 판 번호가 2로 올랐다 — 상수와 비교하면 상수를 되돌린 변이도 통과한다(7회차 F2 ⑥)
 });
 
 test.after(() => R._closeForTest());

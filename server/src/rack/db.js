@@ -43,14 +43,27 @@ function nameTaken(rows, name, ignoreId = '') {
   const want = foldWidth(String(name ?? ''));
   return (rows || []).some((r) => r && r.id !== ignoreId && foldWidth(String(r.name ?? '')) === want);
 }
+/**
+ * 이름 바꾸기 판정 — 'same'(그대로 둔다 · 판 · 이력 없음) · 'taken'(409) · 'ok'. 데이터센터 · 전산실 · 랙이 같이 쓴다.
+ * 7회차 C1: 이름 중복을 폭에 무관하게 보자, 전각 · 반각 쌍둥이('ＲＭ' · 'RM')가 이미 있는 옛 원장에서 **바꾸지 않은 이름**을 저장하면 409 가 났다.
+ * 같은 글이면 그대로 · 폭만 다른 글(입력 정리가 전각을 접은 것)이 쌍둥이와 부딪히면 그대로 둔다(접으면 같은 이름이 둘이 된다) · 그 밖에 부딪히면 409.
+ */
+function renameVerdict(rows, curName, name, id) {
+  if (name === curName) return 'same';
+  if (!nameTaken(rows, name, id)) return 'ok';
+  return foldWidth(String(curName ?? '')) === foldWidth(String(name ?? '')) ? 'same' : 'taken';
+}
 
 export function rackDbError() { return _initError; }
 /** 원장 파일 경로(주기 흡수가 '파일이 있을 때만' 돌려고 본다 — 열지 않는다). */
 export const rackDbFile = () => fileOf();
-/** 원장에 자료가 있는 법인 전부(지운 법인 포함). */
+/**
+ * 시리얼 가림 재료가 있는 법인 전부 — 원장에 자료가 있는 법인(지운 법인 포함) ∪ 시리얼 기록만 남은 법인(랙 종류 이름을 가리는 데 쓴다).
+ * 7회차 C3: 원장(rack_site)만 보면 데이터센터까지 다 지운 법인의 시리얼 기록이 빠져, 그 시리얼이 든 랙 종류 이름이 범위 계정에 원문으로 보였다.
+ */
 export async function ledgerCorpIds() {
   const db = await need();
-  return db.prepare('SELECT DISTINCT corp_id AS c FROM rack_site ORDER BY corp_id').all().map((r) => r.c);
+  return db.prepare('SELECT corp_id AS c FROM rack_site UNION SELECT corp_id AS c FROM rack_serial_seen ORDER BY c').all().map((r) => r.c);
 }
 
 export async function openRackDb() {
@@ -202,7 +215,9 @@ function placeRow(r) {
   try { const v = JSON.parse(r.extra_serials || '[]'); if (Array.isArray(v)) extra = v.filter((x) => typeof x === 'string'); } catch { extra = []; }
   return {
     id: r.id, rackId: r.rack_id, face: r.face, uStart: r.u_start, uSize: r.u_size, kind: r.kind, label: r.label, model: r.model,
-    serial: r.serial, serialKey: r.serial_key, extraSerials: extra, note: r.note,
+    // 연결 키는 저장된 칸(serial_key)이 아니라 지금 키 함수로 시리얼에서 만든다(7회차 C8 — 재현: 열 때 키 다시 만들기가 색인 쓰기에서 실패하면 같은 트랜잭션의 칸 고치기도
+    //   되돌려져 옛 키가 남고, 전각만 있는 옛 시리얼의 연결이 끊기고 훑기 판정의 중복도 놓쳤다). 칸은 남겨 둔다(쓰기는 계속 맞춘다).
+    serial: r.serial, serialKey: serialKeyOf(r.serial ?? ''), extraSerials: extra, note: r.note,
     ratedW: r.rated_w ?? null, opW: r.op_w ?? null, weightKg: r.weight_kg ?? null, updatedAt: r.updated_at,
   };
 }
@@ -405,13 +420,25 @@ export async function corpOf(kind, id) {
 
 /** 한 법인 원장에 이미 놓인 시리얼 키(미배치 계산용). */
 /** 그 법인의 시리얼 가림 재료 — 지금 원장의 시리얼 원문(주 + 추가) + 한 번이라도 원장에 있었던 시리얼의 비교 키. 시리얼을 가리는 판본의 글자 가림(textMask.js)에만 쓴다. 응답에 싣지 말 것. */
-export async function corpSerials(corpId) {
+export async function corpSerials(corpId, { pause = null } = {}) {
   const db = await need();
   const out = [];
-  for (const r of db.prepare(`SELECT p.serial AS s, p.extra_serials AS x FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id
-    JOIN rack_room m ON m.id = r.room_id JOIN rack_site t ON t.id = m.site_id WHERE t.corp_id = ? AND (p.serial <> '' OR p.extra_serials <> '[]')`).all(String(corpId || ''))) {
+  const cid = String(corpId || '');
+  const take = (r) => {
     if (r.s) out.push(r.s);
     try { for (const x of JSON.parse(r.x || '[]')) if (typeof x === 'string' && x) out.push(x); } catch { /* */ }
+  };
+  if (pause) {
+    // 가림 집계처럼 긴 작업은 전산실마다 읽고 양보한다(7회차 P7-5: 장비 5만 대 법인을 한 문장으로 읽으면 CPU 0.1초 · 집계 최대 정지 0.28~0.50초).
+    const q = db.prepare(`SELECT p.serial AS s, p.extra_serials AS x FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id
+      WHERE r.room_id = ? AND (p.serial <> '' OR p.extra_serials <> '[]')`);
+    for (const { id } of db.prepare('SELECT m.id AS id FROM rack_room m JOIN rack_site t ON t.id = m.site_id WHERE t.corp_id = ?').all(cid)) {
+      for (const r of q.all(id)) take(r);
+      await pause();
+    }
+  } else {
+    for (const r of db.prepare(`SELECT p.serial AS s, p.extra_serials AS x FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id
+      JOIN rack_room m ON m.id = r.room_id JOIN rack_site t ON t.id = m.site_id WHERE t.corp_id = ? AND (p.serial <> '' OR p.extra_serials <> '[]')`).all(cid)) take(r);
   }
   // + 한 번이라도 이 법인 원장에 있었던 시리얼의 비교 키(뺀 장비 · 나중에 넣은 시리얼의 옛 글까지 가리려고 — rack_serial_seen)
   if (!_seenReady && Date.now() >= _seenRetryAt) {   // 열 때 채우지 못했으면 여기서 다시
@@ -423,7 +450,18 @@ export async function corpSerials(corpId) {
       console.warn(`[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다 — ${Math.round(wait / 1000)}초 뒤 다시 시도합니다:`, e.message);
     }
   }
-  for (const r of db.prepare('SELECT key FROM rack_serial_seen WHERE corp_id = ?').all(String(corpId || ''))) out.push(r.key);
+  if (!pause) {
+    for (const r of db.prepare('SELECT key FROM rack_serial_seen WHERE corp_id = ?').all(cid)) out.push(r.key);
+    return out;
+  }
+  const page = db.prepare(`SELECT key FROM rack_serial_seen WHERE corp_id = ? AND key > ? ORDER BY key LIMIT ${MASK_PAGE}`);
+  for (let last = ''; ;) {
+    const rows = page.all(cid, last);
+    for (const r of rows) out.push(r.key);
+    if (rows.length < MASK_PAGE) break;
+    last = rows[rows.length - 1].key;
+    await pause();
+  }
   return out;
 }
 
@@ -433,16 +471,26 @@ export async function corpSerials(corpId) {
 //   한 번이라도 본 재료를 원장 옆에 남기고(rack_mask_seen — kind 'h' 주소 · 't' 태그) 가림은 **이 기록** 으로 만든다(흡수한 '지금 값' 이 곧 기록에 든다).
 //   지운 서버의 주소도 남는다(의도 — 가림이 풀리지 않게). 잘못 들어간 값은 전체 범위 관리자가 지운다(`maskForget` — 감사 · 6회차 반증 R1).
 //   ⓐ 메모리 사본이 진실이고 파일은 뒤따른다 — 흡수는 사본에 바로 넣고(그 요청부터 가린다) 파일 쓰기는 응답 뒤에 모아서(`flushMask` · 잠금을 기다리지 않는다 ·
-//      실패하면 30초부터 두 배씩 최대 16분 뒤 다시 — 6회차 성능 3: 읽기 요청이 30초마다 3초씩 잠금을 기다렸다).
+//      실패하면 30초부터 두 배씩 최대 `MASK_FLUSH_RETRY_MAX_MS`(2분) 뒤 다시 — 6회차 성능 3: 읽기 요청이 30초마다 3초씩 잠금을 기다렸다).
+//      ⚠ 7회차 S7-4 · R7-1: 대기 값은 메모리에만 있다 — 포탈을 끌 때 `flushMaskOnExit` 가 잠금을 잠깐 기다려 쓴다(index.js 종료 훅). 그래도 끄는 순간까지
+//      다른 프로세스가 원장 쓰기 잠금을 쥐고 있으면 그 값은 잃는다(경고로 남긴다) — 처음 판의 상한 16분은 원인이 사라진 뒤에도 그만큼 쓰지 않아 그 창을 넓혔다.
 //   ⓑ 세대(`maskState().gen`): 사본이 바뀔 때만 오른다 — 가림 색인은 세대마다 한 번 만든다(`rack/material.js` · 6회차 성능 1: 요청마다 기록 전체로 색인을 다시 만들어
 //      기록 20만에서 요청 하나가 3~17초였다).
 //   ⓒ 닫힌 쪽 실패: 기록을 못 읽으면 던진다(`MaskUnavailable`) — 조회 계정 요청은 503(6회차 보안 2: 읽기 오류 하나로 가림이 조용히 풀렸다).
-//   ⓓ 상한: 종류마다 기록 `MASK_SEEN_MAX`. 넘은 '지금 값' 과 너무 긴 값은 파일에 쓰지 않고 메모리(`over` · `MASK_OVER_MAX`)에만 둔다 — 그동안은 가린다.
+//   ⓓ 상한: 종류마다 기록 `MASK_SEEN_MAX`. 상한 뒤의 새 값과 너무 긴 주소(255자 초과)는 파일에 쓰지 않고 메모리(`over` · `MASK_OVER_MAX`)에만 둔다.
+//      over 가 넘치면 **지금 등록부에 없는 값부터** 버린다 — 비우고, 그 흡수의 지금 값(이미 over 에 있던 것)을 되돌린 뒤 새 값을 넣는다(7회차 P7-1 · C4:
+//      처음 판은 넣는 도중에 비워, 같은 흡수에서 먼저 지나간 지금 값이 그 세대 색인에서 빠지고 같은 값을 다시 흡수할 때마다 세대가 올랐다).
+//      그래도 그 흡수의 지금 값을 다 담지 못하면 담지 못한 수를 알린다(`out.short`) — 조회 계정 요청은 503(닫힌 쪽 · 라우트 viewerOf).
+//      비운 값(지금 등록부에 없는 값)은 같은 프로세스에서도 더는 가리지 않는다(메모리 상한의 대가 — 경고로 알린다 · 7회차 S7-3 정정: 예전 문서는 '그동안은 가린다' 라고 했다).
+//      태그는 64자를 넘으면 재료가 아니다 — 글 속 찾기 색인(`textMask.js KEY_MAX`)에 들지 않아 가릴 수 없다(서비스 태그는 7자 · 7회차 C5).
+//      255자 넘는 주소(등록부 상한은 2,048자 — 경로가 붙은 URL)는 파일에 남기지 않는다 — 메모리에서는 글 속에서도 가린다(`rack/material.js` 색인 상한 2,048).
 //   값은 `rack/material.js` 가 정리해 넘긴 글 그대로. **응답에 싣지 말 것**(관리 화면 `maskSeenRows` 는 전체 범위 관리자만).
 const MASK_SEEN_MAX = 200_000;
 const MASK_OVER_MAX = 50_000;
 const MASK_KEY_MAX = Object.freeze({ h: 255, t: 64 });
 const MASK_FLUSH_CHUNK = 2000;                 // 파일 쓰기 한 번(한 트랜잭션)에 넣는 행 — 사이마다 양보
+const MASK_FLUSH_RETRY_MAX_MS = 120_000;       // 실패 뒤 다시 쓰는 간격의 상한(30초 → 1분 → 2분)
+const MASK_PAGE = 5000;                        // 기록을 읽는 조각
 const MASK_KINDS = Object.freeze(['h', 't']);
 export class MaskUnavailable extends Error {}
 let _mat = null;                               // { h:Set, t:Set, over:{h:Set,t:Set} } — 이 프로세스의 사본(핸들을 다시 열어도 유지 — 파일보다 앞설 수 있다)
@@ -453,6 +501,12 @@ const _matPend = { h: new Map(), t: new Map() };   // 값 → 처음 본 시각(
 let _matFlushTimer = null;
 let _matFlushFails = 0;
 let _matCapWarned = false;
+let _matOverWarnAt = 0;
+let _matShortWarnAt = 0;
+// 기록을 조각으로 읽는 쿼리 — 행 값 비교라야 기본 키(kind, key)를 탄다(7회차 P7-3: `kind > ? OR (kind = ? AND key > ?)` 는 SCAN 이라 조각마다 처음부터 훑어 O(n²) —
+//   기록 20만 × 2 에서 처음 읽기 CPU 1.6~1.8초 → 0.5초). `test/rackMaterialMut1127.test.js` 가 쿼리 계획을 고정한다.
+const MASK_PAGE_SQL = `SELECT kind, key, first_seen FROM rack_mask_seen WHERE (kind, key) > (?, ?) ORDER BY kind, key LIMIT ${MASK_PAGE}`;
+export const _maskPageSqlForTest = MASK_PAGE_SQL;
 /** 잘라 낸 부분 문자열이 원문(엣지가 보낸 큰 글)을 붙들지 않게 새 글로 만든다(6회차 성능 4 — V8 의 잘린 문자열은 원문을 쥔다). */
 const ownStr = (s) => JSON.parse(JSON.stringify(s));
 
@@ -466,12 +520,12 @@ async function maskLoad() {
     const m = { h: new Set(), t: new Set(), over: { h: new Set(), t: new Set() } };
     const pause = createYielder(15);
     try {
-      const page = db.prepare('SELECT kind, key FROM rack_mask_seen WHERE kind > ? OR (kind = ? AND key > ?) ORDER BY kind, key LIMIT 5000');
+      const page = db.prepare(MASK_PAGE_SQL);
       let lk = ''; let lv = '';
       for (;;) {
-        const rows = page.all(lk, lk, lv);
+        const rows = page.all(lk, lv);
         for (const r of rows) m[r.kind]?.add(r.key);
-        if (rows.length < 5000) break;
+        if (rows.length < MASK_PAGE) break;
         lk = rows[rows.length - 1].kind; lv = rows[rows.length - 1].key;
         await pause();
       }
@@ -497,27 +551,51 @@ export async function maskState() {
 /**
  * 지금 재료를 사본에 더한다(새 값만 · 그 요청부터 가린다) — 파일 쓰기는 응답 뒤로 미룬다. 돌려주는 값 = 세대.
  * @param {string[]} hosts  등록 주소(정리된 글)   @param {string[]} tags  서비스 태그(정리된 글)
+ * @param {{ now?: number, out?: { short?: number } }} [o]  `out.short` = 이 흡수의 값 중 메모리 상한 때문에 담지 못한 수(0 이면 이 흡수의 값은 모두 가린다)
  */
-export async function maskAbsorb(hosts = [], tags = [], { now = Date.now() } = {}) {
+export async function maskAbsorb(hosts = [], tags = [], { now = Date.now(), out = null } = {}) {
   const m = await maskLoad();
   let changed = false;
+  let short = 0;
   const lists = { h: hosts, t: tags };
   for (const k of MASK_KINDS) {
+    const over = m.over[k];
+    const inOver = [];          // 이 흡수의 값 중 이미 메모리에만 있던 것 — 지금 값이다(over 를 비울 때 되돌린다)
+    const toOver = new Set();   // 이 흡수의 새 값 중 파일에 쓰지 않을 것
     for (const v0 of lists[k] || []) {
-      if (typeof v0 !== 'string' || !v0 || m[k].has(v0) || m.over[k].has(v0)) continue;
+      if (typeof v0 !== 'string' || !v0 || m[k].has(v0)) continue;
+      if (over.has(v0)) { inOver.push(v0); continue; }
+      if (k === 't' && v0.length > MASK_KEY_MAX.t) continue;   // 색인에 들지 않는 길이 — 재료가 아니다(ⓓ · 7회차 C5)
+      if (toOver.has(v0)) continue;
       const v = ownStr(v0);
       if (v.length > MASK_KEY_MAX[k] || m[k].size >= MASK_SEEN_MAX) {
         if (m[k].size >= MASK_SEEN_MAX && !_matCapWarned) {
           _matCapWarned = true;
           console.warn(`[rack-db] 가림 재료 기록이 상한(${MASK_SEEN_MAX})에 닿았습니다 — 새 값은 파일에 남기지 않고 메모리에만 둡니다(다시 띄우면 그 값은 지금 등록부에 있을 때만 가립니다). 가림 집계 화면에서 지금 등록부에 없는 기록을 정리하세요.`);
         }
-        if (m.over[k].size >= MASK_OVER_MAX) m.over[k].clear();   // 메모리 상한 — 넘치면 비우고 지금 값부터 다시(넘치는 고장은 위 경고가 이미 알렸다)
-        m.over[k].add(v);
+        toOver.add(v);
       } else {
-        m[k].add(v); _matPend[k].set(v, now);
+        m[k].add(v); _matPend[k].set(v, now); changed = true;
       }
-      changed = true;
     }
+    if (!toOver.size) continue;
+    if (over.size + toOver.size > MASK_OVER_MAX) {
+      // 메모리 상한 — 지금 등록부에 없는 값부터 버린다(넣기 전에 판정 — 넣는 도중에 비우면 먼저 지나간 지금 값을 잃는다 · 7회차 P7-1 · C4)
+      const dropped = over.size - inOver.length;
+      over.clear();
+      for (const v of inOver) over.add(v);
+      if (Date.now() - _matOverWarnAt >= 10 * 60_000) {
+        _matOverWarnAt = Date.now();
+        console.warn(`[rack-db] 가림 재료의 메모리 몫(${MASK_OVER_MAX})이 넘쳐 지금 등록부에 없는 값 ${dropped}건을 버렸습니다 — 그 값이 든 이름은 이제 가리지 않습니다. 재료를 보내는 쪽(엣지 · 등록부)의 고장을 확인하고 가림 집계 화면에서 기록을 정리하세요(10분에 한 번 알립니다).`);
+      }
+    }
+    for (const v of toOver) { if (over.size < MASK_OVER_MAX) over.add(v); else short += 1; }
+    changed = true;
+  }
+  if (out) out.short = short;
+  if (short && Date.now() - _matShortWarnAt >= 10 * 60_000) {
+    _matShortWarnAt = Date.now();
+    console.warn(`[rack-db] 가림 재료가 기록 상한과 메모리 몫을 모두 넘어 지금 값 ${short}건을 담지 못했습니다 — 조회 계정 요청은 503 으로 답합니다(10분에 한 번 알립니다).`);
   }
   if (changed) { _matGen += 1; scheduleMaskFlush(); }
   return _matGen;
@@ -529,42 +607,75 @@ function scheduleMaskFlush(delayMs = 0) {
   if (delayMs > 0) t.unref?.();
   _matFlushTimer = t;
 }
+/** 대기 값 한 조각을 쓴다(동기 · 한 트랜잭션). `busyMs` 동안 잠금을 기다린다(0 = 기다리지 않는다). 쓰면 그 값을 대기에서 뺀다 · 실패하면 던진다. */
+function writeMaskChunk(db, busyMs) {
+  const batch = [];
+  for (const k of MASK_KINDS) for (const [v, at] of _matPend[k]) { if (batch.length >= MASK_FLUSH_CHUNK) break; batch.push([k, v, at]); }
+  let prevBusy = null;
+  try { prevBusy = db.prepare('PRAGMA busy_timeout').get()?.timeout ?? null; } catch { prevBusy = null; }
+  db.exec(`PRAGMA busy_timeout = ${Math.max(0, busyMs | 0)}`);
+  try {
+    tx(db, () => {
+      const ins = db.prepare('INSERT OR IGNORE INTO rack_mask_seen (kind, key, first_seen) VALUES (?, ?, ?)');
+      for (const [k, v, at] of batch) ins.run(k, v, at);
+    });
+  } finally { if (prevBusy != null) { try { db.exec(`PRAGMA busy_timeout = ${Number(prevBusy) | 0}`); } catch { /* */ } } }
+  for (const [k, v] of batch) _matPend[k].delete(v);
+}
 /** 아직 파일에 쓰지 못한 값을 쓴다(잠금을 기다리지 않는다 — 다른 연결이 잡고 있으면 바로 실패하고 나중에 다시). 동기 · 조각 하나. */
 function flushMask() {
   _matFlushTimer = null;
   const db = _db;
   const total = _matPend.h.size + _matPend.t.size;
   if (!db || !total) return;
-  const batch = [];
-  for (const k of MASK_KINDS) for (const [v, at] of _matPend[k]) { if (batch.length >= MASK_FLUSH_CHUNK) break; batch.push([k, v, at]); }
-  let prevBusy = null;
   try {
-    try { prevBusy = db.prepare('PRAGMA busy_timeout').get()?.timeout ?? null; } catch { prevBusy = null; }
-    db.exec('PRAGMA busy_timeout = 0');
-    try {
-      tx(db, () => {
-        const ins = db.prepare('INSERT OR IGNORE INTO rack_mask_seen (kind, key, first_seen) VALUES (?, ?, ?)');
-        for (const [k, v, at] of batch) ins.run(k, v, at);
-      });
-    } finally { if (prevBusy != null) { try { db.exec(`PRAGMA busy_timeout = ${Number(prevBusy) | 0}`); } catch { /* */ } } }
-    for (const [k, v] of batch) _matPend[k].delete(v);
+    writeMaskChunk(db, 0);
+    if (_matFlushFails) console.warn(`[rack-db] 가림 재료를 다시 파일에 남기기 시작했습니다(${_matFlushFails}번 실패 뒤).`);
     _matFlushFails = 0;
     if (_matPend.h.size + _matPend.t.size) scheduleMaskFlush();   // 남은 조각은 다음 틱에
   } catch (e) {
-    const wait = KEYS_RETRY_MS * 2 ** Math.min(_matFlushFails, SEEN_RETRY_MAX_DOUBLINGS); _matFlushFails += 1;
-    console.warn(`[rack-db] 가림 재료를 파일에 남기지 못했습니다(${total}건 대기 — 메모리에서는 가립니다) — ${Math.round(wait / 1000)}초 뒤 다시 시도합니다:`, e.message);
+    const wait = Math.min(MASK_FLUSH_RETRY_MAX_MS, KEYS_RETRY_MS * 2 ** Math.min(_matFlushFails, 8)); _matFlushFails += 1;
+    // 실패가 이어지는 동안 알림은 처음 한 번과 그 뒤 30번마다(2분 간격이면 약 1시간) — 무음 실패도 도배도 아니게
+    if (_matFlushFails === 1 || _matFlushFails % 30 === 0) {
+      console.warn(`[rack-db] 가림 재료를 파일에 남기지 못했습니다(${total}건 대기 — 메모리에서는 가립니다 · 이 상태로 포탈을 끄면 대기 값을 잃습니다) — ${Math.round(wait / 1000)}초 뒤 다시 시도합니다(${_matFlushFails}번째):`, e.message);
+    }
     scheduleMaskFlush(wait);
   }
 }
+/**
+ * 포탈을 끌 때 한 번(index.js gracefulExit) — 대기 값을 모두 쓴다. 조각마다 잠금을 `busyMs` 까지 기다린다(종료 유예 안쪽).
+ * 쓰지 못하면 잃는 건수를 경고로 남긴다(대기 값은 메모리에만 있다 — ⓐ). 돌려주는 값 = 남은 대기 수.
+ */
+export function flushMaskOnExit({ busyMs = 1500 } = {}) {
+  if (_matFlushTimer) { clearTimeout(_matFlushTimer); clearImmediate(_matFlushTimer); _matFlushTimer = null; }
+  const db = _db;
+  let left = _matPend.h.size + _matPend.t.size;
+  if (!left) return 0;
+  if (!db) { console.warn(`[rack-db] 종료 — 원장이 닫혀 있어 가림 재료 대기 ${left}건을 파일에 남기지 못했습니다(다시 띄우면 지금 등록부에 있는 값만 가립니다).`); return left; }
+  try {
+    for (let i = 0; i < 1000 && left; i += 1) { writeMaskChunk(db, busyMs); left = _matPend.h.size + _matPend.t.size; }
+  } catch (e) {
+    left = _matPend.h.size + _matPend.t.size;
+    console.warn(`[rack-db] 종료 — 가림 재료 대기 ${left}건을 파일에 남기지 못했습니다(다시 띄우면 지금 등록부에 있는 값만 가립니다):`, e.message);
+  }
+  return left;
+}
 /** 테스트 전용 — 대기 중인 기록을 지금 파일에 쓴다(다시 열기 전에). */
 export function _flushMaskForTest() { if (_matFlushTimer) { clearTimeout(_matFlushTimer); clearImmediate(_matFlushTimer); _matFlushTimer = null; } for (let i = 0; i < 200 && _matPend.h.size + _matPend.t.size; i += 1) flushMask(); }
-/** 테스트 전용 — 프로세스를 다시 띄운 것처럼 메모리 사본을 버린다(파일의 기록만 남는다). */
-export function _dropMaskMemoryForTest() { _flushMaskForTest(); _mat = null; _matLoadFailAt = 0; _matCapWarned = false; _matFlushFails = 0; }
+/**
+ * 테스트 전용 — 프로세스를 다시 띄운 것처럼 메모리 사본을 버린다(파일의 기록만 남는다).
+ * `flush: false` = 대기 값을 쓰지 않고 버린다(종료 훅 없이 죽은 프로세스 — 7회차 R7-1 ③: 늘 먼저 쓰는 흉내로는 대기 값 유실을 볼 수 없었다).
+ */
+export function _dropMaskMemoryForTest({ flush = true } = {}) {
+  if (flush) _flushMaskForTest();
+  else { if (_matFlushTimer) { clearTimeout(_matFlushTimer); clearImmediate(_matFlushTimer); _matFlushTimer = null; } for (const k of MASK_KINDS) _matPend[k].clear(); }
+  _mat = null; _matLoadFailAt = 0; _matCapWarned = false; _matFlushFails = 0; _matOverWarnAt = 0; _matShortWarnAt = 0;
+}
 
 /** 기록 수(메모리 사본 — 파일에 아직 쓰지 못한 값 포함) · 파일에 쓰지 못한 수 · 메모리에만 둔 수. */
 export async function maskSeenCounts() {
   const m = await maskLoad();
-  return { hosts: m.h.size, tags: m.t.size, pending: _matPend.h.size + _matPend.t.size, overflow: m.over.h.size + m.over.t.size, max: MASK_SEEN_MAX };
+  return { hosts: m.h.size, tags: m.t.size, pending: _matPend.h.size + _matPend.t.size, overflow: m.over.h.size + m.over.t.size, max: MASK_SEEN_MAX, overMax: MASK_OVER_MAX };
 }
 
 /** 관리 화면용 — 파일의 기록 행 전부(종류 · 값 · 처음 본 시각). 조각마다 양보. **전체 범위 관리자 라우트만** 부른다. */
@@ -572,12 +683,12 @@ export async function maskSeenRows() {
   const db = await need();
   const pause = createYielder(15);
   const out = [];
-  const page = db.prepare('SELECT kind, key, first_seen FROM rack_mask_seen WHERE kind > ? OR (kind = ? AND key > ?) ORDER BY kind, key LIMIT 5000');
+  const page = db.prepare(MASK_PAGE_SQL);
   let lk = ''; let lv = '';
   for (;;) {
-    const rows = page.all(lk, lk, lv);
+    const rows = page.all(lk, lv);
     for (const r of rows) out.push({ kind: r.kind, key: r.key, firstSeen: r.first_seen || null });
-    if (rows.length < 5000) break;
+    if (rows.length < MASK_PAGE) break;
     lk = rows[rows.length - 1].kind; lv = rows[rows.length - 1].key;
     await pause();
   }
@@ -672,9 +783,10 @@ export async function renameSite({ id, name, user }) {
   return tx(db, () => {
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(id));
     if (!s) fail(404, '데이터센터를 찾지 못했습니다.');
-    if (name === s.name) return { id, unchanged: true };   // 같은 이름 — 판 · 이력(기준 판 포함)을 만들지 않는다
+    const verdict = renameVerdict(db.prepare('SELECT id, name FROM rack_site WHERE corp_id = ?').all(s.corpId), s.name, name, id);
+    if (verdict === 'same') return { id, unchanged: true };   // 같은 이름 — 판 · 이력(기준 판 포함)을 만들지 않는다
+    if (verdict === 'taken') fail(409, '같은 이름의 데이터센터가 이 법인에 이미 있습니다.');
     ensureBaseline(db, s.corpId);
-    if (nameTaken(db.prepare('SELECT id, name FROM rack_site WHERE corp_id = ?').all(s.corpId), name, id)) fail(409, '같은 이름의 데이터센터가 이 법인에 이미 있습니다.');
     db.prepare('UPDATE rack_site SET name = ? WHERE id = ?').run(name, id);
     log(db, { user, corpId: s.corpId, action: 'site.rename', detail: `${s.name} → ${name}` });
     return { id };
@@ -716,9 +828,10 @@ export async function renameRoom({ id, name, user }) {
   return tx(db, () => {
     const m = roomRow(db.prepare('SELECT * FROM rack_room WHERE id = ?').get(id));
     if (!m) fail(404, '전산실을 찾지 못했습니다.');
-    if (nameTaken(db.prepare('SELECT id, name FROM rack_room WHERE site_id = ?').all(m.siteId), name, id)) fail(409, '같은 이름의 전산실이 이미 있습니다.');
+    const verdict = renameVerdict(db.prepare('SELECT id, name FROM rack_room WHERE site_id = ?').all(m.siteId), m.name, name, id);
+    if (verdict === 'same') return { id, unchanged: true };   // 같은 이름 — 판 · 이력을 만들지 않는다(중복 검사보다 먼저 — 7회차 C1)
+    if (verdict === 'taken') fail(409, '같은 이름의 전산실이 이미 있습니다.');
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(m.siteId));
-    if (name === m.name) return { id, unchanged: true };   // 같은 이름 — 판 · 이력을 만들지 않는다
     ensureBaseline(db, s?.corpId);
     db.prepare('UPDATE rack_room SET name = ? WHERE id = ?').run(name, id);
     log(db, { user, corpId: s?.corpId || '', roomId: id, action: 'room.rename', detail: `${m.name} → ${name}` });
@@ -817,7 +930,11 @@ export function updateRack({ roomId, rev, user, id, input }) {
     const next = { ...cur, ...input };
     // 반증 F8: 높이만 고치고 종류를 고르지 않았으면 '직접 높이' 로 본다(종류의 높이와 어긋난 채 종류 이름이 남지 않게).
     if (input.heightU != null && !input.typeId) next.typeId = '';
-    if (input.name != null && nameTaken([...racksById.values()], input.name, id)) fail(409, '같은 이름의 랙이 이 전산실에 이미 있습니다.');
+    if (input.name != null) {
+      const verdict = renameVerdict([...racksById.values()], cur.name, input.name, id);
+      if (verdict === 'taken') fail(409, '같은 이름의 랙이 이 전산실에 이미 있습니다.');
+      if (verdict === 'same') next.name = cur.name;   // 바꾸지 않은 이름(폭만 다른 쌍둥이 포함)은 그대로 — 다른 칸의 고치기를 막지 않는다(7회차 C1)
+    }
     if (input.typeId) {
       const t = typeRow(db.prepare('SELECT * FROM rack_type WHERE id = ?').get(input.typeId));
       if (!t) fail(400, '랙 종류를 찾지 못했습니다.');
@@ -964,11 +1081,12 @@ function serialClash(db, corpId, keys, ignoreId = '') {
 }
 /** 색인 없이 원장을 훑는 예전 판정 — 자기 점검(RACK_SELF_CHECK=1)에서만 색인 결과와 대조한다. */
 function serialClashScan(db, corpId, keys, ignoreId = '') {
-  const rows = db.prepare(`SELECT p.id, p.label, p.serial_key AS k, p.extra_serials AS x, r.name AS rack, m.name AS room FROM rack_place p
+  const rows = db.prepare(`SELECT p.id, p.label, p.serial AS s, p.extra_serials AS x, r.name AS rack, m.name AS room FROM rack_place p
     JOIN rack_rack r ON r.id = p.rack_id JOIN rack_room m ON m.id = r.room_id JOIN rack_site s ON s.id = m.site_id WHERE s.corp_id = ?`).all(corpId);
   for (const r of rows) {
     if (r.id === ignoreId) continue;
-    const theirs = new Set(r.k ? [r.k] : []);
+    const k0 = serialKeyOf(r.s || '');   // 저장된 키 칸이 아니라 지금 키 함수로(7회차 C8 — 위 placeRow 와 같은 까닭)
+    const theirs = new Set(k0 ? [k0] : []);
     try { for (const x of JSON.parse(r.x || '[]')) { const kx = serialKeyOf(x); if (kx) theirs.add(kx); } } catch { /* */ }
     for (const k of keys) if (theirs.has(k)) return { id: r.id, where: `${r.room} › ${r.rack}`, label: r.label || '이름 없는 장비' };
   }

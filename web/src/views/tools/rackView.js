@@ -283,7 +283,24 @@ export const fieldsText = (fields) => ((fields || []).length ? fields.map((f) =>
  * 예전엔 둘 다 '—' 만 보여 '바뀌는 것 없음' 으로 읽혔다(6회차 화면 D5 · 정확성 D5).
  */
 export function restoreMissingText(isAdmin) {
-  return isAdmin ? '지금 원장과 비교하지 못했습니다(원장을 읽지 못했거나 이 판을 되살릴 수 없습니다).' : '되돌리기 미리 보기는 관리자에게만 보입니다.';
+  // 서버는 '지금 원장' 을 판 꼴로 읽지 못했을 때만 미리 보기를 비운다(rack/db.js versionDetail — 이 판 자체는 읽혔다). 예전 문구는 '이 판을 되살릴 수 없다' 고도 말해
+  //   되돌리기 단추가 함께 보이는 화면과 어긋났다(7회차 화면 U6).
+  return isAdmin ? '지금 원장과 비교하지 못했습니다(지금 원장을 판 꼴로 읽지 못했습니다) — 되돌리면 무엇이 바뀌는지 미리 볼 수 없습니다.' : '되돌리기 미리 보기는 관리자에게만 보입니다.';
+}
+/**
+ * 되돌리기 확인 문구(순수) — 미리 보기가 없으면 그 사실을 확인 단계에서 다시 밝힌다(7회차 화면 U6).
+ * @param {string} corpName  @param {number} vid  @param {boolean} hasPreview  서버가 되돌리기 미리 보기(`restore`)를 실었는가
+ */
+export function restoreConfirmText(corpName, vid, hasPreview) {
+  const base = `${corpName} 의 랙 실장도 전체가 판 #${vid} 의 모습으로 바뀝니다. 지금 모습도 판으로 남아 다시 되돌릴 수 있습니다. 열려 있는 다른 편집 화면은 다음 저장에서 최신을 다시 불러옵니다.`;
+  return hasPreview ? base : `${base} ⚠ 미리 보기 없이 되돌립니다 — 무엇이 바뀌는지 확인하지 못했습니다.`;
+}
+/** 가림 재료 기록에서 지운 결과 문구(순수) — 서버가 돌려준 지운 수 · 건너뛴 수(못 읽은 값은 0 으로 지어내지 않는다). */
+export function forgetResultText(r) {
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+  const removed = n(r?.removed); const skipped = n(r?.skippedCurrent);
+  if (removed == null) return '지웠습니다(지운 수를 받지 못했습니다).';
+  return `${removed.toLocaleString()}건을 지웠습니다${skipped ? ` · 지금 등록부에 있는 ${skipped.toLocaleString()}건은 건너뛰었습니다` : ''}.`;
 }
 
 /**

@@ -16,7 +16,7 @@ import RackMaskCensus from './RackMaskCensus.jsx';
 import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
-  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields, unplacedMode, linkNameText, restoreMissingText,
+  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields, unplacedMode, linkNameText, restoreMissingText, restoreConfirmText,
   viewAfterLoadFail, sameSpot, viewAfterMove, spotVisible, lostViewReason, modalWithRoom, conflictHint, nameTarget,
 } from './rackView.js';
 
@@ -76,10 +76,11 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
   return (
     <div style={{ width: 236, flex: '0 0 auto', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '0 2px 4px', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-        {/* 이름은 줄이고(전체는 title) 사용 U 는 늘 보이게 — 조회 계정의 가린 이름('masked-… (이름 가림)')이 머리글을 넘쳐 사용 U · 용도를 밀어냈다(6회차 화면 D3) */}
+        {/* 이름은 줄이고(전체는 title) 사용 U 는 늘 보이게 — 조회 계정의 가린 이름('masked-… (이름 가림)')이 머리글을 넘쳐 사용 U · 용도를 밀어냈다(6회차 화면 D3).
+            줄 · 용도 글은 **남는 폭만** 쓴다(기본 폭 0) — 7회차 화면 U1: 기본 폭이 글 폭이라 긴 용도 글이 짧은 랙 이름('A1')을 'A…' 로 밀어냈다. 긴 이름이면 줄 · 용도는 title 로만 남는다. */}
         <strong title={rack.name} style={{ ...mono, fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', flex: '0 1 auto' }}>{rack.name}</strong>
         <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>{rack.totalsStale ? `— / ${H}U` : `${t.usedU ?? 0} / ${H}U${t.usePct != null ? ` · ${t.usePct}%` : ''}`}</span>
-        <span title={[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ') || undefined} style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 'auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ')}</span>
+        <span title={[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ') || undefined} style={{ fontSize: 11, color: 'var(--text-dim)', flex: '1 1 0%', textAlign: 'right', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ')}</span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 10.5, color: 'var(--text-dim)', padding: '0 2px 6px' }}>
         {/* 끌어 놓기를 화면에 먼저 반영한 랙은 합계가 옛 값이다 — 다시 불러올 때까지 숫자 대신 밝힌다(2회차 반증 C6) */}
@@ -443,7 +444,7 @@ function VersionsModal({ corpId, corpName, isAdmin, onClose, onRestored, onFaile
                         <button type="button" style={btnPri} onClick={() => setConfirm(true)}>이 판으로 되돌리기</button>
                       ) : (
                         <>
-                          <span style={{ fontSize: 12, flex: '1 1 260px' }}>{corpName} 의 랙 실장도 전체가 판 #{selVid} 의 모습으로 바뀝니다. 지금 모습도 판으로 남아 다시 되돌릴 수 있습니다. 열려 있는 다른 편집 화면은 다음 저장에서 최신을 다시 불러옵니다.</span>
+                          <span style={{ fontSize: 12, flex: '1 1 260px' }}>{restoreConfirmText(corpName, selVid, !!detail.restore)}</span>
                           <button type="button" style={off(btn, busy)} disabled={busy} onClick={() => setConfirm(false)}>취소</button>
                           <button type="button" style={off({ ...btnPri, background: 'var(--red)', borderColor: 'var(--red)', color: '#ffffff' }, busy)} disabled={busy} onClick={restore}>{busy ? '되돌리는 중…' : '되돌리기 확인'}</button>
                         </>

@@ -31,14 +31,14 @@ import { scopeIdracServers } from '../admin/idracCore.js';
 import { hwSummaryOf, mgmtHostOf } from '../../idrac/hwSummary.js';
 import { partHealthRollup } from '../../idrac/invView.js';
 import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, dropInvisible, foldWidth, serialAddressLike, LIMITS, KIND_LABEL } from '../../rack/layout.js';
-import { projectSite, projectRoom, projectType, projectRack, projectPlace, projectHw, projectDiff } from '../../rack/project.js';
+import { projectSite, projectRoom, projectType, projectRack, projectPlace, projectLink, projectDiff } from '../../rack/project.js';
 import * as R from '../../rack/db.js';
 import { VERSION_KEEP } from '../../rack/versions.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { createYielder } from '../../util/timeSlice.js';
 import { hostVariants, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
 import { tagIndexOf, stripTags, needleIndexOfAsync, replaceNeedles, charKind } from '../../rack/textMask.js';
-import { cleanTag, realTags, usableTag, fleetServers, fleetMaterial, absorbFleet, materialIndex, corpTagIndexOf } from '../../rack/material.js';
+import { cleanTag, realTags, usableTag, fleetServers, fleetMaterial, absorbFleet, materialIndex, corpTagIndexOf, corpTagIndexOfAsync, hostIndexOf } from '../../rack/material.js';
 import { todayStamp } from '../../util/dayKey.js';
 import { isIPv6 } from 'node:net';
 
@@ -286,6 +286,7 @@ function textMaskOf({ admin, showSerial, ix, corpIdx = null }) {
  *  · `forCorp(법인)` = 그 법인 원장의 글에 쓰는 가림 · `forCorps(법인들)` = 여러 법인에 걸친 글(랙 종류 이름 — 전 법인 원장의 시리얼).
  */
 const MASK_UNAVAILABLE_REASON = '가림 재료 기록을 읽지 못해 지금은 조회 계정에 원장을 보여 줄 수 없습니다 — 잠시 뒤 다시 시도하세요(계속되면 관리자에게 알리세요).';
+const MASK_SATURATED_REASON = '가림 재료가 기록 상한을 넘어 지금은 조회 계정에 원장을 보여 줄 수 없습니다 — 관리자에게 알리세요(관리자는 가림 집계 화면에서 지금 등록부에 없는 기록을 정리하고, 재료를 보내는 쪽의 고장을 확인합니다).';
 let _absorbWarn = '';
 async function viewerOf(req) {
   const admin = isAdminDetailUser(req.user);
@@ -301,10 +302,13 @@ async function viewerOf(req) {
   const showSerial = serialsVisible(req);
   let ix;
   // 시리얼을 가리는 판본(범위 계정)은 인벤토리에서만 읽힌 태그도 **매번** 흡수한다(2회차 반증 B-1 — 그 태그는 이 판본에서만 가린다. 간격을 두면 새로 읽힌 태그가 그 사이 보인다).
-  try { await absorbFleet(all, { forceInv: !showSerial }); ix = await materialIndex(); } catch (e) {
+  const out = { short: 0 };
+  try { await absorbFleet(all, { forceInv: !showSerial, out }); ix = await materialIndex(); } catch (e) {
     if (e instanceof R.MaskUnavailable) throw new R.RackError(503, MASK_UNAVAILABLE_REASON, { code: 'maskUnavailable' });
     throw e;
   }
+  // 지금 재료를 다 담지 못했다(기록 상한 + 메모리 몫을 넘은 고장 — `rack/db.js` ⓓ) — 그 값이 든 이름이 원문으로 나가므로 닫힌 쪽으로(7회차 P7-1 · C4 대책의 끝).
+  if (out.short) throw new R.RackError(503, MASK_SATURATED_REASON, { code: 'maskUnavailable' });
   const cache = new Map();
   const forCorps = async (corpIds) => {
     // 시리얼을 보는 판본은 태그를 가리지 않는다 — 법인과 무관하게 가림 하나.
@@ -327,25 +331,26 @@ async function viewerOf(req) {
  *    IP 로 등록한 서버는 이름이 곧 관리 주소이고, 등록부 이름은 원장의 글이 아니라 사람이 공개 여부를 정한 적이 없다 — 조회 계정은 원장의 표시 이름을 본다.
  *    id 는 항상 토큰(id 가 주소 · 서비스 태그인 등록부가 있다 — 화면은 키로만 쓴다). 모델 · 하드웨어 요약은 칸 목록으로(`project.js projectHw`).
  */
-const POWER_STATES = new Set(['On', 'Off', 'PoweringOn', 'PoweringOff', 'Paused']);
 function linkView(row, v) {
   const { s, inv } = row;
   const sys = inv?.system || {};
-  const rollup = (k) => { const r = partHealthRollup(inv?.[k]); return r.state ? { state: r.state, ...r.counts } : null; };
+  const parts = inv ? { psu: partHealthRollup(inv.psus), disk: partHealthRollup(inv.disks), mem: partHealthRollup(inv.memoryDimms), fan: partHealthRollup(inv.fans) } : null;
   const ps = String(sys.powerState || inv?.powerState || '');
-  const common = {
-    // 전원 상태는 Redfish 열거값만 조회 계정에(6회차 반증 R5: 엣지가 보낸 자유 글 256자가 그대로 실렸다). 관리자는 원문.
-    powerState: v.admin || POWER_STATES.has(ps) ? ps : '',
-    health: healthOf(sys.health),
-    remote: !!s.remote,
-    collectedAt: Number(inv?.collectedAt) || null,
-    parts: inv ? { psu: rollup('psus'), disk: rollup('disks'), mem: rollup('memoryDimms'), fan: rollup('fans') } : null,
-  };
   const model = String(sys.model || s.model || '');
   if (v.admin) {
-    return { serverId: String(s.id), name: s.name || sys.hostName || '', hostname: sys.hostName || '', model, ...common, hw: hwSummaryOf(inv), mgmtHost: mgmtHostOf(s.host) };
+    const rollup = (r) => (r.state ? { state: r.state, ...r.counts } : null);
+    return {
+      serverId: String(s.id), name: s.name || sys.hostName || '', hostname: sys.hostName || '', model,
+      powerState: ps, health: healthOf(sys.health), remote: !!s.remote, collectedAt: Number(inv?.collectedAt) || null,
+      parts: parts ? { psu: rollup(parts.psu), disk: rollup(parts.disk), mem: rollup(parts.mem), fan: rollup(parts.fan) } : null,
+      hw: hwSummaryOf(inv), mgmtHost: mgmtHostOf(s.host),
+    };
   }
-  return { serverId: maskedIdToken(String(s.id ?? '')), model: v.text(model), ...common, hw: projectHw(hwSummaryOf(inv), v) };
+  // 비관리자는 칸 목록 투영으로만(`rack/project.js projectLink` — 전원 상태 열거값 · 부품 개수 · 하드웨어 요약 · 가린 모델. 7회차 반증 R7-2)
+  return projectLink({
+    serverToken: maskedIdToken(String(s.id ?? '')), model, powerState: ps, health: healthOf(sys.health), remote: s.remote,
+    collectedAt: inv?.collectedAt, parts, hw: hwSummaryOf(inv),
+  }, v);
 }
 
 // ───────────────────────── 조회 ─────────────────────────
@@ -660,11 +665,16 @@ async function runOp(req, res) {
           const c = cleanPlaceInput(b.place, { partial: op === 'place.update' });
           if (c.error) return res.status(400).json({ ok: false, reason: c.error });
           // 시리얼 칸에 등록된 관리 주소(FQDN)를 적은 것도 거절한다 — IP · URL 은 `cleanPlaceInput` 이 거절하고, 등록 주소는 재료를 아는 여기서(입력 · 출력 판정을 맞춘다 — 6회차 보안 4).
-          //   재료 기록을 못 읽으면 이 검사만 건너뛴다(쓰기를 막지 않는다 — 출력은 조회 계정에 503 으로 닫힌다).
+          //   판정 재료는 **쓰는 사람이 볼 수 있는 서버만**(7회차 S7-1 — 재현): 함대 색인(전 법인 등록부 · 엣지 목록 · 지운 서버 기록)으로 거절하면 범위 관리자가 후보 이름을 넣어
+          //   400 · 200(낡은 rev 면 400 · 409 — 저장 · 감사 없이) 차이로 다른 법인 서버가 등록돼 있는지 알아냈다. 조회 ∧ 쓰기 전체 범위 관리자만 함대 색인(기록 포함)으로 본다.
+          //   범위 밖 주소가 저장되더라도 출력은 닫혀 있다 — 시리얼을 보는 조회 계정에는 `textMaskOf.serial` 이 함대 색인으로 비우고, 범위 계정에는 시리얼이 나가지 않는다.
+          //   재료 기록을 못 읽으면(전체 범위 관리자) 이 검사만 건너뛴다(쓰기를 막지 않는다 — 출력은 조회 계정에 503 으로 닫힌다).
           const sers = [c.value.serial, ...(c.value.extraSerials || [])].filter(Boolean);
           if (sers.length) {
-            let ix = null; try { ix = await materialIndex(); } catch { ix = null; }
-            if (ix && sers.some((x) => textMaskOf({ admin: false, showSerial: true, ix }).hasHost(x))) {
+            let hostIx = null;
+            if (isFullReadWriteScope(req.user, store.get())) { try { hostIx = await materialIndex(); } catch { hostIx = null; } }
+            else hostIx = hostIndexOf(fleetMaterial(scopeIdracServers(req, fleetServers(req.user)).servers).hosts);
+            if (hostIx && sers.some((x) => textMaskOf({ admin: false, showSerial: true, ix: hostIx }).hasHost(x))) {
               return res.status(400).json({ ok: false, reason: '시리얼 칸에 등록된 관리 주소가 있습니다 — 주소는 메모에 적으세요(메모는 관리자에게만 보입니다).' });
             }
           }
@@ -719,7 +729,8 @@ async function maskCensus(req, corpIds) {
   const fields = Object.fromEntries(CENSUS_FIELDS.map((f) => [f, blank()]));
   const samples = []; let sampleOmitted = 0; let notes = 0; let places = 0; let racks = 0;
   for (const corpId of corpIds) {
-    const tagMask = textMaskOf({ admin: false, showSerial: false, ix, corpIdx: corpTagIndexOf(await R.corpSerials(corpId)) });
+    // 법인 원장 시리얼도 전산실마다 읽고 색인도 조각으로(7회차 P7-5 — 장비 5만 대 법인에서 한 번에 읽고 만들면 최대 정지 0.28~0.50초)
+    const tagMask = textMaskOf({ admin: false, showSerial: false, ix, corpIdx: await corpTagIndexOfAsync(await R.corpSerials(corpId, { pause }), pause) });
     const t = await R.corpTexts(corpId, { pause });
     notes += t.notes; places += t.places; racks += t.racks;
     const seen = new Set();

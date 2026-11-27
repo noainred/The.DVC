@@ -18,8 +18,9 @@ import { analysisServersWithRemote, invForServer } from '../insights/analysisSer
 import { isPlaceholderTag } from '../bmusage/commonTag.js';
 import { hostVariants } from '../auth/addressMask.js';
 import { createYielder } from '../util/timeSlice.js';
+import { HOST_MAX_LEN } from '../idrac/registry.js';
 import { dropInvisible, foldWidth } from './layout.js';
-import { tagIndexOf, tagIndexOfAsync, needleIndexOfAsync } from './textMask.js';
+import { tagIndexOf, tagIndexOfAsync, needleIndexOf, needleIndexOfAsync } from './textMask.js';
 import * as R from './db.js';
 
 /**
@@ -82,10 +83,10 @@ export function _resetAbsorbForTest() { _invAt = 0; }
  * 등록부의 지금 재료를 기록에 흡수한다(새 값만 — `rack/db.js maskAbsorb`). 기록을 읽지 못하면 던진다(`R.MaskUnavailable`).
  * @param {object[]} all  `fleetServers()` 결과   @param {{ forceInv?: boolean }} [o]
  */
-export async function absorbFleet(all, { forceInv = false } = {}) {
+export async function absorbFleet(all, { forceInv = false, out = null } = {}) {
   const inv = forceInv || Date.now() - _invAt >= INV_EVERY_MS;
   const m = fleetMaterial(all, { invTags: inv });
-  const gen = await R.maskAbsorb(m.hosts, m.tags);
+  const gen = await R.maskAbsorb(m.hosts, m.tags, { out });   // out.short = 메모리 상한 때문에 담지 못한 지금 값의 수(라우트가 조회 계정에 503)
   if (inv) _invAt = Date.now();   // 흡수를 마친 뒤에 간격을 시작한다(못 마친 흡수가 간격만 먹지 않게)
   return gen;
 }
@@ -109,6 +110,9 @@ export async function materialIndex() {
   _ixBuild = { gen, p };
   return p;
 }
+// 글 속 주소 찾기 색인의 길이 — 상한은 등록부 host 상한(`idrac/registry.js HOST_MAX_LEN` 2,048)과 같게: 255자 넘는 주소(경로가 붙은 URL)도 글 속에서 찾는다
+//   (7회차 C5: 예전 상한 255 라 그런 주소는 이름 통째가 같을 때만 가렸다. 파일에는 255자까지만 남긴다 — `rack/db.js` ⓓ).
+const HOST_NEEDLE = Object.freeze({ min: 3, max: HOST_MAX_LEN });
 async function buildIndex(gen, hosts, tags) {
   const pause = createYielder(15);
   const addrSet = new Set(); const variants = [];
@@ -117,14 +121,30 @@ async function buildIndex(gen, hosts, tags) {
     for (const v of hostVariants(h)) { addrSet.add(v.toLowerCase()); variants.push(v); }
     if ((++i & 511) === 0) await pause();
   }
-  const hostIdx = await needleIndexOfAsync(variants, { min: 3 }, pause);
+  const hostIdx = await needleIndexOfAsync(variants, HOST_NEEDLE, pause);
   const usable = []; i = 0;
   for (const t of tags) { if (usableTag(t)) usable.push(t); if ((++i & 1023) === 0) await pause(); }
   const fleetTagIdx = await tagIndexOfAsync(usable, pause);
   return { gen, addrSet, hostIdx, fleetTagIdx, hosts: hosts.length, tags: tags.length };
 }
+/**
+ * 주소 목록(정리한 글) 하나로 만든 작은 주소 색인 — `materialIndex` 의 주소 칸과 같은 꼴({ addrSet, hostIdx }). 동기라 작은 목록에만.
+ * 시리얼 칸 입력 검사가 **쓰는 사람의 조회 범위 안 서버**로만 판정할 때 쓴다(7회차 S7-1: 함대 색인으로 거절하면 범위 관리자가 후보 이름을 넣어
+ *   400 · 200 차이로 다른 법인 서버가 등록돼 있는지 알아냈다 — 설계 5.5 · 반증 2-2 가 막기로 한 길).
+ */
+export function hostIndexOf(hosts) {
+  const addrSet = new Set(); const variants = [];
+  for (const h of hosts || []) for (const v of hostVariants(h)) { addrSet.add(v.toLowerCase()); variants.push(v); }
+  return { addrSet, hostIdx: needleIndexOf(variants, HOST_NEEDLE) };
+}
 /** 법인 원장 시리얼의 작은 색인(요청 안에서 법인마다 한 번). */
 export const corpTagIndexOf = (serials) => tagIndexOf(realTags(serials));
+/** 같은 색인을 조각으로(가림 집계처럼 법인 원장 전부를 훑는 긴 작업 — 7회차 P7-5). 결과는 `corpTagIndexOf` 와 같다. */
+export async function corpTagIndexOfAsync(serials, pause) {
+  const usable = []; let i = 0;
+  for (const s of serials || []) { const t = cleanTag(s); if (usableTag(t)) usable.push(t); if ((++i & 1023) === 0) await pause(); }
+  return tagIndexOfAsync(usable, pause);
+}
 /** 테스트 전용 — 색인 캐시를 버린다. */
 export function _dropIndexForTest() { _ix = null; _ixBuild = null; }
 

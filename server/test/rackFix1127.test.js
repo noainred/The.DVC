@@ -62,6 +62,11 @@ test('D1: iDRAC 펌웨어 판(네 마디)은 조회 계정에도 그대로 — �
   }
   for (const v of ['7.00.00.171', '2.83.83.83', '6.10.80.00', 'A04', '1.20']) assert.equal(P.firmwareLike(v), true, v);
   for (const v of ['build 10.20.30.4', 'fw 7.0 build', '', 'x'.repeat(41), null]) assert.equal(P.firmwareLike(v), false, String(v));
+  // 7회차 F2 ②: 위 'x'.repeat(41) · 'build …' 는 정규식 머리에서 이미 떨어져 40자 상한 · 끝 고정($)을 보지 않았다 — 판 꼴인 채로 상한 · 꼬리를 본다
+  assert.equal(P.firmwareLike('7.00.00.171 build 10.20.30.4'), false, '판 뒤에 주소가 붙은 글');
+  const fwLong = `1${'.abcdefghij'.repeat(4)}`;
+  assert.equal(P.firmwareLike(fwLong.slice(0, 40)), true, '판 꼴 40자');
+  assert.equal(P.firmwareLike(fwLong), false, '판 꼴 41자 이상');
 });
 
 test('전원 상태: 조회 계정에는 Redfish 열거값만(엣지가 보낸 자유 글은 비운다) · 관리자는 원문', async () => {
@@ -79,6 +84,9 @@ test('시리얼 칸: 등록된 관리 주소(FQDN) · 화면처럼 문자열로 
     { serial: 'bmc-fw1.mgmt.example' },
     { extraSerials: 'SW-1 / bmc-fw2.mgmt.example' },
     { extraSerials: 'SW-CORE-1 / https://unreg-host.example/ui' },   // 화면이 보내는 꼴 — 예전엔 'https:' · 'unreg-host.example' · 'ui' 로 쪼개져 저장됐다
+    // 7회차 F2 ③: 위 줄은 쪼갠 뒤 남는 'https:' 조각을 마지막 검사가 잡아 '쪼개기 전 낱말 검사' 를 보지 않았다 — http 가 아닌 URL · 긴 낱말 뒤의 URL
+    { extraSerials: 'SW-1 / smb://nas01/share' },
+    { extraSerials: `${'L'.repeat(70)} smb://nas01/share` },
     { extraSerials: ['SW-1', 'http:bmc.example'] },
     { serial: 'bmc.10.20.30.4' },
   ];

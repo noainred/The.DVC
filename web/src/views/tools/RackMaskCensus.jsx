@@ -7,7 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { CENSUS_FIELD_LABEL, censusRows, censusHitsText, SEEN_KIND_LABEL, seenKeyOf, forgetItemsOf, seenCapText } from './rackView.js';
+import { CENSUS_FIELD_LABEL, censusRows, censusHitsText, SEEN_KIND_LABEL, seenKeyOf, forgetItemsOf, seenCapText, forgetResultText } from './rackView.js';
 
 const btn = { height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontWeight: 600, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' };
 const tile = { flex: '1 1 170px', minWidth: 0, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' };
@@ -119,9 +119,10 @@ function SeenRecords({ material, onChanged }) {
   const [msg, setMsg] = useState('');
   const seq = useRef(0);
   const cap = seenCapText(material);
-  const load = useCallback(async () => {
+  // keepMsg = 지운 뒤 다시 읽을 때 결과 문구를 지우지 않는다(7회차 화면 U2 · 시험 F1: 문구를 쓴 바로 뒤 load 가 같은 틱에 '' 로 덮어 한 번도 보이지 않았다).
+  const load = useCallback(async ({ keepMsg = false } = {}) => {
     const my = ++seq.current;
-    setBusy(true); setMsg('');
+    setBusy(true); if (!keepMsg) setMsg('');
     try { const r = await fetchJson('/tools/rack/mask-seen'); if (my === seq.current) { setList(r); setErr(null); setSel(new Set()); } }
     catch (e) { if (my === seq.current) setErr(e); }
     finally { if (my === seq.current) setBusy(false); }
@@ -134,8 +135,8 @@ function SeenRecords({ material, onChanged }) {
     setBusy(true); setErr(null);
     try {
       const r = await postJson('/tools/rack/op', { op: 'mask.forget', items });
-      setMsg(`${(r.removed ?? 0).toLocaleString()}건을 지웠습니다${r.skippedCurrent ? ` · 지금 등록부에 있는 ${r.skippedCurrent.toLocaleString()}건은 건너뛰었습니다` : ''}.`);
-      await load(); onChanged?.();
+      setMsg(forgetResultText(r));
+      await load({ keepMsg: true }); onChanged?.();
     } catch (e) { setErr(e); setBusy(false); }
   };
   const toggle = (k) => setSel((s0) => { const s1 = new Set(s0); if (s1.has(k)) s1.delete(k); else s1.add(k); return s1; });
@@ -143,18 +144,21 @@ function SeenRecords({ material, onChanged }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border-soft)', paddingTop: 10, minWidth: 0 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <strong style={{ fontSize: 13 }}>가림 재료 기록</strong>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: cap?.warn ? '#fcd34d' : 'var(--text-dim)' }}>{cap ? cap.text : '—'}{cap?.warn ? ' — 상한에 가깝습니다. 지금 등록부에 없는 기록을 정리하세요.' : ''}</span>
-        <button type="button" style={{ ...btn, minWidth: 168, opacity: busy ? 0.5 : 1, cursor: busy ? 'not-allowed' : 'pointer' }} disabled={busy} onClick={load}>{busy && !list ? '불러오는 중…' : '지금 등록부에 없는 기록 보기'}</button>
+        {/* 기본 폭을 준다 — 좁은 화면에서 글이 단추 옆 몇십 px 칸에 세로로 늘어서지 않고, 모자라면 단추가 다음 줄로 간다(7회차 화면 U4) */}
+        <span style={{ flex: '1 1 220px', minWidth: 0, fontSize: 12, color: cap?.warn ? '#fcd34d' : 'var(--text-dim)' }}>{cap ? cap.text : '—'}{cap?.warn ? ' — 상한에 가깝습니다. 지금 등록부에 없는 기록을 정리하세요.' : ''}</span>
+        {/* 단추 글은 바뀌지 않는다(바쁠 때 글을 바꾸면 폭이 줄었다 — 7회차 화면 U5) · 진행은 아래 상태 줄이 알린다 */}
+        <button type="button" aria-busy={busy} style={{ ...btn, opacity: busy ? 0.5 : 1, cursor: busy ? 'not-allowed' : 'pointer' }} disabled={busy} onClick={() => load()}>지금 등록부에 없는 기록 보기</button>
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
         한 번 본 관리 주소 · 서비스 태그는 서버가 등록부에서 사라져도 기록에 남아 이름을 계속 가립니다. 잘못 들어간 값만 골라 지우세요.
       </div>
       {err ? <ErrorBox error={err} /> : null}
       {msg ? <div role="status" style={{ fontSize: 12 }}>{msg}</div> : null}
+      {busy && !list ? <div role="status" style={{ fontSize: 12, color: 'var(--text-dim)' }}>불러오는 중…</div> : null}
       {list ? (
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}>지금 등록부에 없는 기록 {num(list.staleTotal ?? null)}건{list.staleTotal > (list.stale || []).length ? ` — 오래된 순으로 앞 ${num((list.stale || []).length)}건만 보입니다` : ''}</span>
+            <span style={{ flex: '1 1 220px', minWidth: 0, fontSize: 12 }}>지금 등록부에 없는 기록 {num(list.staleTotal ?? null)}건{list.staleTotal > (list.stale || []).length ? ` — 오래된 순으로 앞 ${num((list.stale || []).length)}건만 보입니다` : ''}</span>
             <button type="button" style={{ ...btn, opacity: busy || !(list.stale || []).length ? 0.5 : 1 }} disabled={busy || !(list.stale || []).length} onClick={() => setSel(new Set((list.stale || []).map(seenKeyOf)))}>보이는 것 모두 고르기</button>
             <button type="button" style={{ ...btn, borderColor: items.length ? 'var(--red)' : 'var(--border)', opacity: busy || !items.length ? 0.5 : 1, cursor: busy || !items.length ? 'not-allowed' : 'pointer' }} disabled={busy || !items.length} onClick={forget}>고른 {items.length.toLocaleString()}건 지우기</button>
           </div>

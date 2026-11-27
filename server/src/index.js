@@ -97,6 +97,7 @@ import { startCapacitySampler } from './capacity/sampler.js';
 import { startCapacityPush } from './agent/capacityPush.js';
 import { startSvcmonPoller } from './svcmon/poller.js';
 import { startMaterialWatch as startRackMaterialWatch } from './rack/material.js';
+import { flushMaskOnExit as flushRackMaskOnExit } from './rack/db.js';   // 종료 직전 랙 가림 재료 대기 값 쓰기(7회차 R7-1 — 메모리에만 있다)
 import { startSettingsSyncDetector } from './svcmon/settingsSync.js';
 import { startSvcmonTrials } from './svcmon/trial.js';
 import { startSvcmonPush } from './agent/svcmonPush.js';
@@ -836,6 +837,8 @@ const gracefulExit = (signal, { beforeExit } = {}) => {
       try { stopFocusMonWorker(); stopFocusMon(); } catch (e) { console.warn(`[shutdown] 집중 모니터링 정지 실패: ${e?.message || e}`); }
       // v3.9.0: SSH 키 사용 기록 — 메모리에 모아 30초 뒤 쓰므로 종료 직전 남은 것을 쓴다(동기 · 작다).
       try { flushKeyUsage(); } catch (e) { console.warn(`[shutdown] 키 사용 기록 쓰기 실패: ${e?.message || e}`); }
+      // 2026-11-27(7회차 R7-1): 랙 가림 재료 — 파일 쓰기가 밀린 값(메모리에만 있다)을 쓴다. 조각마다 잠금을 1.5초까지 기다린다(유예 안쪽 · 못 쓰면 경고).
+      try { flushRackMaskOnExit(); } catch (e) { console.warn(`[shutdown] 랙 가림 재료 쓰기 실패: ${e?.message || e}`); }
       for (const h of exitHooks) { try { h(); } catch (e) { console.warn(`[shutdown] 종료 훅 실패: ${e?.message || e}`); } }
       process.exit(code);
     });

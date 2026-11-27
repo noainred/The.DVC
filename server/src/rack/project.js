@@ -80,6 +80,33 @@ export function projectHw(hw, v) {
   };
 }
 
+/** 전원 상태 — Redfish 열거값만(6회차 반증 R5: 엣지가 보낸 자유 글 256자가 그대로 실렸다). */
+export const POWER_STATES = new Set(['On', 'Off', 'PoweringOn', 'PoweringOff', 'Paused']);
+/** 부품 상태 요약(`idrac/invView.js partHealthRollup` 결과) — 상태 · 개수만. 상태가 없으면 null. */
+const projectRollup = (r) => (r && r.state ? {
+  state: String(r.state), ok: r.counts?.ok ?? 0, warn: r.counts?.warn ?? 0, fault: r.counts?.fault ?? 0, unknown: r.counts?.unknown ?? 0, absent: r.counts?.absent ?? 0,
+} : null);
+/**
+ * 연결된 서버의 정보(비관리자 판본) — 라우트(`routes/api/rack.js linkView`)가 모은 값에서 **칸을 하나씩** 적는다.
+ * 7회차 반증 R7-2: 라우트 안에서 펼침(`...common`) · 조건 분기로 만들던 때에는 원격 서버에만 붙는 칸(엣지 관리 주소)을 더한 변이가 랙 시험 247개를 모두 통과했다.
+ * 등록부 서버 이름 · OS 호스트 이름 · 관리 주소는 싣지 않는다(관리자만 — 2026-11-27 사용자 결정).
+ * @param {{ serverToken: string, model: string, powerState: string, health: string, remote: boolean, collectedAt: number|null,
+ *           parts: { psu, disk, mem, fan }|null, hw: object|null }} f
+ */
+export function projectLink(f, v) {
+  const ps = String(f.powerState || '');
+  return {
+    serverId: String(f.serverToken || ''),
+    model: v.text(String(f.model || '')),
+    powerState: POWER_STATES.has(ps) ? ps : '',
+    health: String(f.health || ''),
+    remote: !!f.remote,
+    collectedAt: Number(f.collectedAt) || null,
+    parts: f.parts ? { psu: projectRollup(f.parts.psu), disk: projectRollup(f.parts.disk), mem: projectRollup(f.parts.mem), fan: projectRollup(f.parts.fan) } : null,
+    hw: projectHw(f.hw, v),
+  };
+}
+
 /**
  * 판 차이 한 묶음(`changes` · `restore`)의 항목 — 이름은 db 층이 이미 가렸다(`versionDetail maskItem` — 그 장비의 시리얼을 함께 본다).
  * 여기서는 위치 글(`where` — 랙 이름이 들어 있다)을 가리고, 관리자 전용 칸의 이름을 `fields` 에서 뺀다.

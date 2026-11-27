@@ -99,9 +99,9 @@ test('④ 쓰기도 흡수한다 — 조회 없이 서버를 놓고 그 서버�
 test('④ 인벤토리에서만 읽힌 태그 — 범위 계정 요청은 매번 흡수 · 관리자 · 전체 범위 요청은 간격(그 판본은 태그를 가리지 않는다)', async () => {
   registry.importServers([{ id: 'inv1', name: 'inv1', host: 'https://10.77.0.1', username: 'root', password: 'x', serviceTag: '', vcenterId: 'vc-a' }]);
   invCache.setInventory('inv1', { system: { serviceTag: 'INVONLY71', model: 'R650', hostName: 'h1' }, collectedAt: Date.now() });
+  M._resetAbsorbForTest();   // 간격 밖에서 시작 — 쓰기의 흡수가 인벤토리 태그까지 모은다(7회차 F2 ①: 여기 단언이 'A 또는 not A' 라 아무것도 보지 않았다)
   const pid = await place('spare INVONLY71 unit', 7);   // 쓰기가 흡수(간격이 시작된다)
-  const after1 = await R.maskState();
-  assert.ok(after1.tags.has('INVONLY71') || !after1.tags.has('INVONLY71'));   // 첫 흡수는 간격 밖이면 넣는다 — 순서에 기대지 않게 다음 단언으로 본다
+  assert.ok((await R.maskState()).tags.has('INVONLY71'), '간격 밖의 쓰기 흡수는 인벤토리에서만 읽힌 태그도 기록한다');
   M._resetAbsorbForTest(); await roomOf(ADMIN);   // 간격 시작
   invCache.setInventory('inv1', { system: { serviceTag: 'INVONLY72', model: 'R650', hostName: 'h1' }, collectedAt: Date.now() });
   await roomOf(ADMIN); await roomOf(OP_ALL);
@@ -112,7 +112,7 @@ test('④ 인벤토리에서만 읽힌 태그 — 범위 계정 요청은 매번
   invCache.setInventory('inv1', { system: { serviceTag: '', model: 'R650', hostName: 'h1' }, collectedAt: Date.now() });
   restart();
   assert.equal(await labelOf(OP_A, p2), 'spare ••• unit', '인벤토리에서 태그가 사라져도 기록으로 가린다');
-  assert.ok(pid);
+  assert.equal(await labelOf(OP_A, pid), 'spare ••• unit', '쓰기 때 흡수한 인벤토리 태그도 다시 띄운 뒤 가린다');
 });
 
 test('④ 주기 흡수 — 아무도 열지 않아도 등록부의 재료를 기록한다 · 원장 파일이 없으면 돌지 않는다 · 재진입하지 않는다', async () => {
@@ -209,16 +209,19 @@ test('③ 기록을 읽지 못하면 조회 계정에는 503(닫힌 쪽) · 관�
   assert.ok(!JSON.stringify(r.body).includes('idrac-r1'));
 });
 
-test('⑥ 너무 긴 값(주소 255자 · 태그 64자 초과)은 메모리에만 — 이 프로세스에서는 가리고 파일에는 남기지 않는다', async () => {
+test('⑥ 255자 넘는 주소는 메모리에만(글 속에서도 가린다 · 파일에는 남기지 않는다) · 64자 넘는 태그는 재료가 아니다(색인에 들지 않는다 — 7회차 C5)', async () => {
   const h255 = `h${'x'.repeat(246)}.example`; const h256 = `h${'y'.repeat(247)}.example`;
   assert.equal(h255.length, 255); assert.equal(h256.length, 256);
   const before = await counts();
+  const overBefore = (await R.maskSeenCounts()).overflow;
   await R.maskAbsorb([h255, h256, '', null, 42], ['U'.repeat(64), 'V'.repeat(65), '', null]);
   const c = await R.maskSeenCounts();
   assert.deepEqual({ hosts: c.hosts, tags: c.tags }, { hosts: before.hosts + 1, tags: before.tags + 1 });
-  assert.equal(c.overflow, 2);
+  assert.equal(c.overflow - overBefore, 1, '긴 주소 하나만 메모리 몫에(64자 넘는 태그는 담지 않는다)');
   const ix = await M.materialIndex();
   assert.ok(ix.addrSet.has(h256), '긴 값도 이 프로세스의 재료');
+  assert.ok(ix.hostIdx.set.has(h256), '글 속 찾기 색인에도 든다(상한 = 등록부 host 상한)');
+  assert.ok(!ix.fleetTagIdx.set.has('v'.repeat(65)), '64자 넘는 태그는 색인에 없다');
   restart();
   const st = await R.maskState();
   assert.ok(st.hosts.has(h255) && !st.hosts.has(h256) && st.tags.has('U'.repeat(64)) && !st.tags.has('V'.repeat(65)));

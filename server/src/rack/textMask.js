@@ -72,6 +72,21 @@ function headsOf(set) {
   for (const [h, g] of groups) heads.set(h, [...g].sort((a, b) => b - a));
   return { heads, headLen };
 }
+/**
+ * `lensOf` + `headsOf` 를 조각으로 — 4,096개마다 `pause`. 결과는 두 동기 함수와 같다(시험이 대조).
+ * 7회차 P7-2: 조각 빌드의 넣기 고리는 양보했지만 끝의 이 두 훑기가 동기여서 기록 20만에서 세대가 바뀔 때마다 이벤트 루프가 104~178ms(최대 400ms) 멈췄다.
+ */
+async function lensHeadsAsync(set, pause) {
+  const SLICE = 4095;
+  let i = 0;
+  const l = new Set(); let headLen = HEAD_LEN;
+  for (const s of set) { l.add(s.length); if (s.length < headLen) headLen = s.length; if ((++i & SLICE) === 0) await pause(); }
+  const groups = new Map();
+  for (const s of set) { const h = s.slice(0, headLen); let g = groups.get(h); if (!g) { g = new Set(); groups.set(h, g); } g.add(s.length); if ((++i & SLICE) === 0) await pause(); }
+  const heads = new Map();
+  for (const [h, g] of groups) { heads.set(h, [...g].sort((a, b) => b - a)); if ((++i & SLICE) === 0) await pause(); }
+  return { lens: [...l].sort((a, b) => b - a), heads, headLen };
+}
 
 /** 사영 구간 [a, b) 의 '구분자 자리 모양' — 키 글자 사이에 구분자가 끼어 있는 자리(키 안의 위치)를 쉼표로 이은 글자. 붙여 쓴 것은 ''. */
 function shapeOf(pos, a, b) {
@@ -108,8 +123,10 @@ export async function tagIndexOfAsync(tags, pause) {
   const set = new Set(); const shapes = new Map();
   let i = 0;
   for (const t of tags || []) { tagIndexAdd(set, shapes, t); if ((++i & 511) === 0 && pause) await pause(); }
-  if (pause) await pause();
-  return { set, lens: lensOf(set), shapes, ...headsOf(set) };
+  if (!pause) return { set, lens: lensOf(set), shapes, ...headsOf(set) };
+  await pause();
+  const { lens, heads, headLen } = await lensHeadsAsync(set, pause);
+  return { set, lens, shapes, heads, headLen };
 }
 
 /**
@@ -189,8 +206,10 @@ export async function needleIndexOfAsync(strings, { min = 1, max = 255 } = {}, p
     if (s.length >= min && s.length <= max) set.add(s);
     if ((++i & 511) === 0 && pause) await pause();
   }
-  if (pause) await pause();
-  return { set, lens: lensOf(set), ...headsOf(set) };
+  if (!pause) return { set, lens: lensOf(set), ...headsOf(set) };
+  await pause();
+  const { lens, heads, headLen } = await lensHeadsAsync(set, pause);
+  return { set, lens, heads, headLen };
 }
 
 /**
