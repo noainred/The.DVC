@@ -231,15 +231,28 @@ test('C5 · C6 · 반증 추가 1: 비관리자 응답에 IP 로 등록한 서�
     assert.ok(!j.includes('10.20.30.4'), `${user.username}: 관리 IP 가 응답에 없다`);
     const linked = v.body.places.find((x) => x.id === p1.body.id).link;
     assert.ok(linked && linked.serverId.startsWith('masked-'), '주소 id 는 토큰');
-    assert.ok(linked.name.includes('이름 가림'));
-    assert.equal(linked.hostname, '', 'OS 호스트 이름은 관리자만');
+    // 2026-11-27: 등록부 서버 이름 · OS 호스트 이름은 조회 계정에 싣지 않는다(칸 목록 투영 `rack/project.js`) — 예전의 ‘이름 가림’ 표기 · 빈 hostname 이 아니라 키 자체가 없다.
+    assert.ok(!('name' in linked), `${user.username}: 등록부 서버 이름(= 관리 IP)은 키째 없다 — ${JSON.stringify(linked)}`);
+    assert.ok(!('hostname' in linked), `${user.username}: OS 호스트 이름은 관리자만(키째 없다)`);
+    assert.ok(!('mgmtHost' in linked), `${user.username}: 관리 주소는 관리자만`);
+    // 미배치 목록(IP 로 등록한 10.20.30.42 가 여기 든다)은 관리자에게만 — 조회 계정에는 대수만 간다.
+    assert.deepEqual(v.body.unplaced, [], `${user.username}: 미배치 서버 목록은 비어 있다`); assert.equal(v.body.unplacedListed, false);
+    assert.ok(v.body.unplacedTotal >= 1, `${user.username}: 대수는 그대로 센다(${v.body.unplacedTotal})`);
   }
   const scoped = JSON.stringify((await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: kr.r1 } })).body).toLowerCase();
   assert.ok(!scoped.includes('tag9876'), '범위 비관리자: 이름 속 서비스 태그도 걷어 낸다');
   const all = (await call('GET /tools/rack/room/:id', { user: OP_ALL, params: { id: kr.r1 } })).body;
-  assert.equal(all.places.find((x) => x.id === p2.body.id).link.name, 'idrac-TAG9876', '시리얼을 보는 판본은 이름도 그대로');
+  // 2026-11-27: 등록부 서버 이름은 조회 계정에 싣지 않는다 — 시리얼을 보는 판본(전체 범위 운영자)도 이름 키가 없고 시리얼만 그대로다. ‘이름이 그대로’ 는 아래 관리자 판본에서 본다.
+  const allP2 = all.places.find((x) => x.id === p2.body.id);
+  assert.ok(allP2.link && !('name' in allP2.link), `시리얼을 보는 판본에도 등록부 이름 키는 없다 — ${JSON.stringify(allP2.link)}`);
+  assert.equal(allP2.serial, 'TAG9876', '시리얼을 보는 판본은 시리얼 그대로');
+  assert.ok(!JSON.stringify(all).includes('idrac-TAG9876'), '등록부 이름은 응답 어디에도 없다');
   const adm = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: kr.r1 } })).body;
   assert.equal(adm.places.find((x) => x.id === p1.body.id).link.serverId, '10.20.30.41', '관리자 판본은 원문');
+  assert.equal(adm.places.find((x) => x.id === p1.body.id).link.name, '10.20.30.41', '관리자 판본은 등록부 이름도 원문');
+  assert.equal(adm.places.find((x) => x.id === p2.body.id).link.name, 'idrac-TAG9876', '관리자 판본은 등록부 이름 그대로');
+  assert.equal(adm.unplacedListed, true); assert.ok(adm.unplaced.some((u) => u.serverId === '10.20.30.42' && u.name === '10.20.30.42'), '관리자 판본의 미배치 목록은 원문');
+  assert.equal(all.unplacedTotal, adm.unplaced.length, '조회 계정이 받는 대수 = 관리자가 보는 목록의 대수');
 });
 
 test('C7: 감사 상세는 요청 id 가 아니라 실제로 만든 id', async () => {

@@ -11,6 +11,7 @@
  * U 는 아래가 1 이다(엑셀 실장도와 같다). 시작 U(uStart)는 장비가 차지한 **가장 아래** 줄이다.
  */
 import { normKey } from '../insights/serialKey.js';
+import { isIPv6 } from 'node:net';
 import { numOrNull } from '../util/numOrNull.js';
 
 export const FACES = Object.freeze(['full', 'front', 'rear']);
@@ -43,10 +44,20 @@ export const LIMITS = Object.freeze({
 const CTRL = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu;
 /** 보이지 않는 글자를 지운 글(가림 판정 앞에서 쓴다 — 이 정리가 생기기 전에 저장된 이름에도 같은 눈으로). */
 export const dropInvisible = (s) => (typeof s === 'string' ? s.replace(CTRL, '') : s);
-/** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
+/**
+ * 전각 ASCII(U+FF01~FF5E)와 전각 공백(U+3000)을 반각으로 — 글자 수는 그대로다(1:1 · BMP).
+ * 2026-11-27 반증 P4(재현): 전각으로 적은 주소 '１０.２０.３０.４' · 태그 'ＳＶＡ０００１' 는 눈에는 같은 값인데 가림 판정을 비켜 갔다.
+ * 새 입력은 `cleanText` 가 저장 전에 접고, 그 전에 저장된 값은 가림 판정이 같은 눈으로 본다(`routes/api/rack.js` — 조회 계정에는 접은 글이 보인다).
+ * ⚠ NFKC 전체(‘①’ → ‘1’ · ‘㈜’ → ‘(주)’)는 하지 않는다 — 사람이 적은 이름의 글자를 바꾼다. 통째 판정으로 넘어갈 때(설계 docs/design/rack-mask-redesign) 판정용 눈으로만 쓴다.
+ */
+const WIDE = /[\uff01-\uff5e\u3000]/;
+const WIDE_G = /[\uff01-\uff5e\u3000]/g;
+export const foldWidth = (s) => (typeof s === 'string' && WIDE.test(s)
+  ? s.replace(WIDE_G, (c) => (c === '\u3000' ? ' ' : String.fromCharCode(c.charCodeAt(0) - 0xfee0))) : s);
+/** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 전각 → 반각 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
 export function cleanText(v, max) {
   const s = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
-  let t = s.slice(0, max * 4).replace(CTRL, ' ').trim().slice(0, max);
+  let t = foldWidth(s.slice(0, max * 4)).replace(CTRL, ' ').trim().slice(0, max);
   // 3회차 점검 정확성 3: 자른 자리가 공백이면 끝 공백이 남았다(눈으로 같은 이름이 중복 검사를 통과 · 다시 저장하면 '바뀐 것' 으로 판정) — 자른 뒤 한 번 더 다듬는다.
   //   서로게이트 쌍의 앞 반쪽에서 잘렸으면 그 반쪽도 뺀다(깨진 글자 U+FFFD 로 저장되지 않게).
   const last = t.charCodeAt(t.length - 1);
@@ -68,6 +79,22 @@ export function nonNeg(v) {
   if (n == null || n < 0 || n > 1e7) return undefined;
   return Math.round(n * 100) / 100;
 }
+
+/**
+ * 시리얼 칸에 적힌 값이 주소(IPv4 · IPv6 · URL)인가(순수 · 입력은 `LIMITS.serial` 이하로 정리된 글).
+ * 2026-11-27 반증 P3(재현): 시리얼 칸은 시리얼을 보는 판본(전체 범위 비관리자)에 원문으로 나간다 — 그 칸에 적힌 관리 주소가 그대로 나갔다.
+ * 시리얼에 주소가 들어갈 까닭이 없으므로 저장 때 거절하고(`cleanPlaceInput`), 그 전에 저장된 값은 응답을 만들 때 비운다(`rack/project.js`).
+ * MAC 꼴은 거절하지 않는다(MAC 을 시리얼로 쓰는 장비가 있다) — 응답 쪽 판정(`routes/api/rack.js` 의 주소 판정)이 비관리자에게 비운다.
+ */
+const V4_IN = /(?:^|[^0-9.])(?:\d{1,3}\.){3}\d{1,3}(?![0-9.])/;
+export function serialAddressLike(v) {
+  if (typeof v !== 'string' || !v || v.length > 256) return false;
+  if (v.includes('://')) return true;
+  if (V4_IN.test(v)) return true;
+  if (v.includes(':')) for (const tok of v.split(/[^0-9a-fA-F:.]+/)) if (tok.split(':').length > 2 && isIPv6(tok)) return true;
+  return false;
+}
+const SERIAL_ADDR_ERR = '시리얼 칸에는 주소(IP · URL)를 넣을 수 없습니다 — 주소는 메모에 적으세요(메모는 관리자에게만 보입니다).';
 
 /** 시리얼 비교 키 — 시리얼 색인(insights/serialLookup.js)과 같은 정규화(대소문자 · 공백 · `:` `-` `_` `.` 무시). */
 export const serialKeyOf = (v) => normKey(v);
@@ -154,6 +181,7 @@ export function cleanPlaceInput(body = {}, { partial = false } = {}) {
     if (list.length > LIMITS.extraSerials) return { error: `추가 시리얼은 ${LIMITS.extraSerials}개까지입니다.` };
     out.extraSerials = list;
   }
+  if (serialAddressLike(out.serial) || (out.extraSerials || []).some(serialAddressLike)) return { error: SERIAL_ADDR_ERR };
   if (!partial || has('note')) out.note = cleanText(b.note, LIMITS.note);
   for (const [k, label] of [['ratedW', '정격 전력'], ['opW', '운전 전력'], ['weightKg', '무게']]) {
     if (partial && !has(k)) continue;

@@ -69,7 +69,7 @@ const MASK_ROWS = [
   ['M20', 'v6 2001:0db8:0000:0000:0000:0000:0000:0a35 x', '0db8', '0a35'],      // 줄이지 않은 가장 긴 표기(39자)
   ['M21', 'lo ::1 x', '::1'],                                                   // 가장 짧은 IPv6(3자)
 ];
-// [변이, 표시 이름] — 주소가 아니므로 그대로 보여야 하는 표기
+// [변이, 표시 이름, (있으면) 보이는 꼴] — 주소가 아니므로 그대로 보여야 하는 표기. 셋째 칸 = 전각 ASCII 는 저장 전에 반각으로 접힌다(2026-11-27 `layout.js foldWidth` — 관리자에게도 접힌 글).
 const KEEP_ROWS = [
   ['M01', 'bios 12.34.56 rear'],              // 숫자 묶음 3개(7자 이상)는 IPv4 가 아니다
   ['M03 · M07', 'lot 10.20.3000.40.50 x'],    // 4자리 묶음이 끼면 이어진 묶음 4개가 아니다(자릿수 1~3 · 틀린 묶음에서 셈을 되돌린다)
@@ -78,7 +78,10 @@ const KEEP_ROWS = [
   ['M11', 'cafe::string x'],                  // 뒤에 글자가 붙어 있어도
   ['M18', 'ns 12345::b7 keep'],               // '::' 가 있어도 net.isIPv6 가 거짓이면(마디가 5자리) 주소가 아니다
   ['M22', 'sep ::: here'],                    // 16진 숫자가 없는 콜론 묶음
-  ['M36', 'ver２::beef note'],                // 구간 앞의 전각 숫자도 '글자 · 숫자' 다
+  // 2026-11-27: 전각 숫자는 이제 저장 전에 반각으로 접혀 ‘ver2::beef’ 가 된다(구간 ‘2::beef’ 앞은 글자 r — 여전히 주소가 아니다). 접힌 꼴로 보이는지를 본다.
+  ['M36', 'ver２::beef note', 'ver2::beef note'],
+  // M36 의 본뜻(구간 앞의 16진 구간에 들지 않는 숫자도 '글자 · 숫자' 다)은 접히지 않는 숫자로 본다 — 아라비아-인도 숫자 2(U+0662 · Nd)
+  ['M36', 'ver٢::beef note'],
 ];
 // [변이, 낱말 하나인 표시 이름] — 통째로 등록 주소(문장 부호 · 대소문자만 다름)면 '<토큰> (이름 가림)'
 const NAME_ROWS = [['M24', '(bm9x)'], ['M25', 'idrac-b1.mgmt.example.'], ['M26', 'IDRAC-A1.MGMT.EXAMPLE']];
@@ -122,11 +125,14 @@ test('M05 · M13 · M14 · M20 · M21: 주소 표기 — 비관리자 판본의 
   for (const [, label] of MASK_ROWS) assert.equal(labelOf(adm, label), label, '관리자는 원문');
 });
 
-test('M01 · M03 · M04 · M07 · M10 · M11 · M18 · M22 · M36: 주소가 아닌 표기는 그대로 보인다(과잉 가림 없음)', async () => {
+test('M01 · M03 · M04 · M07 · M10 · M11 · M18 · M22 · M36: 주소가 아닌 표기는 가려지지 않는다(과잉 가림 없음 — 전각 ASCII 만 반각으로 접힌 꼴로 보인다)', async () => {
   for (const user of [OP_ALL, OP_A]) {
     const v = await views(user);
-    for (const [id, label] of KEEP_ROWS) assert.equal(labelOf(v, label), label, `${id} · ${user.username}`);
+    for (const [id, label, shown] of KEEP_ROWS) assert.equal(labelOf(v, label), shown ?? label, `${id} · ${user.username}`);
   }
+  // 2026-11-27: 전각 → 반각 접기는 가림이 아니라 저장 정리다 — 관리자 판본도 같은 글을 본다(조회 계정에게만 글자가 바뀌는 것이 아니다)
+  const adm = await views(ADMIN);
+  for (const [id, label, shown] of KEEP_ROWS) assert.equal(labelOf(adm, label), shown ?? label, `${id} · 관리자`);
 });
 
 test('M24 · M25 · M26: 낱말 하나인 이름이 등록 주소 그대로면(문장 부호 · 끝 점 · 대소문자 차이) 이름 가림 표기로 나간다', async () => {

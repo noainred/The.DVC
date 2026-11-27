@@ -99,7 +99,11 @@ async function openInner() {
       CREATE TABLE IF NOT EXISTS rack_serial_seen (
         corp_id TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY (corp_id, key)
       ) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS rack_mask_seen (
+        kind TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY (kind, key)
+      ) WITHOUT ROWID;
     `);
+    _maskSeen = null; _maskSeenRetryAt = 0;   // 새 핸들 — 앞 핸들에서 읽은 재료 기록을 믿지 않는다
     // 이력 · 판 글(detail)은 장비 표시 이름으로 만든다 — 그 이름에 든 시리얼을 가리려면 그 행이 말하는 장비의 시리얼을 알아야 한다(1회차 점검: 원장에서 뺀 장비의
     //   시리얼은 '지금 원장' 에 없어 옛 글에서 가려지지 않았다). 행마다 tags(JSON 배열 — 응답에 싣지 않는다)를 둔다. NULL = 이 칸이 생기기 전의 행(알 수 없음).
     for (const t of ['rack_log', 'rack_version']) {
@@ -133,7 +137,7 @@ async function openInner() {
 }
 
 /** 테스트 전용 — 핸들을 닫고 다음 호출이 다시 열게 한다. */
-export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _keysReady = false; _keysRetryAt = 0; _seenReady = false; _seenRetryAt = 0; _seenFails = 0; DETAIL_CACHE.clear(); }
+export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _maskSeen = null; _maskSeenRetryAt = 0; _maskSeenCapWarned = false; _keysReady = false; _keysRetryAt = 0; _seenReady = false; _seenRetryAt = 0; _seenFails = 0; DETAIL_CACHE.clear(); }
 /** 테스트 전용 — 색인 다시 채우기의 재시도 대기를 없앤다(대기 시간을 기다리지 않고 '다음 시도' 를 보려고). */
 export function _keysRetryNowForTest() { _keysRetryAt = 0; }
 /** 테스트 전용 — SQL 로 원장을 직접 고친 뒤(전산실 rev 를 올리지 않는 변경) 조각 캐시와 시리얼 키 색인을 원장에 맞춘다. */
@@ -403,6 +407,92 @@ export async function corpSerials(corpId) {
   }
   for (const r of db.prepare('SELECT key FROM rack_serial_seen WHERE corp_id = ?').all(String(corpId || ''))) out.push(r.key);
   return out;
+}
+
+// ── 가림 재료 기록(2026-11-27 — 설계 docs/design/rack-mask-redesign J4 '재료는 줄지 않는다') ──
+//   가림 재료(등록 서버의 관리 주소 · 서비스 태그)는 요청 때의 등록부에서 모은다. 엣지가 올린 서버 목록은 메모리에만 있어(`collector/remoteInventory.js`)
+//   중앙을 다시 띄운 직후 · 수집 서버를 끈 뒤에는 비어 있고, 그동안 그 서버들의 주소 · 태그가 든 이름이 조회 계정에 원문으로 나갔다(반증 재현).
+//   한 번이라도 본 재료를 원장 옆에 남기고(rack_mask_seen — kind 'h' 주소 · 't' 태그) 가림은 **기록 ∪ 지금** 으로 만든다. 지운 서버의 주소도 남는다(의도 — 가림이 풀리지 않게).
+//   값은 라우트가 정리해 넘긴 글 그대로(자리표시 태그 거르기 · 주소 변형 만들기는 색인을 만드는 쪽이 한다). 응답에 싣지 말 것.
+const MASK_SEEN_MAX = 200_000;                 // 종류마다 — 엣지가 올린 값이 주기마다 달라지는 고장에도 표가 끝없이 자라지 않게
+const MASK_KEY_MAX = Object.freeze({ h: 255, t: 64 });   // 이보다 긴 값은 기록하지 않는다(그 요청의 재료로는 쓴다)
+let _maskSeen = null;                          // 이 핸들에서 읽은 사본 { h:Set, t:Set }
+let _maskSeenRetryAt = 0;
+let _maskSeenCapWarned = false;
+function maskSeenLoad(db) {
+  if (_maskSeen) return _maskSeen;
+  const m = { h: new Set(), t: new Set() };
+  for (const r of db.prepare('SELECT kind, key FROM rack_mask_seen').all()) m[r.kind]?.add(r.key);
+  _maskSeen = m;
+  return m;
+}
+/**
+ * 지금 재료를 기록에 더하고 **기록 ∪ 지금** 을 돌려준다.
+ * 기록을 읽거나 쓰지 못해도 던지지 않는다 — 그 요청은 지금 재료(+ 읽어 둔 기록)로 가리고, 쓰기는 `KEYS_RETRY_MS` 뒤에 다시 시도한다(요청마다 잠금 대기를 물지 않게).
+ * @param {string[]} hosts  등록 주소(정리된 글)   @param {string[]} tags  서비스 태그(정리된 글)
+ * @returns {Promise<{hosts:string[], tags:string[]}>}
+ */
+export async function maskMaterial(hosts = [], tags = []) {
+  const db = await need();
+  const cur = { h: hosts.filter((v) => typeof v === 'string' && v), t: tags.filter((v) => typeof v === 'string' && v) };
+  let m;
+  try { m = maskSeenLoad(db); } catch (e) {
+    console.warn('[rack-db] 가림 재료 기록을 읽지 못했습니다 — 이 요청은 지금 등록부의 재료만으로 가립니다:', e.message);
+    return { hosts: [...new Set(cur.h)], tags: [...new Set(cur.t)] };
+  }
+  const fresh = { h: new Set(), t: new Set() };
+  for (const k of ['h', 't']) for (const v of cur[k]) if (v.length <= MASK_KEY_MAX[k] && !m[k].has(v)) fresh[k].add(v);
+  if ((fresh.h.size || fresh.t.size) && Date.now() >= _maskSeenRetryAt) {
+    const added = { h: [], t: [] };
+    try {
+      tx(db, () => {
+        const ins = db.prepare('INSERT OR IGNORE INTO rack_mask_seen (kind, key) VALUES (?, ?)');
+        for (const k of ['h', 't']) for (const v of fresh[k]) {
+          if (m[k].size + added[k].length >= MASK_SEEN_MAX) {
+            if (!_maskSeenCapWarned) { _maskSeenCapWarned = true; console.warn(`[rack-db] 가림 재료 기록이 상한(${MASK_SEEN_MAX})에 닿았습니다 — 새 값은 기록하지 않습니다(지금 등록부에 있는 동안은 가려집니다).`); }
+            break;
+          }
+          ins.run(k, v); added[k].push(v);
+        }
+      });
+      for (const k of ['h', 't']) for (const v of added[k]) m[k].add(v);   // COMMIT 뒤에만 사본에(ROLLBACK 된 값이 남지 않게)
+    } catch (e) {
+      _maskSeenRetryAt = Date.now() + KEYS_RETRY_MS;
+      console.warn(`[rack-db] 가림 재료를 기록하지 못했습니다 — ${Math.round(KEYS_RETRY_MS / 1000)}초 뒤 다시 시도합니다(이 요청은 지금 재료로 가립니다):`, e.message);
+    }
+  }
+  return { hosts: [...new Set([...m.h, ...cur.h])], tags: [...new Set([...m.t, ...cur.t])] };
+}
+/** 테스트 · 집계용 — 기록된 재료 수. */
+export async function maskSeenCounts() {
+  const db = await need();
+  const m = maskSeenLoad(db);
+  return { hosts: m.h.size, tags: m.t.size };
+}
+
+/**
+ * 그 법인 원장의 자유 글(가림 집계용 — `routes/api/rack.js` 의 관리자 전용 집계만 쓴다 · 응답에 그대로 싣는 곳은 그 라우트뿐).
+ * 조회 계정에 보이는 칸(표시 이름 · 모델 · 랙의 이름 · 줄 · 용도 · 전산실 · 데이터센터 이름)을 칸 이름 · 위치 · 그 장비의 시리얼과 함께. 메모는 건수만.
+ */
+export async function corpTexts(corpId) {
+  const db = await need();
+  const { sites, rooms, racks, places } = corpRows(db, String(corpId || ''));
+  const siteName = new Map(sites.map((s) => [s.id, s.name]));
+  const roomWhere = new Map(rooms.map((r) => [r.id, `${siteName.get(r.siteId) || ''} › ${r.name}`]));
+  const rackWhere = new Map(racks.map((k) => [k.id, `${roomWhere.get(k.roomId) || ''} › ${k.name}`]));
+  const texts = [];
+  const push = (field, text, where, own = []) => { if (typeof text === 'string' && text) texts.push({ field, text, where, own }); };
+  for (const s of sites) push('siteName', s.name, s.name);
+  for (const r of rooms) push('roomName', r.name, roomWhere.get(r.id));
+  for (const k of racks) { const w = rackWhere.get(k.id); push('rackName', k.name, w); push('rackRow', k.row, w); push('rackRole', k.role, w); }
+  let notes = 0;
+  for (const p of places) {
+    const w = `${rackWhere.get(p.rackId) || ''} U${p.uStart}`;
+    const own = [p.serial, ...(p.extraSerials || [])].filter(Boolean);
+    push('label', p.label, w, own); push('model', p.model, w, own);
+    if (p.note) notes += 1;
+  }
+  return { texts, notes, places: places.length, racks: racks.length };
 }
 
 export async function placedSerialKeys(corpId) {

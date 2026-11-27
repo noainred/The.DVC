@@ -1,6 +1,6 @@
 // 랙 실장도 2회차 점검(2026-11-26 · 보안 축 6건) 회귀 — 비관리자 판본의 글자 가림(routes/api/rack.js textMaskOf 하나가 순서 · 재료를 정한다):
 //   1 가림 재료(주소 · 태그)는 범위로 자르기 전 등록부 전체에서 · 2 이름 판정과 글 치환이 같은 기준(대소문자 · IPv4 뒤 마침표 · IPv6) ·
-//   3 주소 먼저 → 태그 나중('idrac-<태그>.<도메인>') · 4 link.name · unplaced[].name 도 같은 가림 · 5 구분자를 달리 적은 시리얼.
+//   3 주소 먼저 → 태그 나중('idrac-<태그>.<도메인>') · 4 link.name · unplaced[].name 도 같은 가림(2026-11-27 부터는 조회 계정에 그 이름을 아예 싣지 않는다) · 5 구분자를 달리 적은 시리얼.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -90,17 +90,28 @@ test('3 · 5: 시리얼을 가리는 판본(범위 비관리자)에는 태그 ·
   assert.equal(full.room.serialsHidden, false);
 });
 
-test('4: 연결된 서버 이름 · 미배치 서버 이름도 같은 가림(host:포트 · 다른 서버의 태그 · 범위 밖 서버의 주소)', async () => {
+// 2026-11-27(사용자 결정 — 칸 목록 투영 `rack/project.js`): 등록부 서버 이름은 조회 계정에 싣지 않는다 — 예전에는 연결 · 미배치 이름에 표시 이름과 같은 가림을 걸어
+//   ‘주소 · 태그만 지운 이름’ 을 내보냈고 이 시험이 그 가림을 봤다. 이제는 그 이름이 어떤 꼴이든(보통 이름 · host:포트 · 다른 서버의 태그가 든 이름) 응답에 없다.
+test('4: 연결된 서버 이름 · 미배치 서버 이름은 조회 계정에 싣지 않는다(보통 이름 · host:포트 · 다른 서버의 태그 · 범위 밖 서버의 주소) — 관리자는 원문', async () => {
+  const adm = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body;
   for (const user of [OP_ALL, OP_A]) {
     const room = (await call('GET /tools/rack/room/:id', { user, params: { id: roomId } })).body;
-    const names = [...room.unplaced.map((x) => x.name), ...room.places.map((p) => p.link?.name).filter(Boolean)];
-    assert.ok(!names.some((n) => /mgmt\.example/i.test(n)), `${user.username}: ${names}`);
-    assert.ok(names.includes('srv-a') || room.unplaced.some((x) => x.name === 'srv-a'), '보통 이름은 그대로');
+    const links = room.places.map((p) => p.link).filter(Boolean);
+    assert.ok(links.length >= 1, `${user.username}: 이어진 서버가 있다(아래 ‘키 없음’ 이 빈 목록을 본 것이 아니다)`);
+    for (const l of links) assert.ok(l.serverId.startsWith('masked-') && !('name' in l) && !('hostname' in l) && !('mgmtHost' in l), `${user.username}: ${JSON.stringify(l)}`);
+    assert.deepEqual(room.unplaced, [], `${user.username}: 미배치 목록은 비어 있다`); assert.equal(room.unplacedListed, false);
+    assert.equal(room.unplacedTotal, 3, `${user.username}: 대수는 예전과 같다(srv-a · idrac40 · spare-for)`);
+    const j = JSON.stringify(room);
+    assert.ok(!/mgmt\.example/i.test(j), `${user.username}: 관리 주소가 응답 어디에도 없다`);
+    // 예전 ‘보통 이름은 그대로’(srv-a) · ‘이름 속 다른 서버의 태그’(spare-for-•••): 등록부 이름은 주소 · 태그가 없어도 싣지 않는다
+    for (const name of ['srv-a', 'spare-for-', 'idrac40']) assert.ok(!j.includes(name), `${user.username}: 등록부 이름 ‘${name}’ 이 응답에 있다`);
   }
-  const scopedNames = (await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } })).body.unplaced.map((x) => x.name);
-  assert.ok(scopedNames.some((n) => n.startsWith('spare-for-')) && !scopedNames.some((n) => /svc0002/i.test(n)), `이름 속 다른 서버의 태그: ${scopedNames}`);
-  const admNames = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body.unplaced.map((x) => x.name);
+  assert.ok(!/svc0002/i.test(JSON.stringify((await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } })).body)), '범위 계정: 이름 속 다른(범위 밖) 서버의 태그도 없다');
+  assert.equal(adm.unplacedListed, true);
+  const admNames = adm.unplaced.map((x) => x.name);
   assert.ok(admNames.includes('idrac40.mgmt.example:443') && admNames.includes('spare-for-SVC0002'), '관리자는 원문');
+  assert.ok(admNames.includes('srv-a'), '보통 이름은 그대로(관리자 판본)');
+  assert.equal(adm.places.find((p) => p.serial === 'TAG9876').link.name, 'idrac-TAG9876.mgmt.example', '관리자 판본은 연결된 서버 이름도 원문');
 });
 
 test('textMask 순수 판정: 비교 키(구분자 · 대소문자 무시) · 원문 범위 치환 · 최소 길이 · 대소문자 무시 주소 치환', () => {

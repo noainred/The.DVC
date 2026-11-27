@@ -232,13 +232,33 @@ test('M11 · M12 · M22 · M23 · M24 · M27 · M28 · M29: 가린 꼴 — 대�
   }
 });
 
-test("M34: 등록부 이름 — 앞뒤 공백이 붙은 '주소가 이름' 은 이름 가림 표기 · 300자를 넘는 낱말은 살피지 않고 토큰 하나(이름 가림 표기 없음)", async () => {
+// 2026-11-27(사용자 결정 — 칸 목록 투영 `rack/project.js`): 등록부 서버 이름 · 미배치 서버 목록은 조회 계정에 싣지 않는다 — 예전에 미배치 이름으로 보던 M34
+//   (‘이름 가림’ 갈래의 앞뒤 공백 · 길이 상한)는 조회 계정에 남은 이름(표시 이름 — 이 정리가 생기기 전에 저장된 값을 원장에 직접 넣는다)으로 옮겨서 본다.
+test("M34: 등록부 이름('주소가 이름' · 300자를 넘는 낱말)은 조회 계정에 싣지 않는다 · 표시 이름 — 앞뒤 공백이 붙은 '주소가 이름' 은 이름 가림 표기 · 300자를 넘는 낱말은 살피지 않고 토큰 하나(이름 가림 표기 없음)", async () => {
   for (const user of [OP_ALL, OP_A]) {
     const room = (await call('GET /tools/rack/room/:id', { user, params: { id: roomId } })).body;
-    const names = room.unplaced.map((x) => x.name);
-    assert.ok(!JSON.stringify(names).includes('10.9.8.7'), JSON.stringify(names));
-    assert.equal(names.filter((n) => /^masked-[0-9a-f]{12} \(이름 가림\)$/.test(n)).length, 1, `등록부 이름(앞뒤 공백) · ${user.username}: ${JSON.stringify(names)}`);
-    assert.equal(names.filter((n) => /^masked-[0-9a-f]{12}$/.test(n)).length, 1, `M34 · ${user.username}: ${JSON.stringify(names)}`);
+    assert.deepEqual(room.unplaced, [], `${user.username}: 미배치 목록은 비어 있다`); assert.equal(room.unplacedListed, false);
+    assert.equal(room.unplacedTotal, 5, `${user.username}: 대수는 예전과 같다`);
+    const j = JSON.stringify(room);
+    assert.ok(!j.includes('10.9.8.7'), `${user.username}: 등록부 이름의 주소(10.9.8.77 · …10.9.8.78)가 응답 어디에도 없다`);
+    assert.ok(!j.includes('n'.repeat(40)), `${user.username}: 300자를 넘는 등록부 이름의 조각도 없다`);
+  }
+  const admNames = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body.unplaced.map((x) => x.name);
+  assert.ok(admNames.includes('10.9.8.77') && admNames.includes(LONG_NAME), `관리자 판본의 미배치 목록은 등록부 이름 원문(이 시험이 그 이름을 실제로 등록했다): ${JSON.stringify(admNames.map((n) => n.slice(0, 20)))}`);
+  // 표시 이름으로 옮긴 M34 — 옛 판본이 그대로 저장한 이름(원장에 직접 넣는다 · 새 입력은 cleanText 가 다듬고 96자에서 자른다)
+  await add('legacy-m34-pad'); await add('legacy-m34-long');
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(process.env.RACK_DB);
+  const set = (label, v) => raw.prepare('UPDATE rack_place SET label = ? WHERE id = ?').run(v, idOf.get(label));
+  set('legacy-m34-pad', '  10.9.8.79  ');                        // 앞뒤 공백이 붙은 '주소가 이름'
+  set('legacy-m34-long', `${'n'.repeat(310)}.10.9.8.80`);        // 300자를 넘는 한 낱말(주소가 들었다)
+  raw.close();
+  await R._resyncForTest();
+  for (const user of [OP_ALL, OP_A]) {
+    const v = await views(user);
+    assert.match(String(labelOf(v, 'legacy-m34-pad')), /^masked-[0-9a-f]{12} \(이름 가림\)$/, `이름(앞뒤 공백) · ${user.username}: ${JSON.stringify(labelOf(v, 'legacy-m34-pad'))}`);
+    assert.match(String(labelOf(v, 'legacy-m34-long')), /^masked-[0-9a-f]{12}$/, `M34 · ${user.username}: ${JSON.stringify(String(labelOf(v, 'legacy-m34-long')).slice(0, 60))}`);
+    assert.ok(!JSON.stringify(v.room).includes('10.9.8.'), `${user.username}: 그 표시 이름의 주소가 전산실 응답 어디에도 없다`);
   }
 });
 

@@ -96,7 +96,10 @@ test('탐침 H18~H26 · H29 · H30 · H13 · H16 · H12: 비관리자 판본 —
     const j = JSON.stringify({ places: v.places, logs: v.logs });
     assert.ok(!j.includes('10.9.8.7'), `${user.username} H18 · H19 · H25: 이름 · 이력의 IP`);
     assert.ok(!j.includes('bmc-other.corp.example'), `${user.username} H26 · H30: 등록부 관리 주소(이름 속 · 다른 서버의 주소와 같은 이름)`);
-    assert.ok(v.places.find((x) => x.id === linkA).link.name.includes('이름 가림'), `${user.username} H30`);
+    // 2026-11-27: 등록부 서버 이름은 조회 계정에 싣지 않는다 — 다른 서버의 관리 주소와 같은 이름(H30)은 ‘이름 가림’ 표기가 아니라 키 자체가 없다(원문이 없다는 것은 바로 위 단언이 본다).
+    const la = v.places.find((x) => x.id === linkA).link;
+    assert.ok(la && la.serverId.startsWith('masked-') && !('name' in la) && !('hostname' in la) && !('mgmtHost' in la), `${user.username} H30: ${JSON.stringify(la)}`);
+    assert.deepEqual(v.unplaced, [], `${user.username} H30: 미배치 목록(등록부 이름)도 싣지 않는다`); assert.equal(v.unplacedListed, false);
     const l = await call('GET /tools/rack/versions', { user, query: { corp: 'kr' } });
     assert.ok(!JSON.stringify(l.body).includes('10.9.8.7') && !JSON.stringify(l.body).includes('bmc-other.corp'), `${user.username} H20`);
     for (const ver of l.body.versions.slice(0, 8)) {
@@ -105,6 +108,8 @@ test('탐침 H18~H26 · H29 · H30 · H13 · H16 · H12: 비관리자 판본 —
     }
     void ipLabel; void hostText;
   }
+  // H30 대조군(2026-11-27): 관리자 판본에는 그 등록부 이름이 원문으로 이어져 있다 — 위 ‘키 없음’ 이 빈 연결을 본 것이 아니다.
+  assert.equal((await room(ADMIN, kr.r1)).places.find((x) => x.id === linkA).link.name, 'bmc-other.corp.example', 'H30 관리자 판본은 등록부 이름 그대로');
   // 시리얼을 가리는 판본(범위 비관리자)만: 원장 시리얼이 든 이름 · 이력 · 판 글자
   const v = await room(OP_A, kr.r1);
   assert.ok(!JSON.stringify({ places: v.places, logs: v.logs }).toLowerCase().includes('ledger77'), 'H18 · H19 · H24 · H29');

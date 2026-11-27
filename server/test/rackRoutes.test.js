@@ -129,7 +129,16 @@ test('조회: 서비스 태그로 iDRAC 서버 연결 · 미배치 · 관리 주
   const s2 = o.body.places.find((p) => p.kind === 'server');
   assert.equal(s2.serial, ''); assert.equal(s2.serialHidden, true);
   assert.equal(s2.link.mgmtHost, undefined, '비관리자 판본에는 관리 주소 없음');
-  assert.equal(o.body.unplaced[0].serviceTag, undefined);
+  // 2026-11-27: 미배치 서버 목록은 관리자에게만 싣는다(조회 계정에는 대수만 — `rack/project.js` 칸 목록). 예전 단언(범위 비관리자의 미배치 항목에 serviceTag 가 없다)보다 강한 사실:
+  //   목록 자체가 비어 있고, 등록부 이름 · 서비스 태그 · 관리 주소가 응답 어디에도 없다.
+  assert.deepEqual(o.body.unplaced, [], '조회 계정의 미배치 목록은 비어 있다'); assert.equal(o.body.unplacedListed, false);
+  assert.equal(o.body.unplacedTotal, 1, '대수는 그대로(s2)');
+  assert.ok(s2.link.serverId.startsWith('masked-') && !('name' in s2.link) && !('hostname' in s2.link), `연결 정보에 등록부 이름 · 호스트 이름 키가 없다: ${JSON.stringify(s2.link)}`);
+  const oj = JSON.stringify(o.body);
+  for (const secret of ['DEF5678', 'ABC1234', 'abc-1234', 'kr-esx-0', '192.0.2.']) assert.ok(!oj.includes(secret), `범위 비관리자 응답에 ‘${secret}’ 가 있다`);
+  assert.equal(a.body.unplacedListed, true);
+  assert.deepEqual(a.body.unplaced.map((u) => [u.name, u.serviceTag]), [['kr-esx-02', 'DEF5678']], '관리자 판본의 미배치 목록은 등록부 이름 · 서비스 태그 원문');
+  assert.equal(srv.link.name, 'kr-esx-01', '관리자 판본의 연결 정보는 등록부 이름 그대로');
   assert.equal(o.body.canEdit, false);
   assert.ok(o.body.logs.every((l) => l.user === ''), '비관리자에게 작업자 계정명 없음');
 

@@ -1,6 +1,6 @@
 # 랙 실장도(`server/src/rack/` · 라우트 `routes/api/rack.js` · 화면 `web/src/views/tools/RackTool.jsx`) 불변조건
 
-설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `test/rackPerf1126.test.js`(개선 1 · 2) · `test/rackGaps{Pure,Db,Routes,Head,Leak,R2x,R2sec,Refute,R3x}1126.test.js` · `test/rackGapsR3fix1126.test.js`(가림 순수 함수를 느린 기준 구현과 무작위 대조 포함) · `test/rackMaskMatrix1126.test.js`(가림 표기 행렬 × 응답 경로 — **가림 판정을 고치면 이 표에 표기를 더할 것**)(2026-11-26 점검 1~3회차) · `web/src/views/tools/{rackView,rackViewGaps1126}.test.js`.
+설계: `docs/design/rack-elevation/README.md` · 조회 계정 가림 재설계 `docs/design/rack-mask-redesign/README.md`(2026-11-27 컨펌 — 안 B′ · 지금은 1단계 '닫기' 까지). 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `test/rackPerf1126.test.js`(개선 1 · 2) · `test/rackGaps{Pure,Db,Routes,Head,Leak,R2x,R2sec,Refute,R3x}1126.test.js` · `test/rackGapsR3fix1126.test.js`(가림 순수 함수를 느린 기준 구현과 무작위 대조 포함) · `test/rackMaskMatrix1126.test.js`(가림 표기 행렬 × 응답 경로 — **가림 판정을 고치면 이 표에 표기를 더할 것**)(2026-11-26 점검 1~3회차) · `web/src/views/tools/{rackView,rackViewGaps1126}.test.js`.
 
 - **원장은 중앙 한 곳**(2026-11-20 사용자 결정). 사람이 정한 위치만 저장한다 — 상태 · 온도 · 전력 측정값은 넣지 않고 화면을 그릴 때 수집 모듈에서 잇는다.
   계층은 법인(`datacenter/store.js` DataCenter = 법인 묶음) → 데이터센터(site · 물리) → 전산실 → 랙 → 배치. 법인 하나에 데이터센터가 여럿일 수 있다.
@@ -31,9 +31,19 @@
   자기 점검 `RACK_SELF_CHECK=1`(랙 테스트 전부가 켠다)은 캐시로 만든 판 · 색인 판정을 원장 훑기와 매번 대조해 다르면 던진다 — SQL 로 원장을 직접 고친 테스트는 `_resyncForTest()`.
   실측(장비 5,100대 법인 · 4 vCPU 컨테이너 · 중앙값): 전산실 10곳이면 옮기기 33 → 12ms · 시리얼 고치기 45 → 10ms, **전산실 1곳에 다 있으면** 36 → 32ms · 46 → 32ms(그 전산실을 통째로 다시 읽는다) ·
   판 크기 67 → 72KB(gzip 1단계) · `placedSerialKeys` 는 5ms 그대로. 미배치 서버 목록은 법인당 `UNPLACED_MAX` 대까지 싣고 화면이 검색어로 거른다(`rackView.js matchUnplaced`).
+- **조회 계정 응답은 칸 목록 투영(2026-11-27 · 사용자 컨펌 '안 B′ · 메모는 관리자 전용 · 나머지 추천안대로' — 상세 `docs/rules/rack.md` 2026-11-27 절)**:
+  응답은 **`rack/project.js` 에 적힌 칸만** 싣는다 — 원장 행을 펼쳐(`...p`) 싣지 않는다(가릴 칸을 하나씩 지정하던 때 잊은 칸 10종이 원문으로 나갔다 · 실측).
+  관리자만: 메모(note) · 등록부 서버 이름 · OS 호스트 이름 · 관리 주소 · 미배치 서버 목록(그 밖에는 대수 + `unplacedListed:false`) · 되돌리기 미리 보기 · 작업자.
+  가림을 거쳐: 표시 이름 · 모델 · 랙의 이름 · 줄 · 용도 · 전산실 · 데이터센터 · 랙 종류 이름 · 판 차이의 이름과 위치 글. 시리얼 칸은 시리얼 판본에 주되 주소 꼴이면 비운다.
+  **가림 재료는 줄지 않는다**: `viewerOf` 가 요청당 한 번 모아 **원장 옆 기록 ∪ 지금 등록부**(`rack/db.js maskMaterial` · 표 `rack_mask_seen`)로 가린다 — 엣지 서버 목록은 메모리뿐이라
+  재시작 직후 · 수집 서버를 끈 뒤에 가림이 풀렸다(재현). 기록은 누가 보든 채운다(관리자 요청은 60초에 한 번). 재료를 요청 판본 · 범위로 줄이는 최적화를 넣지 말 것.
+  새 입력은 전각 → 반각(`layout.js foldWidth` — 옛 값은 가림이 같은 눈으로 본다) · 시리얼 칸의 주소(IP · URL)는 저장 거절.
+  **새 칸을 응답에 더하려면** `project.js` 에 등급을 적고 `test/rackProject1127.test.js` 의 키 목록 · 표식을 함께 고친다(표식 시험 = 공개가 아닌 칸의 글자가 조회 계정의 모든 GET 응답에 없다).
+  가림 집계 `GET /tools/rack/mask-census` 는 조회 ∧ 쓰기 전체 범위 관리자만(전 법인 재료로 '걸리는가' 를 답한다 — 범위 관리자에게 열면 존재 확인 길). 재료의 값은 응답에 싣지 않는다.
+  ⚠ 판정 방식은 아직 '찾아 지우기' 다 — 표기를 바꾼 식별자(등록 주소의 첫 마디 · 구분자를 바꾼 IP)는 그대로 보인다(집계가 센다). 통째 판정 + 사람의 결정(승인 · 숨김)은 다음 단계.
 - **비관리자 판본의 가림 · 화면의 늦은 응답(2026-11-26 점검 1~4회차 — 상세 · 근거 · 대가는 `docs/rules/rack.md`, 고치기 전에 읽을 것)**:
   표시 이름(label)은 관리자가 공개한 이름이다 — 주소와 (시리얼을 가리는 판본에서) 시리얼 · 태그만 가린다. **가림은 `routes/api/rack.js textMaskOf` 하나가 정한다**(주소 먼저 → 태그 나중 · 재료는 범위로 자르기 전 등록부 전체 +
-  인벤토리 태그 + 그 법인의 시리얼 기록 `rack_serial_seen`). 같은 가림이 `places[].label` · `link.name` · `unplaced[].name` · 이력 · 판 목록 · 판 글 · 판 차이 · 엑셀에 닿는다. 이력 · 판 행의 `tags` 와 판 차이의 `_tags` 는 응답으로 나가지 않는다(`versionDetail` 이 유일한 출구).
+  인벤토리 태그 + 그 법인의 시리얼 기록 `rack_serial_seen`). 같은 가림이 표시 이름 · 모델 · 랙/전산실/데이터센터/랙 종류 이름 · 이력 · 판 목록 · 판 글 · 판 차이(이름 · 위치 글)에 닿는다(등록부 서버 이름은 2026-11-27 부터 조회 계정에 싣지 않는다 — 아래). 이력 · 판 행의 `tags` 와 판 차이의 `_tags` 는 응답으로 나가지 않는다(`versionDetail` 이 유일한 출구).
   경계 규칙은 `rack/textMask.js` 머리말: 낱말 경계 = 글자 갈래(라틴 글자 · 숫자 / 그 밖)가 바뀌는 자리 · 6자 미만 키는 낱말 통째(원문에 구분자가 있으면 같은 모양도) · 점 없는 등록 주소는 호스트 이름 낱말 통째.
   글 속 IP 는 라우트의 `hasIpv4` · `hasIpv6`(마디 묶음 · MAC 포함)로 — 다른 화면의 `addressMatcher`(식별자 칸용)를 글에 쓰지 않는다. **자리표시 태그는 가림 재료도 연결 키도 아니다**(`usableTag` — 비 ASCII 값은 예외).
   이름 정리(`layout.js cleanText`)는 유니코드 속성으로 지우고 가림 판정도 같은 글자를 지운 글로 본다(`dropInvisible`). 바뀐 것이 없는 저장은 rev · 판 · 이력 · 감사를 만들지 않는다(`unchanged: true`).

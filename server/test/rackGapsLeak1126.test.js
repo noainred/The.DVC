@@ -72,7 +72,9 @@ test('원장에서 뺀 · 시리얼을 바꾼 장비의 시리얼이 든 이름 
   const adm3 = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: r } })).body;
   assert.ok(adm3.logs.some((l) => l.detail.includes('nas-OLDSER77')), '관리자는 옛 행도 원문');
 });
-test('S2: 주소 판정기는 요청당 하나(범위 안 등록부 전체 주소) — 이름이 id 와 같기만 한 서버는 가리지 않고, 다른 서버의 관리 주소와 같은 이름은 가린다', async () => {
+// 2026-11-27(사용자 결정 — 칸 목록 투영 `rack/project.js`): 등록부 서버 이름 · 미배치 서버 목록은 조회 계정에 싣지 않는다. 예전에 이 시험이 미배치 이름으로 보던
+//   ‘요청당 하나의 주소 판정기’ 는 조회 계정에 남은 이름(표시 이름)으로 옮겨서 보고, 등록부 이름 쪽은 ‘목록이 비었다 · 응답 어디에도 없다’ 와 관리자 판본의 원문으로 본다.
+test('S2: 주소 판정기는 요청당 하나(범위 안 등록부 전체 주소) — 조회 계정에 미배치 목록 · 등록부 이름이 없고, 표시 이름은 id 와 같기만 하면 그대로 · 다른 서버의 관리 주소와 같으면 가린다', async () => {
   const registry = await import(`${S}/idrac/registry.js`);
   registry.importServers([
     { id: 'kr-esx-01', name: 'kr-esx-01', host: 'https://10.9.9.1', username: 'root', password: 'x', serviceTag: 'SVCAAA1', vcenterId: 'vc-a' },
@@ -81,14 +83,28 @@ test('S2: 주소 판정기는 요청당 하나(범위 안 등록부 전체 주�
   ]);
   const OP_ALL = U('op', 'operator');
   const roomId = (await R.listTree(new Set(['kr']))).rooms[0].id;
+  // 표시 이름 두 개 — 하나는 서버 id · 등록부 이름과 같기만 한 이름(주소가 아니다), 하나는 다른 서버(x3)의 관리 주소와 대소문자만 다른 이름
+  const cur = await R.getRoom(roomId);
+  const sameAsId = await op({ op: 'place.add', rackId: cur.racks[0].id, rev: cur.room.rev, place: { face: 'full', uStart: 10, uSize: 1, kind: 'other', label: 'kr-esx-01' } });
+  assert.equal(sameAsId.statusCode, 200, JSON.stringify(sameAsId.body));
+  const sameAsHost = await op({ op: 'place.add', rackId: cur.racks[0].id, rev: sameAsId.body.rev, place: { face: 'full', uStart: 11, uSize: 1, kind: 'other', label: 'IDRAC21.mgmt.EXAMPLE' } });
+  assert.equal(sameAsHost.statusCode, 200, JSON.stringify(sameAsHost.body));
   const v = (await call('GET /tools/rack/room/:id', { user: OP_ALL, params: { id: roomId } })).body;
-  const names = v.unplaced.map((x) => x.name);
-  assert.ok(names.includes('kr-esx-01'), `이름이 id 와 같아도 주소가 아니면 그대로: ${names}`);
-  assert.ok(names.includes('srv3'));
-  assert.ok(!names.some((n) => /idrac21\.mgmt\.example/i.test(n)), `다른 서버의 관리 주소와 같은 이름은 가린다: ${names}`);
-  assert.ok(v.unplaced.every((x) => x.serverId.startsWith('masked-')), '비관리자에게 서버 id 는 항상 토큰');
+  const labelOf = (body, id) => body.places.find((p) => p.id === id)?.label;
+  assert.equal(labelOf(v, sameAsId.body.id), 'kr-esx-01', '이름이 id 와 같아도 주소가 아니면 그대로');
+  assert.match(String(labelOf(v, sameAsHost.body.id)), /^masked-[0-9a-f]{12} \(이름 가림\)$/, `다른 서버의 관리 주소와 같은 이름은 가린다: ${labelOf(v, sameAsHost.body.id)}`);
+  const j = JSON.stringify(v);
+  assert.ok(!/idrac21\.mgmt\.example/i.test(j), '다른 서버의 관리 주소(= 등록부 이름 · 표시 이름)가 응답 어디에도 없다');
+  // 미배치 서버 목록(등록부 이름 · id)은 관리자에게만 — 조회 계정에는 목록이 비고 대수만 간다
+  assert.deepEqual(v.unplaced, [], `조회 계정의 미배치 목록은 비어 있다: ${JSON.stringify(v.unplaced)}`); assert.equal(v.unplacedListed, false);
+  assert.equal(v.unplacedTotal, 3, '대수는 예전과 같다(kr-esx-01 · x2 · x3)');
+  assert.ok(!j.includes('srv3') && !j.includes('SVCAAA'), '등록부 이름 · 서비스 태그는 주소가 아니어도 싣지 않는다');
+  assert.ok(!/"serverId":"(?!masked-)/.test(j), '비관리자에게 서버 id 는 (실린다면) 항상 토큰');
   const adm = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body;
+  assert.equal(adm.unplacedListed, true);
+  assert.deepEqual(adm.unplaced.map((x) => x.name).sort(), ['IDRAC21.mgmt.EXAMPLE', 'kr-esx-01', 'srv3'], '관리자는 등록부 이름 원문(주소가 아닌 이름도 · 주소인 이름도)');
   assert.ok(adm.unplaced.some((x) => x.name === 'IDRAC21.mgmt.EXAMPLE' && x.serverId === 'x2'), '관리자는 원문');
+  assert.equal(labelOf(adm, sameAsHost.body.id), 'IDRAC21.mgmt.EXAMPLE', '관리자는 표시 이름도 원문');
 });
 
 test.after(() => R._closeForTest());

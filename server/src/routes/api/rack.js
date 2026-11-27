@@ -30,10 +30,12 @@ import { analysisServersWithRemote, invForServer } from '../../insights/analysis
 import { scopeIdracServers } from '../admin/idracCore.js';
 import { hwSummaryOf, mgmtHostOf } from '../../idrac/hwSummary.js';
 import { partHealthRollup } from '../../idrac/invView.js';
-import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, dropInvisible, LIMITS, KIND_LABEL } from '../../rack/layout.js';
+import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, dropInvisible, foldWidth, LIMITS, KIND_LABEL } from '../../rack/layout.js';
+import { projectSite, projectRoom, projectType, projectRack, projectPlace, projectHw, projectDiff } from '../../rack/project.js';
 import * as R from '../../rack/db.js';
 import { VERSION_KEEP } from '../../rack/versions.js';
 import { acquireExport } from '../../util/exportBusy.js';
+import { createYielder } from '../../util/timeSlice.js';
 import { addressMatcher, hostVariants, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
 import { tagIndexOf, stripTags, needleIndexOf, replaceNeedles, charKind } from '../../rack/textMask.js';
 import { todayStamp } from '../../util/dayKey.js';
@@ -118,20 +120,18 @@ export const usableTag = (t) => {
 };
 
 // 가림 재료도 판정 대상 글과 **같은 눈으로** 본다 — 글에서만 보이지 않는 글자를 지우면, 그런 글자가 시리얼과 이름 양쪽에 든 옛 값이 서로 어긋나 가려지지 않았다(5회차 점검 정확성 1 · 재현).
-const cleanTag = (t) => (typeof t === 'string' ? dropInvisible(t).trim() : t);
+const cleanTag = (t) => (typeof t === 'string' ? foldWidth(dropInvisible(t)).trim() : t);
 
 export const UNPLACED_MAX = 2000;   // 미배치 서버 목록에 싣는 최대 대수(법인 하나) — 넘으면 unplacedTotal 이 더 크고 화면이 밝힌다
 const HEALTH = { ok: 'ok', warning: 'warn', critical: 'crit' };
 const healthOf = (v) => HEALTH[String(v || '').toLowerCase()] || (v ? 'unknown' : '');
 
 /**
- * 그 법인의 서버(범위로 먼저 자름) — 서비스 태그 키 → 서버.
- * `invTags` = 가림 재료에 **범위 밖 서버의 인벤토리 태그**도 넣는다(시리얼을 가리는 판본만 켠다 — 2회차 반증 B-1: 등록부 태그 칸이 비고 인벤토리에서만 읽힌
- *   범위 밖 서버의 태그가 다른 장비 이름에 적혀 있으면 원문으로 나갔다). 인벤토리 조회는 메모리 캐시 한 번이다(`invCache.getInventory`).
+ * 가림 재료(주소 · 태그) — 지금 등록부(중앙 + 엣지가 올린 서버) **전체**에서 모은다(범위로 자르지 않는다).
+ * `invTags` = 인벤토리에서만 읽힌 태그도 넣는다(2회차 반증 B-1: 등록부 태그 칸이 비고 인벤토리에서만 읽힌 범위 밖 서버의 태그가 다른 장비 이름에 적혀 있으면 원문으로 나갔다).
+ *   인벤토리 조회는 메모리 캐시 한 번이다(`invCache.getInventory`). 여기서 모은 것은 `viewerOf` 가 원장 옆 기록과 합친다(재료는 줄지 않는다).
  */
-function corpServers(req, corpId, { invTags = false } = {}) {
-  const assign = getDatacenterAssign() || {};
-  const all = analysisServersWithRemote({ user: req.user, query: {} });
+function fleetMaterial(all, { invTags = false } = {}) {
   // 가림 재료(주소 · 태그)는 **범위로 자르기 전** 등록부 전체에서 모은다(2회차 점검 1 — 원장은 법인 단위로 보이는데 재료를 조회자 범위 안 서버로만 만들면,
   //   같은 법인의 다른 vCenter 서버 · 귀속 없는 베어메탈의 관리 주소가 든 표시 이름이 범위 계정에게만 원문으로 나갔다). 연결 · 미배치 목록은 지금처럼 범위로 자른다.
   const hosts = []; const allTags = [];
@@ -146,6 +146,12 @@ function corpServers(req, corpId, { invTags = false } = {}) {
       if (typeof t === 'string' && t && t !== s.serviceTag) allTags.push(t);
     }
   }
+  return { hosts, allTags };
+}
+
+/** 그 법인의 서버(범위로 먼저 자름) — 서비스 태그 키 → 서버. `all` = 요청당 한 번 읽은 등록부(`viewerOf`). */
+function corpServers(req, corpId, all) {
+  const assign = getDatacenterAssign() || {};
   const { servers } = scopeIdracServers(req, all);
   const byKey = new Map();
   const list = [];
@@ -165,8 +171,7 @@ function corpServers(req, corpId, { invTags = false } = {}) {
     list.push(row);
     if (key && !byKey.has(key)) byKey.set(key, row);
   }
-  for (const x of list) if (x.tag) allTags.push(x.tag);   // 인벤토리에서만 읽힌 태그(등록부 칸이 빈 서버)
-  return { byKey, list, hosts, allTags };
+  return { byKey, list };
 }
 
 /**
@@ -185,7 +190,7 @@ function corpServers(req, corpId, { invTags = false } = {}) {
  * ⚠ 원장 표시 이름(label)은 관리자가 공개한 이름으로 본다 — 주소와 (가림 판본의) 태그만 가리고, 호스트 이름처럼 보이는 이름은 그대로 둔다(랙 그림의 장비 이름이 비면 조회 계정에게 쓸모가 없다).
  */
 const HIDDEN_ADDR = '(주소 가림)';
-const PLAIN_MASK = Object.freeze({ admin: true, name: (s) => s, text: (s) => s, row: (s) => s, match: () => false });
+const PLAIN_MASK = Object.freeze({ admin: true, showSerial: true, name: (s) => s, text: (s) => s, row: (s) => s, serial: (s) => s, match: () => false });
 const OPEN_P = new Set(['(', '[', '{', '<', '"', "'", '‘', '“']);
 const CLOSE_P = new Set([')', ']', '}', '>', '"', "'", '’', '”', ',', ';', '.', ':']);   // ':' = 이력 글의 '이름: 랙'
 /**
@@ -245,12 +250,15 @@ function hasIpv6(w) {
   }
   return false;
 }
-function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
+/** 주소 판정기 · 주소 색인 — 요청당 한 번 만들어 법인마다 다시 쓴다(목록 응답은 법인 여러 개의 이름을 한 번에 싣는다). */
+function maskBaseOf(hosts = []) {
+  const hs = hosts.map(cleanTag).filter((h) => typeof h === 'string' && h);   // 등록 주소도 같은 눈으로(위 cleanTag)
+  return { match: addressMatcher(hs), hostIdx: needleIndexOf(hs.flatMap(hostVariants), { min: 3 }) };
+}
+function textMaskOf({ admin, showSerial, hosts = [], tags = [], base = null }) {
   if (admin) return PLAIN_MASK;
-  hosts = hosts.map(cleanTag).filter((h) => typeof h === 'string' && h);   // 등록 주소도 같은 눈으로(위 cleanTag)
-  const match = addressMatcher(hosts);
+  const { match, hostIdx } = base || maskBaseOf(hosts);
   const hostEq = (v) => !!v && match.addressSet.has(v.trim().toLowerCase());
-  const hostIdx = needleIndexOf(hosts.flatMap(hostVariants), { min: 3 });
   const corpIdx = showSerial ? null : tagIndexOf(realTags(tags));
   /**
    * 낱말 하나가 IP 리터럴(또는 등록 주소 그대로)을 품었는가.
@@ -288,127 +296,153 @@ function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
   // 그 행 · 그 장비의 시리얼(own)과 법인 색인을 **한 번에** 훑는다(따로 훑으면 짧은 own 이 다른 장비의 긴 시리얼을 깨뜨려 꼬리가 남는다 — 3회차 점검 정확성 1).
   const tagsOut = (t, own) => (showSerial ? t : stripTags(t, own && own.length ? tagIndexOf(realTags(own)) : null, corpIdx));
   // 판정 앞에서 보이지 않는 글자를 지운다(4회차 점검 보안 4 — '10.20<U+FE0F>.31.5' 는 화면에 주소로 보이는데 판정은 비켜 갔다. 새 입력은 cleanText 가 이미 지운다).
-  const text = (s0, own) => { const s = dropInvisible(s0); return typeof s !== 'string' || !s ? s : tagsOut(addr(s), own); };
+  const text = (s0, own) => { const s = foldWidth(dropInvisible(s0)); return typeof s !== 'string' || !s ? s : tagsOut(addr(s), own); };
   return {
-    admin: false, match, text,
+    admin: false, showSerial: !!showSerial, match, text,
     // 이름이 **낱말 하나**이고 그것이 주소면 통째로 '이름 가림'. 여러 낱말이면 주소인 낱말만 가린다('Unity 5.3.0.0 array' 를 통째로 지우지 않는다 — 1회차 반증 판단 2).
     name: (s0, own) => {
-      const s = dropInvisible(s0);
+      const s = foldWidth(dropInvisible(s0));
       if (typeof s !== 'string' || !s) return s;
       const one = s.trim();
       return !/\s/.test(one) && one.length <= 300 && ipWord(one) ? `${textToken(one)} (이름 가림)` : text(s, own);
     },
     row: (detail, own, action) => (!showSerial && own == null && /^place\./.test(String(action || '')) ? R.LEGACY_DETAIL_HIDDEN : text(detail, own || [])),
+    // 시리얼 칸의 값(시리얼을 보는 판본) — 주소 꼴(IP · MAC · 등록 주소)이 들어 있으면 비운다(2026-11-27 반증 P3: 시리얼 칸에 적힌 관리 주소가 원문으로 나갔다).
+    //   새 입력은 `layout.js cleanPlaceInput` 이 저장 때 거절한다 — 여기는 그 전에 저장된 값 · 되돌린 판의 값.
+    serial: (s0) => {
+      const s = foldWidth(dropInvisible(s0));
+      if (typeof s !== 'string' || !s) return '';
+      if (s.split(/\s+/).some((w) => w && (w.length > 300 || ipWord(w)))) return '';
+      return replaceNeedles(s, hostIdx, HIDDEN_ADDR) === s ? s : '';
+    },
   };
 }
-/** 판 목록 · 판 차이 라우트용 — 그 법인의 가림 재료(비관리자일 때만 등록부 · 원장을 읽는다). */
-async function corpTextMask(req, corpId) {
+/**
+ * 요청 하나의 '보는 눈'(판본) — 관리자 여부 · 시리얼 판본 · 가림 함수. **가림 재료는 여기서 한 번 모은다**: 지금 등록부 ∪ 원장 옆에 남긴 기록
+ * (`rack/db.js maskMaterial` — 엣지 서버 목록이 비어 있는 재시작 직후에도 가림이 풀리지 않게 · 2026-11-27 반증 재현).
+ *  · `forCorp(법인)` = 그 법인 원장의 글에 쓰는 가림(주소 색인은 요청당 한 번 · 태그 색인은 법인마다 — 그 법인의 시리얼 기록이 더해진다).
+ *  · `forCorps(법인들)` = 여러 법인에 걸친 글(랙 종류 이름).
+ *  · 재료 기록은 누가 보든 채운다 — 관리자 요청도(가리지는 않는다) `ABSORB_EVERY_MS` 에 한 번 인벤토리 태그까지 모아 기록한다.
+ *    조회 계정이 처음 여는 순간에 엣지 목록이 비어 있을 수 있기 때문이다. 조회 계정 요청은 매번 지금 재료를 기록에 더한다.
+ */
+const ABSORB_EVERY_MS = 60_000;
+let _absorbAt = 0;
+/** 테스트 전용 — 다음 요청이 재료 전체(인벤토리 태그 포함)를 다시 기록하게 한다. */
+export function _resetAbsorbForTest() { _absorbAt = 0; }
+async function viewerOf(req) {
   const admin = isAdminDetailUser(req.user);
-  if (admin) return PLAIN_MASK;
+  const all = analysisServersWithRemote({ user: req.user, query: {} });
+  // 간격은 기록을 **마친 뒤** 시작한다 — 원장을 못 열어 던진 요청이 간격만 먹으면 그 60초 동안 관리자 요청이 재료를 남기지 못한다.
+  const full = Date.now() - _absorbAt >= ABSORB_EVERY_MS;
+  if (admin) {
+    if (full) { const m = fleetMaterial(all, { invTags: true }); await R.maskMaterial(m.hosts.map(cleanTag), m.allTags.map(cleanTag)); _absorbAt = Date.now(); }
+    return { admin: true, showSerial: true, all, forCorp: async () => PLAIN_MASK, forCorps: async () => PLAIN_MASK };
+  }
   const showSerial = serialsVisible(req);
-  const { hosts, allTags } = corpServers(req, corpId, { invTags: !showSerial });
-  const tags = showSerial ? [] : [...allTags, ...(await R.corpSerials(corpId))];
-  return textMaskOf({ admin, showSerial, hosts, tags });
+  const cur = fleetMaterial(all, { invTags: full || !showSerial });
+  const mat = await R.maskMaterial(cur.hosts.map(cleanTag), cur.allTags.map(cleanTag));
+  if (full) _absorbAt = Date.now();
+  const base = maskBaseOf(mat.hosts);
+  const cache = new Map();
+  const forCorps = async (corpIds) => {
+    // 시리얼을 보는 판본은 태그를 가리지 않는다 — 법인과 무관하게 가림 하나.
+    const ids = showSerial ? [] : [...new Set((corpIds || []).map((c) => String(c || '')))].sort();
+    const key = ids.join('\u0000');
+    if (!cache.has(key)) {
+      const tags = showSerial ? [] : [...mat.tags];
+      for (const id of ids) for (const t of await R.corpSerials(id)) tags.push(t);
+      cache.set(key, textMaskOf({ admin: false, showSerial, base, tags }));
+    }
+    return cache.get(key);
+  };
+  return { admin: false, showSerial, all, forCorp: (corpId) => forCorps([corpId]), forCorps };
 }
 
 /**
- * 비관리자 판본의 서버 식별 필드 가림(점검 C5 · C6 — 재현):
- *  · IP 로 등록한 iDRAC 는 등록부 id · 이름이 곧 관리 주소다 — 이름은 요청당 판정기(`textMaskOf` — 범위 안 등록부 전체 주소)로 '이름 가림',
- *    id 는 비관리자면 **항상 토큰**(id 가 주소 · 서비스 태그인 등록부가 있다 — 화면은 id 를 키로만 쓴다).
- *  · 시리얼을 가리는 판본(범위 비관리자)은 이름 · 호스트 이름에 든 서비스 태그도 걷어 낸다(물리서버 폴더 · 서비스 인벤토리 `stripTag` 와 같은 함수 · 같은 임계).
+ * 연결된 서버(iDRAC 등록 서버 — 서비스 태그로 이은 것)의 정보.
+ *  · 관리자: 등록부 이름 · OS 호스트 이름 · 관리 주소까지.
+ *  · 비관리자: **등록부 서버 이름 · OS 호스트 이름 · 관리 주소는 싣지 않는다**(2026-11-27 사용자 결정 — 설계 docs/design/rack-mask-redesign 결정 6).
+ *    IP 로 등록한 서버는 이름이 곧 관리 주소이고, 등록부 이름은 원장의 글이 아니라 사람이 공개 여부를 정한 적이 없다 — 조회 계정은 원장의 표시 이름을 본다.
+ *    id 는 항상 토큰(id 가 주소 · 서비스 태그인 등록부가 있다 — 화면은 키로만 쓴다). 모델 · 하드웨어 요약은 칸 목록으로(`project.js projectHw`).
  */
-function maskServerIdentity(obj, row, { admin, showSerial, mask }) {
-  if (admin) return obj;
-  const out = { ...obj, serverId: maskedIdToken(String(obj.serverId ?? '')) };
-  // OS 호스트 이름은 관리자 판본만(반증 추가 1 — 물리서버 폴더 hwView 와 같은 기준). 등록 이름이 없어 호스트 이름으로 떨어진 이름도 비운다(가림보다 먼저 본다).
-  const osHost = String(row.inv?.system?.hostName || '');
-  if (osHost && !row.s?.name && out.name === osHost) out.name = '';
-  if ('hostname' in out) out.hostname = '';
-  if (out.hw?.host) out.hw = { ...out.hw, host: '' };
-  if (out.hw?.os?.host) out.hw = { ...out.hw, os: { ...out.hw.os, host: '' } };
-  // 이름은 표시 이름과 같은 가림(2회차 점검 4 — 통째 일치만 보면 'host:443' · URL 꼴 · 글 속 주소 · 다른 서버의 태그가 든 이름이 그대로 나갔다)
-  const m = mask || textMaskOf({ admin, showSerial, hosts: [row.s?.host].filter(Boolean), tags: [row.tag].filter(Boolean) });
-  if (out.name) out.name = m.name(out.name, [row.tag].filter(Boolean));
-  return out;
-}
-
-function linkView(row, { admin, showSerial = true, mask = null }) {
+function linkView(row, v) {
   const { s, inv } = row;
   const sys = inv?.system || {};
   const rollup = (k) => { const r = partHealthRollup(inv?.[k]); return r.state ? { state: r.state, ...r.counts } : null; };
-  return maskServerIdentity({
-    serverId: String(s.id),
-    name: s.name || sys.hostName || '',
-    hostname: sys.hostName || '',
-    model: sys.model || s.model || '',
+  const common = {
     powerState: sys.powerState || inv?.powerState || '',
     health: healthOf(sys.health),
     remote: !!s.remote,
     collectedAt: Number(inv?.collectedAt) || null,
-    hw: hwSummaryOf(inv),
     parts: inv ? { psu: rollup('psus'), disk: rollup('disks'), mem: rollup('memoryDimms'), fan: rollup('fans') } : null,
-    ...(admin ? { mgmtHost: mgmtHostOf(s.host) } : {}),
-  }, row, { admin, showSerial, mask });
+  };
+  const model = String(sys.model || s.model || '');
+  if (v.admin) {
+    return { serverId: String(s.id), name: s.name || sys.hostName || '', hostname: sys.hostName || '', model, ...common, hw: hwSummaryOf(inv), mgmtHost: mgmtHostOf(s.host) };
+  }
+  return { serverId: maskedIdToken(String(s.id ?? '')), model: v.text(model), ...common, hw: projectHw(hwSummaryOf(inv), v) };
 }
 
 // ───────────────────────── 조회 ─────────────────────────
 
-async function treeView(req) {
+async function treeView(req, v) {
   const acc = accessOf(req);
   const corps = listDatacenters().filter((d) => canRead(acc, String(d.id)))
     .map((d) => ({ id: String(d.id), name: d.name || String(d.id), writable: canWrite(acc, String(d.id)) }));
   const ids = new Set(corps.map((c) => c.id));
-  const tree = await R.listTree(ids);
+  let tree = await R.listTree(ids);
   // 범위 밖 법인의 원장(법인 목록에서 지워진 법인 포함)은 범위 계정에 주지 않는다 — 전체 범위면 '법인 목록에 없음' 으로 밝힌다.
   if (!acc.read) {
     const known = new Set(listDatacenters().map((d) => String(d.id)));
-    const all = await R.listTree(null);
-    for (const s of all.sites) if (!known.has(s.corpId) && !corps.some((c) => c.id === s.corpId)) corps.push({ id: s.corpId, name: `${s.corpId}(법인 목록에 없음)`, writable: canWrite(acc, s.corpId), orphan: true });
-    return { corps, sites: all.sites, rooms: all.rooms };
+    tree = await R.listTree(null);
+    for (const s of tree.sites) if (!known.has(s.corpId) && !corps.some((c) => c.id === s.corpId)) corps.push({ id: s.corpId, name: `${s.corpId}(법인 목록에 없음)`, writable: canWrite(acc, s.corpId), orphan: true });
   }
-  return { corps, ...tree };
+  // 이름은 그 법인의 가림을 거쳐 칸 목록으로(전산실은 소속 데이터센터의 법인) — 예전엔 원장 행을 그대로 실어 데이터센터 · 전산실 이름이 원문으로 나갔다.
+  const corpOfSite = new Map(tree.sites.map((s) => [s.id, s.corpId]));
+  const sites = []; for (const s of tree.sites) sites.push(projectSite(s, await v.forCorp(s.corpId)));
+  const rooms = []; for (const r of tree.rooms) rooms.push(projectRoom(r, await v.forCorp(corpOfSite.get(r.siteId) || '')));
+  return { corps, sites, rooms, ledgerCorps: [...new Set(tree.sites.map((s) => s.corpId))] };
 }
 
 async function roomView(req, roomId) {
   const acc = accessOf(req);
-  const admin = isAdminDetailUser(req.user);
-  const showSerial = serialsVisible(req);
   const corpId = await R.corpOf('room', roomId).then((x) => x?.corpId || '');
   if (!corpId || !canRead(acc, corpId)) return null;
-  const { byKey, list, hosts, allTags } = corpServers(req, corpId, { invTags: !admin && !showSerial });
-  // 1회차 점검 S1: 표시 이름(label)과 그 이름으로 만든 이력 글에도 주소 · 태그 가림(예전엔 link 만 가렸다 — 화면이 등록부 이름으로 채운 label 이 그대로 나갔다)
-  const mask = textMaskOf({ admin, showSerial, hosts, tags: admin || showSerial ? [] : [...allTags, ...(await R.corpSerials(corpId))] });
+  const v = await viewerOf(req);
+  const { admin, showSerial } = v;
+  // 1회차 점검 S1: 표시 이름(label)과 그 이름으로 만든 이력 글에도 주소 · 태그 가림.
+  // 2026-11-27: 응답은 칸 목록으로(`rack/project.js`) — 메모는 관리자만, 나머지 자유 글(모델 · 랙의 이름 · 줄 · 용도 · 전산실 · 데이터센터 이름)은 전부 가림을 거친다.
+  const mask = await v.forCorp(corpId);
+  const { byKey, list } = corpServers(req, corpId, v.all);
   const data = await R.getRoom(roomId, { maskRow: admin ? null : mask.row });   // 이력 글은 db 층이 그 행의 tags 와 함께 가림 함수에 넘긴다(tags 는 돌려주지 않는다)
   if (!data || data.site.corpId !== corpId) return null;
   const placedKeys = await R.placedSerialKeys(corpId);
   const places = data.places.map((p) => {
     const row = p.kind === 'server' && p.serialKey ? byKey.get(p.serialKey) : null;
-    const out = { ...p, label: mask.name(p.label, [p.serial, ...(p.extraSerials || [])].filter(Boolean)), link: row ? linkView(row, { admin, showSerial, mask }) : null, linkState: p.kind !== 'server' ? 'n/a' : !p.serialKey ? 'no-serial' : row ? 'linked' : 'not-found' };
-    delete out.serialKey;
-    if (!showSerial) { out.serial = ''; out.extraSerials = []; out.serialHidden = true; }
-    return out;
+    return { ...projectPlace(p, mask), link: row ? linkView(row, mask) : null, linkState: p.kind !== 'server' ? 'n/a' : !p.serialKey ? 'no-serial' : row ? 'linked' : 'not-found' };
   });
   const placesByRack = new Map();
   for (const p of places) { if (!placesByRack.has(p.rackId)) placesByRack.set(p.rackId, []); placesByRack.get(p.rackId).push(p); }
   // 점검 C3(재현): 예전엔 후면 전용 장비를 걸러 전력 · 무게 · 대수 합에서 통째로 빠졌다(부분 합이 '몇 대 중 몇 대' 없이 전체처럼 보였다).
   //   rackTotals 가 앞 · 뒤가 같은 U 면 한 번만 세므로 그대로 넘긴다.
-  const racks = data.racks.map((r) => ({ ...r, totals: rackTotals(r, placesByRack.get(r.id) || []) }));
+  const racks = data.racks.map((r) => ({ ...projectRack(r, mask), totals: rackTotals(r, placesByRack.get(r.id) || []) }));
   // 미배치 = 이 법인 서버 중 원장 어디에도(이 법인 전 데이터센터) 서비스 태그가 없는 것.
   const unplacedAll = list.filter((x) => x.key && !placedKeys.has(x.key));
-  // 개선 3(2026-11-26): 화면이 검색어로 걸러 끌어 놓으므로 앞 300대로 자르지 않는다(법인 하나의 서버 수 — 상한은 응답 크기 보호용).
-  const unplaced = unplacedAll.slice(0, UNPLACED_MAX).map((x) => maskServerIdentity({
+  // 목록(등록부 서버 이름 · 호스트 이름 · 태그)은 **관리자에게만** 싣는다 — 놓을 수 있는 계정만 쓰는 목록이고 등록부 이름은 조회 계정에 싣지 않는다(결정 6). 그 밖에는 대수만.
+  //   개선 3(2026-11-26): 화면이 검색어로 걸러 끌어 놓으므로 앞 300대로 자르지 않는다(법인 하나의 서버 수 — 상한은 응답 크기 보호용).
+  const unplaced = admin ? unplacedAll.slice(0, UNPLACED_MAX).map((x) => ({
     serverId: String(x.s.id), name: x.s.name || x.inv?.system?.hostName || '', model: x.inv?.system?.model || x.s.model || '',
-    hostname: x.inv?.system?.hostName || '', ...(showSerial ? { serviceTag: x.tag } : {}),
-  }, x, { admin, showSerial, mask }));
+    hostname: x.inv?.system?.hostName || '', serviceTag: x.tag,
+  })) : [];
   const noTag = list.filter((x) => !x.key).length;   // 태그를 못 읽었거나 자리표시 값인 서버
   const corp = listDatacenters().find((d) => String(d.id) === corpId);
   return {
     ok: true,
     corp: { id: corpId, name: corp?.name || corpId },
-    site: data.site, room: data.room, rev: data.room.rev,
+    site: projectSite(data.site, mask), room: projectRoom(data.room, mask), rev: data.room.rev,
     racks, places,
-    unplaced, unplacedTotal: unplacedAll.length, serversNoTag: noTag,
-    logs: data.logs.map((l) => ({ ...l, user: admin ? l.user : '' })),   // detail 은 getRoom 이 이미 가렸다(maskRow)
+    unplaced, unplacedListed: admin, unplacedTotal: unplacedAll.length, serversNoTag: noTag,
+    logs: data.logs.map((l) => ({ ts: l.ts, action: l.action, detail: l.detail, user: admin ? l.user : '' })),   // detail 은 getRoom 이 이미 가렸다(maskRow)
     canEdit: canWrite(acc, corpId),
     serialsHidden: !showSerial,
     limits: LIMITS,
@@ -650,18 +684,98 @@ async function runOp(req, res) {
   } catch (e) { return sendErr(res, e); }
 }
 
+// ───────────────────────── 가림 집계(관리자 · 읽기 전용) ─────────────────────────
+
+/** 구분자를 바꿔 적은 IPv4('ip-10-20-30-4' · '10 20 30 4' · '10,20,30,4') — 지금 가림은 잡지 않는다(집계의 '폭을 넓히면' 칸에만 쓴다). */
+const ALT_IP = /(?<![0-9])(?:\d{1,3}[-_ ,]){3}\d{1,3}(?![0-9])/;
+export const CENSUS_SAMPLE_MAX = 300;
+const CENSUS_FIELDS = Object.freeze(['label', 'model', 'rackName', 'rackRow', 'rackRole', 'roomName', 'siteName']);
+/**
+ * 조회 계정에 가려져 보이는 글이 원장에 얼마나 있는가(읽기만) — 설계 docs/design/rack-mask-redesign ⑤ · 결정 4.
+ * 운영 원장의 분포(주소 · 태그가 든 글 수, 검사의 폭을 넓히면 더 걸릴 글 수)를 모르는 채로 다음 단계(통째 판정)의 폭을 정하지 않으려고 둔다.
+ *  · 대상: 법인 원장의 자유 글(표시 이름 · 모델 · 랙의 이름 · 줄 · 용도 · 전산실 · 데이터센터 이름) — **(법인, 칸, 글) 이 서로 다른 것**을 센다. 메모는 건수만(조회 계정에 싣지 않는다).
+ *  · addr = 지금 가림이 주소로 고쳐 보이는 글 · tag = 주소는 아니고 범위 계정 판본에서만 고쳐 보이는 글(태그 · 시리얼)
+ *  · 폭을 넓히면: firstLabel = 등록 주소(FQDN)의 첫 마디가 낱말로 든 글 · altIp = 구분자를 바꿔 적은 IPv4 — 지금은 둘 다 그대로 보인다
+ * 가림 재료(등록 주소 · 태그)의 **값은 싣지 않는다** — 개수만. 표본에는 원장의 글(관리자가 이미 보는 값)과 걸린 종류만.
+ */
+async function maskCensus(req, corpIds) {
+  const all = analysisServersWithRemote({ user: req.user, query: {} });
+  const cur = fleetMaterial(all, { invTags: true });
+  const mat = await R.maskMaterial(cur.hosts.map(cleanTag), cur.allTags.map(cleanTag));
+  const base = maskBaseOf(mat.hosts);
+  const addrMask = textMaskOf({ admin: false, showSerial: true, base });
+  const firstLabels = new Set();
+  for (const h of mat.hosts) for (const v of hostVariants(h)) {
+    if (v.includes('/') || v.includes(':')) continue;
+    const i = v.indexOf('.');
+    if (i >= 4 && !/^[0-9.]+$/.test(v)) firstLabels.add(v.slice(0, i).toLowerCase());
+  }
+  const labelIdx = needleIndexOf([...firstLabels], { min: 4 });
+  const blank = () => ({ total: 0, addr: 0, tag: 0, firstLabel: 0, altIp: 0 });
+  const fields = Object.fromEntries(CENSUS_FIELDS.map((f) => [f, blank()]));
+  const samples = []; let sampleOmitted = 0; let notes = 0; let places = 0; let racks = 0;
+  const pause = createYielder();
+  for (const corpId of corpIds) {
+    const tagMask = textMaskOf({ admin: false, showSerial: false, base, tags: [...mat.tags, ...(await R.corpSerials(corpId))] });
+    const t = await R.corpTexts(corpId);
+    notes += t.notes; places += t.places; racks += t.racks;
+    const seen = new Set();
+    for (const x of t.texts) {
+      await pause();
+      const c = foldWidth(dropInvisible(x.text));
+      const key = `${x.field}\u0000${c}`;
+      if (seen.has(key) || !fields[x.field]) continue;
+      seen.add(key);
+      const f = fields[x.field]; f.total += 1;
+      const a = addrMask.name(c);
+      const hits = [];
+      if (a !== c) { f.addr += 1; hits.push('addr'); }
+      else {
+        if (tagMask.name(c, x.own) !== c) { f.tag += 1; hits.push('tag'); }
+        if (replaceNeedles(c, labelIdx, '\u0000') !== c) { f.firstLabel += 1; hits.push('firstLabel'); }
+        if (c.length <= 300 && ALT_IP.test(c)) { f.altIp += 1; hits.push('altIp'); }
+      }
+      if (hits.length) { if (samples.length < CENSUS_SAMPLE_MAX) samples.push({ corpId, field: x.field, where: x.where, text: x.text, hits }); else sampleOmitted += 1; }
+    }
+  }
+  const sum = blank();
+  for (const f of CENSUS_FIELDS) for (const k of Object.keys(sum)) sum[k] += fields[f][k];
+  return { fields, sum, notes, places, racks, samples, sampleOmitted, material: { hosts: mat.hosts.length, tags: mat.tags.length, firstLabels: firstLabels.size } };
+}
+
 export function registerRack(api) {
   api.get('/tools/rack', toolsPerm, async (req, res) => {
     try {
       const acc = accessOf(req);
-      const t = await treeView(req);
-      const types = await R.listTypes();
+      const v = await viewerOf(req);
+      const t = await treeView(req, v);
+      // 랙 종류는 전 법인 공용 목록 — 이름은 이 계정이 보는 법인들의 가림을 거친다(2026-11-27 반증 P1: 원문으로 나갔다).
+      const typeMask = await v.forCorps(t.ledgerCorps);
+      const types = (await R.listTypes()).map((x) => projectType(x, typeMask));
       res.json({
-        ok: true, ...t, types,
+        ok: true, corps: t.corps, sites: t.sites, rooms: t.rooms, types,
         canEditTypes: isAdminDetailUser(req.user) && isFullReadWriteScope(req.user, store.get()),
         isAdmin: acc.isAdmin, kinds: KIND_LABEL, limits: LIMITS,
       });
     } catch (e) { sendErr(res, e); }
+  });
+  // 가림 집계(관리자 · 읽기 전용) — 전 법인 등록부의 주소 · 태그를 재료로 '이 글이 걸리는가' 를 답하므로 **조회 ∧ 쓰기 전체 범위 관리자만**
+  //   (범위 관리자에게 열면 이름 칸에 후보 글자를 적어 다른 법인 서버가 등록돼 있는지 알아내는 길이 된다 — 설계 반증 2-2). 무거운 집계라 동시 1건.
+  api.get('/tools/rack/mask-census', toolsPerm, async (req, res) => {
+    if (!isAdminDetailUser(req.user) || !isFullReadWriteScope(req.user, store.get())) {
+      return res.status(403).json({ ok: false, error: 'forbidden', reason: '가림 집계는 조회 · 쓰기 모두 전체 범위인 관리자만 볼 수 있습니다.' });
+    }
+    try {
+      const names = new Map(listDatacenters().map((d) => [String(d.id), d.name || String(d.id)]));
+      const ledger = [...new Set((await R.listTree(null)).sites.map((x) => x.corpId))].sort();
+      const want = cleanText(req.query?.corp, 64);
+      if (want && !ledger.includes(want)) return res.status(404).json({ ok: false, reason: '그 법인의 원장이 없습니다.' });
+      const lock = acquireExport('rack-census', req);
+      if (!lock.ok) return res.status(lock.status).json(lock.body);
+      let out;
+      try { out = await maskCensus(req, want ? [want] : ledger); } finally { lock.release(); }
+      return res.json({ ok: true, at: Date.now(), corps: (want ? [want] : ledger).map((id) => ({ id, name: names.get(id) || `${id}(법인 목록에 없음)` })), ...out });
+    } catch (e) { return sendErr(res, e); }
   });
   // 법인별 판(최근 30개) — 조회는 그 법인 조회 범위 · 작업자 계정명은 관리자 판본만(변경 이력과 같은 기준).
   api.get('/tools/rack/versions', toolsPerm, async (req, res) => {
@@ -669,9 +783,11 @@ export function registerRack(api) {
       const corpId = cleanText(req.query?.corp, 64);
       const acc = accessOf(req);
       if (!corpId || !canRead(acc, corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
-      const admin = isAdminDetailUser(req.user);
-      const mask = await corpTextMask(req, corpId);
-      const versions = (await R.listVersions(corpId, { maskRow: admin ? null : mask.row })).map((v) => ({ ...v, user: admin ? v.user : '' }));
+      const viewer = await viewerOf(req);
+      const admin = viewer.admin;
+      const mask = await viewer.forCorp(corpId);
+      const versions = (await R.listVersions(corpId, { maskRow: admin ? null : mask.row }))
+        .map((v) => ({ id: v.id, ts: v.ts, action: v.action, detail: v.detail, counts: v.counts, user: admin ? v.user : '' }));
       return res.json({ ok: true, corpId, versions, latestId: versions[0]?.id ?? null, keep: VERSION_KEEP, canRestore: canWrite(acc, corpId) });
     } catch (e) { return sendErr(res, e); }
   });
@@ -680,11 +796,21 @@ export function registerRack(api) {
       const corpId = cleanText(req.query?.corp, 64);
       const acc = accessOf(req);
       if (!corpId || !canRead(acc, corpId) || !/^\d{1,12}$/.test(String(req.params.vid))) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
-      const mask = await corpTextMask(req, corpId);
+      const mask = await (await viewerOf(req)).forCorp(corpId);
       const d = await R.versionDetail(corpId, Number(req.params.vid), mask.admin ? {} : { maskRow: mask.row, maskItem: mask.name });
       if (!d) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
-      if (!isAdminDetailUser(req.user)) d.version.user = '';
-      return res.json({ ok: true, ...d });
+      if (mask.admin) return res.json({ ok: true, ...d });
+      // 비관리자: 칸 목록으로 — 차이 항목의 위치 글(랙 이름)은 가림을 거치고, 관리자 전용 칸의 이름(메모)은 빼고,
+      //   '되돌리면 바뀌는 것'(restore)은 되돌릴 수 없는 계정에 싣지 않는다(2026-11-27 반증 P2 · 2-3 — 응답 표면을 줄인다).
+      return res.json({
+        ok: true,
+        version: { id: d.version.id, ts: d.version.ts, action: d.version.action, detail: d.version.detail, user: '' },
+        readable: d.readable,
+        ...(d.counts !== undefined ? { counts: d.counts } : {}),
+        ...(d.changes !== undefined ? { changes: projectDiff(d.changes, mask) } : {}),
+        ...(d.prevUnreadable !== undefined ? { prevUnreadable: d.prevUnreadable } : {}),
+        restore: null,
+      });
     } catch (e) { return sendErr(res, e); }
   });
   api.get('/tools/rack/room/:id', toolsPerm, async (req, res) => {

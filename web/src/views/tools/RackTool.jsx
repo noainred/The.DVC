@@ -12,10 +12,11 @@ import { Loading, ErrorBox, SearchBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { downloadFailText } from '../downloadFailText.js';
+import RackMaskCensus from './RackMaskCensus.jsx';
 import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
-  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields,
+  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields, unplacedMode, linkNameText,
   viewAfterLoadFail, sameSpot, viewAfterMove, spotVisible, lostViewReason, modalWithRoom, conflictHint, nameTarget,
 } from './rackView.js';
 
@@ -169,7 +170,7 @@ function Detail({ p, rack, onEdit, edit }) {
         <dd style={{ ...dd, ...mono }}>{p.serialHidden ? '— (범위 계정에는 보이지 않습니다)' : [p.serial, ...(p.extraSerials || [])].filter(Boolean).join(' / ') || '—'}</dd>
         <dt style={dt}>계획 전력</dt><dd style={dd}>운전 {wattText(p.opW)} · 정격 {wattText(p.ratedW)}</dd>
         <dt style={dt}>무게</dt><dd style={dd}>{p.weightKg == null ? '—' : `${p.weightKg} kg`}</dd>
-        {p.note ? <><dt style={dt}>메모</dt><dd style={dd}>{p.note}</dd></> : null}
+        {p.note ? <><dt style={dt}>메모(관리자 전용)</dt><dd style={dd}>{p.note}</dd></> : null}
       </dl>
       {p.kind === 'server' ? (
         <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -182,7 +183,7 @@ function Detail({ p, rack, onEdit, edit }) {
           {l ? (
             <>
               <dl style={dl}>
-                <dt style={dt}>호스트 이름</dt><dd style={{ ...dd, ...mono }}>{l.hostname || l.name || '—'}</dd>
+                {linkNameText(l) != null ? <><dt style={dt}>호스트 이름</dt><dd style={{ ...dd, ...mono }}>{linkNameText(l)}</dd></> : null}
                 <dt style={dt}>모델</dt><dd style={dd}>{l.model || '—'}</dd>
                 <dt style={dt}>상태</dt><dd style={dd}>{{ ok: '정상', warn: '경고', crit: '장애' }[st] || '못 읽음'}</dd>
                 <dt style={dt}>전원</dt><dd style={dd}>{l.powerState === 'On' ? '켜짐' : l.powerState === 'Off' ? '꺼짐' : (l.powerState || '—')}</dd>
@@ -239,7 +240,7 @@ function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, saving, erro
           <label style={row}><span style={lab}>정격 전력(W)</span><input style={inp} inputMode="decimal" value={f.ratedW ?? ''} onChange={set('ratedW')} /></label>
           <label style={row}><span style={lab}>무게(kg)</span><input style={inp} inputMode="decimal" value={f.weightKg ?? ''} onChange={set('weightKg')} /></label>
         </div>
-        <label style={{ ...row, flex: 'none' }}><span style={lab}>메모</span><input style={inp} value={f.note} onChange={set('note')} /></label>
+        <label style={{ ...row, flex: 'none' }}><span style={lab}>메모(관리자에게만 보입니다 — 주소 · 접속 방법은 여기에)</span><input style={inp} value={f.note} onChange={set('note')} /></label>
         {error ? <div role="alert" style={{ fontSize: 12, color: '#fecaca', border: '1px solid var(--red)', background: 'rgba(239,68,68,.12)', borderRadius: 8, padding: '8px 10px' }}>{error}</div> : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {init.id ? <button type="button" style={off({ ...btn, color: '#fecaca' }, busy)} disabled={busy} onClick={onRemove}>장비 빼기</button> : null}
@@ -759,6 +760,7 @@ export default function RackTool() {
         {view && canCsv() ? <button type="button" style={off(btn, exporting)} disabled={exporting} onClick={exportXlsx}>{exporting ? '내보내는 중…' : '엑셀 내보내기'}</button> : null}
         {corpId ? <button type="button" style={btn} onClick={() => setModal({ kind: 'versions' })}>판 기록</button> : null}
         {tree.canEditTypes ? <button type="button" style={btn} onClick={() => { setModalErr(''); setModal({ kind: 'types' }); }}>랙 종류</button> : null}
+        {tree.canEditTypes ? <button type="button" style={btn} onClick={() => setModal({ kind: 'census' })}>가림 집계</button> : null}
         {(canEdit || corpWritable) ? <button type="button" style={edit ? btn : btnPri} aria-pressed={edit} onClick={() => setEdit((x) => !x)}>{edit ? '편집 끝내기' : '배치 편집'}</button> : null}
       </div>
 
@@ -835,9 +837,10 @@ export default function RackTool() {
               </div>
               <div style={card}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px' }}>
-                  <strong>미배치 서버</strong><span style={{ color: 'var(--text-dim)' }}>{q.trim() ? `${unplacedHit.length} / ${view.unplacedTotal}` : view.unplacedTotal}</span>
+                  <strong>미배치 서버</strong><span style={{ color: 'var(--text-dim)' }}>{q.trim() && unplacedMode(view) === 'list' ? `${unplacedHit.length} / ${view.unplacedTotal}` : view.unplacedTotal}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)' }}>{edit && canEdit ? '랙으로 끌어 놓기' : 'iDRAC 등록 · 원장에 없음'}</span>
                 </div>
+                {unplacedMode(view) === 'list' ? (<>
                 <div style={{ maxHeight: 360, overflowY: 'auto' }}>
                 {unplacedHit.slice(0, unplacedShow).map((u) => (
                   <div key={u.serverId}
@@ -862,6 +865,7 @@ export default function RackTool() {
                   </div>
                 ) : null}
                 {view.unplacedTotal > (view.unplaced || []).length ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서버가 많아 앞 {(view.unplaced || []).length}대만 받았습니다(전체 {view.unplacedTotal}대) — 검색은 받은 목록 안에서만 됩니다.</div> : null}
+                </>) : <div style={{ padding: '8px 14px', fontSize: 12, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>미배치 서버의 목록은 원장을 편집할 수 있는 관리자에게만 보입니다 — 이 계정에는 대수만 보입니다.</div>}
                 {view.serversNoTag ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서비스 태그를 못 읽었거나 태그가 공통 기본값(여러 서버가 같은 값)인 서버 {view.serversNoTag}대는 태그로 이을 수 없어 미배치에서 뺐습니다.</div> : null}
               </div>
               <div style={card}>
@@ -958,6 +962,7 @@ export default function RackTool() {
             if (modalRef.current !== modal && spotVisible({ corp: forCorp }, { corp: corpIdRef.current })) say('err', `판 되돌리기를 하지 못했습니다 — ${text}`);
           }} />
       ) : null}
+      {modal?.kind === 'census' ? <RackMaskCensus onClose={() => setModal(null)} /> : null}
       {modal?.kind === 'types' ? (
         <TypesModal types={types} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onAdd={async (name, heightU) => { const r = await run({ op: 'type.add', name, heightU }, { okText: '랙 종류를 추가했습니다.', closeModal: false }); if (r) await loadTree(); return !!r; }}
