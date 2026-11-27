@@ -10,6 +10,8 @@ import { listCollectors } from '../../collector/registry.js';
 import { listAssignments, addAssignment, updateAssignment, removeAssignment, getResults, parseCsv as parseAssignmentsCsv, importAssignments, mergeKnownAgents } from '../../central/assignments.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { demoRegistryView } from '../../auth/demoGuest.js';   // 보안 잔여 11-27 L7: 데모 계정에는 데모(mock-) 할당만
+import { isDemoEdgeId, isDemoCollector } from '../../mock/demo/edge.js';
 import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
@@ -193,12 +195,26 @@ adminRouter.post('/horizon/servers/import', csvPerm, adminOnly, fleetOnly, textF
 
 // List per-agent IP assignments (credentials redacted) + each agent's last
 // reported scan result.
-adminRouter.get('/assignments', adminOnly, fleetOnly, (_req, res) => {
+adminRouter.get('/assignments', adminOnly, fleetOnly, (req, res) => {
   // knownAgents: 폼에서 '에이전트 이름'을 직접 타이핑하지 않고 목록에서 고르게 한다(AGENT_NAME
   // 오타로 인한 잡 인출 불일치 방지). 출처 = 등록된 수집 서버(원격, 실제 AGENT_NAME) + 중앙에
   // 한 번이라도 보고한 에이전트 + 기존 할당. mergeKnownAgents가 대소문자 무시 중복 제거.
-  const knownAgents = mergeKnownAgents({ assignments: listAssignments(), results: getResults(), collectors: listCollectors() });
-  res.json({ assignments: listAssignments(), results: getResults(), knownAgents, centralEnabled: Boolean(config.central.token) });
+  const A = listAssignments(); const R0 = getResults(); const R = R0 || {}; const C = listCollectors();
+  // 보안 잔여 11-27 L7: 데모 계정(요청 문맥 role admin — adminOnly 를 통과한다)에는 데모 엣지(mock-) 의 할당 · 보고 결과만 — 사람이 넣은 할당의
+  //   스캔 대역 · iDRAC 계정 이름 · 찾은 IP · 서비스태그 · 실제 엣지 이름은 빼고 개수를 밝힌다(demoMasked). 판정이 던지면 데모 아님(제외).
+  if (demoRegistryView(req)) {
+    const keep = (name) => { try { return isDemoEdgeId(String(name ?? '').trim()); } catch { return false; } };
+    const assignments = A.filter((a) => keep(a?.agent));
+    const results = Object.fromEntries(Object.entries(R).filter(([k]) => keep(k)));
+    const collectors = C.filter((c) => { try { return isDemoCollector(c) && keep(c?.id); } catch { return false; } });
+    const knownAgents = mergeKnownAgents({ assignments, results, collectors }).filter((a) => keep(a?.name));
+    const masked = { assignments: A.length - assignments.length, results: Object.keys(R).length - Object.keys(results).length };
+    // 뺀 것이 없으면(사람이 넣은 할당이 없는 데모 설치본) 관리자와 같은 모양 — 표지를 싣지 않는다.
+    return res.json({ assignments, results: R0 == null && !masked.results ? R0 : results, knownAgents, centralEnabled: Boolean(config.central.token),
+      ...(masked.assignments || masked.results ? { demoMasked: masked } : {}) });
+  }
+  const knownAgents = mergeKnownAgents({ assignments: A, results: R0, collectors: C });
+  res.json({ assignments: A, results: R0, knownAgents, centralEnabled: Boolean(config.central.token) });
 });
 
 adminRouter.post('/assignments', adminOnly, fleetOnly, (req, res) => {

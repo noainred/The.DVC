@@ -78,7 +78,12 @@ test('③ T-3 — 엣지 로그 가림 정규식은 선형 · 먼저 자른다',
   assert.ok(!redactLogLine('X-Collector-Token: SECRETVALUE').includes('SECRETVALUE'), '가림은 그대로');
   const c = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/edgelog/collect.js'), 'utf8');
   // 18회차 반증 A-1: 원문을 다 가린 뒤 화면 길이로 자른다(먼저 자르면 경계에 걸친 비밀 앞부분이 남았다)
-  assert.match(c, /redactLogLine\(String\(e\.msg \?\? ''\)\.slice\(0, SCAN_MAX\)\)\.slice\(0, LINE_MAX\)/);
+  //   보안 잔여 11-27 L8: 그 처리는 edgelog/redactEntries.js redactLogEntries 하나(관리자 로그 뷰어와 공용) — collect.js 는 lineMax 만 넘기고,
+  //   helper 가 원문(SCAN_MAX)을 가린 뒤에 자른다.
+  assert.match(c, /redactLogEntries\(kept, \{ lineMax: LINE_MAX \}\)/);
+  const h = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/edgelog/redactEntries.js'), 'utf8');
+  assert.match(h, /const raw = String\(e\?\.msg \?\? ''\)\.slice\(0, SCAN_MAX\);\s*const msg = String\(redact\(raw\)\);/);
+  assert.match(h, /const msg = Number\.isFinite\(lineMax\) && lineMax >= 0 \? r\.msg\.slice\(0, lineMax\) : r\.msg;/);
 });
 
 test('③ A-1 — 2,000자 경계에 걸친 비밀도 가린다(URL 사용자정보 · 따옴표 값)', async () => {

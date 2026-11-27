@@ -37,15 +37,13 @@ import { siteNameOf } from '../../idrac/scanSite.js';
 import { analysisServersWithRemote, scanSiteIndex, invForServer } from '../../insights/analysisServers.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { adminOnly } from './shared.js';
-import { idracScopeOf, idracInScope, scopeIdracServers } from './idracCore.js';
+import { idracScopeOf, idracInScope, scopeIdracServers, scopeFieldsOf, idracViewSig, idracScopedAccount } from './idracCore.js';   // 보안 잔여 11-27 L7: 데모 판본 · 판본 서명
 import { requirePerm } from '../../auth/auth.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { localStamp, fileStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { snapMemo, sendCached } from '../../util/snapCache.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { addLineCharts, sheetRef, colLetter } from '../../util/xlsxChart.js';
-import { scopeSig } from '../../util/scopeSig.js';
 
 const csvPerm = requirePerm('data.csv');
 const hiddenByScope = (req, s) => { const sc = idracScopeOf(req); return !!sc && !idracInScope(sc, s); };
@@ -500,7 +498,7 @@ function serverRows(req, { gpuKeys = null } = {}) {
       hostId: k.host?.id ? String(k.host.id) : null,
     };
   });
-  return { rows, omitted: r.omitted, scoped: !!r.sc };
+  return { rows, omitted: r.omitted, scoped: !!r.sc, sc: r.sc };
 }
 
 const EXPORT_COLS = { cpuPct: 'CPU 사용률(%)', cpuTemp: 'CPU 온도(℃)', gpuTemp: 'GPU 온도(℃)', inletTemp: '흡기 온도(℃)', exhaustTemp: '배기 온도(℃)', powerW: '소비 전력(W)', hostCpuPct: 'ESXi 호스트 CPU(vCenter, %)', hostGpuPct: 'ESXi 호스트 GPU 사용률(%)', hostGpuMemPct: 'ESXi 호스트 GPU 메모리(%)' };
@@ -652,9 +650,9 @@ export function mergeHourly(lists) {
 export const TABLE_MEMO_MS = 30_000;
 export function registerIdracTrend(adminRouter) {
   adminRouter.get('/idrac/trend/servers', adminOnly, async (req, res) => {
-    const { rows, omitted, scoped } = serverRows(req, { gpuKeys: await gpuKeysFn() });
+    const { rows, omitted, sc } = serverRows(req, { gpuKeys: await gpuKeysFn() });
     res.json({ ok: true, servers: rows, retentionDays: trendRetentionDays(), powerRetentionDays: config.idrac.retentionDays || 0,
-      enabled: TREND_SERIES_ENABLED, ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
+      enabled: TREND_SERIES_ENABLED, ...scopeFieldsOf(sc, omitted) });
   });
 
   // v2.663: 서버 표 · 조건 검색. corp·site 에 '*' 를 주면 전체. 조건 판정은 화면이 한다(위 머리말).
@@ -664,11 +662,11 @@ export function registerIdracTrend(adminRouter) {
     // v2.682(R3P-02): 같은 조건 요청은 계산 1회에 합류하고 30초 기억한다(동시 10건이 같은 계산을 직렬로 10번 하던 것).
     //   키 = 스냅샷 세대(첫 조각 — 세대가 바뀌면 옛 항목을 버린다) + 조건 + 범위 + 역할. 범위·역할이 다르면 다른 판본이다.
     const snap = store.get();
-    const allowed = scopedVcenterIds(req.user, snap);
     const tf = typeFilterOf(req.query);
     const cond = [hours, String(req.query.corp ?? '*'), String(req.query.site ?? '*'), tf.gpu, tf.kind].map((x) => encodeURIComponent(String(x).slice(0, 200))).join('|');
     const role = `${req.user?.role || ''}${req.user?.superAdmin ? '+sa' : ''}`;
-    const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${scopeSig(allowed)}|${role}`;
+    // 보안 잔여 11-27 L7: 판본 서명은 idracViewSig — 데모 계정(role admin · 범위 '*')이 전체 관리자와 같은 열쇠였다(30초 캐시가 판본을 섞었다).
+    const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${idracViewSig(req)}|${role}`;
     try {
       const payload = await snapMemo('idrac-trend-table', key, TABLE_MEMO_MS, () => trendTablePayload(req, hours));
       sendCached(req, res, key, payload);
@@ -679,7 +677,7 @@ export function registerIdracTrend(adminRouter) {
   async function trendTablePayload(req, hours) {
     const now = Date.now();
     const since = Math.floor((now - hours * HOUR) / HOUR) * HOUR;
-    const { rows, omitted, scoped } = serverRows(req, { gpuKeys: await gpuKeysFn() });
+    const { rows, omitted, sc } = serverRows(req, { gpuKeys: await gpuKeysFn() });
     const corp = String(req.query.corp ?? '*'); const site = String(req.query.site ?? '*');
     let targets = rows.filter((r) => (corp === '*' || r.corp === corp) && (site === '*' || r.site === site));
     { const tf = typeFilterOf(req.query); targets = targets.filter((r) => matchType(r, tf)); }
@@ -712,7 +710,7 @@ export function registerIdracTrend(adminRouter) {
     } catch (e) { errors.powerW = e?.message || String(e); }
     const out = buildTableRows(targets, { stats, latest, power, powerKeyFor, since });
     return { ok: true, hours, since, now, rows: out, total: out.length, errors,
-      ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) };
+      ...scopeFieldsOf(sc, omitted) };
   }
 
   // v2.676: ESXi 호스트 → iDRAC 서버(호스트 상세 '통합 성능 모니터링'). 서비스태그·호스트네임·IP·MAC 을 각각 판정해 근거를 싣는다
@@ -737,7 +735,7 @@ export function registerIdracTrend(adminRouter) {
       try { const k = srv ? scopeKind(kindOf(srv), hsc) : null; reverse = k ? { hostId: k.host?.id || null, same: k.host?.id === host.id } : null; } catch { reverse = null; }
     }
     res.json({ ok: true, hostId: host.id, hostName: host.name, vcenterId: host.vcenterId || '', ...out, reverse,
-      ...(r.sc ? { scoped: true } : {}) });
+      ...(r.sc && 'scoped' in scopeFieldsOf(r.sc, r.omitted) ? { scoped: true } : {}) });   // 보안 잔여 11-27 L7: 뺀 것 없는 전체 범위 데모 = 관리자와 같은 응답
   });
 
   adminRouter.get('/idrac/trend/export.csv', adminOnly, csvPerm, async (req, res) => {
@@ -887,7 +885,7 @@ export function registerIdracTrend(adminRouter) {
       idracState = idracStateOf(s, {
         now, latest, localCycle: s.remote ? null : sensorPollCycle(now),
         collector: s.remote ? getCollectorStatus(s.collectorId) : null,
-        showError: !idracScopeOf(req),
+        showError: !idracScopedAccount(idracScopeOf(req)),   // 보안 잔여 11-27 L7: 전체 범위 데모 계정은 범위 계정이 아니다(데모 판본은 데모 서버만 — 오류 원문도 데모 서버 것)
         puller: s.remote ? (() => { try { return pullerStatus(now); } catch { return null; } })() : null,
       });
     } catch (e) { idracState = { error: e?.message || String(e) }; }

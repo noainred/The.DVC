@@ -4,6 +4,7 @@ import { verifyUserOtp, getUser } from '../../auth/auth.js';
 import { getEmergencyStatus, setEmergencyStop, approverRoleIssue } from '../../security/emergencyStop.js';
 import { store } from '../../store.js';
 import { getLogs } from '../../logbuffer.js';
+import { redactLogEntries } from '../../edgelog/redactEntries.js';   // 보안 잔여 11-27 L8: 형제 출구(엣지 로그 · 로그 분석 표본)와 같은 줄 가림
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
@@ -85,8 +86,15 @@ adminRouter.post('/emergency-stop', adminOnly, fleetOnly, (req, res) => {
 });
 
 // Server operational logs (ring buffer). ?since=<id>&level=info|warn|error
+// 보안 잔여 11-27 L8: 예전에는 링버퍼 원문을 그대로 내보냈다 — 같은 버퍼가 엣지 → 중앙(collectEdgeLog) · 중앙 자신의 엣지 로그 화면 · 로그 분석 표본에서는
+//   redactLogLine 을 거쳤다(형제 불일치). 이제 같은 가림(redactLogEntries — 판정 코어 redactLogLine 하나)을 거친다.
+//   · 로컬 뷰어는 줄 길이를 자르지 않는다(링버퍼 MSG_MAX 8,192자 — 예전과 같은 길이). 가린 줄은 items[].masked, 이 응답의 가린 줄 수는 maskedLines,
+//     가렸다는 사실은 redacted:true(옛 서버에는 없다 — 화면이 이 값을 보고 안내를 띄운다). lastId · count · items 의 의미는 그대로(증분 폴링 무변경).
+//   · ⚠ 꼴 기반이라 완전하지 않다 — 화면이 그 사실을 말한다. 호스트 저널(stdout)에는 원문이 남는다(이 응답만 가린다). level 필터는 가림 전에 건다.
 adminRouter.get('/logs', adminOnly, fleetOnly, (req, res) => {
-  res.json(getLogs({ since: req.query.since, level: req.query.level }));
+  const raw = getLogs({ since: req.query.since, level: req.query.level });
+  const { items, masked } = redactLogEntries(raw.items);
+  res.json({ lastId: raw.lastId, count: items.length, items, maskedLines: masked, redacted: true });
 });
 
 // Data-source + per-vCenter collection errors (why a vCenter won't connect).

@@ -17,7 +17,12 @@
  */
 import { auditSkipped } from '../audit.js';
 
-/** 경로 정규화 — 쿼리 제거·소문자·겹친 빗금 합치기·끝 슬래시 제거(express 는 대소문자·끝 슬래시를 구분하지 않고 겹친 빗금도 같은 라우트로 보낸다). */
+/**
+ * 경로 정규화 — 쿼리 제거·소문자·겹친 빗금 합치기·끝 슬래시 제거(express 는 대소문자·끝 슬래시를 구분하지 않고 겹친 빗금도 같은 라우트로 보낸다).
+ * 보안 잔여 11-27 L7(반증 M-1 — 재현)도 같은 두 우회(절대형 요청 대상 · 겹친 빗금)를 찾았다 — main 의 디버깅 2 · 3회차 수정과 겹쳐 그 구현을 쓴다
+ *   (L7 시험 secResidual1127DemoLogs 의 원시 소켓 6종이 이 판정을 지난다). 점 세그먼트('.' · '..')는 풀지 않는다 — express 도 풀지 않으며, 풀면 '/users/..' 가
+ *   '/api/admin' 으로 보여 :id 라우트에 닿는 요청을 열어 준다.
+ */
 export function normApiPath(url) {
   // 겹친 빗금은 하나로 — express 는 ‘/api/admin//bm-power’ 를 ‘/bm-power’ 라우트로 보낸다(디버깅 2회차 보안 #1: 데모 차단 목록 우회). 선형 치환
   // 절대 꼴 요청 대상(GET http://h/api/admin/users — express 는 pathname 으로 라우팅한다)도 경로만 본다(디버깅 3회차 보안 #1). 앵커가 있는 선형 치환
@@ -60,6 +65,20 @@ export const READ_DENY = [
   '/api/tools/bareos-backup/settings',   // v2.823: 카탈로그·매핑 제안·자동 설정도 /settings/directors/… 아래(옛 /catalog 경로는 없앴다 — 검토 I5)
   // v2.932(점검 D1-02): Monitoring 설정 연동 — 통신 점검(/api/tools/link-check)과 같은 카탈로그(전 시스템 이름·호스트·포트·담당 엣지)를 싣는다.
   '/api/svcmon/settings-sync',
+  // 보안 잔여 11-27 L7: 관리자 전용(adminOnly — operator 는 403) 등록부 · 설정 · 실제 출력 조회. operator 판본이 없는 응답이라 데모 계정에
+  //   관리자 판본이 그대로 나갔다(카나리 실측 — 사람이 등록한 장비의 주소 · 계정명 · 서비스태그 · 메일 주소). 데모 데이터가 있는 화면
+  //   (iDRAC 서버 분석 계열 · 에이전트 작업 · 베어메탈 스토리지)은 막지 않고 데모(mock-) 항목만 싣는다(demoRegistryView · 각 라우트).
+  '/api/admin/central/token-apply',      // 엣지 토큰 맞추기 작업 — 단계 문구에 수집 서버 URL · 엣지 보고 호스트 · SSH 대상
+  '/api/admin/central/inventory', '/api/admin/central/ingest-stats',   // 설정 › 수집 서버 전용 — 위임 인벤토리 vCenter 주소 · 실제 엣지 이름
+  '/api/admin/ipam/scan',                // IP 능동 스캔 설정 · 대역 · 결과 · 로그 · 일정 · 서버 OS 제안(BMC 주소 · 서비스태그) — 데모 시드 없음
+  '/api/admin/ipam/settings', '/api/admin/ipam/changes', '/api/admin/ipam/report',   // IP 분류 대역 설정 · 스캔 변화 · 스캔 보고서(실제 스캔 IP)
+  // iDRAC 스캔 결과 · 로그 · 작업(설정 › 스캔 로그 · 스캔 작업 — 실제 스캔 IP · 서비스태그 · 엣지 이름). 접두 비교라 'scan-' 하나로 묶을 수 없다.
+  '/api/admin/idrac/scan-result', '/api/admin/idrac/scan-agents', '/api/admin/idrac/scan-log', '/api/admin/idrac/scan-jobs', '/api/admin/idrac/scan-job-log',
+  '/api/tools/server-info', '/api/tools/server-cmd',   // 운영 작업 — 사람이 등록한 서버 주소와 **실제 명령 출력**(데모 시드 없음)
+  // 서버 접속 온보딩 관리(키 지문 · 공개키 · 공통 계정 이름 · 배포 행의 키 · 자격 참조) — 데모 시드 없음
+  '/api/tools/bm-usage/ssh-keys', '/api/tools/bm-usage/accounts', '/api/tools/bm-usage/onboard/edge-rows',
+  '/api/settings/ssh-access',            // 설정 › 보안 › 서버 접속 — 소유자 게이트로 이미 403 이지만 '설정 화면 API 접두는 READ_DENY 에도'(demo.md)
+  '/api/tools/storage-usage/mail',       // 스토리지 사용량 보고서 메일 설정 — 받는 사람 원문 · 통합 관리자 주소(반증 M-2 — /api/admin/mail 의 형제 우회로)
 ];
 
 /** v2.720(감사 R1-03·R1-06): 데모 계정이 사람이 등록한(비-mock) 장비를 수집하려 할 때 라우트·폴러가 함께 쓰는 문구. */
@@ -137,6 +156,24 @@ export function isDemoGuest(user) {
  */
 export function isAdminDetailUser(user) {
   return user?.role === 'admin' && !isDemoGuest(user);
+}
+
+/** 보안 잔여 11-27 L7: 관리자 API(/api/admin 아래) 요청인가 — normApiPath(READ_DENY 와 같은 정규화 — 절대형 · 겹친 슬래시 포함) 기준. */
+export function isAdminApiPath(originalUrl) {
+  const p = normApiPath(originalUrl);
+  return p === '/api/admin' || p.startsWith('/api/admin/');
+}
+
+/**
+ * 보안 잔여 11-27 L7: 관리자 API 에서 **데모 판본(데모 mock- 항목만)** 을 줄 요청인가 — 판정 연결은 이 함수 하나.
+ *  · 데모 판정은 isDemoGuest(반증 S-1 — '관리자 판본인가'(isAdminDetailUser)와 '데모 판본인가' 는 다른 질문이다. /api/admin 아래에도
+ *    adminOnly 가 없는 GET 이 있어 '관리자 판본이 아닌 사용자 = 데모' 가 아니다 — operator 에게 조용히 빈 목록을 주지 않게).
+ *  · 경로 조건(/api/admin): iDRAC 범위 판정(idracScopeOf)을 non-admin 라우트(Overview 카드 · 랙 · 디스크 배드 · VM 지표)도 쓴다 — 그쪽은
+ *    v2.743 규약대로 데모 = operator 판본이고, 캐시 열쇠에 데모 축도 없다. 그래서 adminOnly 인 /api/admin 아래에서만 데모 판본을 건다.
+ *  · 사용자 없는 요청 · originalUrl 없는 직접 호출은 아니다(역할 게이트가 먼저 거르고, 인증 꺼짐 익명은 데모가 아니다).
+ */
+export function demoRegistryView(req) {
+  return !!req?.user && isDemoGuest(req.user) && isAdminApiPath(req?.originalUrl || '');
 }
 
 /**

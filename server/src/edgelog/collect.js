@@ -20,14 +20,15 @@ import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { getLogs } from '../logbuffer.js';
 import { STATUS_SPEC } from './spec.js';
-import { redactDeep, redactLogLine } from './redact.js';
+import { redactDeep } from './redact.js';
+import { redactLogEntries } from './redactEntries.js';   // 보안 잔여 11-27 L8: 링버퍼 줄 가림은 출구마다 이 함수 하나(관리자 로그 뷰어와 같은 처리)
 
 /** 로그 줄 수 기본 상한 — 본문 크기 가드(1,000줄 × ~200B ≈ 200KB). */
 export const DEFAULT_LOG_LIMIT = 400;
 export const MAX_LOG_LIMIT = 1_000;
 /** 로그 한 줄 길이 상한(스택·SSH 추적이 통째로 들어온다 — `util/activityLog.js:67` 와 같은 규칙). */
 const LINE_MAX = 2_000;
-const SCAN_MAX = 16_384;   // 가림 정규식에 넣는 원문 상한(logbuffer MSG_MAX 8,192 + 생략 표지보다 넉넉히)
+// 가림 정규식에 넣는 원문 상한(SCAN_MAX)은 redactEntries.js 하나 — 보안 잔여 11-27 L8(관리자 로그 뷰어와 같은 상한).
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
@@ -85,7 +86,8 @@ export async function collectEdgeLog({ since = 0, level = '', limit = DEFAULT_LO
   // 16회차 T-3 · 18회차 반증 A-1: 가림 정규식은 모두 길이 한정 선형이라, **줄 원문(logbuffer MSG_MAX 8,192자 + 생략 표지)을 다 가린 뒤** 화면 길이로 자른다.
   //   먼저 LINE_MAX 에서 자르면 끝 표지('@' · 닫는 따옴표)가 잘린 비밀 앞부분이 원문으로 나갔다(재현: URL 비밀번호 · 공백 든 따옴표 값).
   //   SCAN_MAX 는 상주 상한을 넘는 비정상 입력만 막는 바깥 상한이다(정규식 입력 길이를 묶는다).
-  const items = kept.map((e) => ({ id: e.id, time: e.time, level: e.level, msg: redactLogLine(String(e.msg ?? '').slice(0, SCAN_MAX)).slice(0, LINE_MAX) }));
+  //   보안 잔여 11-27 L8: 그 처리(원문 상한 → 가림 → 자르기)는 redactLogEntries 하나 — 엣지 회신 모양은 예전 그대로(masked 표지는 싣지 않는다 — 중앙 정제 화이트리스트 밖).
+  const items = redactLogEntries(kept, { lineMax: LINE_MAX }).items.map(({ id, time, level, msg }) => ({ id, time, level, msg }));
 
   const status = withStatus ? await collectStatus() : null;
   return {

@@ -120,7 +120,8 @@ test('R3P-02 — /admin/idrac/trend/table 같은 조건은 기억된 응답(계�
   const src = fs.readFileSync(new URL('../src/routes/admin/idracTrend.js', import.meta.url), 'utf8');
   const seg = src.slice(src.indexOf("'/idrac/trend/table'"), src.indexOf('async function trendTablePayload'));
   assert.match(seg, /snapMemo\('idrac-trend-table'/);
-  assert.match(seg, /scopedVcenterIds\(req\.user/);
+  // 보안 잔여 11-27 L7: 범위 축은 idracViewSig(범위 · 데모 판본 · 전체를 가르는 서명 — 안에서 scopedVcenterIds 를 본다)
+  assert.match(seg, /idracViewSig\(req\)/);
   assert.match(seg, /req\.user\?\.role/);
   const express = (await import('express')).default;
   const { adminRouter } = await import('../src/routes/admin.js');

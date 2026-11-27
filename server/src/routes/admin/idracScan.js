@@ -34,7 +34,7 @@ import { listAssignments, getResults } from '../../central/assignments.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from './shared.js';
 import { isFullReadWriteScope } from '../../auth/scope.js';
 import { numOrNull } from '../../util/numOrNull.js';
-import { idracScopeOf, idracInScope } from './idracCore.js'; // v2.629 AUTHZ2629-03: 서버 분석 범위 절단 판정 한 벌
+import { idracScopeOf, idracInScope, idracScopedAccount } from './idracCore.js'; // v2.629 AUTHZ2629-03: 서버 분석 범위 절단 판정 한 벌
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 // v2.620(SEC2620-05): 쓰기에만 걸던 이 게이트를 스캔 대역·결과·로그·잡 **조회**에도 건다 — 전 법인 IP 대역과
 //   iDRAC·iLO 계정명이 범위 관리자에게 열려 있었다(쓰기는 v2.611 에 막았다). 서버별 상세 조회(인벤토리·센서)는
@@ -94,7 +94,8 @@ async function inventoryResponse(req, server, inv, { remote = false, collectorId
     inventory: isAdminReq(req) ? inventoryView(inv || null) : maskInventoryForViewer(inventoryView(inv || null)),
     ...(remote ? { statusMissing: statusFieldsMissing(inv) } : {}),
     parts: summarizeServerParts(sv, inv || null, { remote }),
-    partFault: await serverPartFaultInfo(sv, { remote, agents, scoped: !!idracScopeOf(req) }),
+    // 보안 잔여 11-27 L7(반증 M-3): 전체 범위 데모 계정은 범위 계정이 아니다 — 파트 장애 화면 링크를 잠그고 '전체 범위 계정만' 이라 말하지 않게.
+    partFault: await serverPartFaultInfo(sv, { remote, agents, scoped: idracScopedAccount(idracScopeOf(req)) }),
   };
 }
 

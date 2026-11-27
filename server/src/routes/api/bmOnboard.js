@@ -16,6 +16,7 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { inUserScope, inUserWriteScope, isFullReadWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoId as isDemoBmId } from '../../mock/demo/storage.js';   // 보안 잔여 11-27 L7: 베어메탈 스토리지 데모 판정(bmstor 라우트 · 폴러와 같은 함수)
 import { config } from '../../config.js';
 import * as RUN from '../../bmusage/onboard/onboardRun.js';
 import * as ED from '../../bmusage/onboard/edgeDeploy.js';
@@ -332,6 +333,9 @@ export function registerBmOnboard(api, deps = {}) {
       const vcName = (vc) => ((snap?.vcenters || []).find((v) => v.id === vc)?.name) || vc;
       let osRegistry = null;
       try { osRegistry = (await import('../../bmstor/registry.js')).listBmServers(); } catch { osRegistry = null; }
+      // 보안 잔여 11-27 L7: 이 라우트는 adminOnly(operator 판본 없음) — mock 모드 데모 계정(요청 문맥 role admin)에는 OS 등록부(베어메탈 스토리지 · 서버 정보 —
+      //   데모 계정에 READ_DENY 이거나 데모 서버만 싣는 등록부)의 데모(mock-) 서버만 대조한다(사람이 등록한 서버 이름이 '같은 서버' 제안에 실려 나갔다).
+      if (osRegistry && isDemoGuest(req.user)) osRegistry = osRegistry.filter((x) => { try { return isDemoBmId(x?.id); } catch { return false; } });
       const m = missingCheck({ targets: tg.targets, skipped: tg.skipped || [], entryByKey, edgeEntry, vcName, osRegistry });
       const visible = m.rows.filter((r) => (r.vcenterId ? (!allowed || allowed.has(r.vcenterId)) : !allowed));
       const full = (await import('../../auth/addressMask.js')).isAdminReq(req);

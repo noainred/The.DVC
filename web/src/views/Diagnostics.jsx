@@ -4,6 +4,8 @@ import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import Select from '../components/Select.jsx';
 import { numOrNull } from '../numOrNull.js';
+import BoldText from '../components/boldText.jsx';
+import { serverLogRedactNote } from './logRedactText.js';   // 보안 잔여 11-27 L8: 서버가 가린 로그임을 말한다(한계 포함)
 
 const LEVEL_COLOR = { error: '#f87171', warn: '#fbbf24', info: '#93c5fd' };
 
@@ -101,6 +103,7 @@ export default function Diagnostics() {
   // log viewer state
   const [logs, setLogs] = useState([]);
   const [logsDenied, setLogsDenied] = useState(false); // v2.611: 범위 제한 계정은 서버 로그 403 — '로그가 없습니다' 로 말하지 않는다
+  const [logsRedacted, setLogsRedacted] = useState(false); // 보안 잔여 11-27 L8: 서버가 '가렸다' 고 밝힌 응답(redacted:true)을 한 번이라도 받았는가 — 옛 서버에는 안내를 띄우지 않는다
   const [level, setLevel] = useState('all');
   const [query, setQuery] = useState('');
   const [paused, setPaused] = useState(false);
@@ -133,6 +136,7 @@ export default function Diagnostics() {
         const r = await fetchJson('/admin/logs', { since: sinceRef.current });
         if (!on) return;
         sinceRef.current = r.lastId;
+        if (r.redacted === true) setLogsRedacted(true);
         if (r.items?.length) {
           setLogs((prev) => [...prev, ...r.items].slice(-600));
         }
@@ -342,6 +346,11 @@ export default function Diagnostics() {
             </div>
           ))}
         </div>
+        {!logsDenied && logsRedacted && (
+          <div className="muted" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, minWidth: 0, overflowWrap: 'anywhere' }}>
+            <BoldText text={serverLogRedactNote({ redacted: true, maskedShown: shown.filter((l) => l.masked === true).length })} />
+          </div>
+        )}
         <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
           {q || level !== 'all'
             ? <>표시 {shown.length}줄 / 최근 {logs.length}줄 (필터 적용)</>

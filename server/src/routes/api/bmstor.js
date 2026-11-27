@@ -5,7 +5,7 @@ import { logAudit } from '../../audit.js';
 import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue, registryWriteRefusal, registryLoadError } from '../../bmstor/registry.js';
 import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
 import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.js';
-import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
+import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03) · 보안 잔여 11-27 L7(데모 판본)
 import { aggregate } from '../../bmstor/agg.js';
 import { bmServersToCsv, sampleCsv as bmSampleCsv, parseBmServersCsv, analyzeBmServersImport } from '../../bmstor/csv.js';
 import { listCollectors, findCollectorByName } from '../../collector/registry.js';
@@ -39,10 +39,24 @@ import { RANGES, rangeKeyOf, bucketsOf, sourceFor, seriesFromRaw, seriesFromRoll
 import { ioRawRows, ioRollupRows, ioMeasuredServerIds, ioRank, bmIoDbStatus, ioRetention } from '../../bmstor/ioDb.js';
 import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
+/**
+ * 보안 잔여 11-27 L7: 이 도구는 adminOnly(operator 판본이 없다)라 mock 모드 데모 계정(요청 문맥 role admin)에는 **데모(mock-) 서버만** 싣는다 —
+ *   예전에는 사람이 등록한 서버의 이름(카나리 실측)과 서버 절대 경로(DB 위치)가 나갔다. 판정이 던지면 데모 아님(제외).
+ *   현황 · SAN 비교 · I/O 시계열 · 비교 세트가 이 목록 하나로 서버를 고르므로(서버 id 로 고르는 계열도 이 목록에 없는 id 는 '모르는 서버') 여기서 건다.
+ */
+const bmDemoView = (req) => !!req && isDemoGuest(req.user);
+const keepDemoBm = (id) => { try { return isDemoId(id); } catch { return false; } };
 /** 등록 서버 + 법인(corp.datacenterOfBmServer — 폼 값 → 엣지의 법인 → ''). 비밀은 이미 가려져 있다(listBmServers). 엣지 조회는 등록부 코어 하나(findCollectorByName). */
-function serversWithCorp() {
+function serversWithCorp(req = null) {
   const findCollector = (q) => { const c = findCollectorByName(q); return c ? { vcenterId: c.vcenterId } : null; };   // vcenterId 만 — 토큰은 꺼내지 않는다
-  return listBmServers().map((s) => ({ ...s, ...datacenterOfBmServer(s, { findCollector, datacenterOfVcenter }) }));
+  const list = bmDemoView(req) ? listBmServers().filter((s) => keepDemoBm(s?.id)) : listBmServers();
+  return list.map((s) => ({ ...s, ...datacenterOfBmServer(s, { findCollector, datacenterOfVcenter }) }));
+}
+/** 보안 잔여 11-27 L7: DB 상태의 서버 절대 경로는 관리자 상세(데모 계정 제외)에게만 — v2.743 scopeDbStatus 와 같은 판정(오류 문구 속 경로도). */
+function dbStatusView(db, req) {
+  if (!db || typeof db !== 'object' || isAdminDetailUser(req?.user)) return db;
+  const { path: p, ...rest } = db;
+  return { ...rest, ...(rest.error && p ? { error: String(rest.error).split(String(p)).join('(경로 가림)') } : {}), pathHidden: true };
 }
 function dcNameFn() {
   try { const m = new Map(listDatacenters().map((d) => [String(d.id), d.name || d.id])); return (id) => m.get(String(id)) || String(id || '') || '(법인 미지정)'; }
@@ -129,7 +143,7 @@ export async function bmPlacementIssue(body = {}, ex = null, bind = null) {
 export function registerBmStorage(api) {
   // 현황 — 서버 목록(비밀 redact) + 최신 수집을 합산(서버/그룹/전체)해 반환. 엣지 콤보용 목록 포함.
   api.get('/tools/bm-storage', adminOnly, fullScopeOnly, (req, res) => {
-    const servers = serversWithCorp();   // v2.915: 법인(폼 값 · 엣지 추정)도 함께
+    const servers = serversWithCorp(req);   // v2.915: 법인(폼 값 · 엣지 추정)도 함께 · 보안 잔여 11-27 L7: 데모 계정은 데모 서버만
     const { total, groups, perServer } = aggregate(servers, getBmLatest());
     // v2.743 AUTHZ-01: 관리 주소·SSH 계정은 관리자 상세(데모 계정 제외)에게만 — 형제 스토리지·SAN 목록과 같은 maskDeviceAddress.
     //   오류 문구 속 주소도 같은 목록으로 가린다(v2.599 '형제 경로가 우회로' 규약). 가린 사실은 addressHidden.
@@ -158,7 +172,7 @@ export function registerBmStorage(api) {
     const types = parseTypes(req.query.types);
     const dcSet = parseDcQuery(req.query.datacenterId);
     const dcName = dcNameFn();
-    const serversAll = serversWithCorp();
+    const serversAll = serversWithCorp(req);
     const servers = dcSet ? serversAll.filter((s) => dcSet.has(String(s.datacenterId || ''))) : serversAll;
     const latest = getBmLatest();
     const bmAgg = aggregate(servers, latest);
@@ -202,7 +216,7 @@ export function registerBmStorage(api) {
         perfIntervalMs: numOrNull(perfSettings.intervalMs), lastSampleAt, bucketMs: agg?.bucketMs ?? null,
       },
       summary: compareSummary({ bmTotal: bmAgg.total, sanRows }),
-      io: await bmIoDbStatus(),
+      io: dbStatusView(await bmIoDbStatus(), req),
     });
   });
 
@@ -234,7 +248,7 @@ export function registerBmStorage(api) {
     const gran = sourceFor(bucketMs);
     const mock = isMockMode();
     const dcName = dcNameFn();
-    const serversAll = serversWithCorp().filter((s) => s.enabled !== false);
+    const serversAll = serversWithCorp(req).filter((s) => s.enabled !== false);
     const servers = dcSet ? serversAll.filter((s) => dcSet.has(String(s.datacenterId || ''))) : serversAll;
     const serverById = new Map(servers.map((s) => [String(s.id), s]));
     const pick = (r, k) => (metric === 'read' ? r[`${k}Read`] ?? r[`${k}Rd`] : metric === 'write' ? r[`${k}Write`] ?? r[`${k}Wr`] : r[`${k}Total`] ?? r[k]);
@@ -348,7 +362,7 @@ export function registerBmStorage(api) {
     }
     res.json({
       ok: true, range, metric, since, until, bucketMs, gran, buckets, series, rank,
-      sampleMs: { bm: bmSampleMs, san: sanInterval }, retention: ioRetention(), db: await bmIoDbStatus(),
+      sampleMs: { bm: bmSampleMs, san: sanInterval }, retention: ioRetention(), db: dbStatusView(await bmIoDbStatus(), req),
       san: { perfEnabled, perfAvailable: !!agg, switches: switches.length },
     });
   });
@@ -366,9 +380,20 @@ export function registerBmStorage(api) {
     const from = to - period.days * 86_400_000;
     const r = await bmHistoryRange(from, to, { kind });
     const db = await bmHistoryDbStatus();
+    // 보안 잔여 11-27 L7: 데모 계정에는 데모 서버의 계열만 — 그룹 · 전체 합계는 사람이 등록한 서버가 하나도 없을 때만(합에 사람 서버 값이 섞이지 않을 때).
+    //   뺀 계열 수를 밝힌다(demoMasked).
+    let rows = r.rows; let demoMasked = null;
+    if (bmDemoView(req)) {
+      const human = listBmServers().some((x) => !keepDemoBm(x?.id));
+      const keep = (x) => (x?.kind === 'server' ? keepDemoBm(x.key) : !human);
+      const all = new Set((rows || []).map((x) => `${x?.kind}|${x?.key}`));
+      rows = (rows || []).filter(keep);
+      demoMasked = all.size - new Set(rows.map((x) => `${x.kind}|${x.key}`)).size;
+    }
     res.json({
       ok: true, available: r.available, period: period.key, periods: HISTORY_PERIODS, from, to, kind,
-      series: seriesFromRows(r.rows, { servers: listBmServers() }),
+      series: seriesFromRows(rows, { servers: bmDemoView(req) ? listBmServers().filter((x) => keepDemoBm(x?.id)) : listBmServers() }),
+      ...(demoMasked ? { demoMasked } : {}),
       span: r.span, status: bmHistoryStatus(),
       dbError: r.available ? '' : (db.error || 'node:sqlite 를 쓸 수 없습니다'),
     });
@@ -401,7 +426,7 @@ export function registerBmStorage(api) {
     const gran = sourceFor(bucketMs);
     const mock = isMockMode();
     const dcName = dcNameFn();
-    const serversAll = serversWithCorp().filter((s) => s.enabled !== false);
+    const serversAll = serversWithCorp(req).filter((s) => s.enabled !== false);
     const serverById = new Map(serversAll.map((s) => [String(s.id), s]));
     const latest = getBmLatest();
     const empty = () => ({ avg: new Array(n).fill(null), peak: new Array(n).fill(null) });
@@ -539,7 +564,7 @@ export function registerBmStorage(api) {
     }
     res.json({
       ok: true, range, since, until, bucketMs, gran, buckets, targets: out,
-      sampleMs: { bm: bmSampleMs, san: sanIntervalMs, fe: FE_SAMPLE_MS }, retention: ioRetention(), db: await bmIoDbStatus(),
+      sampleMs: { bm: bmSampleMs, san: sanIntervalMs, fe: FE_SAMPLE_MS }, retention: ioRetention(), db: dbStatusView(await bmIoDbStatus(), req),
       ...(mock ? { demo: true } : {}),
     });
   });

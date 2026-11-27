@@ -19,6 +19,7 @@
  * ⚠ 주기·상한 **숫자를 문구에 박지 말 것** — 서버가 주는 값(`limits`·`store`·`jobs`)만 쓴다.
  */
 
+import { logLineRedactLimit } from '../logRedactText.js';   // 보안 잔여 11-27 L8: 두 로그 화면 공용 한계 문구
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
 import { numOrNull } from '../../numOrNull.js';
 import { toneVar } from './toneVar.js';
@@ -191,11 +192,12 @@ export function maskNote(snap = {}) {
 
 /**
  * 로그 가림의 **한계**를 말한다(항상 표시). `redact.js` 는 상태 객체는 키 이름으로 확실히 가리지만
- * 로그는 자유 문자열이라 `KEY=값`·`Bearer …` 꼴만 잡는다 — 잡지 못하는 형태가 있을 수 있다.
+ * 로그는 자유 문자열이라 꼴로만 잡는다 — 잡지 못하는 형태가 있을 수 있다.
+ * 보안 잔여 11-27 L8: 줄 가림 한계 문장은 설정 › 진단 › 서버 로그와 같은 것 하나(views/logRedactText.js) — 예전 'KEY=값 · Bearer 꼴만' 은 낡았다.
  * ⚠ 이 문구를 지우지 말 것: '가렸다' 고만 말하고 한계를 숨기면 사용자가 로그를 그대로 외부에 공유한다.
  */
 export function logRedactNote() {
-  return '진행상태의 비밀 필드는 **키 이름으로** 가립니다. 로그 줄은 자유 문자열이라 **KEY=값 · Bearer 꼴만** 가립니다 — 다른 형태로 찍힌 값은 남을 수 있으니 로그를 외부에 공유하기 전에 확인하세요.';
+  return `진행상태의 비밀 필드는 **키 이름으로** 가립니다. ${logLineRedactLimit()}`;
 }
 
 /**

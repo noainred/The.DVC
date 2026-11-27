@@ -21,6 +21,8 @@ import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInvent
 import { snapMemo } from '../../util/snapCache.js';
 import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { demoRegistryView } from '../../auth/demoGuest.js';   // 보안 잔여 11-27 L7: 관리자 API 의 데모 판본(데모 mock- 항목만)
+import { isDemoEdgeId } from '../../mock/demo/edge.js';
 import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer, fullScopeOnlyWith } from './shared.js';
 import { scanSiteIndex, withScanDatacenter } from '../../insights/analysisServers.js'; // v2.969: 상태 보드도 Agent 스캔 대역 법인
 import { scopeSig } from '../../util/scopeSig.js';
@@ -42,16 +44,52 @@ const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수�
 // v2.909: 귀속 판정(idTag · idracServerVcOf · idracCorpIndex)은 도메인 모듈 idrac/corpAttribution.js 로 옮겼다 — ⌘K 통합 장비 검색
 //   (search/inventoryIndex.js)이 같은 판정을 쓰려고(도메인 → routes 의존을 만들지 않게). 이 파일은 그대로 다시 내보낸다(호출부 · 테스트 무변경).
 export { idracServerVcOf, idracCorpIndex, _resetIdracCorpIndex } from '../../idrac/corpAttribution.js';
-/** 범위 계정이면 { allowed:Set, tagMap, index } · 전체 범위면 null. */
+/**
+ * 보안 잔여 11-27 L7: 데모(mock-) iDRAC 서버인가 — 로컬 행은 id, 원격(엣지 보고) 행은 **보고한 엣지(collectorId)와 id 가 둘 다** 데모여야 한다
+ * (사람이 등록한 엣지가 mock- id 를 보고해도 데모가 아니다 · 3단 지도 commmap/demoMask 와 같은 mock- 규약). 판정이 던지면 데모 아님(제외 — fail-closed).
+ */
+export function isDemoIdracServer(s) {
+  try {
+    if (!s || typeof s !== 'object') return false;
+    if (!isDemoEdgeId(s.id)) return false;
+    return s.remote ? isDemoEdgeId(s.collectorId) : true;
+  } catch { return false; }
+}
+/**
+ * 범위 계정이면 { allowed:Set, tagMap, index } · 전체 범위면 null.
+ * 보안 잔여 11-27 L7: 관리자 API 의 데모 계정(demoRegistryView)이면 { demoOnly:true, scoped:Set|null, allowed:Set, … } — iDRAC 계열 라우트가
+ *   이 하나로 데모 판본(데모 서버만 · 단건은 404 · 뺀 개수)을 받는다. 데모 계정은 요청 문맥이 role admin · 보통 전체 범위라 예전에는 null(관리자 판본)이었다.
+ *   allowed 는 범위 계정이면 그 범위, 아니면 **스냅샷의 전 vCenter**(mock 생성기 값) — ESXi 매칭(scopeKind) · resolve-host · 법인 선택 목록이
+ *   관리자와 같게 동작하게(빈 집합이면 데모 서버가 모두 베어메탈로 보인다 — 반증 S-6). 범위가 지정된 데모 계정은 범위 판정과 데모 판정을 함께 건다(반증 S-2).
+ */
 export function idracScopeOf(req) {
   const snap = store.get();
   const allowed = scopedVcenterIds(req?.user, snap);
+  if (demoRegistryView(req)) {
+    return { demoOnly: true, scoped: allowed || null, allowed: allowed || new Set((snap?.vcenters || []).map((v) => String(v.id))), tagMap: hostVcByTag(), index: idracCorpIndex(snap) };
+  }
   return allowed ? { allowed, tagMap: hostVcByTag(), index: idracCorpIndex(snap) } : null;
 }
 export function idracInScope(sc, s) {
   if (!sc) return true;
+  if (sc.demoOnly) {
+    if (!isDemoIdracServer(s)) return false;
+    if (!sc.scoped) return true;   // 전체 범위 데모 — 귀속 없는 데모 서버(앱 서버)도 보인다(관리자와 같은 목록)
+  }
   const vc = idracServerVcOf(s, sc.tagMap, sc.index);
   return !!vc && sc.allowed.has(vc);
+}
+/**
+ * 보안 잔여 11-27 L7: 이 요청이 '범위 계정' 판본인가(범위 표지 · 오류 원문 숨김 · 파트 장애 링크 잠금 · 전 법인 합계 거부의 기준).
+ *   전체 범위 데모 계정은 범위 계정이 아니다(반증 M-3 — sc 가 있다는 사실만 보면 사람 장비가 없는 데모 설치본에서도 '전체 범위 계정만' 문구가 나왔다).
+ */
+export const idracScopedAccount = (sc) => !!sc && !(sc.demoOnly && !sc.scoped);
+/** 보안 잔여 11-27 L7: iDRAC 조회 판본 서명(캐시 열쇠) — 데모 판본 · 범위 · 전체가 서로 다른 열쇠(단사 — 'demo|' 는 scopeSig 출력('*' · 's:…')과 겹치지 않는다).
+ *   데모 계정은 role 이 admin 이라 역할 축으로는 관리자와 갈리지 않는다 — iDRAC 조회 캐시는 이 서명으로 만든다(④ 소스 스윕). */
+export function idracViewSig(req) {
+  const sc = idracScopeOf(req);
+  if (sc?.demoOnly) return `demo|${scopeSig(sc.scoped)}`;
+  return scopeSig(sc ? sc.allowed : null);
 }
 /** 서버 목록 절단. 전체 범위면 원본 그대로 + omitted 0. */
 export function scopeIdracServers(req, servers) {
@@ -65,12 +103,22 @@ function scopedDatacenters(r, assign) {
   const all = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id }));
   if (!r.sc) return all;
   const ids = new Set();
+  if (r.sc.demoOnly && !r.sc.scoped) return all;   // 보안 잔여 11-27 L7: 전체 범위 데모 — 법인 이름은 operator 판본도 싣는다(관리자와 같은 목록)
   for (const vc of r.sc.allowed) { const d = assign[String(vc)]; if (d) ids.add(String(d)); }
   for (const x of r.servers) { const d = String(x.datacenterId || assign[String(x.vcenterId || x.mappedVcenterId || '')] || ''); if (d) ids.add(d); }
   return all.filter((d) => ids.has(String(d.id)));
 }
-/** 응답에 덧붙일 범위 필드(범위 계정만). */
-const scopeFields = (r) => (r.sc ? { scoped: true, omittedOutOfScope: r.omitted } : {});
+/**
+ * 응답에 덧붙일 범위 필드(범위 계정만).
+ * 보안 잔여 11-27 L7: 데모 판본은 뺀 것이 있을 때만 { scoped, demoOnly, omittedOutOfScope } — 사람 장비가 없는 데모 설치본의 응답은 관리자와 같다(반증 M-3).
+ *   뺀 것이 있으면 밝힌다(조용한 제외 금지 — 화면 scopeOmitNote 가 그린다).
+ */
+export const scopeFieldsOf = (sc, omitted) => {
+  if (!sc) return {};
+  if (sc.demoOnly && !sc.scoped) return omitted > 0 ? { scoped: true, demoOnly: true, omittedOutOfScope: omitted } : {};
+  return { scoped: true, omittedOutOfScope: omitted, ...(sc.demoOnly ? { demoOnly: true } : {}) };
+};
+const scopeFields = (r) => scopeFieldsOf(r.sc, r.omitted);
 /**
  * 전산실 온도 시계열 그룹(법인 id | vCenter id | 미지정 | ''=전체)이 범위 계정에 허용되는가.
  * 그룹 합계는 그 그룹의 **모든** 서버로 적재된 값이라, 그룹 안에 범위 밖(또는 귀속 없는) 서버가 하나라도 있으면
@@ -79,6 +127,7 @@ const scopeFields = (r) => (r.sc ? { scoped: true, omittedOutOfScope: r.omitted 
 export function roomTempGroupsAllowed(req, groups) {
   const sc = idracScopeOf(req);
   if (!sc) return { allowed: groups, denied: [], sc: null };
+  const demoFull = sc.demoOnly && !sc.scoped;
   const members = new Map();
   for (const s of analysisServersWithRemote()) {
     const dcId = String(s.datacenterId || '').trim();
@@ -88,6 +137,9 @@ export function roomTempGroupsAllowed(req, groups) {
     m.n += 1; if (!idracInScope(sc, s)) m.out += 1;
     members.set(key, m);
   }
+  // 보안 잔여 11-27 L7(반증 M-3): 전체 범위 데모 계정은 전 법인 합계('')도 — 모든 그룹에 사람이 등록한 서버가 하나도 없을 때만(합계에 사람 장비 값이 섞이지 않을 때).
+  //   그때는 어느 그룹 값에도 사람 장비가 섞일 수 없으므로 관리자와 같은 판정(전부 허용)이다.
+  if (demoFull && [...members.values()].every((m) => m.out === 0)) return { allowed: groups, denied: [], sc: null };
   const ok = (g) => { const m = g ? members.get(g) : null; return !!m && m.n > 0 && m.out === 0; };
   return { allowed: groups.filter(ok), denied: groups.filter((g) => !ok(g)), sc };
 }
@@ -118,7 +170,11 @@ adminRouter.get('/room-temp/history', adminOnly, async (req, res) => {
     // v2.629(AUTHZ2629-03): 범위 계정은 그룹 전원이 범위 안인 법인만(전 법인 합계 '' 는 불허).
     const g = roomTempGroupsAllowed(req, [group]);
     if (g.sc && !g.allowed.length) {
-      return res.status(403).json({ ok: false, error: 'forbidden', reason: group ? '이 법인의 전산실 온도에는 범위 밖(또는 귀속 없는) 서버가 섞여 있어 범위 제한 계정에는 보이지 않습니다.' : '전 법인 합계는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
+      // 보안 잔여 11-27 L7: 데모 계정에는 데모 문구(범위 계정 문구는 데모에게 사실이 아니다 — 반증 nit)
+      const demoWhy = g.sc.demoOnly && !g.sc.scoped;
+      return res.status(403).json({ ok: false, error: 'forbidden', reason: demoWhy
+        ? (group ? '이 법인의 전산실 온도에는 사람이 등록한(데모가 아닌) 서버가 섞여 있어 데모 계정에는 보이지 않습니다.' : '전 법인 합계에는 사람이 등록한(데모가 아닌) 서버가 섞여 있어 데모 계정에는 보이지 않습니다.')
+        : (group ? '이 법인의 전산실 온도에는 범위 밖(또는 귀속 없는) 서버가 섞여 있어 범위 제한 계정에는 보이지 않습니다.' : '전 법인 합계는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.') });
     }
     const db = await getMetricsDb();
     res.json(await roomTempHistory(db, {
@@ -145,7 +201,7 @@ adminRouter.get('/room-temp/spark', adminOnly, async (req, res) => {
       hours: Number(req.query.hours) || 24,
       groups: g.allowed,
     });
-    res.json(g.sc ? { ...out, scoped: true, omittedOutOfScope: g.denied.length } : out);
+    res.json(g.sc ? { ...out, scoped: true, omittedOutOfScope: g.denied.length, ...(g.sc.demoOnly ? { demoOnly: true } : {}) } : out);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -211,14 +267,16 @@ adminRouter.get('/idrac', adminOnly, async (req, res) => {
       await maybeYield();
     }
   }
-  if (!r.sc) return res.json({ servers: r.servers, poller: getPollerStatus() });
+  // 보안 잔여 11-27 L7(반증 M-3): 전체 범위 데모 계정이 뺀 서버가 없으면(사람이 등록한 서버가 없는 데모 설치본) 폴러 상태도 관리자와 같다 —
+  //   폴러가 도는 서버가 모두 데모 서버라 전 함대 성공 · 실패 수 · 오류 목록에 사람 장비가 없다. 뺀 것이 있으면 아래 범위 판본(lastRun null).
+  if (!r.sc || (r.sc.demoOnly && !r.sc.scoped && r.omitted === 0)) return res.json({ servers: r.servers, poller: getPollerStatus() });
   // 폴러 상태는 모양을 유지하되(화면이 읽는 키) 전 법인 집계를 빼고 범위 안 값만 싣는다 — lastRun(전 법인 성공·실패 수·
   //   오류 목록)은 범위로 가를 수 없어 null(첫 수집 전과 같은 표시), 인증 정지 목록은 범위 안 서버만.
   const p = getPollerStatus() || {};
   const keptIds = new Set(r.servers.map((x) => String(x.id)));
   res.json({
     servers: r.servers,
-    poller: { enabled: p.enabled, intervalMs: p.intervalMs, servers: r.servers.filter((x) => !x.remote).length, lastRun: null, authStops: (p.authStops || []).filter((x) => keptIds.has(String(x.id))), scoped: true },
+    poller: { enabled: p.enabled, intervalMs: p.intervalMs, servers: r.servers.filter((x) => !x.remote).length, lastRun: null, authStops: (p.authStops || []).filter((x) => keptIds.has(String(x.id))), scoped: true, ...(r.sc.demoOnly ? { demoOnly: true } : {}) },
     ...scopeFields(r),
   });
 });
@@ -506,7 +564,19 @@ adminRouter.get('/idrac/unsupported', adminOnly, (req, res) => {
   const datacenterId = String(req.query.datacenterId || '').trim();
   const r = listUnsupportedServers({ datacenterId });
   // v2.629(AUTHZ2629-03): 스캔 발견물은 vCenter 귀속이 없다 — 범위 계정에는 싣지 않고 개수만 밝힌다(귀속 없음 미노출).
-  if (idracScopeOf(req)) return res.json({ ok: true, rows: [], groups: [], total: 0, truncatedGroups: 0, scoped: true, omittedOutOfScope: r.total, generatedAt: Date.now() });
+  const sc = idracScopeOf(req);
+  // 보안 잔여 11-27 L7: 데모 계정(전체 범위)에는 데모 시드 그룹(trigger 'demo' · 중앙 또는 데모 엣지)의 행만 — 사람이 돌린 스캔의 IP · 서비스 이름은 빼고 개수를 밝힌다.
+  //   행은 그 그룹의 (agent · 법인 · 서비스) 열쇠로 고른다(저장소가 이 셋으로 그룹을 하나만 둔다 — central/unsupportedServers.js keyOf).
+  if (sc && sc.demoOnly && !sc.scoped) {
+    const gk = (x) => `${x.agent ?? ''}\u0000${x.datacenterId ?? ''}\u0000${x.service ?? ''}`;
+    const isDemoGroup = (g) => { try { return g?.trigger === 'demo' && (!String(g.agent || '') || isDemoEdgeId(g.agent)); } catch { return false; } };
+    const groups = (r.groups || []).filter(isDemoGroup);
+    const keys = new Set(groups.map(gk));
+    const rows = (r.rows || []).filter((x) => keys.has(gk(x)));
+    const omitted = (r.total || 0) - rows.length;
+    return res.json({ ok: true, rows, groups, total: rows.length, truncatedGroups: groups.filter((g) => g.truncated).length, ...scopeFieldsOf(sc, omitted), generatedAt: Date.now() });
+  }
+  if (sc) return res.json({ ok: true, rows: [], groups: [], total: 0, truncatedGroups: 0, scoped: true, omittedOutOfScope: r.total, ...(sc.demoOnly ? { demoOnly: true } : {}), generatedAt: Date.now() });
   res.json({ ok: true, ...r, generatedAt: Date.now() });
 });
 
@@ -598,7 +668,14 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
   if (vcFilter) physServers = physServers.filter((s) => (vcFilter === '__unmapped__' ? !s.vcenterId : s.vcenterId === vcFilter));
   // v2.629: 물리 GPU 서버도 범위 계정에는 귀속 vCenter 가 허용 집합인 것만(귀속 없음 미노출).
   let physOmitted = 0;
-  if (scoped.sc) { const before = physServers.length; physServers = physServers.filter((s) => s.vcenterId && scoped.sc.allowed.has(String(s.vcenterId))); physOmitted = before - physServers.length; }
+  // 보안 잔여 11-27 L7: 데모 판본은 데모(mock-) 물리 서버만 — allowed 가 스냅샷 전 vCenter 라 귀속 판정만으로는 사람이 등록한 서버가 통과한다.
+  if (scoped.sc) {
+    const before = physServers.length;
+    const sc = scoped.sc;
+    const vcOk = (s) => !!s.vcenterId && sc.allowed.has(String(s.vcenterId));
+    physServers = physServers.filter((s) => (sc.demoOnly ? isDemoEdgeId(s.id) && (!sc.scoped || vcOk(s)) : vcOk(s)));
+    physOmitted = before - physServers.length;
+  }
   let physCount = 0; let physGpus = 0;
   for (const s of physServers) {
     const gms = s.gpuModels || [];
@@ -617,7 +694,7 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
     inventoryStale: counts.invStale, gpusStale: counts.gpusStale, gpusUnnamed: counts.gpusUnnamed, disabledServers: counts.disabled,
     physicalServers: physCount, physicalGpus: physGpus,
     missing,
-    ...(scoped.sc ? { scoped: true, omittedOutOfScope: scoped.omitted + physOmitted } : {}),
+    ...scopeFieldsOf(scoped.sc, scoped.omitted + physOmitted),
   });
 });
 
@@ -630,8 +707,7 @@ adminRouter.get('/idrac/parts-inventory', adminOnly, async (req, res) => {
     const cat = String(req.query.cat || '').trim();
     if (cat && !isPartCat(cat)) return res.status(400).json({ ok: false, reason: `알 수 없는 카테고리: ${cat}` });
     // v2.629(AUTHZ2629-03): 범위 계정은 귀속 서버만 — 캐시 키에 범위를 넣는다(없으면 먼저 연 사람의 판본이 나간다).
-    const sc = idracScopeOf(req);
-    const key = `parts|${scopeSig(sc ? sc.allowed : null)}|${req.originalUrl}`;
+    const key = `parts|${idracViewSig(req)}|${req.originalUrl}`;   // 보안 잔여 11-27 L7: 데모 판본(role admin)이 관리자 · 범위 판본과 열쇠를 나누지 않던 것
     const payload = await snapMemo('idrac-parts', key, 15_000, () => {
       const r = scopeIdracServers(req, analysisServersWithRemote(req));
       const out = partBuckets(r.servers, invForServer, { cat, q: String(req.query.q || '') });
