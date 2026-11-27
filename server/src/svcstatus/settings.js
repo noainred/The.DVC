@@ -82,12 +82,8 @@ export function normalizeSettings(input = {}) {
 export const DEFAULTS = Object.freeze(normalizeSettings({}));
 
 const parseStrictObject = (text) => { const v = JSON.parse(text); if (!isObj(v)) throw new SyntaxError('객체가 아닌 JSON 값'); return v; };
-const _file = makeJsonFileLoader(FILE, {
-  label: '포탈 서비스 상태 모니터링 설정(svc-status-settings.json) — 확정하면 기본값(측정 켜짐 · 60초 · 제외 없음 · 끊김 알림 켜짐)으로 저장됩니다',
-  confirm: () => saveSvcStatusSettings({}, { replace: true }),
-  parse: parseStrictObject,
-  tag: 'svcstatus',
-});
+// ⚠ 한 줄로 둔다 — audit2633 ① 이 makeJsonFileLoader( 줄에서 label · confirm 을 찾는다(확정 버튼 등재 확인).
+const _file = makeJsonFileLoader(FILE, { label: '포탈 서비스 상태 모니터링 설정(svc-status-settings.json) — 확정하면 기본값(측정 켜짐 · 60초 · 제외 없음 · 끊김 알림 켜짐)으로 저장됩니다', confirm: () => saveSvcStatusSettings({}, { replace: true }), parse: parseStrictObject, tag: 'svcstatus' });
 let _cache = null;
 let _lastGood = null;
 const copy = (c) => JSON.parse(JSON.stringify(c));

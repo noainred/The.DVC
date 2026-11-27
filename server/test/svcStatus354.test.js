@@ -105,11 +105,11 @@ test('① 알림 수준 — 끈 종류는 정상 · 못 잼은 정한 분이 지
 /* ───────────────────────── ② 스토리지 접속처 ───────────────────────── */
 
 test('② 스토리지 접속처는 storage/endpoint.js 하나 — 수집기에 env 포트 사본이 없다 · 기본값 · env · SSH 포트 · 수집 방식 기본', () => {
-  for (const f of ['isilon', 'powerstore', 'unity', 'xtremio', 'powermax', 'vplex']) {
-    const s = bare(`storage/collectors/${f}.js`);
-    assert.doesNotMatch(s, /process\.env\.STORAGE_[A-Z]+_PORT/, `${f}.js 에 포트 env 사본이 남았다`);
-    assert.match(s, /restPortOf\(/, `${f}.js 가 공용 표를 쓰지 않는다`);
-  }
+  for (const f of ['isilon', 'powerstore', 'unity', 'xtremio', 'powermax', 'vplex', 'arrayPerf']) assert.match(bare(`storage/collectors/${f}.js`), /restPortOf\(/, `${f}.js 가 공용 표를 쓰지 않는다`);
+  // 전수 — server/src 어디에서도 스토리지 포트 env 를 직접 읽지 않는다(표 하나 · 5분 표본 arrayPerf 의 사본 3곳을 전량 검증에서 찾았다)
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+  const leaks = walk(SRC).filter((p) => !p.endsWith(path.join('storage', 'endpoint.js')) && /process\.env\.STORAGE_[A-Z]+_PORT/.test(stripComments(fs.readFileSync(p, 'utf8'))));
+  assert.deepEqual(leaks.map((p) => path.relative(SRC, p)), [], '스토리지 포트 env 사본');
   assert.equal(EP.restPortOf('isilon', {}), 8080); assert.equal(EP.restPortOf('powermax', {}), 8443); assert.equal(EP.restPortOf('vmax', {}), 8443);
   assert.equal(EP.restPortOf('unity480', {}), 443); assert.equal(EP.restPortOf('powermax', { STORAGE_UNISPHERE_PORT: '9443' }), 9443);
   assert.equal(EP.restPortOf('powermax', { STORAGE_UNISPHERE_PORT: '70000' }), 8443, '범위 밖 env 는 기본값');

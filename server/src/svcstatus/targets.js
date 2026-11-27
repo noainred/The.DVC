@@ -20,6 +20,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { KIND_KEYS } from './settings.js';
+import { pushAll } from '../util/pushAll.js';
 
 const t = (v) => String(v ?? '').trim();
 
@@ -149,7 +150,7 @@ export function planTargets(built = {}, { settings = {}, siteOwner = new Map(), 
         continue;
       }
     }
-    rows.push(...fresh.get(k));
+    pushAll(rows, fresh.get(k));   // 전개 push 금지(원소 수만큼 인자 — audit2603a 스윕)
   }
   return { rows, heldKinds, sourceErrors, raw };
 }

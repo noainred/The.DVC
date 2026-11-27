@@ -161,7 +161,7 @@
 | `storage/` | 74 | 16,539 | `storage/registry.js` (23) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
 | `storpath/` | 4 | 391 | `storpath/cache.js` (2) | ESXi 경로 카운터 캐시(v2.935 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다. |
 | `svcmon/` | 22 | 8,235 | `svcmon/store.js` (16) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
-| `svcstatus/` | 9 | 1,693 | `svcstatus/poller.js` (3) | svcstatus/poller.js — 중앙이 재는 대상의 주기 측정(v3.54 — **중앙 전용**: CENTRAL_URL 이 있는 엣지 노드에서는 돌지 않는다. |
+| `svcstatus/` | 9 | 1,690 | `svcstatus/poller.js` (3) | svcstatus/poller.js — 중앙이 재는 대상의 주기 측정(v3.54 — **중앙 전용**: CENTRAL_URL 이 있는 엣지 노드에서는 돌지 않는다. |
 | `system/` | 2 | 336 | `system/nfsMounts.js` (4) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
 | `tags/` | 4 | 502 | `tags/analyze.js` (6) | tags/analyze.js — 특수 기능 '태그·사용자 지정 속성 점검'(도구 키 `vm-tags`, v2.703 — A15) 판정(순수). |
 | `toolcats/` | 2 | 384 | `toolcats/settings.js` (3) | toolcats/settings.js — 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). |
@@ -186,7 +186,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 109개 · 파일 1608개 · 372,984줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 109개 · 파일 1608개 · 372,981줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
