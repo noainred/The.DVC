@@ -15,7 +15,7 @@
 import crypto from 'node:crypto';
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { READY_TIMEOUT_MS, testTarget, focusAuthGuard, authDevOf } from '../collector.js';
-import { ACCT_RE } from './bundle.js';
+import { ACCT_RE, REMOTE_KILL_S, selfTimeoutLines } from './bundle.js';
 import { installCredFor, PREP_FEATURE, INSTALL_FEATURE } from './installCred.js';
 import { installOnce, PRIV_COMMAND, within, keyStopped, noteAuth } from './install.js';
 import { isDemoTarget, demoHello } from '../mock.js';
@@ -27,12 +27,14 @@ export const PREP_EXEC_MS = 60_000;
 export const PREP_CLEANUP_MS = 10_000;
 export const PREP_MARGIN_MS = 5_000;
 export const PREP_TIMEOUT_MS = 140_000;
+/** v3.54.0 ⑧ 준비 파일의 원격 시한(초) — 원격 시한 + KILL 유예 < PREP_EXEC_MS(시험 고정). 넘치면 그 서버에서 스스로 멈춘다(bundle.selfTimeoutLines). */
+export const PREP_REMOTE_LIMIT_S = 45;
 /** 준비 파일이 멈춘 까닭(웹 `PREP_FAIL_TEXT` 와 같다 · 시험 대조). */
 export const PREP_FAILS = Object.freeze(['args', 'not-root', 'acct-root', 'sshd-missing', 'sshd-unread', 'sshd-pubkey', 'sshd-akfile', 'sshd-allow', 'sshd-deny', 'sshd-groups',
-  'sshd-authmethods', 'acct-create', 'acct-shell', 'acct-home', 'acct-sudo', 'key-symlink', 'key-write', 'no-runuser']);
+  'sshd-authmethods', 'acct-create', 'acct-shell', 'acct-home', 'acct-sudo', 'acct-sudo-unknown', 'key-symlink', 'key-write', 'no-runuser']);
 /** 결과 까닭(웹 `PREP_CODE_TEXT` 와 같다). 'login' = 넣었지만 키 로그인 거부 · 실패. */
 export const PREP_CODES = Object.freeze(['ok', 'login', 'cred', 'bad-acct', 'acct-root', 'acct-prep', 'no-key', 'conn-unknown', 'key-stopped', 'auth', 'hostkey', 'unreachable', 'timeout',
-  'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other', 'busy', 'queue-full']);
+  'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other', 'busy', 'queue-full', 'not-mine', 'lost']);
 /** 단계(0 ~ 7 — 화면 막대 · 시안의 8칸). */
 export const PREP_STEPS = Object.freeze(['cred', 'connect', 'priv', 'sshd', 'acct', 'key', 'login', 'audit']);
 /** 디스크 점검을 함께 하지 않은 까닭. */
@@ -80,6 +82,7 @@ export function prepScript(key, { age = 'never', conn = null } = {}) {
 # 서버 집중 모니터링 — 접속 준비(수집 계정 · 공개키) 파일 · 포탈이 대상 서버에서 root 로 한 번 돌린다(v3.18.0)
 # 하는 일: sshd 설정 읽기(바꾸지 않음) → 수집 계정이 없으면 만들기(비밀번호 칸 '*'${age === 'default' ? '' : ' · 만료 없음'}) → 그 계정 권한으로 공개키 한 줄 넣기
 PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
+${selfTimeoutLines(PREP_REMOTE_LIMIT_S)}
 umask 022
 if [ "$#" -ne 1 ]; then ${fail('args', 64)}; fi
 A="$1"
@@ -131,9 +134,29 @@ if E=$(getent passwd "$A"); then
   # 반증 D4: 이미 sudo 로 모든 명령을 할 수 있는 계정에는 넣지 않는다(집중 모니터링 키가 root 와 같은 힘이 된다 — 디스크 점검 실행 파일 한 줄 같은 좁은 허용은 괜찮다)
   G=$(id -Gn "$A" 2>/dev/null || true)
   case " $G " in *' wheel '*|*' sudo '*|*' admin '*) ${fail('acct-sudo', 66)} ;; esac
+  # v3.54.0 ⑧: 판정은 sudo 자신에게 묻는다 — 'sudo -l -U 계정 <명령>' 이 셸 · su · env 를 허용하면 root 와 같다(별칭 Cmnd_Alias · 와일드카드 /usr/bin/* · ALL 을 sudo 가 푼다).
+  #   예전 판정(줄 끝 'ALL' 글자)은 셸만 준 줄 · 와일드카드를 못 봤고, Defaults requiretty 서버에서는 tty 없는 root 의 sudo -l 이 실패해 **넣었다**(이 개발 환경 sudo 1.9.15 로 재현).
+  #   tty 를 요구하면 script(util-linux)로 가짜 터미널을 열어 다시 묻고, 그래도 모르면 넣지 않는다(acct-sudo-unknown).
   if command -v sudo >/dev/null 2>&1; then
+    SK=0
+    for c in /bin/sh /bin/bash "$(command -v su 2>/dev/null || true)" "$(command -v env 2>/dev/null || true)"; do
+      [ -n "$c" ] && [ -x "$c" ] || continue
+      case "$c" in *[!A-Za-z0-9/._-]*) continue ;; esac
+      # 변수 이름 주의: E 는 위의 getent 줄이다(아래 홈 판정이 쓴다) — 덮지 않는다(v3.54.0 시험이 잡은 결함)
+      if SE=$(sudo -n -l -U "$A" "$c" 2>&1 >/dev/null); then ${fail('acct-sudo', 66)}; fi
+      [ -z "$SE" ] && continue
+      if command -v script >/dev/null 2>&1; then
+        # 종료값은 표지로(script 자체가 실패하면 표지가 없다 → 모름) · 허용 안 됨 = 종료값 1 + 다른 출력 없음
+        Y=$(script -qc "sudo -n -l -U '$A' '$c'; echo DVC-SUDO-RC=\\$?" /dev/null </dev/null 2>/dev/null | tr -d '\\r' || true)
+        case "$Y" in *DVC-SUDO-RC=0*) ${fail('acct-sudo', 66)} ;; esac
+        O=$(printf '%s\\n' "$Y" | grep -v '^DVC-SUDO-RC=' || true)
+        case "$Y" in *DVC-SUDO-RC=1*) [ -z "$O" ] && continue ;; esac
+      fi
+      SK=1
+    done
     SL=$(sudo -n -l -U "$A" 2>/dev/null || true)
     if printf '%s\\n' "$SL" | grep -Eq '(^|[[:space:],:])ALL[[:space:]]*$'; then ${fail('acct-sudo', 66)}; fi
+    [ "$SK" = 1 ] && ${fail('acct-sudo-unknown', 66)}
   fi
   echo '##DP exists'
 else
@@ -231,18 +254,20 @@ export async function prepOnce(t, { keys, connect = withSsh, expect = {}, credOf
     if (!login?.ok) return { ...base, auditSkip: 'login' };
     // 디스크 점검 함께: 같은 키가 ‘설치’ 도 직접 켰을 때만(컨펌 ⑩ — 하나만 켠 키는 준비까지만)
     if (!demo) {
-      const ic = credOf(t, { edge: !!expect?.edge, corpVcs: credVcs(), pick: expect?.pick || null, withAuth: false, feature: INSTALL_FEATURE });
+      const ic = credOf(t, { edge: !!expect?.edge, corpVcs: credVcs(), pick: expect?.pick || null, withAuth: false, feature: INSTALL_FEATURE, local: credLocal() });
       if (!ic || ic.state !== 'ok') return { ...base, auditSkip: 'cred' };
       if (!ic.keyId || !cred?.keyId || ic.keyId !== cred.keyId) return { ...base, auditSkip: 'key' };
     }
     ph('디스크 점검 프로그램 설치');
-    const r = await installOnce(t, { keys, connect, credOf, onPhase: ph, now, expect: { program: expect?.program, dir, oldDirs: expect?.oldDirs || [], pick: expect?.pick || null, edge: !!expect?.edge, edgeVcs: expect?.edgeVcs, corpVcs: expect?.corpVcs } })
+    const r = await installOnce(t, { keys, connect, credOf, onPhase: ph, now, expect: { program: expect?.program, dir, oldDirs: expect?.oldDirs || [], pick: expect?.pick || null, edge: !!expect?.edge, edgeVcs: expect?.edgeVcs, edgeLocal: expect?.edgeLocal, corpVcs: expect?.corpVcs } })
       .catch(() => null);
     if (!r) return { ...base, auditSkip: 'cred' };
     return { ...base, install: r.install, ready: r.ready || [], dir: r.dir ?? dir };
   };
   // 엣지: 법인 = 그 엣지 스냅샷의 vCenter 들(edgeVcs — 중앙이 보낸 값이 아니다)
   const credVcs = () => (expect?.edge ? (typeof expect.edgeVcs === 'function' ? expect.edgeVcs() : []) : (Array.isArray(expect?.corpVcs) ? expect.corpVcs : []));
+  // v3.54.0 ④: 엣지는 법인 공통 계정을 자기가 아는 서버에만(installCred 'not-local' — 이 함수가 없으면 닫힌다)
+  const credLocal = () => (expect?.edge && typeof expect.edgeLocal === 'function' ? expect.edgeLocal() : null);
   if (t.demo || isDemoTarget(t.id)) {
     ph('준비');
     const n = Number(String(t.id).replace(/\D/g, '').slice(-2)) || 0;
@@ -253,7 +278,7 @@ export async function prepOnce(t, { keys, connect = withSsh, expect = {}, credOf
   const info = keys?.keyInfo?.() || null;
   const kl0 = keyLineFor(info?.publicKey || '');
   if (!info?.usable || !kl0) return res('no-key');
-  const cred = credOf(t, { edge: !!expect?.edge, corpVcs: credVcs(), pick: expect?.pick || null, withAuth: true, feature: PREP_FEATURE });
+  const cred = credOf(t, { edge: !!expect?.edge, corpVcs: credVcs(), pick: expect?.pick || null, withAuth: true, feature: PREP_FEATURE, local: credLocal() });
   if (!cred || cred.state !== 'ok' || !cred.auth) return res('cred', { cred: cred?.state || 'error', acct: cred?.acct || '', key: cred?.key || '', src: cred?.src || null });
   const who = { acct: cred.acct, key: cred.key, src: cred.src };
   // 반증 D4: 수집 계정이 준비 계정 자신이면 넣지 않는다(root 로 갈 수 있는 계정에 집중 모니터링 키를 주게 된다)
@@ -305,6 +330,8 @@ export async function prepOnce(t, { keys, connect = withSsh, expect = {}, credOf
   // 반증 D2: 주소 제한은 이번에 그 줄을 넣었을 때만 '적용' — 같은 키가 다른 옵션으로 있으면(differs) 그대로 두고 알린다
   const prep = { step: parsed ? stepOfPrep(parsed) : 3, fail: parsed?.fail || null, rc: parsed?.rc ?? null, priv, created: !!parsed?.created, exists: !!parsed?.exists, added: !!parsed?.added, have: !!parsed?.have,
     differs: !!parsed?.differs, partial: !!parsed?.partial, warn: parsed?.warn || [], from: wantFrom && !!parsed?.added, ...who };
+  // v3.54.0 ⑧: 준비 파일이 원격 시한(timeout)으로 멈췄다(124 · KILL 137) — 끝까지 돌지 않았다는 것만 안다(한 일은 prep 칸이 알린다)
+  if (!parsed?.ok && !parsed?.fail && (parsed?.rc === 124 || parsed?.rc === 137)) return res('timeout', prep);
   if (!parsed?.ok) return res(parsed?.fail ? 'script' : 'script-other', prep);
   // 반증 D3: 사람이(OTP) 누른 준비로 키가 들어갔다 — 그 대상 · 이 노드 키의 인증 정지를 한 번 푼다('다시 연결' 과 같은 판단 · 시험은 한 번만)
   try { focusAuthGuard.clearAuthStop(authDevOf(t, info.fingerprint).id, { verified: false }); } catch { /* 정지 기록을 못 지워도 시험이 'auth-stopped' 로 알린다 */ }

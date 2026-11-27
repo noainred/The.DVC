@@ -212,6 +212,20 @@ const EOF_WRAPPER = 'DVC_DISK_AUDIT_WRAPPER_EOF';
  */
 export const INSTALL_FAILS = Object.freeze(['args', 'not-root', 'no-acct', 'dir-symlink', 'dir-notdir', 'dir-owner', 'dir-writable', 'dir-traverse', 'dir-netfs', 'dir-noexec', 'no-includedir', 'damaged', 'visudo', 'install']);
 export const INSTALL_STEPS = Object.freeze(['dir', 'files', 'sudoers', 'old']);
+/**
+ * v3.54.0 ⑧(v3.17.0 의 남은 것 — 설치 exec 시한을 넘긴 설치 파일이 원격에서 계속 돌 수 있었다: 채널을 닫아도 pty 없는 프로세스가 남는다):
+ *   root 로 도는 파일(설치 · 접속 준비)은 스스로 `timeout` 아래에서 다시 돈다 — 시한이 되면 그 프로세스 묶음(자식까지)을 TERM → KILL 한다.
+ *   원격 시한 + KILL 유예 < 그 exec 시한(시험이 산수를 고정). `timeout` 이 없는 서버는 예전 그대로(문서의 남은 것).
+ *   손으로 받은 설치 파일도 같은 시한이다(설치는 보통 몇 초).
+ */
+export const REMOTE_KILL_S = 5;
+export const INSTALL_REMOTE_LIMIT_S = 80;
+/** 스스로 시한(셸 조각 — 파일 머리 PATH 다음에). 값은 이 파일의 상수 숫자뿐. */
+export function selfTimeoutLines(limitS) {
+  if (!Number.isInteger(limitS) || limitS < 5 || limitS > 600) throw new Error('원격 시한 값이 규칙에 맞지 않습니다');
+  return `# 시한: ${limitS}초 안에 끝나지 않으면 스스로 멈춘다(포탈 exec 시한보다 짧게 — 접속이 끊겨도 root 프로세스가 남지 않게)
+if [ -z "\${DVC_FM_TO:-}" ] && [ -f "$0" ] && command -v timeout >/dev/null 2>&1; then DVC_FM_TO=1; export DVC_FM_TO; exec timeout -k ${REMOTE_KILL_S} ${limitS} /bin/sh "$0" "$@"; fi`;
+}
 /** 네트워크 · 사용자 공간 파일시스템(stat -f %T 이름) — 설치하지 않는다. */
 const NETFS = ['nfs', 'nfs4', 'cifs', 'smb', 'smb2', 'smbfs', 'fuse', 'fuseblk', 'ceph', 'glusterfs', '9p', 'afs', 'lustre', 'gfs2', 'ocfs2', 'sshfs', 'davfs'];
 export function installScript({ dir = '', oldDirs = [] } = {}) {
@@ -279,6 +293,7 @@ set -eu
 umask 022
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+${selfTimeoutLines(INSTALL_REMOTE_LIMIT_S)}
 ACCT="\${1:-}"
 case "$ACCT" in
   ''|-*|*[!A-Za-z0-9._-]*) echo '##DI fail args'; echo "사용법: sh $0 <수집 계정>   (계정 이름은 영문 · 숫자 · . _ - 만)"; exit 64 ;;
@@ -292,6 +307,7 @@ ${dirCheck}
 if [ ! -d /etc/sudoers.d ] || ! grep -Eq '^[#@]includedir[[:space:]]+/etc/sudoers.d' /etc/sudoers; then echo '##DI fail no-includedir'; echo '/etc/sudoers 에 includedir /etc/sudoers.d 가 없습니다 — 설치하지 않습니다.'; exit 78; fi
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
+trap 'exit 143' TERM INT HUP
 cat > "$T/rhel_disk_audit.py" <<'${EOF_PROGRAM}'
 ${progText}${progText.endsWith('\n') ? '' : '\n'}${EOF_PROGRAM}
 cat > "$T/dvc-disk-audit" <<'${EOF_WRAPPER}'

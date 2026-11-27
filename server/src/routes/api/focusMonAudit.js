@@ -34,6 +34,8 @@ import { INSTALL_CODES, INSTALL_STEPS } from '../../focusmon/audit/install.js';
 import { CRED_STATES, PREP_FEATURE, credSnapshot } from '../../focusmon/audit/installCred.js';
 import { PREP_CODES, PREP_STEPS, PREP_FAILS, AUDIT_SKIPS, PREP_TIMEOUT_MS } from '../../focusmon/audit/prep.js'; // v3.18.0 접속 자동 준비
 import * as fstore from '../../focusmon/store.js';
+import { store } from '../../store.js';
+import { machineIndex } from '../../focusmon/audit/sameMachine.js'; // v3.54.0 ⑤ 같은 서버(주소 · 인벤토리 같은 VM · 호스트 이름)
 import { requireSettingsOwner } from '../admin/shared.js';
 import { reauth } from './reauth.js';
 import { getDatacenterAssign } from '../../datacenter/store.js';
@@ -175,11 +177,12 @@ api.post('/tools/focus-mon/audit/install', ...installGate, (req, res) => {
   let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
   const results = []; const wake = new Set(); const started = [];
   const everyone = allTargets(); // 같은 주소 찾기는 범위 · 데모와 무관하게 등록부 전부에서(반증 S3)
+  const machine = machineFor(everyone, cr);
   for (const id of [...new Set(ids)]) {
     const t = vis.get(id);
     if (!t) { results.push({ id, ok: false, code: 'not-found', reason: '없는 대상입니다.' }); continue; }
     const pick = Object.hasOwn(picks, id) && typeof picks[id] === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(picks[id]) ? picks[id] : null;
-    const r = A.requestInstall(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys, peers: everyone });
+    const r = A.requestInstall(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys, peers: everyone, machine });
     results.push({ id, name: t.name, ...r });
     if (r.ok) { started.push(t.name); if (r.via === 'edge' && t.agent) wake.add(t.agent); }
   }
@@ -188,6 +191,22 @@ api.post('/tools/focus-mon/audit/install', ...installGate, (req, res) => {
   if (started.length) logAudit({ user: req.user?.username, action: 'focus-mon.audit.install', target: started.slice(0, 20).join(', '), detail: `${started.length}대${started.length > 20 ? ' (앞 20대만 적음)' : ''} · 디렉터리 ${dir || '(기본 경로)'}`, ip: req.ip });
   res.json({ ok: true, results, started: started.length, dir });
 });
+
+/**
+ * v3.54.0 ⑤: 같은 서버 색인(요청마다 한 번) — 등록부 전부 · 중앙 스냅샷 VM(그 VM 의 IP 목록) · 그 서버가 알려 준 호스트 이름(수집 hello · 연결 시험 hello).
+ *   스냅샷을 못 읽으면 인벤토리 근거 없이(주소 · 호스트 이름만) — 좁아질 뿐 넓어지지 않는다.
+ */
+function machineFor(everyone, cr = corpResolver()) {
+  let vms = []; let vcs = [];
+  try { const s = store.get(); vms = s?.vms || []; vcs = Array.isArray(s?.vcenters) ? s.vcenters : []; } catch { vms = []; vcs = []; }
+  const helloOf = (id) => fstore.helloOf(id) || fstore.testOf(id)?.result?.hello || null;
+  // 반증 F1(same-machine): VM 은 그 VM 을 수집한 노드(사이트 vCenter 의 collectedBy 엣지 · 중앙 직접 '')의 대상하고만 — 스냅샷에 없는 vCenter 의 VM 은 근거로 쓰지 않는다
+  const vcNode = new Map(vcs.filter((v) => v && v.id != null).map((v) => [String(v.id), String(v.collectedBy || '').toLowerCase()]));
+  const vmNodeOf = (vm) => (vcNode.has(String(vm?.vcenterId)) ? vcNode.get(String(vm.vcenterId)) : null);
+  // 반증 F2(same-machine): 중앙 직접 대상('' 노드)은 여러 법인이다 — 이름 근거는 법인으로 더 나눈다(법인을 모르면 null — 어느 법인과도 견준다: 넓게 잡는 쪽)
+  const groupOf = (t) => (t.agent ? null : (cr.of(t)?.id || null));
+  return machineIndex(everyone, { vms, helloOf, vmNodeOf, groupOf });
+}
 
 /* ── v3.18.0 접속 자동 준비(수집 계정 · 공개키) — 대상 · 키 탭 ─────────────────────────────── */
 /** 그 서버의 키 로그인(지금) — 수집 상태가 있으면 그것, 없으면 마지막 연결 시험(엣지 서버도 시험 결과로 안다). */
@@ -213,14 +232,18 @@ api.get('/tools/focus-mon/prep', adminOnly, fullScopeOnly, (req, res) => {
   const cr = corpResolver();
   let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
   const snap = credSnapshot();   // 51회차 #4
+  const machine = machineFor(everyone, cr);
   const rows = targets.map((t) => {
     const corpVcs = t.agent ? [] : corpVcsOf(t, cr, assign);
     const lp = A.readinessOf(t.id)?.lastPrep || null;
+    // v3.54.0 ⑤: 같은 서버로 보이는 다른 수집 계정 항목(근거 · 이름 — 데모 계정에는 데모가 아닌 항목 이름을 싣지 않는다)
+    const other = A.sharedWith(A.sameMachinePeersOf(t, everyone, machine).filter((p) => String(p.username || '') !== String(t.username || '')))
+      .map((p) => (demo && !everyone.find((x) => x.id === p.id)?.demo ? { ...p, id: '', name: '' } : p));
     return {
       id: t.id, name: t.name, host: t.host, port: t.port, username: t.username || '', agent: t.agent || '', demo: !!t.demo, corp: demo && !t.demo ? null : cr.of(t),
       login: loginOf(t), keyFp: nodeKeyFp(t),
       cred: A.credOfTarget(t, { corpVcs, feature: PREP_FEATURE, snap }), credInstall: A.credOfTarget(t, { corpVcs, snap }),
-      hostShared: everyone.some((p) => p.id !== t.id && A.sameHost(p, t) && String(p.username || '') !== String(t.username || '')),
+      hostShared: other.length > 0, hostSharedWith: other,
       lastPrep: lp ? (demo ? { ...lp, by: '' } : lp) : null, job: A.jobOf(t.id),
     };
   });
@@ -246,13 +269,14 @@ api.post('/tools/focus-mon/prep', ...installGate, (req, res) => {
   const vis = new Map(visibleTargets(req).map((t) => [t.id, t]));
   const everyone = allTargets(); // 같은 주소 찾기는 범위 · 데모와 무관하게 등록부 전부에서
   const cr = corpResolver();
+  const machine = machineFor(everyone, cr);
   let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
   const results = []; const wake = new Set(); const started = [];
   for (const id of [...new Set(ids)]) {
     const t = vis.get(id);
     if (!t) { results.push({ id, ok: false, code: 'not-found', reason: '없는 대상입니다.' }); continue; }
     const pick = Object.hasOwn(picks, id) && typeof picks[id] === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(picks[id]) ? picks[id] : null;
-    const r = A.requestPrep(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys, peers: everyone, withAudit, from, age });
+    const r = A.requestPrep(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys, peers: everyone, machine, withAudit, from, age });
     results.push({ id, name: t.name, ...r });
     if (r.ok) { started.push(t.name); if (r.via === 'edge' && t.agent) wake.add(t.agent); }
   }

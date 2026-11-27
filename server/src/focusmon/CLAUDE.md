@@ -3,12 +3,11 @@
 > v2.976 사용자 요청(2026-11-11) "특수기능에 ‘집중 모니터링’ … 최대 20대 · cpu/memory/network/disk 실시간 · 본딩/개별 인터페이스 · 디스크/파티션 read/write/latency/wait ·
 > top 30 프로세스" + "리눅스만 · IP ssh key less · RHEL 7.8 기준" + "iostat 13열" + "1·5·10·30분 구간 띠" + "30일 · DB 에 저장(프로세스 목록도)".
 > 설계 `docs/design/focus-mon/README.md`(시안 컨펌 뒤 구현). 회귀: `server/test/focusMon2976.test.js` · `focusMonApi2976.test.js` · `web/src/views/tools/focusMonText.test.js`.
-> 변이 10/10(공유 토큰 허용 · 남의 대상 받기 · 인증 정지 무시 · 데이터 경로 범위 게이트 · IPv4 검증 · 수집당 20대 · cmdline 수집 · 엣지 시각 자르기 · 공개키 보기에 개인키 · 엣지 보류 시한) — 처음 돌린 판에서 6건이 살아남아 테스트를 보강했다.
+> 변이 10/10(목록은 `docs/rules/focusmon.md` '옮긴 원문(v3.54.0)').
 
 - **원격 명령은 상수**(`script.js SCRIPTS` — 주기 1·2·5·10초별로 미리 만든 bash 루프 하나). 사용자 · 원격 출력 값을 명령에 넣지 않는다.
   프로세스는 **comm 만**(/proc/<pid>/stat) — cmdline · environ 을 읽지 않는다(인자에 비밀번호가 흔하다 · `docs/rules/security-api.md` 8b 와 같은 규칙).
-  comm 은 awk 가 안전한 글자로 바꾼다 → 표지(`##XXX`) 위조는 없다. ⚠ v2.981 정정(반증 F2 · 재현): comm 의 줄바꿈은 stat 한 줄을 둘로 나눠 뒷줄이 다른 pid 행(`1234 (sshd)`)으로 읽혔다(v2.976 부터) —
-  이제 `grep -H` 로 읽어 **pid 는 파일 경로에서** · 같은 파일의 줄은 이어 붙이고 첫 칸이 그 pid 일 때만 받는다. 파서(`parse.js`)는 표지 · 순서 · 줄 수 · 줄 길이 상한으로 자른다.
+  comm 은 awk 가 안전한 글자로 바꾼다 · **pid 는 파일 경로에서**(`grep -H` — v2.981 정정 원문은 문서) · 파서(`parse.js`)는 표지 · 순서 · 줄 수 · 줄 길이 상한으로 자른다.
 - **접속은 키만**(`util/sshKeyStore.js` 공장 · 파일 `focusmon_key` · env `FOCUSMON_SSH_KEY`). 개인키는 노드 밖으로 나가지 않는다 — 응답 · 엣지 push · 백업에 공개키 · 지문만.
   등록부(`focusmon-targets.json`)에 비밀 필드가 없다. 비밀번호 폴백 없음.
 - **인증 거부는 자동 재시도 금지**(`collector.js focusAuthGuard` — `focusmon-auth-stops.json`). 사람이 ‘다시 연결’ 을 눌러야 한 번 시도한다(`RETRY_MIN_MS` 60초에 한 번).
@@ -62,9 +61,10 @@
   ⑤ 인증 거부는 `focusAuthGuard` 에 정지 · 정지된 대상은 접속하지 않는다(자동 재시도 금지). ⑥ 숫자는 **줄 수**(장애 횟수 아님) · 끝까지 돌지 않은 회차(outcome ≠ 'done')는 합계에 넣지 않는다(null).
   ⑦ 한도 — 노드당 동시 1 · 같은 서버 실행 10분에 한 번(실행된 때 기준) · 준비 확인 60초 · 엣지 미수령 30분/결과 없음 시한 뒤 'lost' · 보관 10회 · 90일. 조회 admin + 전체 범위 · 실행 + 쓰기 전체 범위 · 데모 차단 · 감사.
   ⑧ 반증 1인 반영(9건 — 원문 `docs/rules/focusmon.md`): **표지는 실행마다 난수** · 보고서 모양 검사 · 출력 예산 · 엣지 결과 크기 상한 · 'lost' 2시간 · 접속처가 바뀌면 지우고 `ep` 로 거름 · flock · SIGPIPE trap.
-  ⑨ **자동 설치 · 설치 디렉터리(v3.17.0 · 회귀 `focusMonInstall3170` · web `focusMonAuditInstall`)**: 판정 `bundle.dirIssue` 하나(웹 대조) · 설정 손상은 재시작 뒤에도 503 ·
-     설치 계정은 **맡은 노드**의 SSH 공용 접속(`installCred` — 직접 켠 키만 · 같은 주소 둘 · 비밀번호 안 씀) · 비밀번호 없는 sudo · root 만 · 위쪽 폴더 · 심링크 · 네트워크 FS · noexec 검사 ·
-     옛 파일은 판본이 같고 새 경로가 아닐 때만 지움 · 연속 3대 거부면 멈춤 · 위치 기억(후보 밖 무시) · **설치 작업은 이번 본문에 caps 'install' 을 실은 엣지에만** ·
-     'ok' 는 중앙이 준비 줄을 다시 판정 · 같은 주소 다른 계정은 거부(sudoers 하나) · 엣지 법인 = 스냅샷 vCenter · 문 = 관리자 · 소유자 등급 · 데모 차단 · OTP(마지막) · 감사. 반증 기록 `docs/rules/focusmon.md`.
-  ⑩ **접속 자동 준비(v3.18.0 · 회귀 `focusMonPrep3180` · web `focusMonPrep`)**: 키 기능 `focus-mon-prep` 을 직접 켠 키만 · 준비 파일은 `sshd -T` **읽기만**(막혀 있으면 아무것도 안 바꿈) ·
-     공개키는 **그 계정 권한으로**(runuser) · 있는 계정은 안 바꿈 · 수집 계정 root 거부 · 엣지는 caps 'prep' + credPrep · 고르지 않은 설치 결과 무시. 상세 `docs/rules/focusmon.md`.
+  ⑨ **자동 설치 · 설치 디렉터리(v3.17.0 · 회귀 `focusMonInstall3170`)**: 판정 `bundle.dirIssue` 하나 · 설치 계정은 **맡은 노드**의 SSH 공용 접속(직접 켠 키만) · 비밀번호 없는 sudo ·
+     디렉터리 검사(위쪽 · 심링크 · 네트워크 FS · noexec) · **caps 'install' 을 실은 엣지에만** · 'ok' 는 중앙이 재판정 · 같은 서버 다른 계정은 거부 · 문 = 관리자 · 소유자 등급 · 데모 차단 · OTP.
+  ⑩ **접속 자동 준비(v3.18.0 · 회귀 `focusMonPrep3180`)**: `focus-mon-prep` 을 직접 켠 키만 · `sshd -T` **읽기만** · 공개키는 **그 계정 권한으로**(runuser) · 있는 계정은 안 바꿈 · caps 'prep' + credPrep.
+  ⑪ **v3.54.0 보강(회귀 `focusMonBundleA3540`)**: 엣지 root 작업은 맡은 서버 목록과 같은 접속처일 때만(`jobTargetKnown`) · 공통 계정은 **엣지가 아는 서버에만**(`installCredFor` 의 `local` — 엣지에서 빠지면 닫힘 'not-local') ·
+     같은 서버 = `sameMachine.machineIndex`(주소 + **같은 노드의** 인벤토리 VM · 호스트 이름 — 새 근거를 노드 밖으로 넓히지 말 것) · 설치 · 준비 'lost' 는 lastInstall · lastPrep 에(lastError 아님) ·
+     sudo 판정은 **sudo 에게 명령으로** 묻고 모르면 넣지 않음(acct-sudo-unknown — 글자 검사로 되돌리지 말 것) · root 파일은 `selfTimeoutLines`(원격 시한 + KILL < exec 시한 — 시험 고정).
+  ⑨ ~ ⑪ 상세 · 반증 기록 `docs/rules/focusmon.md`.
