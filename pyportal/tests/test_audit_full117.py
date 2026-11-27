@@ -455,9 +455,18 @@ class SettingsWithoutHistoryTest(HttpCase):
 class DeepJsonTest(HttpCase):
     def test_deeply_nested_body_is_a_400(self):
         """F4(재현): 예전에는 RecursionError → 500 + traceback(미인증 요청마다)."""
-        body = b"[" * 200000 + b"]" * 200000
+        # 보안 잔여 11-27 L12(fix1 S2): 미인증 본문은 64KiB 까지만 읽는다 — 깊이 3만(60KB)은 그 안이라 JSON 파서까지 가고
+        #   재귀 한도를 넘는다(실측 RecursionError). 상한을 넘는 깊은 본문은 읽기 전에 401(역시 500 아님).
+        body = b"[" * 30000 + b"]" * 30000
         code, payload = raw_request(self.url + "/api/health/check", "POST", body)
         self.assertEqual(code, 400, payload)
+        self.assertNotEqual(payload.get("code"), "internal_error")
+        big = b"[" * 200000 + b"]" * 200000
+        try:
+            code, payload = raw_request(self.url + "/api/health/check", "POST", big)
+        except (ConnectionError, urllib.error.URLError):
+            code, payload = None, {}   # 읽기 전에 닫혀 보내던 본문에 RST 가 날 수 있다 — 500 만 아니면 된다
+        self.assertNotEqual(code, 500, payload)
         self.assertNotEqual(payload.get("code"), "internal_error")
 
 

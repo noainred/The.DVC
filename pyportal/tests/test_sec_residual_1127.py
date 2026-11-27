@@ -4,6 +4,8 @@
 - 연결 세마포어를 스레드 안에서(스레드 생성 뒤) 5초 기다려, 거절될 연결에도 스레드가 먼저 생겼다.
 - 형제: EOF 로 끝난 헤더 · 짧게 끝난 본문 · 잘못된 Content-Length 를 그대로 라우팅했다.
 - 반증(설계 2차): keep-alive 로 자리를 무기한 쥐기 · 가득 찼을 때 즉시 거절의 '빈자리 복권' · 선언 길이로 늘어나는 본문 시한.
+- 반증 1회차(fix1): 자리 넘기기가 공격 중 정상 keep-alive 만 끊음(M1) · 느린 읽기(응답 쓰기)에 전체 시한 없음 · 대기 줄 앞 막힘(S1) ·
+  미인증 큰 본문을 최저 속도로 흘려 자리 보유(S2) · Content-Length 의 유니코드 공백(N1) · shutdown 뒤 재가동(N2).
 
 실제 127.0.0.1 소켓을 쓴다. 시한은 config 를 patch(create=True)하거나 서버 속성으로 줄인다 —
 수정 전 판본에서도 TypeError 가 아니라 단언으로 실패하게.
@@ -117,10 +119,11 @@ class InboundCase(ServerCase):
     """ServerCase 의 ctx · admin 토큰을 쓰고, 시험마다 시한을 줄인 서버를 따로 띄운다."""
 
     def _server(self, *, header=10.0, rate=16384, cap=300.0, max_connections=64, per_client=0,
-                admit_wait=None, handler=None, cls=None):
+                admit_wait=None, handler=None, cls=None, reclaim_after=None, preauth=65536):
         patches = [mock.patch.object(config, "header_timeout", header, create=True),
                    mock.patch.object(config, "body_min_rate", rate, create=True),
-                   mock.patch.object(config, "body_timeout_max", cap, create=True)]
+                   mock.patch.object(config, "body_timeout_max", cap, create=True),
+                   mock.patch.object(config, "preauth_max_body", preauth, create=True)]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -128,6 +131,8 @@ class InboundCase(ServerCase):
                                             max_connections=max_connections, max_per_client=per_client)
         if admit_wait is not None:
             srv.admit_wait = admit_wait
+        if reclaim_after is not None:
+            srv.reclaim_after = reclaim_after
         thread = threading.Thread(target=srv.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(srv.server_close)
@@ -289,7 +294,9 @@ class KeepAliveTest(InboundCase):
 
 
 class BodyDeadlineTest(InboundCase):
-    def _post(self, port, length, extra_headers=b""):
+    def _post(self, port, length, extra_headers=b"", auth=False):
+        if auth:   # fix1 S2: 64KiB 넘는 본문은 로그인 세션이 있어야 읽는다(미인증은 읽기 전에 401)
+            extra_headers = b"X-Settings-Token: " + self.token.encode() + b"\r\n" + extra_headers
         sock = _open(port)
         self.addCleanup(sock.close)
         sock.sendall(b"POST /api/shortcuts HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
@@ -300,7 +307,7 @@ class BodyDeadlineTest(InboundCase):
         """T2 + 반증 M-3: 1MiB 를 선언하고 1바이트씩 — 받은 바이트만큼만 늘어나 base(0.5초) 근처에서 408."""
         with _capture():
             srv, port = self._server(header=0.5, rate=16384, cap=300.0)
-            sock = self._post(port, 1048576)
+            sock = self._post(port, 1048576, auth=True)
             t0 = time.monotonic()
             status = ""
             body = b""
@@ -336,7 +343,7 @@ class BodyDeadlineTest(InboundCase):
         """M4: 최저 속도를 넘겨 보내더라도 본문 전체 시한 상한(1초)에서 408."""
         with _capture():
             srv, port = self._server(header=0.3, rate=1024, cap=1.0)
-            sock = self._post(port, 100000)
+            sock = self._post(port, 100000, auth=True)
             t0 = time.monotonic()
             sock.settimeout(0.05)
             buf = b""
@@ -364,7 +371,7 @@ class BodyDeadlineTest(InboundCase):
         """408 뒤 짧은 린저: 시한 뒤에도 본문을 보내는 상대에게 바로 RST 를 주지 않는다(읽지 않은 채 닫으면 RST 로 응답이 버려질 수 있다)."""
         with _capture():
             srv, port = self._server(header=0.3)
-            sock = self._post(port, 500000)
+            sock = self._post(port, 500000, auth=True)
             sock.sendall(b"x" * 10)
             status, headers, _ = _read_response(sock)
             self.assertIn(" 408 ", status)
@@ -388,10 +395,26 @@ class BodyDeadlineTest(InboundCase):
             status, _, body = _read_response(sock)
             self.assertIn(" 401 ", status, "정상 속도의 본문이 시한에 걸렸다")
             self.assertEqual(json.loads(body.decode())["code"], "settings_login_required")
-            big = self._post(port, 900000)
+            big = self._post(port, 900000, auth=True)
             big.sendall(b" " * 900000)
             status, _, body = _read_response(big)
-            self.assertIn(" 401 ", status)
+            self.assertIn(" 400 ", status, "로그인 세션의 빠른 대용량 본문이 처리기까지 가지 않았다")
+
+    def test_expect_100_continue_does_not_start_the_write_clock(self):
+        """fix1: 'Expect: 100-continue' 의 100 응답이 연 쓰기 단계는 본문을 받기 전에 닫는다 — base(0.5초)보다 오래 걸린 정상 속도의
+        본문(약 1초)도 최종 응답을 받는다(열어 두면 본문 수신 시간이 쓰기 시한에 들어가 응답 없이 끊긴다)."""
+        with _capture():
+            srv, port = self._server(header=0.5, rate=1024, cap=30.0)
+            sock = self._post(port, 2000, b"Expect: 100-continue\r\n", auth=True)
+            sock.settimeout(3)
+            first = sock.recv(100)
+            self.assertTrue(first.startswith(b"HTTP/1.1 100 "), first)
+            for _ in range(10):
+                sock.sendall(b" " * 200)   # 2000B/s > 1024B/s
+                time.sleep(0.1)
+            status = _read_response(sock)[0]
+            self.assertIn(" 400 ", status, "100-continue 뒤 정상 속도 본문의 응답이 쓰기 시한에 잘렸다")
+            self.assertEqual(self._drops(srv, "write"), 0)
 
     def test_short_body_is_not_routed(self):
         """T4: 끝까지 오지 않은 본문(SHUT_WR) — 앞부분이 유효한 JSON 이어도 저장하지 않고 400."""
@@ -471,9 +494,9 @@ class AdmissionTest(InboundCase):
             self.assertLess(time.monotonic() - t0, 2.0)
 
     def test_idle_keepalive_is_evicted_when_full(self):
-        """반증 M-1: 유휴 keep-alive 연결은 자리를 무기한 쥐지 못한다 — 가득 차면 가장 오래 유휴한 연결을 내보낸다."""
+        """반증 M-1: 유휴 keep-alive 연결은 자리를 무기한 쥐지 못한다 — 가득 차면 reclaim_after 넘게 쉰 연결 중 가장 오래 쉰 것을 내보낸다."""
         with _capture():
-            srv, port = self._server(header=2.0, max_connections=2, admit_wait=3.0)
+            srv, port = self._server(header=2.0, max_connections=2, admit_wait=3.0, reclaim_after=0.3)
             idle = []
             for _ in range(2):
                 sock = _open(port)
@@ -482,6 +505,7 @@ class AdmissionTest(InboundCase):
                 self.assertIn(" 200 ", _read_response(sock)[0])
                 idle.append(sock)
                 time.sleep(0.05)
+            time.sleep(0.4)
             t0 = time.monotonic()
             third = _open(port)
             self.addCleanup(third.close)
@@ -491,24 +515,100 @@ class AdmissionTest(InboundCase):
             got, closed = _closed_within(idle[0], 2.0)
             self.assertIsNotNone(closed, "가장 오래 유휴한 연결이 내보내지지 않았다")
             self.assertGreaterEqual(self._drops(srv, "evicted"), 1)
+            idle[1].sendall(_GET)
+            self.assertIn(" 200 ", _read_response(idle[1])[0], "두 번째 유휴 연결까지 내보냈다(대기자 하나에 하나만)")
 
-    def test_finished_request_hands_its_slot_to_a_waiter(self):
-        """반증 M-1: 자리를 기다리는 연결이 있으면 요청을 마친 연결은 유휴로 들어가지 않고 자리를 넘긴다."""
+    def test_active_keepalive_is_not_evicted_for_a_newcomer(self):
+        """fix1: 자리가 reclaim_after(1초)보다 자주 쓰는 keep-alive 하나뿐이면 새 연결은 대기 마감에 끊기고 기존 연결은 그대로다
+        (방금 요청을 마친 연결을 내보내면 쓰는 사람을 밀어내고 새로 온 연결 — 공격 연결일 수 있다 — 을 들인다)."""
         with _capture():
-            srv, port = self._server(header=5.0, max_connections=2, admit_wait=4.0)
-            held = self._hold_partial(port, 2)
+            srv, port = self._server(header=5.0, max_connections=1, admit_wait=0.6, reclaim_after=1.0)
+            user = _open(port)
+            self.addCleanup(user.close)
+            user.sendall(_GET)
+            self.assertIn(" 200 ", _read_response(user)[0])
+            newcomer = _open(port)
+            self.addCleanup(newcomer.close)
+            newcomer.sendall(_GET_CLOSE)
+            for _ in range(5):
+                time.sleep(0.2)
+                user.sendall(_GET)
+                self.assertIn(" 200 ", _read_response(user)[0], "쓰고 있는 keep-alive 를 새 연결에 내보냈다")
+            self.assertEqual(_read_all(newcomer, 1.0), b"")
+            self.assertEqual(self._drops(srv, "full"), 1)
+            self.assertEqual(self._drops(srv, "evicted"), 0)
+
+    def test_idle_is_evicted_when_no_slow_phase_matures_before_the_deadline(self):
+        """fix1: 느린 단계 후보(헤더 0.1초째 · 1.5초 뒤 후보)가 대기 마감(1초) 전에 생기지 않으면 오래 쉰 유휴를 내보낸다 —
+        느린 후보를 마감 너머까지 기다려 새 연결을 'full' 로 끊지 않는다."""
+        with _capture():
+            srv, port = self._server(header=8.0, max_connections=2, admit_wait=1.0, reclaim_after=1.5)
+            idle = _open(port)
+            self.addCleanup(idle.close)
+            idle.sendall(_GET)
+            self.assertIn(" 200 ", _read_response(idle)[0])
+            time.sleep(1.6)   # 유휴 1.6초 > reclaim_after
+            self._hold_partial(port, 1)   # 헤더 단계 막 시작
             self.assertTrue(_wait(lambda: self._active(srv) == 2))
             third = _open(port)
             self.addCleanup(third.close)
             third.sendall(_GET_CLOSE)
-            time.sleep(0.3)
-            held[0].sendall(b"1\r\n\r\n")   # 헤더를 마친다(keep-alive)
+            self.assertIn(" 200 ", _read_response(third)[0], "대기 마감 너머의 느린 후보를 기다리느라 새 연결을 끊었다")
+            self.assertEqual(self._drops(srv, "evicted"), 1)
+            self.assertEqual(self._drops(srv, "full"), 0)
+
+    def test_recently_finished_keepalive_keeps_its_seat_and_the_slow_phase_is_reclaimed(self):
+        """fix1 M1: 기다리는 연결이 있어도 방금 요청을 마친 keep-alive 는 자리를 넘기지 않는다 — 헤더를 오래 흘리는 연결을 되찾는다.
+
+        1회차는 요청을 마친 연결이 넘겨(conn_idle) 공격 중 정상 사용자만 요청마다 끊겼다(반증 실측: 매 요청 재연결 · 느린 읽기 0/2).
+        """
+        with _capture():
+            srv, port = self._server(header=5.0, max_connections=2, admit_wait=4.0, reclaim_after=1.0)
+            held = self._hold_partial(port, 2)
+            self.assertTrue(_wait(lambda: self._active(srv) == 2))
+            t_start = time.monotonic()
+            third = _open(port)
+            self.addCleanup(third.close)
+            third.sendall(_GET_CLOSE)
+            time.sleep(0.2)
+            held[0].sendall(b"1\r\n\r\n")   # 헤더를 마친다(keep-alive) — 이제 정상 사용자다
             self.assertIn(" 200 ", _read_response(held[0])[0])
-            t0 = time.monotonic()
-            self.assertIn(" 200 ", _read_response(third)[0], "요청을 마친 keep-alive 가 자리를 넘기지 않았다")
-            self.assertLess(time.monotonic() - t0, 2.0)
-            _, closed = _closed_within(held[0], 2.0)
-            self.assertIsNotNone(closed)
+            for _ in range(4):   # 0.2초마다 같은 연결로 — reclaim_after(1초)보다 자주 쓰는 연결
+                time.sleep(0.2)
+                held[0].sendall(_GET)
+                self.assertIn(" 200 ", _read_response(held[0])[0], "방금 요청을 마친 keep-alive 가 기다리는 연결에 자리를 넘겼다")
+            self.assertIn(" 200 ", _read_response(third)[0], "헤더를 흘리는 연결을 되찾지 않았다")
+            self.assertLess(time.monotonic() - t_start, 3.0)
+            _, closed = _closed_within(held[1], 2.0)
+            self.assertIsNotNone(closed, "헤더 단계에 오래 머문 연결이 끊기지 않았다")
+            self.assertEqual(self._drops(srv, "shed"), 1)
+            self.assertEqual(self._drops(srv, "eof"), 0, "되찾긴 연결을 'EOF 로 끝난 헤더' 로 이중 집계했다")
+            held[0].sendall(_GET)
+            self.assertIn(" 200 ", _read_response(held[0])[0])
+
+    def test_request_in_processing_is_not_reclaimed(self):
+        """fix1: 헤더를 다 받은 뒤 서버가 처리 중인 요청(본문 없음)은 되찾기 대상이 아니다 — 헤더 단계를 열어 두면 처리 시간이
+        '헤더 단계' 로 보여 처리 중인 연결을 끊었다. 처리가 끝나 유휴가 된 뒤 reclaim_after 가 지나면 기다리던 연결이 받는다."""
+        real_all = self.ctx.shortcuts.all
+
+        def slow_all():
+            time.sleep(1.0)
+            return real_all()
+
+        with _capture():
+            srv, port = self._server(header=5.0, max_connections=1, admit_wait=2.5, reclaim_after=0.2)
+            with mock.patch.object(self.ctx.shortcuts, "all", side_effect=slow_all):
+                busy = _open(port)
+                self.addCleanup(busy.close)
+                busy.sendall(b"GET /api/shortcuts HTTP/1.1\r\nHost: x\r\n\r\n")
+                time.sleep(0.1)
+                waiter = _open(port)
+                self.addCleanup(waiter.close)
+                waiter.sendall(_GET_CLOSE)
+                self.assertIn(" 200 ", _read_response(busy)[0], "처리 중인 요청을 되찾았다")
+            self.assertIn(" 200 ", _read_response(waiter)[0], "처리를 마치고 쉰 연결을 되찾지 않았다")
+            self.assertEqual(self._drops(srv, "shed"), 0)
+            self.assertEqual(self._drops(srv, "evicted"), 1)
 
     def test_reconnecting_attackers_do_not_starve_a_waiting_user(self):
         """반증 M-2(exp2): 시한마다 다시 붙는 연결 8개 · 자리 4 — 정상 요청 성공률 80% 이상."""
@@ -614,10 +714,12 @@ class AdmissionTest(InboundCase):
         srv._release(b)   # noqa: SLF001
         self.assertEqual(srv._per_client, {})   # noqa: SLF001
 
-    def test_evicted_idle_connection_is_not_served(self):
-        """유휴 peek 가 첫 바이트를 받은 직후 내보내진 연결은 처리하지 않는다(conn_busy → False) · 내보내기는 유휴만 고른다."""
+    def test_reclaim_policy(self):
+        """fix1: 되찾기 대상 — 헤더 · 본문 · 쓰기에 reclaim_after 넘게 머문 연결이 먼저(오래된 순) · 그다음 오래 쉰 유휴.
+        처리 중(단계 없음) · 린저 · 로그인 세션의 본문 · 쓰기는 되찾지 않는다 · 되찾긴 연결은 다음 요청을 처리하지 않는다 ·
+        느린 단계 후보가 대기 마감 전에 생기면 유휴를 내보내지 않고 그것을 기다린다."""
         srv = server_mod.HubServer(("127.0.0.1", 0), server_mod.HubHandler, self.ctx,
-                                   max_connections=2, max_per_client=0)
+                                   max_connections=9, max_per_client=0, reclaim_after=1.0)
         self.addCleanup(srv.server_close)
 
         class FakeSock:
@@ -627,17 +729,82 @@ class AdmissionTest(InboundCase):
             def shutdown(self, how):
                 self.shut.append(how)
 
-        busy, idle = FakeSock(), FakeSock()
-        srv._admit(busy, "10.0.0.1")   # noqa: SLF001
-        srv._admit(idle, "10.0.0.2")   # noqa: SLF001
-        self.assertTrue(srv.conn_idle(idle))
+        socks = {name: FakeSock() for name in ("working", "fresh_idle", "mid_idle", "old_idle", "header", "old_header",
+                                               "trusted_body", "trusted_header", "linger")}
+        for i, sock in enumerate(socks.values()):
+            self.assertIsNone(srv._admit(sock, "10.0.0.%d" % i)[0])   # noqa: SLF001
+        now = time.monotonic()
+        seat = {name: srv._admitted[sock] for name, sock in socks.items()}   # noqa: SLF001
+        self.assertTrue(srv.conn_idle(socks["fresh_idle"]))
+        self.assertTrue(srv.conn_idle(socks["old_idle"]))
+        self.assertTrue(srv.conn_idle(socks["mid_idle"]))
+        seat["old_idle"].since = now - 5
+        seat["mid_idle"].since = now - 3
+        seat["fresh_idle"].since = now - 0.5
+        seat["header"].conn.enter("header", now - 2)
+        seat["old_header"].conn.enter("header", now - 3)
+        seat["trusted_body"].conn.enter("body", now - 9)
+        seat["trusted_body"].conn.trusted = True
+        seat["trusted_header"].conn.enter("header", now - 1.5)
+        seat["trusted_header"].conn.trusted = True   # 헤더 단계는 로그인 여부를 아직 모른다 — 대상
+        seat["linger"].conn.enter("linger", now - 9)
+        seat["working"].since = now - 9          # 처리 중(단계 없음) — 대상 아님
+        order = []
         with srv._cond:   # noqa: SLF001
-            self.assertEqual(srv._evict_idle_locked(), 1)   # noqa: SLF001
-            self.assertEqual(srv._evict_idle_locked(), 0, "처리 중(busy)인 연결을 내보냈다")   # noqa: SLF001
-        self.assertEqual(idle.shut, [socket.SHUT_RDWR])
-        self.assertEqual(busy.shut, [])
-        self.assertFalse(srv.conn_busy(idle), "내보낸 연결이 다음 요청을 처리했다")
-        self.assertTrue(srv.conn_busy(busy))
+            for _ in range(6):
+                kind, next_at = srv._reclaim_one_locked(now)   # noqa: SLF001
+                if kind is None:
+                    break
+                victim = [name for name, st in seat.items() if st.state == "evicted" and name not in order]
+                order.append(victim[0])
+                self.assertEqual(kind, "evicted" if victim[0].endswith("idle") else "shed")
+        self.assertEqual(order, ["old_header", "header", "trusted_header", "old_idle", "mid_idle"])
+        self.assertAlmostEqual(next_at, now + 0.5, delta=0.01)   # 다음 후보: fresh_idle 이 1초를 채우는 때
+        for name in ("working", "fresh_idle", "trusted_body", "linger"):
+            self.assertEqual(socks[name].shut, [], name + " 을(를) 되찾았다")
+            self.assertFalse(seat[name].conn.shed)
+        for name in order:
+            self.assertEqual(socks[name].shut, [socket.SHUT_RDWR])
+            self.assertTrue(seat[name].conn.shed)
+        self.assertFalse(srv.conn_busy(socks["old_idle"]), "내보낸 연결이 다음 요청을 처리했다")
+        self.assertFalse(srv.conn_idle(socks["old_header"]), "되찾은 연결이 유휴로 남았다")
+        self.assertTrue(srv.conn_busy(socks["working"]))
+        with srv._cond:   # noqa: SLF001
+            self.assertTrue(srv._reclaim_pending_locked(now + 0.5))   # noqa: SLF001
+            self.assertFalse(srv._reclaim_pending_locked(now + 1.5), "돌아오지 않는 자리가 되찾기를 영원히 막는다")   # noqa: SLF001
+        # 유휴(5초 쉼) 하나 + 헤더 단계 0.6초째(0.4초 뒤 후보) — 마감이 그 뒤면 기다리고, 그 전이면 유휴를 내보낸다
+        srv2 = server_mod.HubServer(("127.0.0.1", 0), server_mod.HubHandler, self.ctx,
+                                    max_connections=2, max_per_client=0, reclaim_after=1.0)
+        self.addCleanup(srv2.server_close)
+        user, slow = FakeSock(), FakeSock()
+        srv2._admit(user, "10.0.0.1")   # noqa: SLF001
+        srv2._admit(slow, "10.0.0.2")   # noqa: SLF001
+        self.assertTrue(srv2.conn_idle(user))
+        now = time.monotonic()
+        srv2._admitted[user].since = now - 5   # noqa: SLF001
+        srv2._admitted[slow].conn.enter("header", now - 0.6)   # noqa: SLF001
+        with srv2._cond:   # noqa: SLF001
+            kind, next_at = srv2._reclaim_one_locked(now, now + 2.0)   # noqa: SLF001
+            self.assertIsNone(kind, "곧 느린 단계 후보가 생기는데 쉬고 있던 정상 연결을 내보냈다")
+            self.assertAlmostEqual(next_at, now + 0.4, delta=0.01)
+            self.assertEqual(user.shut, [])
+            kind, _ = srv2._reclaim_one_locked(now + 0.5, now + 2.0)   # noqa: SLF001
+            self.assertEqual(kind, "shed")
+            self.assertEqual((user.shut, slow.shut), ([], [socket.SHUT_RDWR]))
+        srv3 = server_mod.HubServer(("127.0.0.1", 0), server_mod.HubHandler, self.ctx,
+                                    max_connections=2, max_per_client=0, reclaim_after=1.0)
+        self.addCleanup(srv3.server_close)
+        user, slow = FakeSock(), FakeSock()
+        srv3._admit(user, "10.0.0.1")   # noqa: SLF001
+        srv3._admit(slow, "10.0.0.2")   # noqa: SLF001
+        self.assertTrue(srv3.conn_idle(user))
+        now = time.monotonic()
+        srv3._admitted[user].since = now - 5   # noqa: SLF001
+        srv3._admitted[slow].conn.enter("header", now - 0.6)   # noqa: SLF001
+        with srv3._cond:   # noqa: SLF001
+            kind, _ = srv3._reclaim_one_locked(now, now + 0.2)   # noqa: SLF001
+        self.assertEqual(kind, "evicted", "대기 마감 전에 느린 후보가 없는데 유휴를 내보내지 않았다")
+        self.assertEqual((user.shut, slow.shut), ([socket.SHUT_RDWR], []))
 
     @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "리눅스 전용")
     def test_no_fd_leak(self):
@@ -659,6 +826,410 @@ class AdmissionTest(InboundCase):
             self.assertTrue(_wait(lambda: srv.active_connections() == 0))
             time.sleep(0.2)
             self.assertLessEqual(len(os.listdir("/proc/self/fd")), base + 3)
+
+
+_FONT = b"GET /fonts/PretendardVariable.woff2 HTTP/1.1\r\nHost: x\r\n\r\n"
+
+
+def _slow_reader(port, stop, rcvbuf=1024):
+    """큰 정적 파일(폰트 2MB)을 요청하고 읽지 않는다. 서버가 끊으면 다시 붙는다(반증 refute_g5._slow_reader 와 같은 꼴)."""
+    while time.monotonic() < stop:
+        try:
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
+            s.settimeout(2)
+            s.connect(("127.0.0.1", port))
+            s.sendall(_FONT)
+            s.settimeout(0.2)
+            while time.monotonic() < stop:
+                try:
+                    if s.recv(1, socket.MSG_PEEK) == b"":
+                        break
+                    time.sleep(0.2)
+                except socket.timeout:
+                    pass
+                except OSError:
+                    break
+                try:
+                    s.send(b"x")
+                except OSError:
+                    break
+            s.close()
+        except OSError:
+            time.sleep(0.05)
+
+
+def _dripper(port, stop):
+    """헤더를 0.05초마다 1바이트씩 — 끊기면 다시 붙는다."""
+    while time.monotonic() < stop:
+        try:
+            a = socket.create_connection(("127.0.0.1", port), timeout=1)
+            a.settimeout(0.05)
+            a.sendall(b"GET / HTTP/1.1\r\nX: ")
+            while time.monotonic() < stop:
+                try:
+                    a.sendall(b"a")
+                    if a.recv(10) == b"":
+                        break
+                except socket.timeout:
+                    pass
+                except OSError:
+                    break
+                time.sleep(0.05)
+            a.close()
+        except OSError:
+            time.sleep(0.02)
+
+
+def _min_rate_poster(port, stop, length, per_tick, path=b"/api/health/check", extra=b""):
+    """미인증 본문을 최저 속도를 겨우 넘겨(0.1초마다 per_tick 바이트) 보낸다 — 끊기면 다시 붙는다."""
+    while time.monotonic() < stop:
+        try:
+            a = socket.create_connection(("127.0.0.1", port), timeout=2)
+            a.sendall(b"POST " + path + b" HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n" + extra
+                      + b"Content-Length: " + str(length).encode() + b"\r\n\r\n")
+            sent = 0
+            while time.monotonic() < stop and sent < length:
+                a.sendall(b" " * per_tick)
+                sent += per_tick
+                time.sleep(0.1)
+            a.close()
+        except OSError:
+            time.sleep(0.05)
+
+
+class UnderAttackTest(InboundCase):
+    """fix1 M1 · S1 · S2: 공격 중에도 기존 keep-alive 가 그대로 쓰이고, 새 사용자도 들어온다.
+
+    축소 비율: 헤더 시한 1초 · 대기 상한 1초 · 되찾기 0.5초(운영 10 · 10 · 5 의 1/10). 자리 4.
+    수정 전(a821fd9e)은 기존 연결이 세마포어 칸을 쥐고 있어 '기존 keep-alive' 시험은 통과한다(회귀 지킴이) —
+    1회차(8708d24f)는 요청을 마친 연결이 자리를 넘겨 실패했다(반증 실측: 매 요청 재연결 · 느린 읽기 0/2).
+    """
+
+    def _keepalive_user(self, port):
+        sock = _open(port)
+        self.addCleanup(sock.close)
+        sock.sendall(_GET)
+        self.assertIn(" 200 ", _read_response(sock)[0])
+        return sock
+
+    def _use(self, sock, seconds, gap):
+        results = []
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            t0 = time.monotonic()
+            try:
+                sock.settimeout(3)
+                sock.sendall(_GET)
+                ok = " 200 " in _read_response(sock)[0]
+            except OSError:
+                ok = False
+            results.append((ok, round(time.monotonic() - t0, 2)))
+            if not ok:
+                break
+            time.sleep(gap)
+        return results
+
+    def _attack(self, target, count, seconds, *args):
+        stop = time.monotonic() + seconds
+        threads = [threading.Thread(target=target, args=(self._port, stop) + args, daemon=True) for _ in range(count)]
+        for t in threads:
+            t.start()
+        self.addCleanup(lambda: [t.join(5) for t in threads])
+        return stop
+
+    def _new_users(self, stop, margin=1.0, read=3.0):
+        ok = tries = 0
+        waits = []
+        while time.monotonic() < stop - margin:
+            tries += 1
+            t0 = time.monotonic()
+            try:
+                c = socket.create_connection(("127.0.0.1", self._port), timeout=3)
+                c.settimeout(0.5)
+                c.sendall(_GET_CLOSE)
+                if _read_all(c, read).startswith(b"HTTP/1.1 200 "):
+                    ok += 1
+                    waits.append(round(time.monotonic() - t0, 2))
+                c.close()
+            except OSError:
+                pass
+            time.sleep(0.2)
+        return ok, tries, waits
+
+    def test_existing_keepalive_keeps_working_under_drip_attack(self):
+        with _capture():
+            srv, self._port = self._server(header=1.0, max_connections=4, admit_wait=1.0)
+            user = self._keepalive_user(self._port)
+            self._attack(_dripper, 8, 4.5)
+            results = self._use(user, 3.8, 0.6)   # 반증 경계: 요청 사이 0.6초 쉼 > 되찾기 0.5초 — 그래도 느린 공격 연결이 먼저 끊긴다
+        self.assertGreaterEqual(len(results), 4)
+        self.assertTrue(all(ok for ok, _ in results), "공격 중 기존 keep-alive 가 끊겼다: {}".format(results))
+        self.assertLess(max(d for _, d in results), 0.5, results)
+
+    def test_existing_keepalive_keeps_working_under_slow_read_attack(self):
+        with _capture():
+            srv, self._port = self._server(header=1.0, max_connections=4, admit_wait=1.0)
+            user = self._keepalive_user(self._port)
+            self._attack(_slow_reader, 16, 4.5)
+            results = self._use(user, 3.8, 0.6)   # 반증 경계: 요청 사이 0.6초 쉼 > 되찾기 0.5초 — 그래도 느린 공격 연결이 먼저 끊긴다
+        self.assertGreaterEqual(len(results), 4)
+        self.assertTrue(all(ok for ok, _ in results), "느린 읽기 공격 중 기존 keep-alive 가 끊겼다: {}".format(results))
+        self.assertLess(max(d for _, d in results), 0.5, results)
+
+    def test_new_users_get_in_during_slow_read_attack(self):
+        """반증 S1: 느린 읽기 16연결(자리 4) — 응답 쓰기 시한 + 되찾기로 보유가 짧아져 대기 줄이 막히지 않는다."""
+        with _capture():
+            srv, self._port = self._server(header=1.0, max_connections=4, admit_wait=1.0)
+            stop = self._attack(_slow_reader, 16, 8.0)
+            time.sleep(0.8)
+            ok, tries, waits = self._new_users(stop)
+            drops = dict(srv.inbound_drops) if hasattr(srv, "inbound_drops") else {}
+        # 공격 연결 16개가 자리 4개 앞에 줄을 선다 — 새 사용자는 FIFO 로 약 1.5~2초 기다린다(되찾기 0.5초마다 4자리 · 실측)
+        self.assertGreaterEqual(tries, 3)
+        self.assertGreaterEqual(ok / tries, 0.8, "느린 읽기 중 새 사용자 {}/{} · {} · {}".format(ok, tries, waits, drops))
+        self.assertGreater(drops.get("write", 0) + drops.get("shed", 0), 0)
+
+    def test_new_users_get_in_while_min_rate_bodies_hold_seats(self):
+        """반증 S2: 최저 속도를 겨우 넘는 미인증 본문 8연결(자리 4 · 본문은 미인증 상한 안) — 되찾기로 새 사용자가 들어온다."""
+        with _capture():
+            srv, self._port = self._server(header=1.0, rate=1024, cap=60.0, max_connections=4, admit_wait=1.0)
+            stop = self._attack(_min_rate_poster, 8, 6.0, 60000, 150)   # 1500B/s > 1024B/s · 6만 바이트 < 미인증 상한
+            time.sleep(0.8)
+            ok, tries, waits = self._new_users(stop)
+            drops = dict(srv.inbound_drops) if hasattr(srv, "inbound_drops") else {}
+        self.assertGreaterEqual(tries, 4)
+        self.assertGreaterEqual(ok / tries, 0.8, "최저 속도 본문 중 새 사용자 {}/{} · {} · {}".format(ok, tries, waits, drops))
+
+
+class WriteDeadlineTest(InboundCase):
+    def test_non_reading_client_is_cut_at_the_write_deadline(self):
+        """fix1 M1(a): 응답을 읽지 않는 연결 — 쓰기 단계 시한(base 0.5초 + 상대가 받은 바이트/최저 속도)에서 끊긴다.
+
+        수정 전에는 sendall 1회에 소켓 시한 20초라 쓰기마다 20초를 쥐었다. 보낸 바이트(커널 송신 버퍼)로 세면 루프백에서 20초였다(실측).
+        """
+        with _capture() as out:
+            srv, port = self._server(header=0.5)
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+            self.addCleanup(s.close)
+            s.connect(("127.0.0.1", port))
+            s.sendall(_FONT)
+            self.assertTrue(_wait(lambda: self._active(srv) == 1, 2.0))
+            t0 = time.monotonic()
+            self.assertTrue(_wait(lambda: self._active(srv) == 0, 6.0), "읽지 않는 연결이 6초 동안 자리를 쥐었다")
+            self.assertLess(time.monotonic() - t0, 4.0)
+            self.assertEqual(self._drops(srv, "write"), 1)
+            time.sleep(0.1)
+        self.assertNotIn("Traceback", out.getvalue())
+        self.assertNotIn("BrokenPipe", out.getvalue())
+        self.assertIn("응답 쓰기 시한 초과 1건", out.getvalue())
+
+    def test_reading_clients_get_the_whole_file(self):
+        """정상 읽기는 그대로 — 2MB 폰트를 빠르게 · 최저 속도의 몇 배로(약 100KB/s · base 0.5초보다 훨씬 오래) 끝까지 받는다."""
+        with _capture():
+            srv, port = self._server(header=0.5, rate=16384)
+            size = (server_mod.STATIC_DIR / "fonts" / "PretendardVariable.woff2").stat().st_size
+            fast = _open(port)
+            self.addCleanup(fast.close)
+            fast.sendall(_FONT)
+            status, _, body = _read_response(fast)
+            self.assertIn(" 200 ", status)
+            self.assertEqual(len(body), size)
+            slow = socket.socket()
+            slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16384)
+            self.addCleanup(slow.close)
+            slow.connect(("127.0.0.1", port))
+            slow.settimeout(5)
+            slow.sendall(b"GET /app.js HTTP/1.1\r\nHost: x\r\n\r\n")
+            data = b""
+            t0 = time.monotonic()
+            want = None
+            while want is None or len(data) < want:
+                chunk = slow.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if want is None and b"\r\n\r\n" in data:
+                    head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1")
+                    length = [int(x.split(":", 1)[1]) for x in head.split("\r\n") if x.lower().startswith("content-length:")][0]
+                    want = len(head) + 4 + length
+                time.sleep(0.04)   # 4KB/0.04초 ≈ 100KB/s
+            self.assertEqual(len(data), want, "최저 속도보다 빠르게 읽는 연결이 끊겼다")
+            self.assertGreater(time.monotonic() - t0, 0.6, "읽기 속도 제한이 걸리지 않았다(시험 무효)")
+            slow.sendall(_GET)   # 같은 연결의 다음 요청도 그대로(앞 응답의 쓰기 단계가 남지 않는다)
+            self.assertIn(" 200 ", _read_response(slow)[0])
+            self.assertEqual(self._drops(srv, "write"), 0)
+
+
+class ReclaimTest(InboundCase):
+    def test_trusted_upload_is_not_reclaimed_but_anonymous_one_is(self):
+        """fix1: 가득 찼을 때 미인증 본문(최저 속도 이상)은 되찾기 대상 · 로그인 세션의 업로드는 대상이 아니다."""
+        with _capture():
+            srv, port = self._server(header=2.0, rate=1024, cap=30.0, max_connections=1, admit_wait=1.0,
+                                     reclaim_after=0.3)
+            payload = b" " * 3000
+
+            def upload(extra):
+                s = _open(port)
+                self.addCleanup(s.close)
+                s.sendall(b"POST /api/shortcuts HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n" + extra
+                          + b"Content-Length: 3000\r\n\r\n")
+                return s
+
+            # ① 로그인 세션 — 3000B 를 약 2000B/s 로(1.5초) · 기다리는 연결이 있어도 끝까지 받고 답한다
+            trusted = upload(b"X-Settings-Token: " + self.token.encode() + b"\r\n")
+            time.sleep(0.1)
+            waiter = _open(port)
+            self.addCleanup(waiter.close)
+            waiter.sendall(_GET_CLOSE)
+            for i in range(0, 3000, 200):
+                trusted.sendall(payload[i:i + 200])
+                time.sleep(0.1)
+            status = _read_response(trusted)[0]
+            self.assertIn(" 400 ", status, "로그인 세션의 업로드를 되찾았다")   # 공백 본문 = JSON 오류(처리기까지 갔다)
+            self.assertEqual(self._drops(srv, "shed"), 0)
+            self.assertEqual(_read_all(waiter, 1.0), b"")   # 대기 상한(1초) 안에 자리가 나지 않았다
+            # ② 미인증 — 같은 속도의 업로드는 되찾긴다
+            trusted.close()
+            self.assertTrue(_wait(lambda: self._active(srv) == 0))
+            anon = upload(b"")
+            time.sleep(0.1)
+            waiter2 = _open(port)
+            self.addCleanup(waiter2.close)
+            waiter2.sendall(_GET_CLOSE)
+            t0 = time.monotonic()
+            for i in range(0, 1400, 200):
+                try:
+                    anon.sendall(payload[i:i + 200])
+                except OSError:
+                    break
+                time.sleep(0.1)
+            self.assertIn(" 200 ", _read_response(waiter2)[0], "미인증 느린 본문을 되찾지 않았다")
+            self.assertLess(time.monotonic() - t0, 1.5)
+            self.assertEqual(_read_all(anon, 1.0), b"", "되찾긴 연결에 응답했다")
+            self.assertEqual(self._drops(srv, "shed"), 1)
+            self.assertEqual(self._drops(srv, "body"), 0, "되찾기를 본문 시한 초과로 이중 집계했다")
+
+
+class PreauthBodyTest(InboundCase):
+    def _ask(self, port, head, limit=1.5):
+        sock = _open(port)
+        self.addCleanup(sock.close)
+        sock.sendall(head)
+        t0 = time.monotonic()
+        sock.settimeout(limit)
+        try:
+            status, headers, body = _read_response(sock)
+        except socket.timeout:
+            status, headers, body = "", "", b""
+        return status, headers, body, time.monotonic() - t0
+
+    def test_large_anonymous_body_is_refused_before_reading(self):
+        """반증 S2: 로그인 세션 없는 64KiB 초과 본문은 읽기 전에 401 + 닫기(본문 시한 3초를 기다리지 않는다)."""
+        with _capture():
+            srv, port = self._server(header=3.0, preauth=65536)
+            head = (b"POST /api/nothing HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                    b"Content-Length: 1000000\r\n\r\n")
+            status, headers, body, took = self._ask(port, head)
+            self.assertIn(" 401 ", status, "미인증 큰 본문을 읽기 시작했다")
+            self.assertLess(took, 1.0)
+            self.assertIn("Connection: close", headers)
+            self.assertEqual(json.loads(body.decode())["code"], "settings_login_required")
+            self.assertEqual(self._drops(srv, "body"), 0)
+            status, _, _, _ = self._ask(port, head.replace(b"/api/nothing", b"/upload"))
+            self.assertIn(" 404 ", status)
+            with mock.patch.object(config, "token", "hub-secret"):
+                status, _, body, _ = self._ask(port, head)
+                self.assertIn(" 401 ", status)
+                self.assertEqual(json.loads(body.decode())["code"], "hub_token_required")
+            # 미인증 상한 안의 본문은 그대로 읽고 라우팅한다(로그인 실패 401 — 처리기까지 갔다)
+            login = json.dumps({"username": "nobody", "password": "x" * 100}).encode()
+            sock = _open(port)
+            self.addCleanup(sock.close)
+            sock.sendall(b"POST /api/settings/session HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                         b"Content-Length: " + str(len(login)).encode() + b"\r\n\r\n" + login)
+            status, _, body = _read_response(sock)
+            self.assertIn(" 401 ", status)
+            self.assertIn("사용자명 또는 비밀번호", json.loads(body.decode())["error"])
+            # 로그인 세션이면 큰 본문도 읽는다
+            sock = _open(port)
+            self.addCleanup(sock.close)
+            sock.sendall(b"POST /api/shortcuts HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nX-Settings-Token: "
+                         + self.token.encode() + b"\r\nContent-Length: 200000\r\n\r\n" + b" " * 200000)
+            status, _, _ = _read_response(sock)
+            self.assertIn(" 400 ", status)
+
+    def test_content_length_rejects_non_ows_whitespace(self):
+        """반증 N1: Content-Length 앞뒤 공백은 SP · HTAB 만 — '2\\xa0' · '\\x0b' · '\\x0c' · '\\x1c' 는 400(1회차는 404 = 라우팅됨)."""
+        with _capture():
+            srv, port = self._server(header=3.0)
+            for value in (b"2\xa0", b"\x0b2", b"2\x0c", b"2\x1c"):
+                with self.subTest(value=value):
+                    sock = _open(port)
+                    self.addCleanup(sock.close)
+                    sock.sendall(b"POST /api/nothing HTTP/1.1\r\nHost: x\r\nContent-Length: " + value + b"\r\n\r\n{}")
+                    data = _read_all(sock, 3.0)
+                    self.assertTrue(data.startswith(b"HTTP/1.1 400 "), data[:60])
+            sock = _open(port)
+            self.addCleanup(sock.close)
+            sock.sendall(b"POST /api/nothing HTTP/1.1\r\nHost: x\r\nContent-Length: \t2 \r\nConnection: close\r\n\r\n{}")
+            self.assertTrue(_read_all(sock, 3.0).startswith(b"HTTP/1.1 404 "), "OWS(SP · HTAB)는 받아야 한다")
+
+
+class QuietCloseTest(InboundCase):
+    def test_client_reset_mid_header_leaves_no_traceback(self):
+        """fix1: 요청 도중 RST 로 끊는 연결 — stdlib 'Exception occurred during processing' traceback 을 남기지 않는다
+        (미인증 연결이 RST 만으로 로그를 채우지 못하게)."""
+        err = io.StringIO()
+        with _capture() as out, mock.patch("sys.stderr", new=err):
+            srv, port = self._server(header=3.0)
+            for _ in range(3):
+                s = _open(port)
+                s.sendall(b"GET /api/meta HTTP/1.1\r\nHost: x\r\nX-A: ")
+                self.assertTrue(_wait(lambda: self._active(srv) == 1))
+                time.sleep(0.1)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+                s.close()   # SO_LINGER 0 → RST
+                self.assertTrue(_wait(lambda: self._active(srv) == 0))
+            time.sleep(0.2)
+        self.assertNotIn("Traceback", err.getvalue() + out.getvalue())
+        self.assertNotIn("Exception occurred", err.getvalue() + out.getvalue())
+
+    def test_deadline_inside_a_route_closes_quietly(self):
+        """fix1: 라우트 응답을 쓰는 중의 쓰기 시한 · 자리 되찾기(InboundDeadline)는 _dispatch 의 최종 except 가 500 을 덧쓰거나
+        'ERROR unhandled' traceback 을 남기지 않고 핸들러가 조용히 닫는다."""
+        from hub.inbound import InboundDeadline
+        err = io.StringIO()
+        with _capture() as out, mock.patch("sys.stderr", new=err):
+            srv, port = self._server(header=3.0)
+            with mock.patch.object(self.ctx.shortcuts, "all", side_effect=InboundDeadline("write")):
+                s = _open(port)
+                self.addCleanup(s.close)
+                s.sendall(b"GET /api/shortcuts HTTP/1.1\r\nHost: x\r\n\r\n")
+                self.assertEqual(_read_all(s, 2.0), b"")
+            self.assertTrue(_wait(lambda: self._drops(srv, "write") == 1))
+        self.assertNotIn("ERROR unhandled", out.getvalue())
+        self.assertNotIn("Traceback", err.getvalue() + out.getvalue())
+
+
+class RestartTest(InboundCase):
+    def test_serve_forever_again_after_shutdown_still_waits_for_a_seat(self):
+        """반증 N2: shutdown 뒤 같은 객체로 다시 serve_forever — 가득 찼을 때 대기 없이 전부 'full' 로 끊지 않는다."""
+        with _capture():
+            srv, port = self._server(header=5.0, max_connections=1, admit_wait=3.0)
+            srv.shutdown()
+            thread = threading.Thread(target=srv.serve_forever, daemon=True)
+            thread.start()
+            held = self._hold_partial(port, 1)
+            self.assertTrue(_wait(lambda: self._active(srv) == 1))
+            waiting = _open(port)
+            self.addCleanup(waiting.close)
+            waiting.sendall(_GET_CLOSE)
+            time.sleep(0.4)
+            held[0].close()
+            self.assertIn(" 200 ", _read_response(waiting)[0], "재가동한 서버가 자리를 기다리지 않고 끊었다")
+            self.assertEqual(self._drops(srv, "full"), 0)
 
 
 class UnitTest(unittest.TestCase):
@@ -711,6 +1282,118 @@ class UnitTest(unittest.TestCase):
         self.assertEqual(idle_reader.read(10), b"")
         self.assertTrue(idle_rx.eof_in_phase)
 
+    def test_phase_writer(self):
+        """fix1 M1(a): 쓰기 단계 — 첫 write 에 auto 로 열림 · 조각 단위 · 끝나면 소켓 시한은 유휴 값 · 최저 속도 미만이면 시한 ·
+        되찾긴 연결(shed)의 쓰기 오류는 InboundDeadline('shed') · 그 밖의 OSError 는 그대로 · 단계 추적(ConnPhase)."""
+        from hub.inbound import ConnPhase, InboundDeadline, PhaseWriter, write_chunk_size
+
+        class FakeSock:
+            def __init__(self, per_byte=0.0, fail=None):
+                self.timeout = 7.0
+                self.timeouts = []
+                self.chunks = []
+                self.per_byte = per_byte
+                self.fail = fail
+
+            def settimeout(self, value):
+                self.timeout = value
+                self.timeouts.append(value)
+
+            def fileno(self):
+                return -1   # 송신 큐를 못 읽는 소켓 — 보낸 바이트로 센다
+
+            def sendall(self, data):
+                if self.fail:
+                    raise self.fail
+                need = len(data) * self.per_byte
+                if need > self.timeout:
+                    time.sleep(self.timeout)
+                    raise socket.timeout("timed out")
+                time.sleep(need)
+                self.chunks.append(len(data))
+
+        self.assertEqual(write_chunk_size(10.0, 16384), 40960)
+        self.assertEqual(write_chunk_size(0.5, 1024), 512)
+        self.assertEqual(write_chunk_size(100.0, 10 ** 8), 65536)
+        self.assertEqual(write_chunk_size(2.0, 0), 65536)
+        fast = FakeSock()
+        tracker = ConnPhase()
+        tx = PhaseWriter(fast, 7.0, tracker=tracker, auto=(1.0, 16384, 30.0))
+        self.assertEqual(tx.write(b"a" * 20000), 20000)
+        self.assertEqual(tracker.phase, "write")
+        self.assertTrue(all(n <= write_chunk_size(1.0, 16384) for n in fast.chunks))
+        self.assertEqual(sum(fast.chunks), 20000)
+        self.assertEqual(fast.timeout, 7.0, "쓰기 단계 잔여 시한이 소켓에 남았다")
+        tx.end()
+        self.assertIsNone(tracker.phase)
+        # 최저 속도(16384B/s)의 1/4 로 받는 상대 — base 0.3초 + 받은 바이트/최저 속도 안에서 끊긴다
+        slow = FakeSock(per_byte=1 / 4096)
+        tx = PhaseWriter(slow, 7.0, auto=(0.3, 16384, 30.0))
+        t0 = time.monotonic()
+        with self.assertRaises(InboundDeadline) as caught:
+            tx.write(b"b" * 200000)
+        self.assertEqual(caught.exception.phase, "write")
+        self.assertLess(time.monotonic() - t0, 1.5)
+        self.assertEqual(slow.timeout, 7.0)
+        # 최저 속도의 4배 — base(0.3초)보다 오래 걸려도 끝까지 보낸다(허용 시간이 받은 바이트만큼 는다)
+        ok = FakeSock(per_byte=1 / 65536)
+        tx = PhaseWriter(ok, 7.0, auto=(0.3, 16384, 30.0))
+        t0 = time.monotonic()
+        tx.write(b"c" * 40000)
+        self.assertGreater(time.monotonic() - t0, 0.5)
+        self.assertEqual(sum(ok.chunks), 40000)
+        # 되찾긴 연결 — 보내기 전에 표시됐으면 보내지 않고, 보내는 도중 되찾겨 깨진 파이프가 나도 'shed' 로 접는다
+        shed = ConnPhase()
+        shed.shed = True
+        before = FakeSock()
+        tx = PhaseWriter(before, 7.0, tracker=shed, auto=(1.0, 16384, 30.0))
+        with self.assertRaises(InboundDeadline) as caught:
+            tx.write(b"d")
+        self.assertEqual(caught.exception.phase, "shed")
+        self.assertEqual(before.chunks, [])
+        during = ConnPhase()
+
+        class ShedDuringSend(FakeSock):
+            def sendall(self, data):
+                during.shed = True   # 서버가 되찾으며 shutdown → 보내던 sendall 이 깨진 파이프
+                raise BrokenPipeError(32, "Broken pipe")
+
+        tx = PhaseWriter(ShedDuringSend(), 7.0, tracker=during, auto=(1.0, 16384, 30.0))
+        with self.assertRaises(InboundDeadline) as caught:
+            tx.write(b"d")
+        self.assertEqual(caught.exception.phase, "shed")
+        tx = PhaseWriter(FakeSock(fail=BrokenPipeError(32, "Broken pipe")), 7.0, tracker=ConnPhase(), auto=(1.0, 16384, 30.0))
+        with self.assertRaises(BrokenPipeError):
+            tx.write(b"e")
+        # auto 없음 = 예전 동작(단계 없이 그대로 보낸다)
+        plain = FakeSock()
+        self.assertEqual(PhaseWriter(plain, 7.0).write(b"f" * 100000), 100000)
+        self.assertEqual(plain.chunks, [100000])
+        self.assertEqual(plain.timeouts, [])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "리눅스 송신 큐(TIOCOUTQ)")
+    def test_write_allowance_counts_acknowledged_bytes_only(self):
+        """fix1: 허용 시간은 상대가 받은 바이트로만 는다 — 읽지 않는 상대에게 커널 버퍼에 넣은 바이트를 쳐주지 않는다."""
+        from hub.inbound import PhaseWriter, unacked_bytes
+        srv = socket.create_server(("127.0.0.1", 0))
+        self.addCleanup(srv.close)
+        cli = socket.socket()
+        cli.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+        self.addCleanup(cli.close)
+        cli.connect(srv.getsockname())
+        conn, _ = srv.accept()
+        self.addCleanup(conn.close)
+        conn.settimeout(5.0)
+        self.assertEqual(unacked_bytes(conn), 0)
+        tx = PhaseWriter(conn, 5.0, auto=(0.4, 16384, 300.0))
+        t0 = time.monotonic()
+        with self.assertRaises(Exception) as caught:
+            tx.write(b"g" * 4_000_000)
+        self.assertEqual(getattr(caught.exception, "phase", None), "write", caught.exception)
+        self.assertLess(time.monotonic() - t0, 2.0, "버퍼에 넣은 바이트로 허용 시간이 늘었다")
+        self.assertGreater(tx.sent, 16384 * 2, "커널 버퍼가 시험 조건보다 작다(시험 무효)")
+        self.assertLess(tx.delivered(), tx.sent)
+
     def test_phase_allowance(self):
         """T12: 본문 허용 시간 = base + 받은 바이트/최저 속도, 상한."""
         from hub.inbound import phase_allowance
@@ -722,16 +1405,22 @@ class UnitTest(unittest.TestCase):
 
     def test_config(self):
         """T13: 기본값 10/16384/300 · 범위 밖·잘못된 값은 범위·기본값으로."""
-        keys = ("HUB_HEADER_TIMEOUT", "HUB_BODY_MIN_RATE", "HUB_BODY_TIMEOUT_MAX")
+        keys = ("HUB_HEADER_TIMEOUT", "HUB_BODY_MIN_RATE", "HUB_BODY_TIMEOUT_MAX", "HUB_PREAUTH_MAX_BODY")
         clean = {k: v for k, v in os.environ.items() if k not in keys}
         with mock.patch.dict(os.environ, clean, clear=True):
             c = config_mod.Config()
             self.assertEqual((c.header_timeout, c.body_min_rate, c.body_timeout_max), (10.0, 16384, 300.0))
+            self.assertEqual(c.preauth_max_body, 65536)
         with mock.patch.dict(os.environ, {"HUB_HEADER_TIMEOUT": "0", "HUB_BODY_MIN_RATE": "1", "HUB_BODY_TIMEOUT_MAX": "99999"}):
             c = config_mod.Config()
             self.assertEqual((c.header_timeout, c.body_min_rate, c.body_timeout_max), (1.0, 1024, 3600.0))
         with mock.patch.dict(os.environ, {"HUB_HEADER_TIMEOUT": "abc"}):
             self.assertEqual(config_mod.Config().header_timeout, 10.0)
+        with mock.patch.dict(os.environ, {"HUB_PREAUTH_MAX_BODY": "1"}):
+            self.assertEqual(config_mod.Config().preauth_max_body, 4096)
+        srv = server_mod.HubServer(("127.0.0.1", 0), server_mod.HubHandler, None, max_per_client=0, header_timeout=10.0)
+        self.addCleanup(srv.server_close)
+        self.assertEqual((srv.admit_wait, srv.reclaim_after), (10.0, 5.0), "되찾기는 대기 상한의 절반(막 쥔 자리만 있어도 대기 중에 하나는 되찾는다)")
 
     def test_drop_log_is_rate_limited_and_flushes_its_tail(self):
         """T14 + 반증 N-1: 연결 보호 로그는 간격당 1줄 · 간격 안의 건은 타이머가 '지난 N초' 로 찍는다(다음 사건을 기다리지 않는다)."""

@@ -20,14 +20,18 @@
 - **로그인 실패 잠금은 출발지(IP)별**: 전역 카운터 하나만 두면 아무나 몇 번 틀리는 것으로
   **정상 관리자까지 설정 화면에서 밀어낼 수 있다**(가용성 공격). 전역 상한은 임계값 10배로
   분산 시도 방어에만 쓴다(`SessionStore.GLOBAL_FACTOR`).
-- **수신 단계 시한·연결 자리**(보안 잔여 11-27 L12 · `tests/test_sec_residual_1127.py`): 핸들러 `timeout = 20` 은 유휴(recv 1회)만 —
-  헤더·본문은 `hub/inbound.py PhaseReader` 가 recv 마다 남은 시간을 건다(헤더 `HUB_HEADER_TIMEOUT` 10초: 새 연결은 입장 시각부터 · keep-alive 다음 요청은 첫 바이트부터 ·
-  본문 = 헤더 시한 + **받은** 바이트/`HUB_BODY_MIN_RATE`, 상한 `HUB_BODY_TIMEOUT_MAX` — 선언 길이로 늘리지 말 것). `InboundDeadline` 을 TimeoutError/OSError 하위로 만들지 말 것(stdlib 가 삼킨다) ·
-  EOF 로 끝난 헤더 · 짧은 본문 · 엄격하지 않은 Content-Length 는 라우팅하지 않는다(400/408 + 닫기 + 짧은 린저). 자리 64 는 **스레드 생성 전** `process_request` 에서 잡고,
-  가득 차면 가장 오래 유휴한 keep-alive 를 내보낸 뒤 accept 루프에서 유한 대기(즉시 거절은 재접속 공격에서 정상 사용자를 굶긴다) · 반환은 `shutdown_request` 하나(닫기 전 · 멱등).
-  유휴 종료는 오류 로그로 찍지 않는다. 남는 것: 여러 출발지의 재접속 · 느린 읽기(쓰기 1회당 20초) — 앞단 프록시의 일.
+- **수신 단계 시한·연결 자리**(보안 잔여 11-27 L12 · `tests/test_sec_residual_1127.py`): 핸들러 `timeout = 20` 은 유휴(recv · send 1회)만 —
+  `hub/inbound.py` 가 단계마다 남은 시간을 건다. 헤더 `HUB_HEADER_TIMEOUT` 10초(새 연결은 입장 시각부터 · keep-alive 다음 요청은 첫 바이트부터 · 다 받으면 닫는다) ·
+  본문 = 헤더 시한 + **받은** 바이트/`HUB_BODY_MIN_RATE`, 상한 `HUB_BODY_TIMEOUT_MAX`(선언 길이로 늘리지 말 것) · 응답 쓰기(`PhaseWriter`) = 같은 식에 **상대가 받았다고 확인한** 바이트
+  (리눅스 송신 큐 `TIOCOUTQ` — 커널 버퍼에 넣은 바이트로 세면 읽지 않는 상대가 수 MB/최저 속도만큼 쥔다). `InboundDeadline` 을 TimeoutError/OSError 하위로 만들지 말 것(stdlib 가 삼킨다) ·
+  `_dispatch` 의 최종 except 앞에서 그대로 올린다. EOF 로 끝난 헤더 · 짧은 본문 · 엄격하지 않은 Content-Length(OWS 는 SP · HTAB 만)는 라우팅하지 않는다(400/408 + 닫기 + 짧은 린저) ·
+  로그인 세션 없는 `HUB_PREAUTH_MAX_BODY`(64KiB) 초과 본문은 **읽기 전에** 401 + 닫기. 자리 64 는 **스레드 생성 전** `process_request` 에서 잡고, 가득 차면 accept 루프에서 유한 대기하며
+  **클라이언트를 기다리며 `reclaim_after`(헤더 시한의 절반) 넘게 쥔 자리**를 하나씩 되찾는다 — 헤더 · 본문 · 쓰기에 가장 오래 머문 연결 먼저, 그런 연결이 대기 마감까지 없을 때만 오래 쉰 유휴.
+  처리 중 · 로그인 세션의 본문 · 쓰기는 대상이 아니다. **요청을 마친 연결이 스스로 자리를 넘기게 하지 말 것**(fix1 반증 M1 — 공격 연결은 늘 busy 라 정상 keep-alive 만 끊겼다) ·
+  즉시 거절 금지(재접속 공격에서 정상 사용자를 굶긴다) · 반환은 `shutdown_request` 하나(닫기 전 · 멱등). 유휴 종료 · 상대의 리셋은 오류 로그로 찍지 않는다.
+  남는 것: 되찾기 간격보다 자주 정상 요청을 보내는 연결 · 여러 출발지의 재접속(대기는 FIFO) — 앞단 프록시의 일.
 - **요청 본문은 라우팅 전에 일괄 drain**: 본문을 쓰지 않는 핸들러(리셋·백업 생성) 뒤의 요청이
-  `501 Unsupported method ('{}PUT')` 로 깨진다(keep-alive desync).
+  `501 Unsupported method ('{}PUT')` 로 깨진다(keep-alive desync). 본문을 남긴 채 거절하면 반드시 연결을 닫는다.
 - **SSRF 가드·스킴 화이트리스트·리다이렉트 미추적**: `hub/ssrf.py` 는 **해석된 주소**를 검사해
   10진수·IPv4-mapped 우회를 자동 차단하고, RFC1918 은 사내 대상이라 허용한다. 저장 URL 은
   `http`/`https` 만 — `javascript:` 를 허용하면 카드 클릭이 스크립트 실행 경로가 된다.

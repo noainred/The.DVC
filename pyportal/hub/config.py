@@ -128,6 +128,10 @@ class Config:
         #   RTT 800ms 에서 약 80KB/s 라 5배 여유. HUB_MAX_BODY 를 16MiB 로 올리면 상한 300초 안에 약 56KB/s 가 필요하다.
         self.body_min_rate = _env_int("HUB_BODY_MIN_RATE", 16384, low=1024, high=104_857_600)
         self.body_timeout_max = _env_float("HUB_BODY_TIMEOUT_MAX", 300.0, low=10.0, high=3600.0)
+        #   응답 쓰기도 같은 값(base 헤더 시한 + 보낸 바이트/최저 속도, 상한) — 번들 폰트 2MB 는 최저 속도에서 약 135초.
+        #   로그인 세션이 없는 요청의 본문 상한(반증 1회차 S2) — 미인증으로 본문을 받는 라우트는 로그인 · 공개 재점검(id 목록)뿐이다.
+        #   이보다 큰 미인증 본문은 읽기 전에 거절한다(최저 속도로 흘려 자리를 74초씩 쥐지 못하게 — 64KiB 면 base + 4초).
+        self.preauth_max_body = _env_int("HUB_PREAUTH_MAX_BODY", 65536, low=4096, high=16_777_216)
 
         # 설정 화면 로그인 세션 유지 시간(분) + 실패 잠금
         self.session_ttl_min = _env_int("HUB_SESSION_TTL_MIN", 480, low=5, high=10080)

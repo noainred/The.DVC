@@ -35,7 +35,7 @@ from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID, slugify as
 from . import csvio
 from .config import APP_NAME, STATIC_DIR, VERSION, config
 from .history import RANGE_LABELS, RANGES
-from .inbound import InboundDeadline, PhaseReader
+from .inbound import ConnPhase, InboundDeadline, PhaseReader, PhaseWriter
 from .jsonfile import load_error_text
 from .settings import BACKUP_INTERVAL_CHOICES, HEALTH_INTERVAL_CHOICES
 from .ssrf import ValidationError
@@ -93,10 +93,26 @@ class HubHandler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         stock = self.rfile
-        self._rx = PhaseReader(self.connection, self.timeout)
+        seat = getattr(self.server, "conn_phase", None)
+        self._conn = (seat(self.request) if seat is not None else None) or ConnPhase()
+        self._rx = PhaseReader(self.connection, self.timeout, tracker=self._conn)
         self.rfile = io.BufferedReader(self._rx, io.DEFAULT_BUFFER_SIZE)
         stock.close()   # makefile 참조를 명시적으로 돌려준다(CPython 은 참조 수로도 닫지만 그것에 기대지 않는다)
+        # 반증 1회차 M1: 응답 쓰기도 단계 시한 — base(헤더 시한) + 보낸 바이트/최저 속도, 상한(본문과 같은 값).
+        self._tx = PhaseWriter(self.connection, self.timeout, tracker=self._conn,
+                               auto=(self._srv_value("header_timeout", config.header_timeout),
+                                     self._srv_value("body_min_rate", config.body_min_rate),
+                                     self._srv_value("body_timeout_max", config.body_timeout_max)))
+        self.wfile = self._tx
         self._first_request = True
+
+    def _note_drop(self, kind) -> None:
+        """연결 보호 집계 — 서버가 자리를 되찾으려고 끊은 연결(shed)은 서버가 이미 셌다."""
+        if self._conn.shed:
+            return
+        note = getattr(self.server, "note_inbound_drop", None)
+        if note:
+            note(kind)
 
     def _srv_value(self, name, fallback):
         value = getattr(self.server, name, None)
@@ -107,7 +123,8 @@ class HubHandler(BaseHTTPRequestHandler):
 
         - 새 연결의 첫 요청: 입장(스레드 시작) 시각부터 헤더 시한 — 아무것도 안 보내는 연결이 유휴 20초 + 헤더 시한을 쥐지 못하게.
         - keep-alive 다음 요청: 유휴 대기(소켓 시한 20초 · 무로그)는 세지 않고, 첫 바이트부터 헤더 시한.
-        - 유휴 상태에서는 서버의 입장 표에 '유휴' 로 올라 자리가 가득 찼을 때 내보낼 수 있다(서버 conn_idle/conn_busy).
+        - 유휴 상태에서는 서버의 입장 표에 '유휴' 로 올라, 자리가 가득 찼을 때 오래 쉰 연결부터 되찾을 수 있다(서버 conn_idle/conn_busy).
+          요청을 마친 연결이 스스로 자리를 넘기지는 않는다(반증 1회차 M1 — 넘기면 공격 중 정상 keep-alive 만 끊겼다).
         - 시한 초과는 응답 없이 닫는다(요청 줄도 못 받았을 수 있다 — send_error 가 이전 요청 속성을 쓰게 된다).
         """
         rx = self._rx
@@ -115,6 +132,8 @@ class HubHandler(BaseHTTPRequestHandler):
         first = self._first_request
         self._first_request = False
         rx.end()
+        self._tx.end()
+        self._conn.trusted = False
         header_timeout = self._srv_value("header_timeout", config.header_timeout)
         try:
             if first:
@@ -123,7 +142,7 @@ class HubHandler(BaseHTTPRequestHandler):
             else:
                 conn_idle = getattr(srv, "conn_idle", None)
                 if conn_idle is not None and not conn_idle(self.request):
-                    self.close_connection = True   # 자리를 기다리는 연결이 있다 — 유휴로 들어가지 않고 넘겨준다
+                    self.close_connection = True   # 이미 자리를 되찾긴 연결
                     return
                 got = self.rfile.peek(1)            # 유휴 대기 — 버퍼에 남은 파이프라인 바이트가 있으면 바로 돌아온다
                 conn_busy = getattr(srv, "conn_busy", None)
@@ -134,9 +153,7 @@ class HubHandler(BaseHTTPRequestHandler):
                     rx.begin("header", header_timeout)
         except InboundDeadline:
             self.close_connection = True           # 새 연결이 아무것도 보내지 않았다
-            note = getattr(srv, "note_inbound_drop", None)
-            if note:
-                note("silent")
+            self._note_drop("silent")
             rx.end()
             return
         except OSError:
@@ -151,21 +168,26 @@ class HubHandler(BaseHTTPRequestHandler):
             super().handle_one_request()
         except InboundDeadline as exc:
             self.close_connection = True
-            note = getattr(srv, "note_inbound_drop", None)
-            if note:
-                note(exc.phase)
+            self._note_drop(exc.phase)
+        except ConnectionError:
+            # 상대가 요청 도중 끊었다(리셋 · 깨진 파이프) — 서버 오류가 아니다. 예전에는 stdlib 가 연결마다 traceback 을 찍어
+            #   미인증 연결이 RST 만으로 로그를 채울 수 있었다(되찾기 · 시한으로 끊긴 공격 연결이 다시 붙을 때 흔하다).
+            self.close_connection = True
         finally:
             rx.end()
+            self._tx.end()
 
     def parse_request(self):
         ok = super().parse_request()
         if ok and self._rx.eof_in_phase:
-            # 빈 줄 대신 EOF 로 끝난 헤더 — 요청을 다 받지 못했다(상대가 닫았다). 처리하지도 응답하지도 않는다.
+            # 빈 줄 대신 EOF 로 끝난 헤더 — 요청을 다 받지 못했다(상대가 닫았거나 서버가 자리를 되찾았다). 처리하지도 응답하지도 않는다.
             self.close_connection = True
-            note = getattr(self.server, "note_inbound_drop", None)
-            if note:
-                note("eof")
+            self._note_drop("eof")
             return False
+        if ok:
+            # 헤더를 다 받았다 — 헤더 단계를 닫는다. 열어 두면 본문 없는 요청의 처리 시간이 '헤더 단계' 로 보여 서버가 처리 중인
+            # 연결을 자리 되찾기 대상으로 고른다(본문 단계는 _drain_body 가 따로 연다).
+            self._rx.end()
         return ok
 
     def _reply_and_linger(self, status, message, **extra) -> None:
@@ -178,11 +200,15 @@ class HubHandler(BaseHTTPRequestHandler):
         self.close_connection = True
         payload = {"success": False, "error": message}
         payload.update(extra)
+        tx = self._tx
+        tx.end()
+        tx.begin("write", 2.0)
         try:
-            self.connection.settimeout(2.0)
             self._json(payload, status=status, extra_headers={"Connection": "close"})
-        except OSError:
+        except (InboundDeadline, OSError):
             pass
+        finally:
+            tx.end()
         try:
             self.connection.shutdown(socket.SHUT_WR)
         except OSError:
@@ -243,7 +269,8 @@ class HubHandler(BaseHTTPRequestHandler):
             return
         # 보안 잔여 11-27 L12: Content-Length 는 엄격히(RFC 9112 §6.3) — int() 는 '1_0'·'+5'·' -1' 을 받아들이고, 잘못된 값에도 연결을
         #   재사용해 남은 바이트가 다음 요청으로 파싱됐다. 서로 다른 중복 · 숫자 밖 · 12자리 초과는 라우팅 전 400 + 연결 종료.
-        values = [str(v).strip() for v in (self.headers.get_all("Content-Length") or [])]
+        #   반증 1회차 N1: 앞뒤 공백은 OWS(SP · HTAB)만 — str.strip() 은 '\xa0'·'\x0b'·'\x1c' 까지 지워 '2\xa0' 를 2 로 받았다.
+        values = [str(v).strip(" \t") for v in (self.headers.get_all("Content-Length") or [])]
         if not values:
             values = ["0"]
         if len(set(values)) != 1 or not re.fullmatch(r"[0-9]{1,12}", values[0]):
@@ -263,6 +290,25 @@ class HubHandler(BaseHTTPRequestHandler):
             self._body_raw = b""
             self._body_error = "요청 본문이 너무 큽니다."
             return
+        preauth = min(self._srv_value("preauth_max_body", config.preauth_max_body), config.max_body_bytes)
+        if length > preauth and not self._conn.trusted:
+            # 반증 1회차 S2: 로그인 세션이 없는 요청의 큰 본문은 **읽기 전에** 거절한다. 본문을 받는 미인증 라우트는 로그인 ·
+            #   공개 재점검뿐이라(수 KB) 큰 본문은 쓸 데가 없고, 읽어 주면 최저 속도를 겨우 넘겨 보내는 연결이 자리를 74초씩 쥔다
+            #   (없는 경로로도). 본문을 남긴 채 닫으므로 keep-alive desync 는 없다(연결 종료 + 린저).
+            self.close_connection = True
+            self._body_raw = b""
+            path = urlsplit(self.path).path
+            if not path.startswith("/api/"):
+                self._body_reject = (HTTPStatus.NOT_FOUND, "없는 경로입니다.", {})
+            elif not self._hub_token_ok():
+                self._body_reject = (HTTPStatus.UNAUTHORIZED, "접근 토큰이 필요합니다.", {"code": "hub_token_required"})
+            else:
+                self._body_reject = (HTTPStatus.UNAUTHORIZED,
+                                     "로그인하지 않은 요청의 본문은 {} KB 까지입니다. 설정 비밀번호로 로그인해야 합니다."
+                                     .format(max(1, int(preauth) // 1024)),
+                                     {"code": "settings_login_required"})
+            self._body_error = self._body_reject[1]
+            return
         # 본문 단계 시한: 헤더 시한 + 받은 바이트/최저 속도(상한) — 선언한 길이로 늘리지 않는다(1바이트 드립이 상한까지 쥐지 못하게).
         rx = self._rx
         base = self._srv_value("header_timeout", config.header_timeout)
@@ -275,9 +321,7 @@ class HubHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._body_raw = b""
             self._body_error = "요청 본문을 제시간에 다 받지 못했습니다."
-            note = getattr(self.server, "note_inbound_drop", None)
-            if note:
-                note("body")
+            self._note_drop("body")
             self._body_reject = (HTTPStatus.REQUEST_TIMEOUT,
                                  "요청 본문을 제시간에 다 받지 못했습니다(초당 최소 {} KB · 최대 {}초). "
                                  "네트워크 상태를 확인한 뒤 다시 시도하세요.".format(int(rate) // 1024, int(cap)),
@@ -289,6 +333,9 @@ class HubHandler(BaseHTTPRequestHandler):
             # 끝까지 오지 않은 본문(상대가 중간에 닫음) — 앞부분이 유효한 JSON·CSV 라도 처리하지 않는다.
             self.close_connection = True
             self._body_raw = b""
+            if self._conn.shed:
+                self._body_drop = True   # 서버가 자리를 되찾으려고 끊었다 — 응답하지 않는다
+                return
             self._body_error = "요청 본문이 끝까지 오지 않았습니다(연결이 중간에 끊김)."
             self._body_reject = (HTTPStatus.BAD_REQUEST, self._body_error, {})
             return
@@ -445,7 +492,16 @@ class HubHandler(BaseHTTPRequestHandler):
     def _dispatch(self, method):
         self._response_started = False   # keep-alive 로 같은 핸들러가 여러 요청을 처리한다 — 요청마다 초기화
         self._body_reject = None
+        self._body_drop = False
+        self._tx.end()   # 'Expect: 100-continue' 의 100 응답이 연 쓰기 단계를 닫는다(본문 수신 · 처리 시간을 쓰기 시한에 세지 않게)
+        # 반증 1회차 S2 · M1: 로그인 세션을 가진 요청인지 — 큰 본문 허용 · 자리 되찾기 제외에 쓴다(판정 실패는 미인증으로).
+        try:
+            self._conn.trusted = bool(self._hub_token_ok() and self._session_user())
+        except Exception:  # noqa: BLE001 — 신뢰 판정일 뿐이다(라우트가 같은 판정을 다시 하고 오류는 그쪽에서 답한다)
+            self._conn.trusted = False
         self._drain_body()
+        if self._body_drop:
+            return None
         if self._body_reject:
             # 보안 잔여 11-27 L12: 본문 시한 초과(408)·끝까지 오지 않은 본문·잘못된 Content-Length(400)는 라우팅하지 않는다.
             status, message, extra = self._body_reject
@@ -479,6 +535,8 @@ class HubHandler(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.NOT_FOUND, "대상을 찾을 수 없습니다.")
             except ValueError as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            except InboundDeadline:
+                raise   # 보안 잔여 11-27 L12: 쓰기 시한 · 자리 되찾기 — 500 을 덧쓰지 않고 핸들러가 조용히 닫는다
             except Exception as exc:  # noqa: BLE001
                 # v2.768(점검 R3-C3-3·C3-6): 위 목록 밖 예외(http.client.HTTPException·csv.Error 등)는 예전에
                 # 응답 없이 연결을 끊었다(화면은 원인 대신 네트워크 오류). 원문은 응답에 싣지 않고(내부 경로·
@@ -1436,6 +1494,20 @@ ROUTES = [
 ]
 
 
+class _Seat:
+    """입장 표의 자리 하나. state: 'busy'(요청 중) | 'idle'(keep-alive 대기) | 'evicted'(되찾음 — 반환 대기)."""
+
+    __slots__ = ("sock", "client", "state", "since", "reclaimed_at", "conn")
+
+    def __init__(self, sock, client):
+        self.sock = sock
+        self.client = client
+        self.state = "busy"
+        self.since = time.monotonic()
+        self.reclaimed_at = 0.0
+        self.conn = ConnPhase()
+
+
 class HubServer(ThreadingHTTPServer):
     """요청마다 스레드 — 링크 점검이 몇 초 걸려도 화면 조회가 멈추지 않는다.
 
@@ -1445,12 +1517,18 @@ class HubServer(ThreadingHTTPServer):
     보안 잔여 11-27 L12 — 연결 자리(입장 표):
     - 자리는 **스레드를 만들기 전에** accept 루프(process_request)에서 잡는다. 예전에는 스레드 안에서 세마포어를 5초 기다려,
       거절될 연결에도 스레드가 먼저 생겼다.
-    - 출발지 상한 초과는 즉시 끊는다. 전체가 가득 차면 가장 오래 유휴한 keep-alive 연결 하나를 내보내고 accept 루프에서
-      유한 대기한다(스레드 없음). accept 를 멈추면 커널 listen 대기열이 도착 순서로 줄을 세워, 시한마다 다시 붙는 연결과
-      정상 사용자가 '빈자리 복권' 을 다투지 않는다(즉시 거절이면 정상 성공률이 0~4% 였다 — 반증 실측).
-    - 유휴 keep-alive 는 자리를 무한정 쥘 수 없다: 가득 찼을 때 내보내고, 자리를 기다리는 연결이 있으면 요청을 마친 연결이
-      유휴로 들어가지 않고 넘겨준다(conn_idle). 헤더·본문 단계는 단계 시한(hub/inbound.py)이 끊는다.
-    - 반환은 shutdown_request 하나 — 소켓을 닫기 **전에** 잠금 안에서 표에서 뺀다(내보내기의 shutdown 이 닫힌 뒤 재사용된
+    - 출발지 상한 초과는 즉시 끊는다. 전체가 가득 차면 accept 루프에서 유한 대기한다(스레드 없음). accept 를 멈추면 커널
+      listen 대기열이 도착 순서로 줄을 세워, 시한마다 다시 붙는 연결과 정상 사용자가 '빈자리 복권' 을 다투지 않는다
+      (즉시 거절이면 정상 성공률이 0~4% 였다 — 반증 실측).
+    - 기다리는 동안 **클라이언트를 기다리며 reclaim_after(기본 헤더 시한의 절반) 넘게 쥔 자리**를 하나씩 되찾는다
+      (_reclaim_one_locked): 헤더 · 본문 · 응답 쓰기 단계에 가장 오래 머문 연결이 먼저, 그런 연결이 대기 마감 전까지 없을 때만
+      가장 오래 쉰 유휴 keep-alive.
+      서버가 처리 중인 요청 · 로그인 세션의 본문 · 쓰기(가져오기 · 복원 · 백업 내려받기)는 되찾지 않는다.
+      반증 1회차 M1: 1회차는 '요청을 마친 연결이 기다리는 연결에 자리를 넘김' 이었는데, 공격 연결은 늘 처리 중(busy)이라
+      넘기는 쪽은 정상 keep-alive 뿐이었다 — 공격 중 기존 사용자가 요청마다 끊겨 공격 연결 뒤에 다시 줄을 섰다. 이제 방금
+      요청을 마친 연결은 보호되고, 오래 쥔 쪽(느린 헤더 · 본문 · 읽기)이 먼저 끊긴다. 쓰기 단계 시한(hub/inbound.py
+      PhaseWriter)과 함께 모든 미인증 보유가 유한해져 '대기 상한 안에 자리가 난다' 는 전제가 선다.
+    - 반환은 shutdown_request 하나 — 소켓을 닫기 **전에** 잠금 안에서 표에서 뺀다(되찾기의 shutdown 이 닫힌 뒤 재사용된
       FD 를 건드리지 않게). pop 기반이라 멱등.
     """
 
@@ -1458,11 +1536,16 @@ class HubServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
     _drop_log_interval = 60.0
-    _DROP_LABELS = (("header", "헤더 시한 초과"), ("body", "본문 시한 초과"), ("full", "자리 대기 만료"),
-                    ("per_client", "출발지 상한 거절"), ("evicted", "유휴 연결 정리"))
+    _DROP_LABELS = (("header", "헤더 시한 초과"), ("body", "본문 시한 초과"), ("write", "응답 쓰기 시한 초과"),
+                    ("full", "자리 대기 만료"), ("per_client", "출발지 상한 거절"), ("evicted", "유휴 연결 정리"),
+                    ("shed", "느린 연결 정리"))
+    # 되찾을 수 있는 단계(클라이언트를 기다리는 단계) · 로그인 세션이면 빼는 단계
+    _RECLAIM_PHASES = ("header", "body", "write")
+    _TRUSTED_PHASES = ("body", "write")
 
     def __init__(self, address, handler, ctx, max_connections: int = 64, max_per_client=None,
-                 header_timeout=None, body_min_rate=None, body_timeout_max=None, admit_wait=None):
+                 header_timeout=None, body_min_rate=None, body_timeout_max=None, admit_wait=None,
+                 reclaim_after=None, preauth_max_body=None):
         super().__init__(address, handler)
         self.ctx = ctx
         self._max_conn = max(1, int(max_connections))
@@ -1474,14 +1557,18 @@ class HubServer(ThreadingHTTPServer):
         self.header_timeout = config.header_timeout if header_timeout is None else float(header_timeout)
         self.body_min_rate = config.body_min_rate if body_min_rate is None else body_min_rate
         self.body_timeout_max = config.body_timeout_max if body_timeout_max is None else float(body_timeout_max)
-        # 가득 찼을 때 accept 루프가 기다리는 상한 — 헤더 단계 연결은 이 안에 반드시 자리를 내놓는다.
+        self.preauth_max_body = config.preauth_max_body if preauth_max_body is None else int(preauth_max_body)
+        # 가득 찼을 때 accept 루프가 기다리는 상한.
         self.admit_wait = self.header_timeout if admit_wait is None else float(admit_wait)
+        # 가득 찼을 때 되찾을 수 있는 보유 시간 — 유휴는 요청을 마친 뒤부터, 단계는 단계 시작부터. 대기 상한의 절반이라
+        #   막 쥔 자리만 있어도 대기 중에 하나는 되찾을 수 있다. 이보다 자주 요청하는 keep-alive 는 공격 중에도 자리를 지킨다.
+        self.reclaim_after = self.header_timeout / 2 if reclaim_after is None else float(reclaim_after)
         self._cond = threading.Condition(threading.Lock())
-        self._admitted = {}      # request 소켓 → [client, state('busy'|'idle'|'evicted'), 상태 시각]
-        self._waiting = 0
+        self._admitted = {}      # request 소켓 → _Seat
         self._closing = False
         self._drop_lock = threading.Lock()
-        self.inbound_drops = {k: 0 for k in ("silent", "header", "body", "eof", "full", "per_client", "evicted")}
+        self.inbound_drops = {k: 0 for k in ("silent", "header", "body", "write", "eof", "full", "per_client",
+                                             "evicted", "shed")}
         self._drop_pending = {}
         self._drop_last_log = None
         self._drop_timer = None
@@ -1493,77 +1580,131 @@ class HubServer(ThreadingHTTPServer):
             return len(self._admitted)
 
     def _admit(self, request, client):
-        """None(입장) | 'per_client' | 'full'. 잠금 하나에서 전체·출발지를 함께 판정·기록한다."""
-        evicted = 0
+        """(None(입장) | 'per_client' | 'full', 되찾은 종류 목록). 잠금 하나에서 전체·출발지를 함께 판정·기록한다."""
+        reclaimed = []
         with self._cond:
             if self._per_client_max and self._per_client.get(client, 0) >= self._per_client_max:
-                return "per_client", evicted
+                return "per_client", reclaimed
             if len(self._admitted) >= self._max_conn:
-                evicted += self._evict_idle_locked()
-                self._waiting += 1
-                try:
-                    self._cond.wait_for(lambda: self._closing or len(self._admitted) < self._max_conn,
-                                        timeout=self.admit_wait)
-                finally:
-                    self._waiting -= 1
+                deadline = time.monotonic() + self.admit_wait
+                # 단계 시작 · 처리 끝은 표를 깨우지 않는다 — 되찾을 후보가 생길 때를 놓치지 않게 짧게 다시 본다.
+                poll = min(0.25, max(0.01, self.reclaim_after / 4))
+                while not self._closing and len(self._admitted) >= self._max_conn:
+                    now = time.monotonic()
+                    next_at = None
+                    if not self._reclaim_pending_locked(now):
+                        kind, next_at = self._reclaim_one_locked(now, deadline)
+                        if kind:
+                            reclaimed.append(kind)
+                            next_at = None
+                    left = deadline - now
+                    if left <= 0:
+                        break
+                    wait = min(left, poll)
+                    if next_at is not None:
+                        wait = min(wait, max(0.005, next_at - now))
+                    self._cond.wait(wait)
                 if self._closing or len(self._admitted) >= self._max_conn:
-                    return "full", evicted
-            self._admitted[request] = [client, "busy", time.monotonic()]
+                    return "full", reclaimed
+            self._admitted[request] = _Seat(request, client)
             if self._per_client_max:
                 self._per_client[client] = self._per_client.get(client, 0) + 1
-            return None, evicted
+            return None, reclaimed
 
-    def _evict_idle_locked(self) -> int:
-        """가장 오래 유휴한 keep-alive 연결 하나를 내보낸다(잠금 안 — 표에 있는 동안은 소켓이 닫히지 않았다)."""
-        oldest = None
-        for req, entry in self._admitted.items():
-            if entry[1] == "idle" and (oldest is None or entry[2] < self._admitted[oldest][2]):
-                oldest = req
-        if oldest is None:
-            return 0
-        self._admitted[oldest][1] = "evicted"
+    def _reclaim_pending_locked(self, now) -> bool:
+        """되찾으려고 끊은 연결의 자리가 아직 안 돌아왔다(1초 안) — 대기자 하나에 하나만 끊는다."""
+        return any(seat.state == "evicted" and now - seat.reclaimed_at < 1.0 for seat in self._admitted.values())
+
+    def _reclaim_one_locked(self, now, deadline=None):
+        """가득 찼을 때 자리 하나를 되찾는다(잠금 안 — 표에 있는 동안은 소켓이 닫히지 않았다).
+
+        후보는 클라이언트를 기다리며 reclaim_after 넘게 쥔 자리. **느린 단계가 먼저**: ① 헤더 · 본문 · 쓰기 단계에 가장 오래 머문
+        연결(로그인 세션의 본문 · 쓰기는 제외) ② 그런 연결이 지금도, 대기 마감(deadline) 전까지도 없을 때만 가장 오래 쉰 유휴 keep-alive.
+        반증 1회차 M1: 유휴를 먼저 고르면 공격 중 몇 초 쉰 정상 사용자가 요청마다 자리를 잃었다(공격 연결은 늘 단계 중) —
+        단계에 reclaim_after 넘게 머문 연결은 정의상 느린 쪽이고, 요청을 끝낸 유휴 연결은 정상적으로 행동한 쪽이다.
+        돌려주는 값: (되찾은 종류 | None, 다시 볼 시각 | None).
+        """
+        idle = busy = None
+        idle_next = busy_next = None
+        for seat in self._admitted.values():
+            if seat.state == "idle":
+                since = seat.since
+            elif seat.state == "busy":
+                ph = seat.conn
+                phase = ph.phase
+                if phase not in self._RECLAIM_PHASES or (ph.trusted and phase in self._TRUSTED_PHASES):
+                    continue   # 서버가 처리 중 · 린저 · 로그인 세션의 업로드/내려받기
+                since = ph.started
+            else:
+                continue
+            ready = since + self.reclaim_after
+            if seat.state == "idle":
+                if ready > now:
+                    idle_next = ready if idle_next is None else min(idle_next, ready)
+                elif idle is None or since < idle.since:
+                    idle = seat
+            elif ready > now:
+                busy_next = ready if busy_next is None else min(busy_next, ready)
+            elif busy is None or since < busy.conn.started:
+                busy = seat
+        target = busy
+        if target is None and idle is not None and (busy_next is None or (deadline is not None and busy_next > deadline)):
+            target = idle
+        if target is None:
+            # 유휴 후보가 있어도 느린 단계 후보가 곧 생기면 그것을 기다린다
+            nexts = [t for t in (busy_next, idle_next if idle is None else None) if t is not None]
+            return None, (min(nexts) if nexts else None)
+        kind = "shed" if target is busy else "evicted"
+        target.state = "evicted"
+        target.reclaimed_at = now
+        target.conn.shed = True
         try:
-            oldest.shutdown(socket.SHUT_RDWR)   # 유휴 peek 를 깨운다 — 핸들러가 조용히 닫고 shutdown_request 에서 반환
+            target.sock.shutdown(socket.SHUT_RDWR)   # 유휴 peek · 단계 recv/send 를 깨운다 — 핸들러가 조용히 닫고 shutdown_request 에서 반환
         except OSError:
             pass
-        return 1
+        return kind, None
+
+    def conn_phase(self, request):
+        """핸들러가 단계를 알릴 ConnPhase(입장 표의 자리와 공유). 표에 없으면 None."""
+        with self._cond:
+            seat = self._admitted.get(request)
+            return seat.conn if seat is not None else None
 
     def conn_idle(self, request) -> bool:
-        """핸들러가 keep-alive 유휴 대기에 들어간다. False = 자리를 기다리는 연결이 있어 넘겨줘야 한다(닫을 것)."""
-        handed = False
+        """핸들러가 keep-alive 유휴 대기에 들어간다. False = 이미 자리를 되찾겼다(닫을 것).
+
+        반증 1회차 M1: 기다리는 연결이 있어도 스스로 넘기지 않는다 — 유휴 시각을 적고 대기자를 깨워, reclaim_after 가
+        지나도 다음 요청이 없을 때만 되찾게 한다.
+        """
         with self._cond:
-            entry = self._admitted.get(request)
-            if entry is None:
+            seat = self._admitted.get(request)
+            if seat is None:
                 return True
-            if entry[1] == "evicted" or (self._waiting and len(self._admitted) >= self._max_conn):
-                entry[1] = "evicted"
-                handed = True
-            else:
-                entry[1] = "idle"
-                entry[2] = time.monotonic()
-        if handed:
-            self.note_inbound_drop("evicted")
-            return False
-        return True
+            if seat.state == "evicted":
+                return False
+            seat.state = "idle"
+            seat.since = time.monotonic()
+            self._cond.notify_all()
+            return True
 
     def conn_busy(self, request) -> bool:
         """유휴 대기에서 첫 바이트가 왔다. False = 그사이 내보내졌다(닫을 것)."""
         with self._cond:
-            entry = self._admitted.get(request)
-            if entry is None:
+            seat = self._admitted.get(request)
+            if seat is None:
                 return True
-            if entry[1] == "evicted":
+            if seat.state == "evicted":
                 return False
-            entry[1] = "busy"
+            seat.state = "busy"
             return True
 
     def _release(self, request) -> None:
         """자리 반환 — 멱등(표에 있을 때만 전체·출발지를 줄인다)."""
         with self._cond:
-            entry = self._admitted.pop(request, None)
-            if entry is None:
+            seat = self._admitted.pop(request, None)
+            if seat is None:
                 return
-            client = entry[0]
+            client = seat.client
             if self._per_client_max and client in self._per_client:
                 count = self._per_client[client] - 1
                 if count > 0:
@@ -1574,9 +1715,9 @@ class HubServer(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         client = client_address[0] if client_address else "-"
-        reason, evicted = self._admit(request, client)
-        if evicted:
-            self.note_inbound_drop("evicted")
+        reason, reclaimed = self._admit(request, client)
+        for kind in reclaimed:
+            self.note_inbound_drop(kind)
         if reason:
             # 스레드를 만들지 않고 응답 없이 끊는다(요청을 읽지 않고 쓰면 RST 로 응답이 버려지기 쉽고, accept 스레드에서 쓰게 된다).
             self.note_inbound_drop(reason)
@@ -1588,6 +1729,11 @@ class HubServer(ThreadingHTTPServer):
     def shutdown_request(self, request):
         self._release(request)   # 닫기 전에 표에서 뺀다 — 모든 닫기 경로(스레드 finally · 거절 · start 실패)가 여기를 지난다
         super().shutdown_request(request)
+
+    def serve_forever(self, poll_interval=0.5):
+        with self._cond:
+            self._closing = False   # 반증 1회차 N2: 종료 요청은 그 루프에만 — 같은 객체로 다시 돌리면 자리 대기가 살아 있게
+        super().serve_forever(poll_interval)
 
     def shutdown(self):
         with self._cond:
