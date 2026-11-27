@@ -35,7 +35,7 @@ from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID, slugify as
 from . import csvio
 from .config import APP_NAME, STATIC_DIR, VERSION, config
 from .history import RANGE_LABELS, RANGES
-from .inbound import ConnPhase, InboundDeadline, PhaseReader, PhaseWriter
+from .inbound import SLOW_PHASES, TRUSTED_PHASES, ConnPhase, InboundDeadline, PhaseReader, PhaseWriter
 from .jsonfile import load_error_text
 from .settings import BACKUP_INTERVAL_CHOICES, HEALTH_INTERVAL_CHOICES
 from .ssrf import ValidationError
@@ -134,10 +134,14 @@ class HubHandler(BaseHTTPRequestHandler):
         rx.end()
         self._tx.end()
         self._conn.trusted = False
+        self._conn.user = None
         header_timeout = self._srv_value("header_timeout", config.header_timeout)
         try:
             if first:
-                rx.begin("header", header_timeout)
+                # 입장 시각부터(반증 2회차 R2-1 — 서버가 자리를 잡으면서 ConnPhase 를 헤더 단계로 열어 둔다. 스레드 시작 지연만큼
+                #   헤더 시한이 늘거나, 그사이 '처리 중' 으로 보여 되찾기 예측에서 빠지지 않게).
+                conn = self._conn
+                rx.begin("header", header_timeout, started=conn.started if conn.phase == "header" else None)
                 got = self.rfile.peek(1)
             else:
                 conn_idle = getattr(srv, "conn_idle", None)
@@ -495,10 +499,14 @@ class HubHandler(BaseHTTPRequestHandler):
         self._body_drop = False
         self._tx.end()   # 'Expect: 100-continue' 의 100 응답이 연 쓰기 단계를 닫는다(본문 수신 · 처리 시간을 쓰기 시한에 세지 않게)
         # 반증 1회차 S2 · M1: 로그인 세션을 가진 요청인지 — 큰 본문 허용 · 자리 되찾기 제외에 쓴다(판정 실패는 미인증으로).
+        #   반증 2회차 S: 계정도 적는다 — 되찾기 제외는 계정당 몇 개까지(HubServer.trusted_slow_per_user)라 viewer 계정 하나로 64칸을 못 쥔다.
         try:
-            self._conn.trusted = bool(self._hub_token_ok() and self._session_user())
+            user = self._session_user() if self._hub_token_ok() else None
+            self._conn.trusted = bool(user)
+            self._conn.user = str(user.get("username", "")) if user else None
         except Exception:  # noqa: BLE001 — 신뢰 판정일 뿐이다(라우트가 같은 판정을 다시 하고 오류는 그쪽에서 답한다)
             self._conn.trusted = False
+            self._conn.user = None
         self._drain_body()
         if self._body_drop:
             return None
@@ -1499,13 +1507,14 @@ class _Seat:
 
     __slots__ = ("sock", "client", "state", "since", "reclaimed_at", "conn")
 
-    def __init__(self, sock, client):
+    def __init__(self, sock, client, half_life=20.0):
         self.sock = sock
         self.client = client
         self.state = "busy"
         self.since = time.monotonic()
         self.reclaimed_at = 0.0
-        self.conn = ConnPhase()
+        self.conn = ConnPhase(half_life)
+        self.conn.enter("header", self.since)   # 새 연결은 입장부터 클라이언트의 요청 줄을 기다린다(첫 헤더 단계)
 
 
 class HubServer(ThreadingHTTPServer):
@@ -1520,14 +1529,16 @@ class HubServer(ThreadingHTTPServer):
     - 출발지 상한 초과는 즉시 끊는다. 전체가 가득 차면 accept 루프에서 유한 대기한다(스레드 없음). accept 를 멈추면 커널
       listen 대기열이 도착 순서로 줄을 세워, 시한마다 다시 붙는 연결과 정상 사용자가 '빈자리 복권' 을 다투지 않는다
       (즉시 거절이면 정상 성공률이 0~4% 였다 — 반증 실측).
-    - 기다리는 동안 **클라이언트를 기다리며 reclaim_after(기본 헤더 시한의 절반) 넘게 쥔 자리**를 하나씩 되찾는다
-      (_reclaim_one_locked): 헤더 · 본문 · 응답 쓰기 단계에 가장 오래 머문 연결이 먼저, 그런 연결이 대기 마감 전까지 없을 때만
-      가장 오래 쉰 유휴 keep-alive.
-      서버가 처리 중인 요청 · 로그인 세션의 본문 · 쓰기(가져오기 · 복원 · 백업 내려받기)는 되찾지 않는다.
+    - 기다리는 동안 **느린 연결**의 자리를 하나씩 되찾는다(_reclaim_one_locked). 점수 = 연결 단위로 클라이언트를 기다린 시간
+      (헤더 · 본문 · 응답 쓰기 — 로그인 세션의 본문 · 쓰기는 빼고)의 반감기 누계 + 지금 단계 진행분(hub/inbound.py ConnPhase).
+      점수가 reclaim_after(기본 헤더 시한의 절반) 이상인 자리 중 큰 것이 먼저(쉬는 중이어도). 그런 자리가 대기 마감 직전까지
+      생기지 않을 때만 대체 후보 — 점수가 기준의 1/4 이상인 연결, 그다음 reclaim_after 넘게 쉰 유휴 keep-alive. 공격 중(최근
+      느린 연결을 끊었다)이면 대체 후보는 대기자가 reclaim_after 를 기다린 뒤에만.
+      서버가 처리 중인 요청 · 린저 · 로그인 세션의 본문 · 쓰기(계정당 trusted_slow_per_user 개)는 되찾지 않는다.
       반증 1회차 M1: 1회차는 '요청을 마친 연결이 기다리는 연결에 자리를 넘김' 이었는데, 공격 연결은 늘 처리 중(busy)이라
-      넘기는 쪽은 정상 keep-alive 뿐이었다 — 공격 중 기존 사용자가 요청마다 끊겨 공격 연결 뒤에 다시 줄을 섰다. 이제 방금
-      요청을 마친 연결은 보호되고, 오래 쥔 쪽(느린 헤더 · 본문 · 읽기)이 먼저 끊긴다. 쓰기 단계 시한(hub/inbound.py
-      PhaseWriter)과 함께 모든 미인증 보유가 유한해져 '대기 상한 안에 자리가 난다' 는 전제가 선다.
+      넘기는 쪽은 정상 keep-alive 뿐이었다. 반증 2회차 R2-1: '지금 단계의 시작' 만 보면 단계마다 기준 직전에 다음 단계로
+      갈아타는 연결이 끝내 후보가 되지 않았고(새 사용자 0/5), 마감 직전 쉬던 정상 keep-alive 가 대신 끊겼다(수정 전보다 나쁨).
+      쓰기 단계 시한(PhaseWriter)과 함께 모든 미인증 보유가 유한해져 '대기 상한 안에 자리가 난다' 는 전제가 선다.
     - 반환은 shutdown_request 하나 — 소켓을 닫기 **전에** 잠금 안에서 표에서 뺀다(되찾기의 shutdown 이 닫힌 뒤 재사용된
       FD 를 건드리지 않게). pop 기반이라 멱등.
     """
@@ -1540,8 +1551,11 @@ class HubServer(ThreadingHTTPServer):
                     ("full", "자리 대기 만료"), ("per_client", "출발지 상한 거절"), ("evicted", "유휴 연결 정리"),
                     ("shed", "느린 연결 정리"))
     # 되찾을 수 있는 단계(클라이언트를 기다리는 단계) · 로그인 세션이면 빼는 단계
-    _RECLAIM_PHASES = ("header", "body", "write")
-    _TRUSTED_PHASES = ("body", "write")
+    _RECLAIM_PHASES = SLOW_PHASES      # hub/inbound.py 의 누계 판정과 같은 목록(한 곳)
+    _TRUSTED_PHASES = TRUSTED_PHASES
+    # 로그인 세션의 본문 · 쓰기를 되찾기에서 빼는 개수(계정당). 정상 사용자는 가져오기 · 복원 · 백업 내려받기를 한두 개 넘게 동시에 하지 않는다.
+    trusted_slow_per_user = 2
+    slow_half_life = None   # None = 4 × reclaim_after
 
     def __init__(self, address, handler, ctx, max_connections: int = 64, max_per_client=None,
                  header_timeout=None, body_min_rate=None, body_timeout_max=None, admit_wait=None,
@@ -1560,11 +1574,12 @@ class HubServer(ThreadingHTTPServer):
         self.preauth_max_body = config.preauth_max_body if preauth_max_body is None else int(preauth_max_body)
         # 가득 찼을 때 accept 루프가 기다리는 상한.
         self.admit_wait = self.header_timeout if admit_wait is None else float(admit_wait)
-        # 가득 찼을 때 되찾을 수 있는 보유 시간 — 유휴는 요청을 마친 뒤부터, 단계는 단계 시작부터. 대기 상한의 절반이라
-        #   막 쥔 자리만 있어도 대기 중에 하나는 되찾을 수 있다. 이보다 자주 요청하는 keep-alive 는 공격 중에도 자리를 지킨다.
+        # 가득 찼을 때 되찾는 기준 — 느린 단계 점수(연결 단위 누계 + 진행분) · 유휴 시간. 대기 상한의 절반이라 막 쥔 자리만
+        #   있어도 대기 중에 하나는 되찾을 수 있다. 요청이 빠르고 이보다 자주 쓰는 keep-alive 는 공격 중에도 자리를 지킨다.
         self.reclaim_after = self.header_timeout / 2 if reclaim_after is None else float(reclaim_after)
         self._cond = threading.Condition(threading.Lock())
         self._admitted = {}      # request 소켓 → _Seat
+        self._attack_seen_at = None   # 마지막으로 느린 연결을 끊은 시각(monotonic) — _under_attack
         self._closing = False
         self._drop_lock = threading.Lock()
         self.inbound_drops = {k: 0 for k in ("silent", "header", "body", "write", "eof", "full", "per_client",
@@ -1588,7 +1603,7 @@ class HubServer(ThreadingHTTPServer):
             if len(self._admitted) >= self._max_conn:
                 deadline = time.monotonic() + self.admit_wait
                 # 단계 시작 · 처리 끝은 표를 깨우지 않는다 — 되찾을 후보가 생길 때를 놓치지 않게 짧게 다시 본다.
-                poll = min(0.25, max(0.01, self.reclaim_after / 4))
+                poll = self._poll_interval()
                 while not self._closing and len(self._admitted) >= self._max_conn:
                     now = time.monotonic()
                     next_at = None
@@ -1606,55 +1621,116 @@ class HubServer(ThreadingHTTPServer):
                     self._cond.wait(wait)
                 if self._closing or len(self._admitted) >= self._max_conn:
                     return "full", reclaimed
-            self._admitted[request] = _Seat(request, client)
+            self._admitted[request] = _Seat(request, client, self._slow_half_life())
             if self._per_client_max:
                 self._per_client[client] = self._per_client.get(client, 0) + 1
             return None, reclaimed
 
+    def _under_attack(self, now) -> bool:
+        """최근(느린 단계 반감기 안)에 느린 연결을 끊었다 — 되찾기 · 단계 시한 초과."""
+        seen = self._attack_seen_at
+        return seen is not None and now - seen < self._slow_half_life()
+
+    def _poll_interval(self) -> float:
+        return min(0.25, max(0.01, self.reclaim_after / 4))
+
+    def _slow_half_life(self) -> float:
+        """느린 단계 누계의 반감기 — 기본 되찾기 기준의 4배(운영 20초). 짧으면 갈아타기 공격이 순환마다 쌓을 수 있는 느린 시간이
+        늘고(반감기 2배일 때 순환당 약 1.8초 · 4배일 때 약 0.9초 — 유휴 4.9초 순환 계산), 길면 한 번 느렸던 정상 연결이 오래 앞줄에 선다."""
+        half = self.slow_half_life
+        return 4.0 * self.reclaim_after if half is None else float(half)
+
     def _reclaim_pending_locked(self, now) -> bool:
-        """되찾으려고 끊은 연결의 자리가 아직 안 돌아왔다(1초 안) — 대기자 하나에 하나만 끊는다."""
-        return any(seat.state == "evicted" and now - seat.reclaimed_at < 1.0 for seat in self._admitted.values())
+        """되찾으려고 끊은 연결의 자리가 아직 안 돌아왔다(되찾기 기준 · 상한 1초 안) — 대기자 하나에 하나만 끊는다.
+        반증 2회차 nit: 창을 절대값 1초로 두면 축소 비율 시험(되찾기 0.5초)에서 비율이 어긋났다 — 되찾기 기준에 맞춘다(운영은 그대로 1초)."""
+        grace = min(1.0, self.reclaim_after)
+        return any(seat.state == "evicted" and now - seat.reclaimed_at < grace for seat in self._admitted.values())
 
     def _reclaim_one_locked(self, now, deadline=None):
         """가득 찼을 때 자리 하나를 되찾는다(잠금 안 — 표에 있는 동안은 소켓이 닫히지 않았다).
 
-        후보는 클라이언트를 기다리며 reclaim_after 넘게 쥔 자리. **느린 단계가 먼저**: ① 헤더 · 본문 · 쓰기 단계에 가장 오래 머문
-        연결(로그인 세션의 본문 · 쓰기는 제외) ② 그런 연결이 지금도, 대기 마감(deadline) 전까지도 없을 때만 가장 오래 쉰 유휴 keep-alive.
-        반증 1회차 M1: 유휴를 먼저 고르면 공격 중 몇 초 쉰 정상 사용자가 요청마다 자리를 잃었다(공격 연결은 늘 단계 중) —
-        단계에 reclaim_after 넘게 머문 연결은 정의상 느린 쪽이고, 요청을 끝낸 유휴 연결은 정상적으로 행동한 쪽이다.
+        **느린 연결이 먼저**: 점수 = 연결의 느린 단계 누계(반감기로 줄임 — ConnPhase.slow_score) + 지금 쌓이는 단계의 진행분.
+        ① 점수가 reclaim_after 이상인 자리 중 점수가 가장 큰 것(유휴 · 헤더 · 본문 · 쓰기 어느 상태든 — 갈아타기 공격은 유휴로
+        쉬는 동안에도 앞줄이다) ② 그런 자리가 지금도, 대기 마감 직전(deadline − 2 × 폴링 간격)까지도 생기지 않을 때만 대체 후보 —
+        점수가 기준의 1/4 이상인 연결(큰 순), 그다음 reclaim_after 넘게 쉰 유휴 keep-alive(오래 쉰 순). 공격 중(_under_attack)이면
+        대체 후보는 대기자가 reclaim_after 를 기다린 뒤에만.
+        대상이 아닌 자리: 서버가 처리 중(단계 없음) · 린저 · 로그인 세션의 본문 · 쓰기(계정당 trusted_slow_per_user 개까지 —
+        오래 진행한 것부터 보호하고, 넘는 것은 진행분으로 후보가 된다).
+        반증 1회차 M1: 유휴를 먼저 고르면 공격 중 몇 초 쉰 정상 사용자가 요청마다 자리를 잃었다(공격 연결은 늘 단계 중).
+        반증 2회차 R2-1: '지금 단계 시작' 만 보면 단계를 reclaim_after 직전에 갈아타는 연결이 후보가 되지 않았고, 대기 마감 전까지
+        '곧 후보가 될 느린 단계' 를 기다리느라 유휴 정리까지 막혔다(대기자 0/5 · 기존 keep-alive 가 수정 전보다 먼저 끊김).
         돌려주는 값: (되찾은 종류 | None, 다시 볼 시각 | None).
         """
-        idle = busy = None
-        idle_next = busy_next = None
+        threshold = self.reclaim_after
+        # 로그인 세션의 본문 · 쓰기 — 계정당 보호 개수까지만(오래 진행한 것부터)
+        trusted = {}
         for seat in self._admitted.values():
+            ph = seat.conn
+            if seat.state == "busy" and ph.trusted and ph.phase in self._TRUSTED_PHASES:
+                trusted.setdefault(ph.user, []).append(seat)
+        overflow = set()
+        keep = max(0, int(self.trusted_slow_per_user))
+        for seats in trusted.values():
+            seats.sort(key=lambda st: st.conn.started)
+            overflow.update(id(st) for st in seats[keep:])
+        floor = threshold / 4   # 대기 마감 직전 대체 후보로 볼 '조금 느린' 기준
+        slow = fallback = None
+        slow_score = fallback_key = idle_next = busy_next = None
+        for seat in self._admitted.values():
+            ph = seat.conn
             if seat.state == "idle":
-                since = seat.since
+                score = ph.slow_score(now, current=False)
+                growing = False
             elif seat.state == "busy":
-                ph = seat.conn
                 phase = ph.phase
-                if phase not in self._RECLAIM_PHASES or (ph.trusted and phase in self._TRUSTED_PHASES):
-                    continue   # 서버가 처리 중 · 린저 · 로그인 세션의 업로드/내려받기
-                since = ph.started
+                if phase not in self._RECLAIM_PHASES:
+                    continue   # 서버가 처리 중 · 린저
+                if ph.trusted and phase in self._TRUSTED_PHASES:
+                    if id(seat) not in overflow:
+                        continue   # 로그인 세션의 업로드/내려받기(계정당 보호 개수 안)
+                    score = ph.slow_score(now) + max(0.0, now - ph.started)
+                else:
+                    score = ph.slow_score(now)
+                growing = True
             else:
                 continue
-            ready = since + self.reclaim_after
-            if seat.state == "idle":
-                if ready > now:
-                    idle_next = ready if idle_next is None else min(idle_next, ready)
-                elif idle is None or since < idle.since:
-                    idle = seat
-            elif ready > now:
+            if score >= threshold:
+                if slow is None or score > slow_score:
+                    slow, slow_score = seat, score
+                continue
+            idle_age = now - seat.since if seat.state == "idle" else 0.0
+            if growing:
+                ready = now + (threshold - score)   # 이 단계에 그대로 머물면 후보가 되는 때
                 busy_next = ready if busy_next is None else min(busy_next, ready)
-            elif busy is None or since < busy.conn.started:
-                busy = seat
-        target = busy
-        if target is None and idle is not None and (busy_next is None or (deadline is not None and busy_next > deadline)):
-            target = idle
+            if score >= floor or idle_age >= threshold:
+                # 대체 후보: 조금이라도 느린 연결(점수 큰 순)이 먼저, 그다음 오래 쉰 유휴(정상적으로 요청을 마치고 쉬는 쪽)
+                key = (score if score >= floor else 0.0, idle_age)
+                if fallback is None or key > fallback_key:
+                    fallback, fallback_key = seat, key
+            elif seat.state == "idle":
+                ready = seat.since + threshold
+                idle_next = ready if idle_next is None else min(idle_next, ready)
+        target = slow
+        if target is None and fallback is not None:
+            # 곧 느린 후보가 생기면 쉬고 있는 정상 연결 대신 그것을 기다린다 — 단 대기 마감 직전까지만. 그때도 후보가 없으면
+            #   조금이라도 느린 연결을 먼저 고른다(반증 2회차 R2-1: 갈아타는 연결의 '곧 후보' 가 끝내 오지 않으면 마감 직전에 쉬던
+            #   정상 keep-alive 가 대신 끊겼다 — 수정 전보다 나빴다).
+            shield_until = None if deadline is None else deadline - 2 * self._poll_interval()
+            if busy_next is None or (shield_until is not None and busy_next > shield_until):
+                target = fallback
+            # 공격 중(최근 느린 연결을 끊었다)이면 대체 후보는 대기자가 reclaim_after 를 기다린 뒤에만 — 대기 줄에서 요청을 미리 흘려 둔
+            #   공격 연결은 입장 직후 요청이 빨라 '쉬는 정상 연결' 과 구별되지 않는다. reclaim_after 안에 그 연결이 다시 느린 단계에
+            #   들어가거나(→ 위 예측이 막는다) 오래 쉰 쪽이 된다. 공격이 없으면(가득 찬 정상 keep-alive) 기다리지 않는다.
+            grace_until = None if deadline is None else deadline - self.admit_wait + threshold
+            if target is not None and grace_until is not None and now < grace_until and self._under_attack(now):
+                target = None
+                idle_next = grace_until if idle_next is None else min(idle_next, grace_until)
         if target is None:
-            # 유휴 후보가 있어도 느린 단계 후보가 곧 생기면 그것을 기다린다
-            nexts = [t for t in (busy_next, idle_next if idle is None else None) if t is not None]
+            nexts = [t for t in (busy_next, idle_next) if t is not None]
             return None, (min(nexts) if nexts else None)
-        kind = "shed" if target is busy else "evicted"
+        kind = "evicted" if (target.state == "idle" and target is not slow and fallback_key[0] == 0.0) else "shed"
+        if kind == "shed":
+            self._attack_seen_at = now
         target.state = "evicted"
         target.reclaimed_at = now
         target.conn.shed = True
@@ -1753,6 +1829,8 @@ class HubServer(ThreadingHTTPServer):
         첫 건은 바로 찍고, 간격 안의 건은 모아 두었다가 간격이 지나면 타이머가 '지난 N초' 로 한 줄 더 찍는다(버스트 꼬리가 다음
         사건까지 숨지 않게). silent(아무것도 안 보낸 새 연결 — 브라우저 사전 연결도 이렇다)·eof 는 세기만 한다.
         """
+        if kind in ("header", "body", "write"):
+            self._attack_seen_at = time.monotonic()   # 단계 시한 초과도 공격 신호(값 대입 하나 — 잠금 밖)
         with self._drop_lock:
             self.inbound_drops[kind] = self.inbound_drops.get(kind, 0) + 1
             if kind not in dict(self._DROP_LABELS):

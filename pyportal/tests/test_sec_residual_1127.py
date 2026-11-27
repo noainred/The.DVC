@@ -6,6 +6,8 @@
 - 반증(설계 2차): keep-alive 로 자리를 무기한 쥐기 · 가득 찼을 때 즉시 거절의 '빈자리 복권' · 선언 길이로 늘어나는 본문 시한.
 - 반증 1회차(fix1): 자리 넘기기가 공격 중 정상 keep-alive 만 끊음(M1) · 느린 읽기(응답 쓰기)에 전체 시한 없음 · 대기 줄 앞 막힘(S1) ·
   미인증 큰 본문을 최저 속도로 흘려 자리 보유(S2) · Content-Length 의 유니코드 공백(N1) · shutdown 뒤 재가동(N2).
+- 반증 2회차(fix2): 단계 갈아타기로 되찾기를 피함(R2-1 — PhaseCyclingTest · ReclaimScoreTest · UnitTest.test_conn_phase_slow_score) ·
+  로그인 세션 제외가 계정 수와 무관(S) · 반환 대기 창 절대값(nit).
 
 실제 127.0.0.1 소켓을 쓴다. 시한은 config 를 patch(create=True)하거나 서버 속성으로 줄인다 —
 수정 전 판본에서도 TypeError 가 아니라 단언으로 실패하게.
@@ -104,6 +106,14 @@ def _closed_within(sock, limit):
             return got, time.monotonic() - t0
         got += chunk
     return got, None
+
+
+def _leave(conn, phase, now):
+    """단계 닫기 — 수정 전 판본(leave(phase) 만 받음)에서도 TypeError 가 아니라 단언으로 실패하게."""
+    try:
+        conn.leave(phase, now)
+    except TypeError:
+        conn.leave(phase)
 
 
 def _wait(pred, limit=5.0):
@@ -735,6 +745,8 @@ class AdmissionTest(InboundCase):
             self.assertIsNone(srv._admit(sock, "10.0.0.%d" % i)[0])   # noqa: SLF001
         now = time.monotonic()
         seat = {name: srv._admitted[sock] for name, sock in socks.items()}   # noqa: SLF001
+        for st in seat.values():
+            _leave(st.conn, "header", now)   # fix2: 새 자리는 입장부터 헤더 단계다 — 여기서는 첫 요청을 이미 받은 자리들로 본다
         self.assertTrue(srv.conn_idle(socks["fresh_idle"]))
         self.assertTrue(srv.conn_idle(socks["old_idle"]))
         self.assertTrue(srv.conn_idle(socks["mid_idle"]))
@@ -781,6 +793,7 @@ class AdmissionTest(InboundCase):
         srv2._admit(slow, "10.0.0.2")   # noqa: SLF001
         self.assertTrue(srv2.conn_idle(user))
         now = time.monotonic()
+        _leave(srv2._admitted[user].conn, "header", now)   # noqa: SLF001
         srv2._admitted[user].since = now - 5   # noqa: SLF001
         srv2._admitted[slow].conn.enter("header", now - 0.6)   # noqa: SLF001
         with srv2._cond:   # noqa: SLF001
@@ -799,12 +812,30 @@ class AdmissionTest(InboundCase):
         srv3._admit(slow, "10.0.0.2")   # noqa: SLF001
         self.assertTrue(srv3.conn_idle(user))
         now = time.monotonic()
+        _leave(srv3._admitted[user].conn, "header", now)   # noqa: SLF001
         srv3._admitted[user].since = now - 5   # noqa: SLF001
-        srv3._admitted[slow].conn.enter("header", now - 0.6)   # noqa: SLF001
+        srv3._admitted[slow].conn.enter("header", now - 0.1)   # noqa: SLF001 — 0.1초째(대체 후보 기준 1/4 미만 — 아직 '느리다' 고 볼 수 없다)
         with srv3._cond:   # noqa: SLF001
             kind, _ = srv3._reclaim_one_locked(now, now + 0.2)   # noqa: SLF001
         self.assertEqual(kind, "evicted", "대기 마감 전에 느린 후보가 없는데 유휴를 내보내지 않았다")
         self.assertEqual((user.shut, slow.shut), ([socket.SHUT_RDWR], []))
+        # fix2(반증 2회차 R2-1): 마감 직전 대체 후보는 '조금이라도 느린' 연결이 먼저 — 헤더 0.6초째(기준 1초 미만)가 5초 쉰 정상
+        #   keep-alive 보다 앞선다(1회차 판본은 쉬던 정상 연결을 끊었다 — 갈아타기 공격 중 기존 사용자가 수정 전보다 먼저 끊긴 원인).
+        srv4 = server_mod.HubServer(("127.0.0.1", 0), server_mod.HubHandler, self.ctx,
+                                    max_connections=2, max_per_client=0, reclaim_after=1.0)
+        self.addCleanup(srv4.server_close)
+        user, slow = FakeSock(), FakeSock()
+        srv4._admit(user, "10.0.0.1")   # noqa: SLF001
+        srv4._admit(slow, "10.0.0.2")   # noqa: SLF001
+        self.assertTrue(srv4.conn_idle(user))
+        now = time.monotonic()
+        _leave(srv4._admitted[user].conn, "header", now)   # noqa: SLF001
+        srv4._admitted[user].since = now - 5   # noqa: SLF001
+        srv4._admitted[slow].conn.enter("header", now - 0.6)   # noqa: SLF001
+        with srv4._cond:   # noqa: SLF001
+            kind, _ = srv4._reclaim_one_locked(now, now + 0.2)   # noqa: SLF001
+        self.assertEqual(kind, "shed", "마감 직전에 헤더를 0.6초째 끄는 연결 대신 쉬던 정상 연결을 내보냈다")
+        self.assertEqual((user.shut, slow.shut), ([], [socket.SHUT_RDWR]))
 
     @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "리눅스 전용")
     def test_no_fd_leak(self):
@@ -1232,6 +1263,229 @@ class RestartTest(InboundCase):
             self.assertEqual(self._drops(srv, "full"), 0)
 
 
+def _cycler(port, stop, mode, phase=0.4, idle=0.4):
+    """반증 2회차 R2-1: 단계마다 되찾기 기준(0.5초) 직전에 다음 단계로 갈아탄다 — 유휴 → 헤더 드립 → 본문 드립 → 응답 → 유휴 …
+    (반증 refute_cycle.py 와 같은 꼴). mode 'hdr' 는 쉬지 않고 헤더만 흘린다."""
+    while time.monotonic() < stop:
+        try:
+            s = _open(port, timeout=5)
+            s.settimeout(5)
+            first = True
+            while time.monotonic() < stop:
+                if mode == "full":
+                    if not first:
+                        time.sleep(idle)
+                    first = False
+                    req = b"POST /x HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\n"
+                else:
+                    req = _GET
+                step = phase / len(req) * 0.9
+                for i in range(len(req)):
+                    s.sendall(req[i:i + 1])
+                    time.sleep(step)
+                if mode == "full":
+                    for _ in range(4):
+                        time.sleep(phase / 4 * 0.9)
+                        s.sendall(b"a")
+                if not _read_response(s)[0]:
+                    break
+            s.close()
+        except OSError:
+            time.sleep(0.05)
+
+
+class PhaseCyclingTest(InboundCase):
+    """반증 2회차 R2-1: 되찾기 후보를 '지금 단계의 시작' 으로만 보면 단계를 갈아타는 연결이 자리를 무기한 쥐었다.
+
+    축소 비율은 UnderAttackTest 와 같다(헤더 1초 · 대기 1초 · 되찾기 0.5초 · 자리 4). 수정 전(35d8da36) 실측: 새 사용자 0/5 ·
+    기존 keep-alive(0.6초 간격) 3번째 요청에서 끊김(a821fd9e 는 8/8 유지 — 이 시험의 keep-alive 쪽은 그 판본에서도 통과한다).
+    """
+
+    _keepalive_user = UnderAttackTest._keepalive_user
+    _use = UnderAttackTest._use
+    _new_users = UnderAttackTest._new_users
+
+    def _attack(self, count, seconds, mode):
+        stop = time.monotonic() + seconds
+        threads = [threading.Thread(target=_cycler, args=(self._port, stop, mode), daemon=True) for _ in range(count)]
+        for t in threads:
+            t.start()
+        self.addCleanup(lambda: [t.join(6) for t in threads])
+        return stop
+
+    def test_new_users_get_in_during_phase_cycling(self):
+        for mode in ("full", "hdr"):
+            with self.subTest(mode=mode), _capture():
+                srv, self._port = self._server(header=1.0, max_connections=4, admit_wait=1.0)
+                stop = self._attack(4, 7.0, mode)
+                time.sleep(1.0)
+                ok, tries, waits = self._new_users(stop)
+                drops = dict(getattr(srv, "inbound_drops", {}))
+                self.assertGreaterEqual(tries, 3)
+                self.assertGreaterEqual(ok / tries, 0.8, "단계 갈아타기({}) 중 새 사용자 {}/{} · {} · {}".format(
+                    mode, ok, tries, waits, drops))
+                self.assertGreater(drops.get("shed", 0), 0)
+
+    def test_existing_keepalive_keeps_working_during_phase_cycling(self):
+        for mode in ("full", "hdr"):
+            with self.subTest(mode=mode), _capture():
+                srv, self._port = self._server(header=1.0, max_connections=4, admit_wait=1.0)
+                user = self._keepalive_user(self._port)
+                self._attack(6, 5.5, mode)
+                results = self._use(user, 4.5, 0.6)   # 요청 사이 0.6초 쉼 > 되찾기 0.5초 — 그래도 갈아타는 공격 연결이 먼저 끊긴다
+                drops = dict(getattr(srv, "inbound_drops", {}))
+                self.assertGreaterEqual(len(results), 5)
+                self.assertTrue(all(ok for ok, _ in results), "갈아타기({}) 중 기존 keep-alive 가 끊겼다: {} · {}".format(
+                    mode, results, drops))
+                self.assertEqual(drops.get("evicted", 0), 0, drops)
+
+
+class ReclaimScoreTest(InboundCase):
+    """fix2: 되찾기 판정 단위 시험(가짜 소켓) — 연결 단위 느린 누계 · 마감 직전 대체 후보 · 공격 중 유예 · 계정당 보호 개수 · 반환 대기 창."""
+
+    class FakeSock:
+        def __init__(self):
+            self.shut = []
+
+        def shutdown(self, how):
+            self.shut.append(how)
+
+    def _srv(self, n, reclaim_after=1.0):
+        srv = server_mod.HubServer(("127.0.0.1", 0), server_mod.HubHandler, self.ctx,
+                                   max_connections=n, max_per_client=0, reclaim_after=reclaim_after)
+        self.addCleanup(srv.server_close)
+        socks = [self.FakeSock() for _ in range(n)]
+        now = time.monotonic()
+        for i, sock in enumerate(socks):
+            self.assertIsNone(srv._admit(sock, "10.0.0.%d" % i)[0])   # noqa: SLF001
+            _leave(srv._admitted[sock].conn, "header", now)   # noqa: SLF001 — 첫 요청은 받았다
+        return srv, socks, now
+
+    @staticmethod
+    def _seat(srv, sock):
+        return srv._admitted[sock]   # noqa: SLF001
+
+    def _add_slow(self, conn, seconds, now):
+        add = getattr(conn, "add_slow", None)
+        self.assertIsNotNone(add, "연결 단위 느린 단계 누계가 없다(ConnPhase.add_slow)")
+        add(seconds, now)
+
+    def test_cycling_connection_is_reclaimed_although_its_phase_just_started(self):
+        """누계 0.98초 + 헤더 0.05초째인 연결은 후보다(1회차는 '지금 단계 0.05초' 만 보아 끝내 후보가 되지 않았다) ·
+        쉬는 중이어도 누계가 기준을 넘으면 후보(종류 shed) · 점수가 큰 쪽 먼저 · 5초 쉰 정상 keep-alive 와 막 시작한 헤더는 남는다."""
+        srv, (user, cyc, cyc_idle, fresh), now = self._srv(4)
+        self.assertTrue(srv.conn_idle(user))
+        self._seat(srv, user).since = now - 5
+        self._add_slow(self._seat(srv, cyc).conn, 0.98, now)
+        self._seat(srv, cyc).conn.enter("header", now - 0.05)
+        self.assertTrue(srv.conn_idle(cyc_idle))
+        self._seat(srv, cyc_idle).since = now - 0.3
+        self._add_slow(self._seat(srv, cyc_idle).conn, 1.2, now - 0.3)
+        self._seat(srv, fresh).conn.enter("header", now - 0.05)   # 막 시작한 헤더 — 점수 0.05
+        order = []
+        with srv._cond:   # noqa: SLF001
+            for _ in range(3):
+                kind, _ = srv._reclaim_one_locked(now, now + srv.admit_wait)   # noqa: SLF001 — 대기 막 시작
+                if kind is None:
+                    break
+                victim = [name for name, sock in (("cyc", cyc), ("cyc_idle", cyc_idle), ("user", user), ("fresh", fresh))
+                          if sock.shut and name not in [v for _, v in order]]
+                order.append((kind, victim[0]))
+        self.assertEqual(order, [("shed", "cyc_idle"), ("shed", "cyc")])
+        self.assertEqual((user.shut, fresh.shut), ([], []))
+
+    def test_fallback_waits_under_attack_but_not_otherwise(self):
+        """공격 중(최근 느린 연결을 끊었다)이면 대기자가 reclaim_after 를 기다리기 전에는 쉬는 정상 연결을 내보내지 않는다
+        (대기 줄에서 요청을 미리 흘린 공격 연결은 입장 직후 빨라 보인다). 공격이 없으면(가득 찬 정상 keep-alive) 바로 정리한다."""
+        srv, (user, other), now = self._srv(2)
+        for sock in (user, other):
+            self.assertTrue(srv.conn_idle(sock))
+        self._seat(srv, user).since = now - 5
+        self._seat(srv, other).since = now - 0.2
+        with srv._cond:   # noqa: SLF001
+            kind, _ = srv._reclaim_one_locked(now, now + srv.admit_wait)   # noqa: SLF001
+        self.assertEqual(kind, "evicted", "공격이 없는데 가득 찬 유휴 keep-alive 를 바로 정리하지 않았다")
+        self.assertEqual((user.shut, other.shut), ([socket.SHUT_RDWR], []))
+        srv2, (user, other), now = self._srv(2)
+        for sock in (user, other):
+            self.assertTrue(srv2.conn_idle(sock))
+        self._seat(srv2, user).since = now - 5
+        self._seat(srv2, other).since = now - 0.2
+        self.assertTrue(hasattr(srv2, "_attack_seen_at"), "공격 신호(최근 느린 연결 정리)를 기록하지 않는다")
+        srv2._attack_seen_at = now - 1   # noqa: SLF001
+        deadline = now + srv2.admit_wait
+        with srv2._cond:   # noqa: SLF001
+            kind, next_at = srv2._reclaim_one_locked(now, deadline)   # noqa: SLF001
+            self.assertIsNone(kind, "공격 중 대기를 시작하자마자 쉬던 정상 연결을 내보냈다")
+            self.assertAlmostEqual(next_at, now + 0.8, delta=0.01)   # 다시 볼 때: other 가 1초를 쉬는 때(유예 끝 1초보다 먼저)
+            kind, _ = srv2._reclaim_one_locked(now + 0.8, deadline)   # noqa: SLF001
+            self.assertIsNone(kind, "유예(reclaim_after) 안에 쉬던 정상 연결을 내보냈다")
+            kind, _ = srv2._reclaim_one_locked(now + srv2.reclaim_after, deadline)   # noqa: SLF001
+        self.assertEqual(kind, "evicted")
+        self.assertEqual((user.shut, other.shut), ([socket.SHUT_RDWR], []))
+        with _capture():
+            srv2.note_inbound_drop("header")
+        self.assertGreater(srv2._attack_seen_at, now)   # noqa: SLF001 — 단계 시한 초과도 공격 신호
+
+    def test_trusted_exemption_is_capped_per_account(self):
+        """반증 2회차 S: 로그인 세션의 본문 · 쓰기 제외는 계정당 2개까지(오래 진행한 것 보호) — viewer 하나로 64칸을 못 쥔다.
+        넘는 것은 진행분이 큰 순으로 되찾는다."""
+        from hub.inbound import ConnPhase
+        self.assertIn("user", getattr(ConnPhase, "__slots__", ()), "로그인 세션의 계정을 적지 않는다 — 계정당 보호 개수를 셀 수 없다")
+        srv, socks, now = self._srv(6)
+        plan = [("viewer", "body", 9), ("viewer", "write", 8), ("viewer", "body", 7), ("viewer", "body", 6),
+                ("admin", "body", 9), ("admin", "write", 1)]
+        for sock, (user, phase, ago) in zip(socks, plan):
+            conn = self._seat(srv, sock).conn
+            conn.trusted = True
+            conn.user = user
+            conn.enter(phase, now - ago)
+        shed = []
+        with srv._cond:   # noqa: SLF001
+            for _ in range(4):
+                kind, _ = srv._reclaim_one_locked(now, now + 1.0)   # noqa: SLF001
+                if kind is None:
+                    break
+                shed.extend(i for i, s in enumerate(socks) if s.shut and i not in shed)
+        self.assertEqual(shed, [2, 3], "계정당 보호 개수를 넘는 로그인 세션 업로드를 되찾지 않았거나 순서가 틀렸다")
+
+    def test_reclaim_pending_window_follows_reclaim_after(self):
+        """반증 2회차 nit: 되찾기 반환 대기 창은 min(1초, reclaim_after) — 축소 비율(0.4초)에서도 비율이 맞는다(운영 5초 → 1초 그대로)."""
+        for reclaim_after, inside, outside in ((0.4, 0.3, 0.45), (5.0, 0.9, 1.1)):
+            srv, (a, _b), now = self._srv(2, reclaim_after=reclaim_after)
+            seat = self._seat(srv, a)
+            seat.state = "evicted"
+            seat.reclaimed_at = now
+            with srv._cond:   # noqa: SLF001
+                self.assertTrue(srv._reclaim_pending_locked(now + inside), reclaim_after)   # noqa: SLF001
+                self.assertFalse(srv._reclaim_pending_locked(now + outside), reclaim_after)   # noqa: SLF001
+
+    def test_new_seat_waits_for_the_header_from_admission(self):
+        """새 자리는 입장 시각부터 헤더 단계다 — 스레드 시작 지연 동안 '처리 중' 으로 보여 되찾기 예측에서 빠지지 않게."""
+        srv = server_mod.HubServer(("127.0.0.1", 0), server_mod.HubHandler, self.ctx, max_connections=2, max_per_client=0)
+        self.addCleanup(srv.server_close)
+        sock = self.FakeSock()
+        srv._admit(sock, "10.0.0.1")   # noqa: SLF001
+        seat = self._seat(srv, sock)
+        self.assertEqual((seat.conn.phase, seat.conn.started), ("header", seat.since))
+
+    def test_header_deadline_counts_from_admission_despite_thread_lag(self):
+        """스레드가 0.6초 늦게 시작해도 아무것도 안 보내는 새 연결은 입장부터 헤더 시한(1초)에 끊긴다(1회차: 약 1.6초)."""
+        class Lagging(server_mod.HubHandler):
+            def setup(self):
+                time.sleep(0.6)
+                super().setup()
+
+        with _capture():
+            srv, port = self._server(header=1.0, handler=Lagging)
+            sock = _open(port)
+            self.addCleanup(sock.close)
+            got, closed = _closed_within(sock, 3.0)
+        self.assertEqual(got, b"")
+        self.assertIsNotNone(closed)
+        self.assertLess(closed, 1.35, "헤더 시한을 스레드 시작부터 셌다(입장 시각이 아니라)")
+
+
 class UnitTest(unittest.TestCase):
     def test_phase_reader(self):
         """T10: 단계 중 recv 뒤 소켓 시한은 유휴 값 · 드립은 시한에 InboundDeadline · 단계가 없으면 socket.timeout."""
@@ -1393,6 +1647,53 @@ class UnitTest(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 2.0, "버퍼에 넣은 바이트로 허용 시간이 늘었다")
         self.assertGreater(tx.sent, 16384 * 2, "커널 버퍼가 시험 조건보다 작다(시험 무효)")
         self.assertLess(tx.delivered(), tx.sent)
+
+    def test_conn_phase_slow_score(self):
+        """fix2(반증 2회차 R2-1): 연결 단위 느린 누계 — 헤더 · 본문 · 쓰기를 단계가 바뀌어도 이어 쌓고, 반감기로 줄인다.
+        로그인 세션의 본문 · 쓰기 · 린저 · 유휴는 쌓지 않는다(헤더는 로그인 여부를 아직 모르니 쌓는다). 리더 · 라이터가 단계를 닫으면 더한다."""
+        from hub.inbound import ConnPhase, PhaseReader
+        self.assertTrue(hasattr(ConnPhase, "slow_score"), "연결 단위 느린 누계가 없다 — 단계를 갈아타면 매번 0 부터")
+        c = ConnPhase(half_life=0)   # 먼저 줄이지 않고 쌓이는지만
+        t = 100.0
+        for phase, start, end in (("header", 0.0, 0.4), ("body", 0.4, 0.8), ("write", 0.8, 0.9)):
+            c.enter(phase, t + start)
+            self.assertAlmostEqual(c.slow_score(t + end), start + (end - start), delta=1e-6, msg=phase)
+            c.leave(phase, t + end)
+        self.assertAlmostEqual(c.slow_score(t + 0.9), 0.9, delta=1e-6, msg="단계가 바뀌어도 이어 쌓는다")
+        c.half_life = 4.0
+        self.assertAlmostEqual(c.slow_score(t + 4.9), 0.45, delta=1e-6, msg="반감기 4초")
+        c.enter("linger", t + 5)
+        c.leave("linger", t + 9)
+        self.assertAlmostEqual(c.slow_score(t + 8.9), 0.225, delta=0.01, msg="린저는 쌓지 않는다")
+        c.enter("header", t + 9)
+        self.assertAlmostEqual(c.slow_score(t + 9.5, current=False), c.slow_score(t + 9.5) - 0.5, delta=1e-9)
+        c.leave("header", t + 9.5)
+        c.trusted = True
+        before = c.slow_score(t + 10)
+        for phase in ("body", "write"):
+            c.enter(phase, t + 10)
+            self.assertAlmostEqual(c.slow_score(t + 13), before * 2 ** (-3 / 4.0), delta=0.01, msg=phase)
+            c.leave(phase, t + 13)
+        self.assertAlmostEqual(c.slow_score(t + 13), before * 2 ** (-3 / 4.0), delta=0.01, msg="로그인 세션의 본문 · 쓰기를 쌓았다")
+        c.enter("header", t + 13)
+        c.leave("header", t + 14)
+        self.assertAlmostEqual(c.slow_score(t + 14), before * 2 ** (-4 / 4.0) + 1.0, delta=0.02, msg="헤더는 로그인 세션도 쌓는다")
+        c.leave("header", t + 20)   # 단계가 다르면(이미 닫힘) 아무것도 안 한다
+        self.assertAlmostEqual(c.slow_score(t + 14), before * 2 ** (-4 / 4.0) + 1.0, delta=0.02)
+        # 리더가 단계를 닫으면 tracker 에 더한다(리더 시계)
+        clock = [50.0]
+        a, b = socket.socketpair()
+        self.addCleanup(a.close)
+        self.addCleanup(b.close)
+        tracker = ConnPhase(half_life=0)
+        rx = PhaseReader(a, 5.0, clock=lambda: clock[0], tracker=tracker)
+        rx.begin("header", 10.0)
+        clock[0] = 52.5
+        rx.end()
+        self.assertAlmostEqual(tracker.slow_score(52.5), 2.5)
+        rx.begin("header", 10.0, started=40.0)   # 새 연결의 첫 헤더 — 입장 시각부터
+        self.assertEqual(tracker.started, 40.0)
+        self.assertAlmostEqual(rx.remaining(), 40.0 + 10.0 - 52.5)
 
     def test_phase_allowance(self):
         """T12: 본문 허용 시간 = base + 받은 바이트/최저 속도, 상한."""

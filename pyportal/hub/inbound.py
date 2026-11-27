@@ -14,8 +14,8 @@ Content-Length 로 늘리면 '1MiB 를 선언하고 19초마다 1바이트' 로 
 
 응답 쓰기도 같은 꼴이다(반증 1회차 M1): `sendall` 1회에 소켓 시한 20초라 응답을 읽지 않는 상대(느린 읽기)가 쓰기마다
 20초씩 자리를 쥐었다. `PhaseWriter` 가 쓰기 단계 시한(base + **보낸** 바이트/최저 속도, 상한)을 조각마다 건다.
-`ConnPhase` 는 지금 어느 단계인지(언제부터인지)를 서버의 입장 표에 알린다 — 가득 찼을 때 '클라이언트를 기다리며
-오래 쥔 자리' 를 골라 되찾는 근거다(server.HubServer._reclaim_one_locked).
+`ConnPhase` 는 지금 어느 단계인지(언제부터인지)와 연결 단위 느린 단계 누계(반증 2회차 R2-1 — 단계를 갈아타도 이어 쌓는다)를
+서버의 입장 표에 알린다 — 가득 찼을 때 '클라이언트를 기다리며 오래 쥔 자리' 를 골라 되찾는 근거다(server.HubServer._reclaim_one_locked).
 """
 
 from __future__ import annotations
@@ -70,30 +70,77 @@ def phase_allowance(received: int, *, base: float, min_rate: float = 0, cap: flo
     return allowance
 
 
+# 클라이언트를 기다리는 단계(되찾기 점수에 쌓는다) · 로그인 세션이면 쌓지 않는 단계
+SLOW_PHASES = ("header", "body", "write")
+TRUSTED_PHASES = ("body", "write")
+
+
+def decayed(value: float, at: float, now: float, half_life: float) -> float:
+    """value 를 at 부터 now 까지 반감기 half_life 로 줄인 값(half_life <= 0 이면 줄이지 않는다)."""
+    if value <= 0:
+        return 0.0
+    if half_life and half_life > 0 and now > at:
+        return value * 2.0 ** (-(now - at) / float(half_life))
+    return value
+
+
 class ConnPhase:
-    """연결 하나의 지금 단계 — 핸들러(리더·라이터)가 쓰고 서버의 입장 표가 읽는다.
+    """연결 하나의 지금 단계 + 느린 단계 누계 — 핸들러(리더·라이터)가 쓰고 서버의 입장 표가 읽는다.
 
     phase: None(처리 중 · 유휴) | 'header' | 'body' | 'write' | 'linger' · started: 그 단계 시작(monotonic) ·
     shed: 서버가 자리를 되찾으려고 이 연결을 끊었다(핸들러는 응답·집계 없이 조용히 닫는다) ·
-    trusted: 지금 요청이 로그인 세션을 가졌다(본문·쓰기 단계는 되찾기 대상에서 뺀다 — 가져오기·복원·백업 내려받기).
-    값 대입만 한다(GIL 아래 원자적) — started 를 phase 보다 먼저 써서 읽는 쪽이 새 단계에 옛 시각을 보지 않게.
+    trusted / user: 지금 요청이 로그인 세션을 가졌다 · 그 계정(본문·쓰기 단계는 계정당 몇 개까지 되찾기 대상에서 뺀다 —
+    가져오기·복원·백업 내려받기).
+
+    보안 잔여 11-27 L12 · 반증 2회차 R2-1: '지금 단계의 시작' 만 보면 단계마다 되찾기 간격 직전에 다음 단계로 갈아타는 연결
+    (유휴 → 헤더 드립 → 본문 드립 → 응답 → 유휴 …)이 한 번도 후보가 되지 않고 자리를 무기한 쥐었다(새 사용자 0/5).
+    그래서 **연결 단위로** 클라이언트를 기다린 시간(헤더 · 본문 · 쓰기 — 로그인 세션의 본문 · 쓰기는 빼고)을 반감기로 줄이며
+    쌓는다(`slow_score`). 정상 브라우저는 요청 하나에 ms 단위라 거의 0 이고, 갈아타기 공격은 거의 쉼 없이 쌓인다.
+    값 대입만 한다(GIL 아래 원자적) — 누계는 (값, 시각) 튜플 하나로 바꿔 끼우고, leave 는 phase 를 먼저 지운 뒤 누계를
+    더해 읽는 쪽이 '단계 진행분 + 이미 더한 누계' 를 이중으로 세지 않게(잠깐 덜 세는 쪽 — 잘못 끊지 않는 쪽).
     """
 
-    __slots__ = ("phase", "started", "shed", "trusted")
+    __slots__ = ("phase", "started", "shed", "trusted", "user", "half_life", "_acc")
 
-    def __init__(self):
+    def __init__(self, half_life: float = 20.0):
         self.phase = None
         self.started = 0.0
         self.shed = False
         self.trusted = False
+        self.user = None
+        self.half_life = half_life
+        self._acc = (0.0, 0.0)
 
     def enter(self, phase, started):
         self.started = started
         self.phase = phase
 
-    def leave(self, phase):
-        if self.phase == phase:
-            self.phase = None
+    def counts(self, phase) -> bool:
+        """이 단계가 느린 단계 누계에 들어가는지(지금 요청의 로그인 여부 기준)."""
+        return phase in SLOW_PHASES and not (self.trusted and phase in TRUSTED_PHASES)
+
+    def leave(self, phase, now=None):
+        if self.phase != phase:
+            return
+        started = self.started
+        self.phase = None
+        if self.counts(phase):
+            t = time.monotonic() if now is None else now
+            self.add_slow(t - started, t)
+
+    def add_slow(self, seconds, now) -> None:
+        value, at = self._acc
+        self._acc = (decayed(value, at, now, self.half_life) + max(0.0, float(seconds)), now)
+
+    def slow_score(self, now, current: bool = True) -> float:
+        """반감기로 줄인 느린 단계 누계(초) + (current 면) 지금 단계가 쌓이는 단계일 때 그 진행분."""
+        value, at = self._acc
+        score = decayed(value, at, now, self.half_life)
+        phase = self.phase
+        started = self.started
+        if current and phase is not None and self.counts(phase):
+            score += max(0.0, now - started)
+        return score
 
 
 def write_chunk_size(base: float, min_rate: float) -> int:
@@ -128,11 +175,12 @@ class PhaseReader(io.RawIOBase):
     def readable(self):
         return True
 
-    def begin(self, phase: str, seconds: float, *, min_rate: float = 0, cap: float = None) -> None:
+    def begin(self, phase: str, seconds: float, *, min_rate: float = 0, cap: float = None, started=None) -> None:
+        """started: 단계 시작 시각(기본 지금) — 새 연결의 첫 헤더는 입장 시각부터 센다(서버가 ConnPhase 에 적어 둔 값)."""
         self.phase = phase
         self.received = 0
         self.eof_in_phase = False
-        self._start = self._clock()
+        self._start = self._clock() if started is None else float(started)
         self._base = max(0.0, float(seconds))
         self._rate = min_rate
         self._cap = cap
@@ -141,7 +189,7 @@ class PhaseReader(io.RawIOBase):
 
     def end(self) -> None:
         if self._tracker is not None and self.phase is not None:
-            self._tracker.leave(self.phase)
+            self._tracker.leave(self.phase, self._clock())
         self.phase = None
 
     def remaining(self) -> float:
@@ -221,7 +269,7 @@ class PhaseWriter(io.BufferedIOBase):
 
     def end(self) -> None:
         if self._tracker is not None and self.phase is not None:
-            self._tracker.leave(self.phase)
+            self._tracker.leave(self.phase, self._clock())
         self.phase = None
 
     def delivered(self) -> int:
