@@ -92,7 +92,7 @@ export function RealOsProbe({ scope }) {
             Tools 가 보고한 OS 종류 · 버전 <span className="muted" style={{ fontWeight: 500 }}>{n((data.samples || []).length)}가지{data.samplesOmitted ? ` · 상한으로 ${n(data.samplesOmitted)}가지 생략(파일에도 없음)` : ''}</span>
           </div>
           <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-            <STable className="v3-table" minWidth={1180} limit={50}>
+            <STable className="v3-table" minWidth={1060} limit={50}>
               <thead><tr>
                 <th>보고된 이름</th><th>계열</th><th>배포판</th><th>버전</th><th className="right">VM</th><th className="right">켜짐</th><th className="right">법인</th>
                 <th data-nosort>vCenter 설정값(상위)</th><th data-nosort>커널 · 빌드(상위)</th>
@@ -100,7 +100,7 @@ export function RealOsProbe({ scope }) {
               <tbody>
                 {(data.samples || []).map((r, i) => (
                   <tr key={`${r.prettyName}-${r.distroVersion}-${i}`}>
-                    <td style={{ whiteSpace: 'normal', minWidth: 220 }}><b>{r.prettyName || '—'}</b>{r.appliance ? <span className="badge gray" style={{ marginLeft: 6 }}>어플라이언스 {n(r.appliance)}</span> : null}</td>
+                    <td style={{ whiteSpace: 'normal', minWidth: 220 }}><b>{r.prettyName || '—'}</b>{r.appliance ? <span className="badge gray" style={{ marginLeft: 6 }} title="OVF 제품 정보가 있는 VM">어플라이언스 {n(r.appliance)}</span> : null}{r.managed ? <span className="badge gray" style={{ marginLeft: 6 }} title="vSphere 확장이 관리하는 VM(복제본 · vCLS 등)">확장 관리 {n(r.managed)}</span> : null}</td>
                     <td>{r.familyName || '—'}</td>
                     <td>{r.distroName || '—'}</td>
                     <td className="tabular">{r.distroVersion || '—'}</td>
@@ -108,7 +108,7 @@ export function RealOsProbe({ scope }) {
                     <td className="right tabular" data-sort={r.poweredOn}>{n(r.poweredOn)}</td>
                     <td className="right tabular" data-sort={r.vcenters}>{n(r.vcenters)}</td>
                     <td style={{ whiteSpace: 'normal', fontSize: 12, minWidth: 200 }} className="muted">{topText(r.configOs)}</td>
-                    <td style={{ whiteSpace: 'normal', fontSize: 11.5, minWidth: 200, fontFamily: 'monospace' }} className="muted">{topText(r.kernels, 2)}</td>
+                    <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', fontSize: 11.5, minWidth: 180, fontFamily: 'monospace' }} className="muted">{topText(r.kernels, 2)}</td>
                   </tr>
                 ))}
               </tbody>

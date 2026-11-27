@@ -262,7 +262,8 @@ test('⑧ 점검 집계 — 법인별 개수 · 종류 · 사유 · 어플라이
   const p = buildOsProbe(vms, [{ id: 'vc1', name: 'OC1', version: '8.0.3' }, { id: 'vc2', name: 'OC2' }], [{ vcenterId: 'vc1', osAt: 5, osAsked: true, osApiVersion: '8.0.3.0' }], { now: 10 });
   assert.equal(p.total.vms, 11); assert.equal(p.total.templates, 1);
   assert.equal(p.total.detailed, 3); assert.equal(p.total.detailedOff, 1);
-  assert.deepEqual(p.noDetail, { notRead: 1, notAsked: 1, template: 1, toolsOld: 1, toolsNotRunning: 1, poweredOff: 1, toolsUnknown: 1, other: 2 });
+  assert.deepEqual(p.noDetail, { notRead: 1, notAsked: 1, unparsed: 1, template: 1, toolsOld: 1, toolsNotRunning: 1, poweredOff: 1, toolsUnknown: 1, other: 1 },
+    '형식을 못 읽은 보고(raw · extra)는 Tools 미보고(other)와 섞지 않는다');
   const oc1 = p.vcenters.find((r) => r.id === 'vc1');
   assert.equal(oc1.name, 'OC1'); assert.equal(oc1.detailed, 2); assert.equal(oc1.status.apiVersion, '8.0.3.0');
   assert.equal(p.vcenters.find((r) => r.id === 'vc2').status, null, '엣지 수집 vCenter 는 이 포탈에 상태가 없다');
@@ -271,6 +272,8 @@ test('⑧ 점검 집계 — 법인별 개수 · 종류 · 사유 · 어플라이
   assert.deepEqual(rk.configOs, [{ value: 'CentOS 7 (64-bit)', count: 2 }], '설정값과 실제 값을 나란히 본다');
   const ph = p.samples.find((s) => s.distroName === 'VMware Photon OS');
   assert.equal(ph.appliance, 1);
+  assert.equal(ph.managed, 1);
+  assert.equal(rk.appliance, 0); assert.equal(rk.managed, 0);
   assert.equal(p.appliances[0].name, 'VMware vCenter Server');
   assert.deepEqual(p.appliances[0].os, [{ value: 'VMware Photon OS/Linux', count: 1 }]);
   assert.deepEqual(p.managedBy, [{ extensionKey: 'com.vmware.vim.eam', type: 'cluster-agent', count: 1 }]);
@@ -315,4 +318,63 @@ test('⑨ 배선 — 수집기가 vm.gos 를 싣고 · 라우트가 관리자 �
   assert.equal(numText(null), '—'); assert.equal(pct(0, 0), '—'); assert.equal(pct(1, 4), '25%');
   assert.equal(statusText(null).text, '엣지 수집(상태는 엣지에)');
   assert.match(statusText({ osError: 'x' }).text, /^오류/);
+});
+
+test('⑧ 묶음 키 — 값에 구분자가 있어도 다른 OS 가 합쳐지지 않는다 · 확장 관리 VM 은 어플라이언스가 아니다', () => {
+  const d1 = { ...rocky, detailed: { familyName: 'L|X', distroName: 'Y' } };
+  const d2 = { ...rocky, detailed: { familyName: 'L', distroName: 'X|Y' } };
+  const p = buildOsProbe([
+    vm('vm-1', 'vc1', { gos: d1 }), vm('vm-2', 'vc1', { gos: d2 }),
+    vm('vm-3', 'vc1', { gos: rocky, cfg: { managedBy: { extensionKey: 'com.vmware.vcHms', type: 'replica' } } }),
+  ], [{ id: 'vc1' }], [], { now: 1 });
+  assert.equal(p.samples.length, 3);
+  const rk = p.samples.find((x) => x.distroName === 'Rocky Linux');
+  assert.equal(rk.appliance, 0, '복제본(managedBy)을 어플라이언스로 세지 않는다');
+  assert.equal(rk.managed, 1);
+  assert.equal(p.total.vapp, 0); assert.equal(p.total.managed, 1);
+});
+
+test('⑥ 수집기 — 앞 종류가 예산을 다 쓰면 os 를 시작하지 않는다', async () => {
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  const c = fakeClient();
+  const r = await refreshVmCfg(c, 'vcA', ['vm-1'], { now: NOW, budgetMs: 0, settings: SET });
+  assert.equal(r.os, null);
+  assert.equal(c.calls.length, 0);
+  assert.equal(statusOf('vcA')?.osAt ?? null, null, '시작하지 않은 종류는 상태(osAt)를 갱신하지 않는다');
+});
+
+test('⑦ 가짜 vCenter — 예전 방식(RetrieveProperties) · 중간 실패 뒤 취소도 같은 판', async () => {
+  const { config } = await import('../src/config.js');
+  const ENV = (b) => `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><soapenv:Body>${b}</soapenv:Body></soapenv:Envelope>`;
+  const FAULT = ENV('<soapenv:Fault><faultcode>ServerFaultCode</faultcode><faultstring>boom</faultstring></soapenv:Fault>');
+  const seen = [];
+  let mode = 'legacy';
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (x) => { b += x; });
+    req.on('end', () => {
+      const m = /<(\w+) xmlns="urn:vim25">/.exec(b)?.[1] || '?';
+      seen.push({ m, action: req.headers.soapaction });
+      let code = 200; let body;
+      if (m === 'RetrieveProperties') body = ENV('<RetrievePropertiesResponse xmlns="urn:vim25"><returnval><obj type="VirtualMachine">vm-1</obj><propSet><name>name</name><val xsi:type="xsd:string">a</val></propSet></returnval></RetrievePropertiesResponse>');
+      else if (m === 'RetrievePropertiesEx') body = ENV('<RetrievePropertiesExResponse xmlns="urn:vim25"><returnval><token>T1</token><objects><obj type="VirtualMachine">vm-1</obj></objects></returnval></RetrievePropertiesExResponse>');
+      else if (m === 'ContinueRetrievePropertiesEx') { code = 500; body = FAULT; }
+      else body = ENV('<CancelRetrievePropertiesExResponse xmlns="urn:vim25"></CancelRetrievePropertiesExResponse>');
+      res.writeHead(code, { 'content-type': 'text/xml' }); res.end(body);
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const saved = config.vcPropsPaging;
+  try {
+    const c = new VimSoapClient({ host: `http://127.0.0.1:${srv.address().port}` });
+    c.sc = { propertyCollector: 'propertyCollector' };
+    config.vcPropsPaging = false;
+    await c.retrieveManyObjectProps('VirtualMachine', ['vm-1'], ['name'], 250, { soapVersion: '8.0.2.0' });
+    assert.deepEqual(seen.map((x) => [x.m, x.action]), [['RetrieveProperties', '"urn:vim25/8.0.2.0"']], '예전 방식도 같은 판');
+    seen.length = 0; mode = 'paged';
+    config.vcPropsPaging = true;
+    await assert.rejects(c.retrieveManyObjectProps('VirtualMachine', ['vm-1'], ['name'], 250, { soapVersion: '8.0.2.0' }));
+    assert.deepEqual(seen.map((x) => x.m), ['RetrievePropertiesEx', 'ContinueRetrievePropertiesEx', 'CancelRetrievePropertiesEx']);
+    assert.ok(seen.every((x) => x.action === '"urn:vim25/8.0.2.0"'), '취소 요청도 같은 판');
+    assert.equal(mode, 'paged');
+  } finally { config.vcPropsPaging = saved; await new Promise((r) => srv.close(r)); }
 });

@@ -4,6 +4,7 @@
 export const REASON_TEXT = Object.freeze({
   notRead: '아직 읽지 않음(수집 전 · 엣지 미업그레이드)',
   notAsked: '묻지 않음(vCenter API 8.0.2 미만 또는 판 미상)',
+  unparsed: '보고는 왔으나 형식을 못 읽음',
   template: '템플릿',
   toolsOld: 'Tools 11.2 미만',
   toolsNotRunning: '켜짐 · Tools 미실행',

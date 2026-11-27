@@ -14,12 +14,14 @@ const MANAGED_MAX = 50;
 const TOP_MAX = 5;
 
 /** 보고가 없는 VM 의 사유 — 앞의 것부터 처음 맞는 하나. 화면 문구는 웹 realOsProbeText.js 가 같은 키로 소유한다. */
-export const NO_DETAIL_REASONS = Object.freeze(['notRead', 'notAsked', 'template', 'toolsOld', 'toolsNotRunning', 'poweredOff', 'toolsUnknown', 'other']);
+export const NO_DETAIL_REASONS = Object.freeze(['notRead', 'notAsked', 'unparsed', 'template', 'toolsOld', 'toolsNotRunning', 'poweredOff', 'toolsUnknown', 'other']);
 
 export function noDetailReason(vm) {
   const g = vm?.gos;
   if (!g || typeof g !== 'object') return 'notRead';
   if (!g.asked) return 'notAsked';
+  // 보고는 왔는데 아는 키를 못 읽었다(raw) · 모르는 키만 왔다(extra) — 'Tools 미보고' 가 아니라 파서가 틀린 것이다(점검의 목적이 이것을 가르는 것).
+  if ((typeof g.raw === 'string' && g.raw) || (g.extra && typeof g.extra === 'object' && Object.keys(g.extra).length)) return 'unparsed';
   if (vm.template) return 'template';
   const t = toolsAtLeast(vm.toolsVersion, 11, 2);
   if (t === false) return 'toolsOld';
@@ -92,7 +94,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     const mb = vm.cfg?.managedBy;
     if (mb && (mb.extensionKey || mb.type)) {
       add('managed');
-      const key = `${mb.extensionKey || ''}|${mb.type || ''}`;
+      const key = JSON.stringify([mb.extensionKey || '', mb.type || '']);   // 값에 구분자가 들어가도 다른 항목이 합쳐지지 않게
       const e = managed.get(key) || { key, extensionKey: mb.extensionKey || null, type: mb.type || null, count: 0 };
       e.count += 1; managed.set(key, e);
     }
@@ -102,7 +104,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
       if (g.vapp) {
         add('vapp');
         const v = g.vapp;
-        const key = `${v.name || ''}|${v.vendor || ''}|${v.version || ''}`;
+        const key = JSON.stringify([v.name || '', v.vendor || '', v.version || '']);
         const e = vapps.get(key) || { key, name: v.name || null, vendor: v.vendor || null, version: v.version || null, fullVersion: v.fullVersion || null, count: 0, os: new Map() };
         e.count += 1;
         if (g.detailed?.prettyName) bump(e.os, g.detailed.prettyName, 1);
@@ -123,14 +125,14 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     if (d) {
       add('detailed');
       if (!on) add('detailedOff');
-      const key = [d.familyName, d.distroName, d.distroVersion, d.prettyName, d.bitness].map((x) => x || '').join('|');
+      const key = JSON.stringify([d.familyName, d.distroName, d.distroVersion, d.prettyName, d.bitness].map((x) => x || ''));
       let e = samples.get(key);
       if (!e) {
         e = {
           key, familyName: d.familyName || null, distroName: d.distroName || null, distroVersion: d.distroVersion || null,
           distroAddlVersion: d.distroAddlVersion || null, prettyName: d.prettyName || null, bitness: d.bitness || null,
           architecture: d.architecture || null, cpeString: d.cpeString || null, buildNumber: d.buildNumber || null,
-          count: 0, poweredOn: 0, vcenters: new Set(), kernels: new Map(), configOs: new Map(), toolsGuestId: new Map(), appliance: 0,
+          count: 0, poweredOn: 0, vcenters: new Set(), kernels: new Map(), configOs: new Map(), toolsGuestId: new Map(), appliance: 0, managed: 0,
         };
         samples.set(key, e);
       }
@@ -140,7 +142,9 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
       if (d.kernelVersion) bump(e.kernels, d.kernelVersion, 1);
       bump(e.configOs, typeof vm.guestOS === 'string' && vm.guestOS ? vm.guestOS : '—', 1);
       if (vm.cfg?.guestIdTools) bump(e.toolsGuestId, vm.cfg.guestIdTools, 1);
-      if (g.vapp || (mb && (mb.extensionKey || mb.type))) e.appliance += 1;
+      // 어플라이언스 = 제품 정보(OVF)가 있는 VM 만. 확장이 관리하는 VM(managedBy — 복제본 · vCLS 등)은 따로 센다(복제본을 어플라이언스라 부르지 않는다).
+      if (g.vapp) e.appliance += 1;
+      if (mb && (mb.extensionKey || mb.type)) e.managed += 1;
     } else {
       const why = noDetailReason(vm);
       r.noDetail[why] += 1; noDetail[why] += 1;
@@ -160,7 +164,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
   const sampleList = topList(samples, SAMPLE_MAX, (e) => ({
     familyName: e.familyName, distroName: e.distroName, distroVersion: e.distroVersion, distroAddlVersion: e.distroAddlVersion,
     prettyName: e.prettyName, bitness: e.bitness, architecture: e.architecture, cpeString: e.cpeString, buildNumber: e.buildNumber,
-    count: e.count, poweredOn: e.poweredOn, vcenters: e.vcenters.size, appliance: e.appliance,
+    count: e.count, poweredOn: e.poweredOn, vcenters: e.vcenters.size, appliance: e.appliance, managed: e.managed,
     kernels: topCounts(e.kernels), configOs: topCounts(e.configOs), toolsGuestId: topCounts(e.toolsGuestId),
   }));
   const vappList = topList(vapps, VAPP_MAX, (e) => ({ name: e.name, vendor: e.vendor, version: e.version, fullVersion: e.fullVersion, count: e.count, os: topCounts(e.os) }));

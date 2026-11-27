@@ -607,6 +607,8 @@
 - **점검**: `GET /api/admin/os-scan/probe`(관리자 · 조회 범위 먼저 · 요청 필터 뒤) — 집계는 `inventory/osProbe.js buildOsProbe`(O(N) 1회 · 목록마다 상한 + 생략 수). **VM 이름을 싣지 않는다**
   (화면이 응답을 그대로 JSON 파일로 내려받게 한다). 보고 없음 사유 키는 `NO_DETAIL_REASONS` 하나 — 웹 문구 `views/tools/realOsProbeText.js REASON_TEXT` 와 시험이 대조.
   수집 상태(`vmCfgStatus`)는 이 포탈이 직접 수집하는 vCenter 만 있다 — 엣지 수집분은 '엣지 수집(상태는 엣지에)' 로 말한다(없는 값을 지어내지 않는다).
+  **형식을 못 읽은 보고(raw · extra)는 사유 'unparsed' 로 따로** — 'Tools 정상인데 보고 없음'(other)과 섞으면 파서 결함이 Tools 미보고로 읽힌다(반증 지적).
+  **어플라이언스 = OVF 제품 정보(vapp)가 있는 VM 만** — 확장이 관리하는 VM(managedBy: 복제본 · vCLS)은 '확장 관리' 로 따로 센다. 묶음 키는 `JSON.stringify([…])`(값 안 구분자로 합쳐지지 않게).
 - 남긴 것(다음 단계): 판정 코어(종류 · 버전 · Windows 빌드 → 릴리스) · Summary OS 합계 전환 · VM 성격(일반 / 어플라이언스 / 시스템 VM)과 수동 지정 · EOL · SQLite 저장 · 게스트 조회 스캐너를 '보고 없는 VM 만' 으로.
   Windows 의 실제 보고 글자 · 값 안 이스케이프 규칙은 **실측 전**이다(데모 생성기의 Windows 값은 가정).
   회귀 `server/test/realOs354.test.js`.
