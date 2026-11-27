@@ -5,7 +5,8 @@
  *  · 노드당 동시 세션 상한 `MAX_STREAMS`(기본 40) — 넘는 대상은 시작하지 않고 상태 `limit` 으로 말한다(조용히 빼지 않는다).
  *  · 데모(mock) 대상은 SSH 없이 mock.js 표본을 같은 주기로 낸다 — 화면 · 묶음 · DB 경로가 실데이터와 같은 길을 탄다.
  *  · ‘다시 연결’ 은 대상마다 60초에 한 번 — 연타가 로그인 시도를 늘리지 않게.
- *  · sink: { sample(id, ts, sample, hello), procs(id, ts, p), status(id, st), load?(id, load) } — 중앙은 store 로, 엣지는 보낼 묶음으로 간다.
+ *  · sink: { sample(id, ts, sample, hello, ep), procs(id, ts, p, ep), status(id, st, ep), load?(id, load, ep) } — 중앙은 store 로, 엣지는 보낼 묶음으로 간다.
+ *    ep(v3.57.0) = 중앙이 준 기계 열쇠 — 그 수집기가 연 기계의 값에 붙는다(엣지 중앙이 예전 서버 값을 거른다). 접속처가 같고 열쇠만 바뀌면 다시 열지 않고 바꿔 붙인다.
  *  · v2.983: 원하는 대상의 procEvery(프로세스 표본 주기 — 설정)가 바뀌면 명령만 바꾼다(주기와 같은 길). 수집 부하 창은 sink.load 로.
  */
 import { createCollector, testTarget, focusAuthGuard, authIdOf } from './collector.js';
@@ -25,11 +26,11 @@ function createDemoCollector(t, { interval, procEvery, sink }) {
     const ts = Date.now();
     const s = demoSample(t.id, ts, iv);
     if (s && ts - (lastKm || 0) >= 60_000) { const k = demoKmsg(t.id, ts); if (k) s.km = k; lastKm = ts; } // v3.16.0 ⑯ C2 데모 커널 메시지(60초마다)
-    if (s) { sink.sample(t.id, ts, s, st.hello); st = { ...st, state: 'ok', lastSampleAt: ts }; sink.status(t.id, { ...st }); }
+    if (s) { sink.sample(t.id, ts, s, st.hello, t.ep); st = { ...st, state: 'ok', lastSampleAt: ts }; sink.status(t.id, { ...st }, t.ep); }
   };
-  const ptick = () => { const ts = Date.now(); const p = demoProcs(t.id, ts); if (p) sink.procs(t.id, ts, p); };
+  const ptick = () => { const ts = Date.now(); const p = demoProcs(t.id, ts); if (p) sink.procs(t.id, ts, p, t.ep); };
   // v2.983 데모 수집 부하 — 실수집과 같은 30초 창(값은 mock.js 모형 · 화면이 데모라고 밝힌다)
-  const ltick = () => { const l = demoLoad(t.id, iv, pe, Date.now()); if (l) sink.load?.(t.id, l); };
+  const ltick = () => { const l = demoLoad(t.id, iv, pe, Date.now()); if (l) sink.load?.(t.id, l, t.ep); };
   const arm = () => {
     clearInterval(timer); clearInterval(ptimer); clearInterval(ltimer);
     timer = setInterval(tick, iv * 1000); timer.unref?.();
@@ -61,10 +62,10 @@ export function createRunner({ keys, sink, connect } = {}) {
     ? createDemoCollector(t, { interval, procEvery, sink })
     : createCollector(t, {
       interval, procEvery, keys, connect,
-      onSample: (s, { ts, hello }) => sink.sample(t.id, ts, s, hello),
-      onProcs: (p, { ts }) => sink.procs(t.id, ts, p),
-      onStatus: (st) => sink.status(t.id, st),
-      onLoad: (l) => sink.load?.(t.id, l),
+      onSample: (s, { ts, hello }) => sink.sample(t.id, ts, s, hello, t.ep),
+      onProcs: (p, { ts }) => sink.procs(t.id, ts, p, t.ep),
+      onStatus: (st) => sink.status(t.id, st, t.ep),
+      onLoad: (l) => sink.load?.(t.id, l, t.ep),
     }));
 
   function reconcile(desired = []) {
@@ -74,6 +75,7 @@ export function createRunner({ keys, sink, connect } = {}) {
       if (!want.has(id)) { x.col.stop(); live.delete(id); continue; }
       const d = want.get(id);
       if (!sameEndpoint(x.t, d)) { x.col.stop(); live.delete(id); continue; }
+      if ((d.ep || undefined) !== x.t.ep) x.t.ep = d.ep || undefined; // 같은 접속처 — 열쇠만 바꿔 붙인다(중앙 업그레이드로 처음 받는 경우 · 수집기 재시작 없음)
       if (normInterval(d.interval) !== x.interval) { x.col.setInterval(d.interval); x.interval = normInterval(d.interval); }
       if (normProcEvery(d.procEvery) !== x.procEvery) { x.col.setProcEvery?.(d.procEvery); x.procEvery = normProcEvery(d.procEvery); }
     }
@@ -90,7 +92,7 @@ export function createRunner({ keys, sink, connect } = {}) {
         if (!prev) { try { sink?.status?.(id, { ...st }); } catch { /* 상태 전달 실패가 조정을 멈추지 않게 */ } }
         continue;
       }
-      const t = { id, host: d.host, port: Number(d.port) || 22, username: d.username, demo: !!d.demo };
+      const t = { id, host: d.host, port: Number(d.port) || 22, username: d.username, demo: !!d.demo, ...(d.ep ? { ep: d.ep } : {}) };
       const col = make(t, d.interval, d.procEvery);
       live.set(id, { col, t, interval: normInterval(d.interval), procEvery: normProcEvery(d.procEvery) });
       col.start();

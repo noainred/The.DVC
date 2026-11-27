@@ -17,6 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+import { decodeBlock, encodeBlock, mergeBlocks, decodeProcBlock, encodeProcBlock, mergeProcLists } from './codec.js';
+import { summarizeBlock, encodeSum } from './summary.js';
 
 // ⚠ 파일 이름은 리터럴로 둔다 — scripts/config-doc.mjs 가 path.join(…, '<이름>.db') 모양으로 찾는다.
 const FILE = () => path.join(config.dbDir || config.configDir, 'focusmon.db');
@@ -97,6 +99,9 @@ export function dbBytes() {
  */
 function runRows(db, rows) {
   const m = db.prepare('INSERT OR REPLACE INTO fm_metric (target, minute, n, data) VALUES (?, ?, ?, ?)');
+  // v3.57.0 묶음 B 반증 K1: merge 줄(메모리에 없던 분으로 만든 묶음 — 재시작 · 다시 연 묶음)은 있는 줄과 **합쳐** 쓴다(덮지 않는다). 드물어서(대상마다 기동 뒤 첫 분 정도) 읽기 한 번이 싸다.
+  const getM = db.prepare('SELECT data FROM fm_metric WHERE target = ? AND minute = ?');
+  const getP = db.prepare('SELECT data FROM fm_proc WHERE target = ? AND minute = ?');
   const p = db.prepare('INSERT OR REPLACE INTO fm_proc (target, minute, data) VALUES (?, ?, ?)');
   const ld = db.prepare('INSERT OR REPLACE INTO fm_load (target, minute, data) VALUES (?, ?, ?)');
   const nd = db.prepare('INSERT OR REPLACE INTO fm_node (node, minute, data) VALUES (?, ?, ?)');
@@ -105,14 +110,37 @@ function runRows(db, rows) {
   const s60 = db.prepare('INSERT OR REPLACE INTO fm_sum60 (target, hour, data) VALUES (?, ?, ?)');
   const ev = db.prepare('INSERT OR REPLACE INTO fm_event (id, target, at, kind, text, by, scope) VALUES (?, ?, ?, ?, ?, ?, ?)');
   for (const r of rows) {
-    if (r.kind === 'm' || r.kind == null) m.run(String(r.target), r.minute, r.n | 0, r.data);
-    else if (r.kind === 's1') s1.run(String(r.target), r.minute, r.data);
+    if (r.kind === 'm' || r.kind == null) { const x = r.merge ? mergedMetric(getM.get(String(r.target), r.minute), r) : r; m.run(String(r.target), r.minute, x.n | 0, x.data); }
+    // 합친 분의 1분 요약은 합친 묶음(이미 위 줄이 쓴 fm_metric — 같은 트랜잭션 · 앞 트랜잭션)에서 다시 만든다
+    else if (r.kind === 's1') s1.run(String(r.target), r.minute, r.merge ? (mergedSum(getM.get(String(r.target), r.minute)) || r.data) : r.data);
     else if (r.kind === 's60') s60.run(String(r.target), r.hour, r.data);
     else if (r.kind === 'e') ev.run(String(r.id), String(r.target), r.at, String(r.ekind), String(r.text).slice(0, 300), String(r.by || '').slice(0, 64), String(r.scope || 'server'));
-    else if (r.kind === 'p') p.run(String(r.target), r.minute, r.data);
+    else if (r.kind === 'p') p.run(String(r.target), r.minute, r.merge ? mergedProc(getP.get(String(r.target), r.minute), r.data) : r.data);
     else if (r.kind === 'l') ld.run(String(r.target), r.minute, String(r.data));
     else if (r.kind === 'n') nd.run(String(r.target), r.minute, String(r.data));
   }
+}
+
+/** 있는 줄(없으면 그대로) + 새 묶음 → 합친 줄. 있는 줄이 깨졌으면 새 것으로(읽을 수 없는 줄을 지킬 이유가 없다) · 새 것이 깨졌으면 있는 것을 둔다. */
+function mergedMetric(row, r) {
+  if (!row) return r;
+  const a = decodeBlock(row.data); const b = decodeBlock(r.data);
+  if (!a) return r;
+  if (!b) return { n: a.ts.length, data: row.data };
+  const mg = mergeBlocks(a, b);
+  return { n: mg.ts.length, data: encodeBlock(mg) };
+}
+function mergedSum(row) {
+  const b = row ? decodeBlock(row.data) : null;
+  const sm = b ? summarizeBlock(b) : null;
+  return sm ? encodeSum(sm) : null;
+}
+function mergedProc(row, data) {
+  if (!row) return data;
+  const a = decodeProcBlock(row.data); const b = decodeProcBlock(data);
+  if (!a) return data;
+  if (!b) return row.data;
+  return encodeProcBlock(mergeProcLists(a, b));
 }
 
 export async function writeBlocks(rows = []) {

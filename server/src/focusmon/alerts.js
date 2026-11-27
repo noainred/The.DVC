@@ -231,7 +231,7 @@ function forgetRuleState(ruleId) {
   if (changed) saveState(s);
 }
 /**
- * v3.54.0 묶음 B(30회차 남긴 것 K): 대상의 **주소가 바뀌면** 그 대상의 알림 상태(`규칙|대상`)를 지운다 — 예전 기계의 '발생 중' 이 남아
+ * v3.57.0 묶음 B(30회차 남긴 것 K): 대상의 **주소가 바뀌면** 그 대상의 알림 상태(`규칙|대상`)를 지운다 — 예전 기계의 '발생 중' 이 남아
  *   새 기계에서 '[해제]' 가 나가거나 섞인 판정이 됐다. 다음 주기에 새로 판정한다(지우는 쪽이라 알림이 새로 '발생' 할 수는 있다).
  */
 export function forgetTargetAlerts(targetId) {
@@ -256,7 +256,8 @@ export function ruleTargets(rule, targets, recordIds) {
 
 /** 서버 하나의 [시각, 값] — 메모리의 최근 묶음(31분)에서. app 은 프로세스 표본의 앱 묶음(서비스 기준). */
 export function pointsFor(store, rule, id, now) {
-  const from = now - rule.durMin * 60_000 - 120_000;
+  // v3.57.0 묶음 B(30회차 K 다시 설계): 기계 경계(주소 · 담당 노드를 고친 순간) 앞 표본은 예전 서버 — 판정에 넣지 않는다(기록은 그대로)
+  const from = Math.max(now - rule.durMin * 60_000 - 120_000, Number(store.resetAtOf?.(id)) || 0);
   const out = [];
   if (rule.metric === 'app') {
     // 반증 H1: 서비스마다 프로세스 수(apps.all — 수집기가 약 20초마다 싣는다)가 있으면 그것만 쓴다(없는 이름 = 0 — 죽음). 상위 20(sv)은
@@ -268,7 +269,7 @@ export function pointsFor(store, rule, id, now) {
     for (const s of rows) {
       // 29회차 F6: 목록이 잘린 표본(allCut)에서 없는 이름은 0(죽음)이 아니라 모름(null — 판정 보류)
       //   30회차 E: 'nonsvc'(.service 가 아닌 단위만 잘림 — .service 는 먼저 실린다)이면 .service 이름의 부재는 0 이다
-      // v3.54.0 묶음 B(30회차 남긴 것): 잘린 목록 때문에 모르는 값은 세 번째 칸 'cut' — 보류 사건 문구가 '수집 끊김' 이 아니라 '목록 잘림' 을 말한다(판정은 그대로 보류)
+      // v3.57.0 묶음 B(30회차 남긴 것): 잘린 목록 때문에 모르는 값은 세 번째 칸 'cut' — 보류 사건 문구가 '수집 끊김' 이 아니라 '목록 잘림' 을 말한다(판정은 그대로 보류)
       if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const cut = s.apps.allCut === true || (s.apps.allCut === 'nonsvc' && !String(rule.app).endsWith('.service')); const has = Object.hasOwn(s.apps.all, rule.app); const v = has ? Number(s.apps.all[rule.app]) : (cut ? null : 0); out.push(!has && cut ? [s.t, null, 'cut'] : [s.t, Number.isFinite(v) ? v : null]); } continue; }
       if (!Array.isArray(s.apps.sv)) { out.push([s.t, null]); continue; } // 서비스 지도 없음 — 모름
       const a = s.apps.sv.find((x) => x.k === rule.app);
@@ -364,6 +365,9 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
       failed += 1;
       if (f.retry < SEND_RETRY) { // 앞 상태로 되돌려 다음 주기에 다시(횟수를 남긴다)
         const st = loadState();
+        // v3.57.0 묶음 B 반증 F1 · F3(재현): 보내는 동안 그 짝이 지워졌으면(주소 · 노드를 고침 — forgetTargetAlerts · 규칙 조건을 바꿈 — forgetRuleState)
+        //   되돌리지 않는다. 예전에는 예전 서버의 '발생' 상태를 되살려 새 서버에 '[해제]' 가 나갔다. saveState(next) 가 이 열쇠를 await 전에 썼으므로 없으면 지운 것이다.
+        if (!Object.hasOwn(st, key)) continue;
         st[key] = { ...(f.p0 || { state: 'ok', since: now, at: now }), retry: f.retry + 1, retryOf: j.event };
         saveState(st);
       }

@@ -97,7 +97,7 @@ export async function minuteTick(now = Date.now(), { send = null, maintJudge = n
   return alertCycle({ store, targets: allTargets(), recordIds, send, maintState, mock: isMockMode(), now });
 }
 /**
- * v3.54.0 묶음 B(29회차 남긴 것): 등록부에 없는 대상이 수집 정의에 남은 것(29회차 F5 전에 지운 서버 — 그 뒤로는 지울 때 뺀다)을 뺀다 —
+ * v3.57.0 묶음 B(29회차 남긴 것): 등록부에 없는 대상이 수집 정의에 남은 것(29회차 F5 전에 지운 서버 — 그 뒤로는 지울 때 뺀다)을 뺀다 —
  *   한도(계속 수집 20대)를 차지하고 그 서버의 '수집 종료' 가 404 였다. 등록부를 **읽었을 때만**(못 읽으면 minuteTick 이 먼저 돌아간다) · 10분에 한 번.
  *   빼는 것은 '서버별 수집 종료' 와 같은 길(removeFromCollection — 실행 기록 · 마지막이면 그 수집이 끝난다).
  */
@@ -162,16 +162,23 @@ export function targetEndpointChanged(before, after) {
  *   (대상마다 targetEndpointChanged 를 부르면 50대 옮기기가 같은 엣지에 깨우기 100번이었다).
  * @param {Array<[object|null, object|null]>} pairs [예전, 지금]
  */
-export function targetsEndpointChanged(pairs = []) {
+export function targetsEndpointChanged(pairs = [], now = Date.now()) {
   const list = (Array.isArray(pairs) ? pairs : []).filter((p) => Array.isArray(p) && p[1]?.id);
   if (!list.length) return;
-  tick1();
+  tick1(now);
   const wake = new Map();   // 소문자 → 저장된 글자
   for (const [before, after] of list) {
-    // v3.54.0 묶음 B(30회차 K): 주소가 바뀌었으면 메모리 표본 · 알림 상태도(다른 기계) — 계정 · 포트 · 노드만 바뀌면 같은 기계라 남긴다
+    // v3.57.0 묶음 B(30회차 K · 반증 F3): **기계가 바뀜** = 주소 또는 담당 노드(사설 주소는 법인마다 겹친다 — 같은 10.0.0.5 를 다른 노드로 옮기면 다른 기계다).
+    //   계정 · 포트만 바뀌면 같은 기계라 남긴다. 기계가 바뀌면 경계(store.forgetTargetState) · 알림 상태 · 사건 한 줄.
     const hostChanged = !before || String(before.host || '') !== String(after.host || '');
-    store.forgetTargetState(after.id, { hostChanged });
-    if (hostChanged) { try { forgetTargetAlerts(after.id); } catch { /* 알림 상태는 다음 주기에 다시 판정 */ } }
+    const nodeChanged = !before || String(before.agent || '').toLowerCase() !== String(after.agent || '').toLowerCase();
+    const machineChanged = hostChanged || nodeChanged;
+    store.forgetTargetState(after.id, { machineChanged, now });
+    if (machineChanged) {
+      try { forgetTargetAlerts(after.id); } catch { /* 알림 상태는 다음 주기에 다시 판정 */ }
+      // 차트의 끊긴 자리를 설명한다(기록은 같은 id 로 잇는다) — 주소 · 노드 이름은 싣지 않는다(사건 글은 데모 판본에도 보인다)
+      if (before) store.queueEvent(after.id, 'endpoint', `${hostChanged && nodeChanged ? '접속 주소 · 담당 노드' : hostChanged ? '접속 주소' : '담당 노드'}를 바꿈 — 이 앞의 값은 예전 서버의 것입니다`, now, { scope: 'server' });
+    }
     for (const a of [before?.agent, after.agent]) { const s = String(a || ''); if (s && !wake.has(s.toLowerCase())) wake.set(s.toLowerCase(), s); }
   }
   for (const a of wake.values()) wakeImpl?.(a);

@@ -78,14 +78,17 @@ let _last = null; let dropped = 0;
 let idleHintMs = null; let fails = 0; let lastRttMs = null; let lastError = ''; let lastErrorAt = 0;
 function noteFail(reason) { fails += 1; idleHintMs = null; lastError = String(reason || '').slice(0, 200); lastErrorAt = Date.now(); }
 const _log = createChangeLogger({ windowMs: 10 * 60_000 });
+/** 중앙이 준 표지(소문자 16진수 — 길이 n) · 아니면 없음. */
+const epOf = (v, n) => (typeof v === 'string' && v.length === n && /^[a-f0-9]+$/.test(v) ? v : undefined);
 
 const runner = createRunner({
   keys: focusKeys,
+  // v3.57.0 묶음 B 반증 F2: 값마다 그 수집기를 연 기계 열쇠(ep — 중앙이 준 값)를 붙인다 — 중앙이 주소 · 노드를 고치기 전 서버의 값을 거른다
   sink: {
-    sample: (id, t, s, hello) => { samples.push({ id, t, s, hello }); trim(samples); },
-    procs: (id, t, p) => { procs.push({ id, t, p }); trim(procs); },
-    status: (id, st) => { statuses[id] = st; },
-    load: (id, l) => { loads[id] = l; },
+    sample: (id, t, s, hello, ep) => { samples.push(ep ? { id, t, s, hello, ep } : { id, t, s, hello }); trim(samples); },
+    procs: (id, t, p, ep) => { procs.push(ep ? { id, t, p, ep } : { id, t, p }); trim(procs); },
+    status: (id, st, ep) => { statuses[id] = ep ? { ...st, ep } : st; },
+    load: (id, l, ep) => { loads[id] = ep ? { ...l, ep } : l; },
   },
 });
 
@@ -337,7 +340,7 @@ export async function syncOnce(now = Date.now()) {
     lastRttMs = Date.now() - t0; fails = 0;
     idleHintMs = Number.isFinite(Number(data.idleMs)) && Number(data.idleMs) > 0 ? Number(data.idleMs) : null;
     if (data.ensureKey === true) { try { focusKeys.ensureKey(); } catch (e) { if (_log('key', e.message)) console.warn(`[focusmon-edge] SSH 키를 만들지 못했습니다: ${e.message}`); } }
-    runner.reconcile(targets.map((t) => ({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username), interval: Number(t.interval) || 2, procEvery: Number(t.procEvery) || 5 })));
+    runner.reconcile(targets.map((t) => ({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username), interval: Number(t.interval) || 2, procEvery: Number(t.procEvery) || 5, ep: epOf(t.ep, 16) })));
     const byId = new Map(targets.map((t) => [String(t.id), { id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username) }]));
     // v2.978: 중앙이 retryTargets(접속 정보)를 주면 수집 중이 아닌 대상도 정지를 푼다 — 이어 오는 시험(tests)이 한 번 접속한다(retries 를 tests 보다 먼저 처리).
     for (const t of Array.isArray(data.retryTargets) ? data.retryTargets.slice(0, 50) : []) {
@@ -349,8 +352,9 @@ export async function syncOnce(now = Date.now()) {
       if (testsInFlight.has(id)) continue;
       if (testsInFlight.size >= EDGE_TEST_CONCURRENCY) break; // 동시 상한(반증 1) — 중앙은 diag.testsBusy 로 덜 보낸다. 넘친 것은 중앙이 60초 뒤 다시 배달
       testsInFlight.add(id);
+      const tep = epOf(t.ep, 12); // 시험한 접속처 표지(중앙이 준 값 그대로 돌려준다 — 그 사이 접속처를 고쳤으면 중앙이 버린다)
       runner.test({ id, host: String(t.host), port: Number(t.port) || 22, username: String(t.username) })
-        .then((result) => { testResults.push({ id, result }); schedule(0); })
+        .then((result) => { testResults.push(tep ? { id, result, ep: tep } : { id, result }); schedule(0); })
         .catch(() => {})
         .finally(() => { testsInFlight.delete(id); });
     }
@@ -413,6 +417,7 @@ export function startFocusMonWorker() {
 export function stopFocusMonWorker() { clearTimeout(timer); clearInterval(nodeTimer); nodeTimer = null; try { nodeSampler?.stop(); } catch { /* */ } nodeSampler = null; runner.stopAll(); }
 /** v2.983 시험용 — 수집 부하 창을 넣는다(실수집 없이 동기화 본문을 시험). */
 export function _putLoadForTest(id, l) { loads[id] = l; }
+export function _bufForTest() { return { samples: samples.slice(), procs: procs.slice(), statuses: { ...statuses }, tests: testResults.slice() }; }
 export function _loadsForTest() { return { ...loads }; }
 export function _resetForTest() { auditResults = []; auditDropped = 0; loads = {}; txBytes = 0; nodeLast = null; nodePrevTx = null; testsInFlight.clear(); samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; idleHintMs = null; fails = 0; lastRttMs = null; lastError = ''; lastErrorAt = 0; runner.stopAll(); }
 export const _runnerForTest = runner;

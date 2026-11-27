@@ -21,7 +21,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
-import { flattenSample, newBlock, appendToBlock, encodeBlock, encodeProcBlock } from './codec.js';
+import { flattenSample, newBlock, appendToBlock, encodeBlock, encodeProcBlock, procRowsForDb, PROC_PER_MIN } from './codec.js';
 import { normInterval } from './script.js';
 import { summarizeBlock, encodeSum } from './summary.js'; // v3.13.0 ⑭ 1분 요약
 import { BOOT_ID_RE } from './parse.js'; // v3.16.0 ⑯ 반증 M5 — 부팅 식별(boot_id)
@@ -49,7 +49,8 @@ const counters = { lateDropped: 0, rewrites: 0, closed: 0, eventsDropped: 0, kmC
 /** 반증 M4: 사건은 데이터와 같은 대기열이지만 **따로 상한**(사건이 다른 서버의 분 묶음을 밀어내지 않게 — 넘치면 새 사건을 버리고 센다). */
 export const MAX_Q_EVENTS = 5000;
 let qEv = 0;
-const recountEv = () => { qEv = 0; for (const r of writeQ) if (r.kind === 'e') qEv += 1; };
+/** 기록 대기열 상한(줄) — 넘으면 오래된 것부터 자른다(cutWriteQ 하나). */
+export const WRITEQ_MAX = 20_000;
 
 function entry(id) {
   let e = T.get(id);
@@ -61,22 +62,30 @@ function entry(id) {
 function freeze(block) {
   const cols = new Map();
   for (const [k, arr] of block.cols) { const f = new Float32Array(arr.length); for (let i = 0; i < arr.length; i++) f[i] = arr[i] == null ? NaN : arr[i]; cols.set(k, f); }
-  return { minute: block.minute, ts: Float64Array.from(block.ts), cols, meta: block.meta, frozen: true };
+  return { minute: block.minute, ts: Float64Array.from(block.ts), cols, meta: block.meta, frozen: true, ...(block.merge ? { merge: true } : {}) };
 }
 function thaw(block) {
   const cols = new Map();
   for (const [k, f] of block.cols) cols.set(k, Array.from(f, (x) => (Number.isNaN(x) ? null : x)));
-  return { minute: block.minute, ts: Array.from(block.ts), cols, meta: block.meta };
+  return { minute: block.minute, ts: Array.from(block.ts), cols, meta: block.meta, ...(block.merge ? { merge: true } : {}) };
 }
 
+/*
+ * 합쳐 쓰기(v3.57.0 묶음 B 반증 K1 · 재시작 경로): **메모리에 없던 분**으로 만든 묶음(merge — 대상 메모리의 첫 묶음 · 다시 연 묶음이 메모리에 없던 분)은
+ *   DB 에 이미 그 분이 있을 수 있다(중앙 재시작 · 업그레이드 직전에 쓴 분 + 재시작 뒤 엣지가 보낸 밀린 표본). 예전에는 INSERT OR REPLACE 가
+ *   그 분을 재시작 뒤 몇 표본으로 덮어 업그레이드마다 대상마다 한 분이 깎였다. 이 줄은 db.runRows 가 있는 줄과 합쳐 쓴다(표본 시각 기준 합집합).
+ */
 function enqueueBlock(id, block, procList) {
-  try { writeQ.push({ kind: 'm', target: id, minute: block.minute, n: block.ts.length, data: encodeBlock(block) }); } catch { /* 묶음 하나가 대기열 전체를 깨지 않게 */ }
+  const mg = block.merge ? { merge: true } : {};
+  try { writeQ.push({ kind: 'm', target: id, minute: block.minute, n: block.ts.length, data: encodeBlock(block), ...mg }); } catch { /* 묶음 하나가 대기열 전체를 깨지 않게 */ }
   // v3.13.0(⑭ 컨펌 ② '기록할 때 같이 만든다'): 1분 요약 — 늦은 표본으로 다시 쓸 때(flushReopened)도 같은 길이라 요약도 다시 쓴다
-  try { const sm = summarizeBlock(block); if (sm) writeQ.push({ kind: 's1', target: id, minute: block.minute, data: encodeSum(sm) }); } catch { /* 요약 하나가 대기열을 깨지 않게 */ }
+  try { const sm = summarizeBlock(block); if (sm) writeQ.push({ kind: 's1', target: id, minute: block.minute, data: encodeSum(sm), ...mg }); } catch { /* 요약 하나가 대기열을 깨지 않게 */ }
   // v3.14.0(⑮ 컨펌 ③ '분마다 상위 20 · 30일'): 앱 묶음은 그 분의 **마지막 표본에만** 남긴다(표본마다 남기면 프로세스 기록이 두 배가 된다 · 메모리의 최근 표본은 그대로)
-  if (procList && procList.length) { try { const last = procList.length - 1; writeQ.push({ kind: 'p', target: id, minute: block.minute, data: encodeProcBlock(procList.map((s, i) => (!s.apps ? s : i === last ? (s.apps.all ? { ...s, apps: { sv: s.apps.sv, cm: s.apps.cm } } : s) : { ...s, apps: undefined }))) }); } catch { /* */ } }
-  if (writeQ.length > 20_000) { writeQ.splice(0, writeQ.length - 20_000); recountEv(); } // DB 가 오래 막혀도 메모리가 끝없이 자라지 않게(오래된 것부터 버림)
+  if (procList && procList.length) { try { writeQ.push({ kind: 'p', target: id, minute: block.minute, data: encodeProcBlock(procRowsForDb(procList)), ...mg }); } catch { /* */ } }
+  // DB 가 오래 막혀도 메모리가 끝없이 자라지 않게(오래된 것부터 버림) — 자르기는 cutWriteQ 하나(잘린 줄 표시 · 사건 수 · 센다 — 반증: 예전 자르기는 표시가 없어 그 분의 새 부하 값이 버린 줄에 들어갔다)
+  if (writeQ.length > WRITEQ_MAX) cutWriteQ();
 }
+
 
 function closeCur(id, e) {
   if (!e.cur || !e.cur.ts.length) { e.cur = null; return; }
@@ -93,11 +102,16 @@ function closeCur(id, e) {
 export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   if (!sample || !(ts > 0)) return false;
   const e = entry(id);
-  if (hello) e.hello = hello;
+  // 기계 경계(v3.57.0 묶음 B 반증 K1 · K2 · F1): 경계 앞 표본(예전 서버 — 엣지가 늦게 보낸 것)은 **기록(분 묶음)에만** 넣고 지금 값 · OS · 재부팅 · 커널 메시지 판정에는 쓰지 않는다
+  const fresh = !(ts < (e.resetAt || 0));
+  if (hello && fresh) e.hello = hello;
   const minute = Math.floor(ts / 60_000);
   const { row, meta } = flattenSample(sample);
   if (e.cur && minute > e.cur.minute) closeCur(id, e);
-  if (!e.cur && (!e.recent.length || minute > e.recent[e.recent.length - 1].minute)) e.cur = newBlock(minute);
+  if (!e.cur && (!e.recent.length || minute > e.recent[e.recent.length - 1].minute)) {
+    e.cur = newBlock(minute);
+    if (!e.recent.length) e.cur.merge = true; // 메모리의 첫 묶음 — DB 에 그 분이 이미 있을 수 있다(재시작) · 합쳐 쓴다
+  }
   if (e.cur && minute === e.cur.minute) {
     appendToBlock(e.cur, ts, row, meta);
   } else {
@@ -108,16 +122,16 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
     let b = e.reopen.get(minute);
     if (!b) {
       const i = e.recent.findIndex((x) => x.minute === minute);
-      b = i >= 0 ? thaw(e.recent[i]) : newBlock(minute);
+      if (i >= 0) b = thaw(e.recent[i]); else { b = newBlock(minute); b.merge = true; } // 메모리에 없던 분 — 합쳐 쓴다(덮지 않는다)
       e.reopen.set(minute, b);
     }
     if (!appendToBlock(b, ts, row, meta)) { counters.lateDropped += 1; return false; }
   }
-  if (!e.latest || ts >= e.latest.ts) e.latest = { ts, sample };
-  if (sample.km) ingestKmsg(id, sample.km, ts); // v3.16.0 ⑯ C2 — 커널 메시지 증분(표본마다 한 번 실린다)
+  if (fresh && (!e.latest || ts >= e.latest.ts)) e.latest = { ts, sample };
+  if (fresh && sample.km) ingestKmsg(id, sample.km, ts); // v3.16.0 ⑯ C2 — 커널 메시지 증분(표본마다 한 번 실린다)
   e.lastAt = Math.max(e.lastAt, ts);
   // v3.13.0(⑭ 자동 사건): 가동 시간이 줄면 재부팅(30초 넘게 — 표본 순서가 바뀐 것과 가른다)
-  if (Number.isFinite(sample.up)) {
+  if (fresh && Number.isFinite(sample.up)) {
     // 사건 시각 = 켜진 시각(지금 − 가동 시간) — 쉬던 동안의 재부팅을 다시 받은 시각에 찍지 않는다(반증 F9) · 앞 표본보다 앞으로는 가지 않는다
     //   가동 시간이 **줄었을 때만** 재부팅이다. 공백 뒤 '흘렀어야 할 가동 시간' 과 견주는 판정은 넣었다가 뺐다(반증 재검토 N1 — WAN 이 끊겼다 붙으면
     //   중앙이 엣지 표본 시각을 수신 시각 − 10분으로 당겨 벽시계 공백만 커지고 가동 시간은 그대로라 재부팅이 없는데도 사건이 생겼다).
@@ -189,7 +203,7 @@ function runEvent(s, target, kind, text, now) {
   queueEvent(target, kind, text, now, { id: `run:${s.id}:${kind === 'start' ? 's' : 'e'}:${now}`, by: kind === 'start' ? s.by : '', scope: 'session' });
 }
 /** 자동 사건 종류 → 판정 글(화면은 같은 열쇠로 색을 고른다). */
-export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user', 'oom', 'kerr', 'alert', 'tune']); // v3.16.0 ⑯: OOM · 커널 오류 · 알림 · 수집 조절
+export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user', 'oom', 'kerr', 'alert', 'tune', 'endpoint']); // v3.16.0 ⑯: OOM · 커널 오류 · 알림 · 수집 조절 · v3.57.0: 접속처 바뀜(기계 경계)
 /** 사건을 기록 대기열에 — 대상마다 한 줄(id 를 같이 쓰면 여러 대상을 한 사건으로 묶는다). 글은 300자. */
 export function queueEvent(target, kind, text, at = Date.now(), { id = null, by = '', scope = 'server' } = {}) {
   if (!EVENT_KINDS.includes(kind)) return null;
@@ -205,9 +219,9 @@ export function ingestProcs(id, ts, p) {
   const e = entry(id);
   const minute = Math.floor(ts / 60_000);
   const list = e.procs.get(minute) || [];
-  if (list.length < 60) list.push({ t: ts, n: p.n ?? null, top: p.top || [], ...(p.da === true || p.da === false ? { da: p.da } : {}), ...(p.apps ? { apps: p.apps } : {}) }); // da: 지연 집계(v2.981 — 디스크 대기를 아는지) · apps: 앱 단위 묶음(v3.14.0 ⑮)
+  if (list.length < PROC_PER_MIN) list.push({ t: ts, n: p.n ?? null, top: p.top || [], ...(p.da === true || p.da === false ? { da: p.da } : {}), ...(p.apps ? { apps: p.apps } : {}) }); // da: 지연 집계(v2.981 — 디스크 대기를 아는지) · apps: 앱 단위 묶음(v3.14.0 ⑮)
   e.procs.set(minute, list);
-  if (!e.latestProcs || ts >= e.latestProcs.ts) e.latestProcs = { ts, ...p };
+  if (!(ts < (e.resetAt || 0)) && (!e.latestProcs || ts >= e.latestProcs.ts)) e.latestProcs = { ts, ...p }; // 기계 경계 앞(예전 서버)은 기록에만
   return true;
 }
 
@@ -246,6 +260,8 @@ export function memBlocks(id) {
   return e.cur ? [...e.recent, e.cur] : [...e.recent];
 }
 export function memProcs(id) { return T.get(id)?.procs || new Map(); }
+/** 기계 경계 시각(주소 · 담당 노드가 바뀐 순간 — 그 앞 표본은 예전 서버) · 없으면 0. 알림 판정은 이 뒤 표본만 본다. */
+export function resetAtOf(id) { return T.get(String(id))?.resetAt || 0; }
 export function latestOf(id) { return T.get(id)?.latest || null; }
 export function latestProcsOf(id) { return T.get(id)?.latestProcs || null; }
 export function helloOf(id) { return T.get(id)?.hello || null; }
@@ -552,7 +568,7 @@ function queueJson(kind, key, now, obj) {
   try { data = JSON.stringify(obj); } catch { return; }
   if (data.length > LOAD_MAX_JSON) return;
   const prev = lastQueued.get(k);
-  // v3.54.0 묶음 B: 대기열 상한에서 잘린 줄(dropped)이면 그 분의 새 값을 새 줄로 다시 넣는다(예전엔 버린 줄을 고쳐 그 분이 사라졌다)
+  // v3.57.0 묶음 B: 대기열 상한에서 잘린 줄(dropped)이면 그 분의 새 값을 새 줄로 다시 넣는다(예전엔 버린 줄을 고쳐 그 분이 사라졌다)
   if (prev && prev.minute === minute && !prev.row.dropped) {
     if (!prev.row.written) prev.row.data = data; // 아직 대기열에 있으면 새 값으로
     return;
@@ -563,10 +579,9 @@ function queueJson(kind, key, now, obj) {
   if (writeQ.length > WRITEQ_MAX) cutWriteQ();
 }
 /**
- * v3.54.0 묶음 B(29회차 남긴 것): 대기열을 자를 때 — 잘린 줄의 사건 수를 빼고(예전엔 qEv 가 그대로 남아 사건 상한이 일찍 찼다) ·
+ * v3.57.0 묶음 B(29회차 남긴 것): 대기열을 자를 때 — 잘린 줄의 사건 수를 빼고(예전엔 qEv 가 그대로 남아 사건 상한이 일찍 찼다) ·
  *   잘린 줄은 dropped 로 표시한다(그 분의 새 값은 queueJson 이 새 줄로 다시 넣는다 — 처음 판의 '쓴 것' 표시는 그 분을 버리는 것과 같아 변이 검증이 동등 변이로 잡았다) · 몇 줄 잘랐는지 센다.
  */
-export const WRITEQ_MAX = 20_000;
 function cutWriteQ() {
   const gone = writeQ.splice(0, writeQ.length - WRITEQ_MAX);
   let ev = 0;
@@ -601,13 +616,15 @@ const KEYS_FILE = registerStateFile('focusmon-keys.json');
 let keysLoaded = false;
 
 /**
- * v3.54.0 묶음 B(29회차 남긴 것 E1): 상태 사건(키 로그인 거부 · 호스트키)은 대상마다 STATUS_EVENT_WINDOW_MS(10분) 창에 STATUS_EVENT_BURST(6)건까지 —
+ * v3.57.0 묶음 B(29회차 남긴 것 E1): 상태 사건(키 로그인 거부 · 호스트키)은 대상 · **종류마다** STATUS_EVENT_WINDOW_MS(10분) 창에 STATUS_EVENT_BURST(6)건까지 —
  *   엣지가 ok ↔ auth 를 번갈아 보내면(고장 · 토큰 탈취) 바뀔 때마다 사건이 쌓여 사건 대기열(MAX_Q_EVENTS 5000)이 차고 다른 서버의 사건이 버려졌다.
- *   창 안의 상한을 넘은 것은 세고(statusEventsHeld) 적지 않는다. 처음 판(창에 하나)은 '호스트키 → 키 거부' 같은 정당한 연속 변화까지 버렸다(기존 시험이 잡음).
+ *  · 종류마다 센다 — 처음 판(종류와 상관없이 창에 6건)은 '호스트키 6번 → 키 로그인 거부' 의 거부를 영영 적지 않았다(반증 E1 재현 — 그 뒤 상태가 그대로라 다시 적히지도 않는다).
+ *  · 상한에 처음 닿을 때 '줄여 적음' 한 줄을 남기고(사건 목록이 조용히 끊기지 않게), 다음 창의 첫 사건에 앞 창에서 줄인 수를 붙인다. 넘은 것은 statusEventsHeld 로 센다.
  */
 export const STATUS_EVENT_WINDOW_MS = 10 * 60_000;
 export const STATUS_EVENT_BURST = 6;
-const STATUS_EV_AT = new Map(); // targetId → { from, n } — 창 시작 시각 · 그 창에 적은 상태 사건 수
+const STATUS_EV_AT = new Map(); // `${targetId}|${종류}` → { from, n, held } — 창 시작 시각 · 그 창에 적은 수 · 줄인 수
+const STATUS_TEXT = Object.freeze({ auth: '키 로그인 거부 — 수집을 멈췄습니다', hostkey: '호스트키 승인 필요 — 장비 신뢰 확인' });
 export function setStatus(id, st, now = Date.now()) {
   // v3.13.0(⑭ 자동 사건): 키 로그인 거부 · 호스트키 승인 필요로 **바뀐 순간**만(같은 상태가 이어지면 다시 적지 않는다)
   const prev = ST.get(String(id));
@@ -615,11 +632,14 @@ export function setStatus(id, st, now = Date.now()) {
   //   반증 F2: 다시 시도할 때마다 'connecting' 을 거쳐 같은 상태로 돌아온다 — 견주는 것은 'connecting' 을 뺀 **안정 상태**(호스트키 대기 중 60초마다 사건이 쌓였다)
   const stable = prev ? (prev.state === 'connecting' ? (prev.stable ?? null) : prev.state) : null;
   if ((st?.state === 'auth' || st?.state === 'hostkey') && stable && stable !== st.state) {
-    const k = String(id); let w = STATUS_EV_AT.get(k);
-    if (!w || now - w.from >= STATUS_EVENT_WINDOW_MS || now < w.from) w = { from: now, n: 0 }; // 새 창(시계가 거꾸로 가면 새로)
-    if (w.n >= STATUS_EVENT_BURST) counters.statusEventsHeld += 1;
-    else {
-      queueEvent(id, st.state, st.state === 'auth' ? '키 로그인 거부 — 수집을 멈췄습니다' : '호스트키 승인 필요 — 장비 신뢰 확인', now);
+    const k = `${String(id)}|${st.state}`; let w = STATUS_EV_AT.get(k);
+    let carried = 0;
+    if (!w || now - w.from >= STATUS_EVENT_WINDOW_MS || now < w.from) { carried = w?.held || 0; w = { from: now, n: 0, held: 0 }; } // 새 창(시계가 거꾸로 가면 새로)
+    if (w.n >= STATUS_EVENT_BURST) {
+      counters.statusEventsHeld += 1; w.held += 1;
+      if (w.held === 1) queueEvent(id, st.state, `${STATUS_TEXT[st.state].split(' — ')[0]} — 10분 안에 ${STATUS_EVENT_BURST}번 넘게 바뀌어 이 종류는 줄여 적습니다(지금 상태 칸은 그대로 맞습니다)`, now);
+    } else {
+      queueEvent(id, st.state, carried ? `${STATUS_TEXT[st.state]}(앞 10분 동안 ${carried}번 더 — 줄여 적음)` : STATUS_TEXT[st.state], now);
       w.n += 1;
     }
     STATUS_EV_AT.delete(k); STATUS_EV_AT.set(k, w);
@@ -717,24 +737,61 @@ export function takeEdgeRetries(agent, now = Date.now()) {
 
 /**
  * 접속처가 바뀐 대상(v2.980 — 등록된 서버 수정): 예전 접속처의 수집 상태 · 연결 시험 결과 · 다시 연결 요청을 지운다.
- * 남겨 두면 IP 를 고친 뒤에도 예전 주소의 '연결됨' · 'RHEL 7.x' 가 새 주소의 결과처럼 보인다. 수집한 값(T)은 그대로 — 기록은 같은 id 로 이어진다.
+ * 남겨 두면 IP 를 고친 뒤에도 예전 주소의 '연결됨' · 'RHEL 7.x' 가 새 주소의 결과처럼 보인다.
  * 인증 정지는 여기서 다루지 않는다(접속처 + 키 지문 해시라 저절로 맞지 않는다 — 지우면 자동 재시도가 된다).
+ *
+ * 기계가 바뀜(machineChanged — 주소 또는 담당 노드. v3.57.0 묶음 B — 30회차 남긴 것 K 의 다시 설계):
+ *  · **기록(분 묶음)은 그대로 잇는다** — 같은 id 의 기록이다. 처음 판은 메모리 묶음을 버렸다가 반증에서 둘 다 재현됐다:
+ *    열린 분이 DB 에 한 번도 쓰이지 않고 사라짐(K2) · 엣지가 늦게 보낸 예전 서버 표본이 이미 쓴 분을 몇 표본짜리 묶음으로 덮음(K1 — INSERT OR REPLACE).
+ *  · 대신 **경계 시각(resetAt)** 을 둔다 — 지금 값 · OS(hello) · 재부팅 · 커널 메시지 · 알림 판정(pointsFor)은 그 뒤 표본만 본다. 지금 값 · 수집 부하 창은 지운다.
+ *  · 엣지 표본은 받는 쪽에서 거른다(접속처 표지 ep · 옛 엣지는 동기화 두 번 울타리 — central/focusMonEdge.js).
+ *  · 계정 · 포트만 바뀌면 같은 기계라 경계를 두지 않는다.
  */
-export function forgetTargetState(id, { hostChanged = false } = {}) {
+export function forgetTargetState(id, { machineChanged = false, now = Date.now() } = {}) {
   const k = String(id);
-  ST.delete(k); TESTS.delete(k); RETRIES.delete(k); STATUS_EV_AT.delete(k);
+  ST.delete(k); TESTS.delete(k); RETRIES.delete(k);
+  for (const sk of [...STATUS_EV_AT.keys()]) if (sk.startsWith(`${k}|`)) STATUS_EV_AT.delete(sk);
   const e = T.get(k); if (e) { e.lastUp = undefined; e.lastUpAt = undefined; } // 반증 F9 — 접속처가 바뀌면 옛 서버의 가동 시간으로 '재부팅' 을 만들지 않게
   LOAD.delete(k); // v2.983 반증 F13 — 예전 주소의 수집 부하 창을 새 주소의 것처럼 보이지 않게
   // 전체 점검 29회차 F1(재현): v3.16.0 의 커널 메시지 기준(KMT 부팅 id · 누계) · 읽기 상태(KM) · OOM 상한(KMR)과 hello(OS · 코어)가 남아,
   //   새 서버의 첫 확인이 그 서버 버퍼의 오류 전부를 '커널 오류 N줄(재부팅 뒤 버퍼)' 사건으로 적고 상세 머리글에 예전 서버의 OS 가 보였다.
   KM.delete(k); KMT.delete(k); KMR.delete(k);
   if (e) e.hello = null;
-  // v3.54.0 묶음 B(30회차 남긴 것 K): **주소가 바뀌면** 메모리의 최근 표본(31분 · 프로세스 · 지금 값)도 버린다 — 다른 기계의 값이 알림 판정 · '지금' 칸에 섞였다.
-  //   계정 · 포트 · 담당 노드만 바뀌면 같은 기계라 남긴다. 이미 DB 에 쓴 분은 그대로(그 대상의 기록).
-  if (e && hostChanged) { e.cur = null; e.recent = []; e.reopen = new Map(); e.procs = new Map(); e.latest = null; e.latestProcs = null; e.lastAt = 0; LOAD.delete(k); }
+  if (machineChanged) {
+    const x = e || entry(k);
+    x.resetAt = Math.max(x.resetAt || 0, now); x.latest = null; x.latestProcs = null;
+    EDGE_FENCE.set(k, { at: now, syncs: 0 });
+    if (EDGE_FENCE.size > 5000) EDGE_FENCE.delete(EDGE_FENCE.keys().next().value);
+  }
 }
+
+/**
+ * 기계 열쇠(v3.57.0 묶음 B 반증 F2) — 담당 노드 + 주소. 중앙이 동기화 응답의 대상마다 싣고, 엣지는 그 열쇠로 연 수집기의 표본 · 프로세스 · 상태 · 부하에 그대로 붙여 보낸다.
+ * 중앙은 지금 열쇠와 다른 것(주소를 고치기 전에 수집한 예전 서버의 것 — 깨우기 동기화 · 왕복 중에 모인 것)을 받지 않는다. 계정 · 포트는 넣지 않는다(같은 기계).
+ */
+export function machineKeyOf(t) {
+  if (!t) return '';
+  return crypto.createHash('sha256').update(`${String(t.agent || '').toLowerCase()}|${String(t.host || '')}`).digest('hex').slice(0, 16);
+}
+/** 표지 형식(엣지가 돌려보내는 값 — 이 밖은 표지 없음으로 본다). */
+export const MACHINE_KEY_RE = /^[a-f0-9]{16}$/;
+/**
+ * 표지를 싣지 않는 옛 엣지의 울타리 — 기계가 바뀐 뒤 그 대상을 맡은 엣지의 **동기화 두 번**(바뀐 뒤 첫 동기화 본문 · 그 응답을 기다리는 사이 모인 것)은
+ * 그 대상의 표지 없는 값을 받지 않는다(새 서버 표본 몇 초를 잃을 수 있다 — 옛 엣지만 · 섞이는 것보다 낫다). 2분이 지나면 저절로 풀린다(엣지가 멈춘 경우).
+ */
+export const EDGE_FENCE_SYNCS = 2;
+export const EDGE_FENCE_MS = 120_000;
+const EDGE_FENCE = new Map(); // targetId → { at, syncs }
+export function edgeFenced(id, now = Date.now()) {
+  const f = EDGE_FENCE.get(String(id));
+  if (!f) return false;
+  if (f.syncs >= EDGE_FENCE_SYNCS || now - f.at > EDGE_FENCE_MS || now < f.at) { EDGE_FENCE.delete(String(id)); return false; }
+  return true;
+}
+/** 그 엣지의 동기화 한 번을 마쳤다(응답 직전 — 맡은 대상만). */
+export function edgeFenceSynced(ids = []) { for (const id of ids) { const f = EDGE_FENCE.get(String(id)); if (f) f.syncs += 1; } }
 
 export function _resetForTest() {
   T.clear(); writeQ.length = 0; qEv = 0; KM.clear(); KMT.clear(); KMR.clear(); S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
-  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); loadFixes.length = 0;
+  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); EDGE_FENCE.clear(); loadFixes.length = 0;
 }

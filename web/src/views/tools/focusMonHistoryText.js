@@ -72,6 +72,7 @@ export const EVENT_KIND_TEXT = Object.freeze({
   kerr: { label: '커널 오류', tone: 'warn' },
   alert: { label: '알림', tone: 'warn' }, // v3.16.0 ⑯ C1
   tune: { label: '수집 조절', tone: 'off' }, // v3.16.0 ⑯ C3
+  endpoint: { label: '접속처 바뀜', tone: 'warn' }, // v3.57.0 — 주소 · 담당 노드를 고친 순간(그 앞 값은 예전 서버)
 });
 export const EVENT_SCOPE_TEXT = Object.freeze({ server: '이 서버', group: '이 서버의 그룹', session: '이 서버가 든 수집 전체' });
 /** 차트 위 표시 — 구간 안 사건만 · x 는 0~1 · 같은 자리에 겹치면 줄을 바꾼다(최대 3줄). */
