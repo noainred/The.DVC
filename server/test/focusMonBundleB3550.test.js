@@ -44,7 +44,7 @@ test('E1 — 상태 사건은 대상마다 10분 창에 상한까지(번갈아 �
   assert.equal(out.held, 100 - out.burst, '넘은 것은 센다'); assert.equal(out.a2, 1, '창이 지나면 다시 적는다');
 });
 
-test('Q — 대기열을 자를 때 사건 수를 다시 센다(사건 상한이 일찍 차지 않는다) · 잘린 줄은 쓴 것 · 센다', () => {
+test('Q — 대기열을 자를 때 사건 수를 다시 센다(사건 상한이 일찍 차지 않는다) · 잘린 줄 표시 · 센다', () => {
   const out = sub(`const store = await import(${J('focusmon/store.js')});
     const t0 = Date.now();
     for (let i = 0; i < 30; i++) store.queueEvent('fm-cccccccc03', 'user', 'x' + i, t0);
@@ -122,4 +122,65 @@ test('D — 등록부 손상 중 데모 계정의 서버별 수집 종료는 데
     console.log(JSON.stringify({ status: r.status, reason: body?.reason || '' })); svc.stopFocusMon(); srv.close(); process.exit(0);`,
   { DATA_SOURCE: 'mock', AUTH_SECRET: 'fmb3550-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' }, (d) => fs.writeFileSync(path.join(d, 'focusmon-targets.json'), '{ broken'));
   assert.equal(out.status, 403); assert.match(out.reason, /데모 계정/);
+});
+
+
+/* ── 변이 검증이 찾은 빈틈(생존 6 — 1건은 동등 변이라 동작을 고쳤다) ── */
+test('Q2 — 잘린 분의 새 값은 새 줄로 다시 넣는다(버린 줄을 고치지 않는다)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')});
+    const t0 = Math.floor(Date.now() / 60_000) * 60_000;
+    store.setLoad('fm-keep00000001', { cpuPct: 1 }, t0);
+    for (let i = 0; i < store.WRITEQ_MAX; i++) store.setLoad('fm-l' + String(i).padStart(9, '0'), { cpuPct: 1 }, t0 + 1);
+    const before = store.drainWrites(100000).filter((r) => r.target === 'fm-keep00000001').length;
+    store.setLoad('fm-keep00000001', { cpuPct: 2 }, t0 + 2);
+    const after = store.drainWrites(100000).filter((r) => r.target === 'fm-keep00000001').map((r) => JSON.parse(r.data).cpuPct);
+    console.log(JSON.stringify({ before, after }));`);
+  assert.equal(out.before, 0, '상한에서 잘렸다'); assert.deepEqual(out.after, [2], '같은 분의 새 값이 새 줄로');
+});
+
+test('E1-2 — 접속처가 바뀌면 그 대상의 사건 창 기억도 지운다(새 기계의 첫 사건을 세지 않고 적는다)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')});
+    const t0 = Date.now(); const id = 'fm-eeee00000002';
+    store.setStatus(id, { state: 'ok' }, t0);
+    for (let i = 0; i < 40; i++) store.setStatus(id, { state: i % 2 ? 'ok' : 'auth' }, t0 + 1000 + i * 1000);
+    store.drainWrites(100000);
+    store.forgetTargetState(id, { hostChanged: true });
+    store.setStatus(id, { state: 'ok' }, t0 + 60_000); store.setStatus(id, { state: 'auth' }, t0 + 61_000);
+    console.log(JSON.stringify({ n: store.drainWrites(100000).filter((r) => r.kind === 'e').length }));`);
+  assert.equal(out.n, 1);
+});
+
+test('O2 — 10분 간격(그 사이 새로 생긴 고아는 다음 차례에) · 1분 틱이 부른다', () => {
+  const setup = (d) => {
+    fs.writeFileSync(path.join(d, 'focusmon-targets.json'), JSON.stringify({ v: 1, targets: [
+      { id: 'fm-aaaa000001', name: 'k1', host: '10.1.0.1', port: 22, username: 'dvcmon', agent: '', enabled: true },
+      { id: 'fm-aaaa000002', name: 'k2', host: '10.1.0.2', port: 22, username: 'dvcmon', agent: '', enabled: true }] }));
+    fs.writeFileSync(path.join(d, 'focusmon-sessions.json'), JSON.stringify({ v: 1, sessions: [{ id: 'fs-0123456789ab', mode: 'record', by: 'a', targets: ['fm-aaaa000001', 'fm-aaaa000002', 'fm-dead000099'], interval: 2, startedAt: Date.now() - 3600_000 }] }));
+  };
+  const out = sub(`const store = await import(${J('focusmon/store.js')});
+    const svc = await import(${J('focusmon/service.js')});
+    const registry = await import(${J('focusmon/registry.js')});
+    const t0 = Date.now();
+    const r1 = await svc.minuteTick(t0);                     // 1분 틱이 부른다
+    const a1 = store.listSessions().map((s) => s.targets)[0];
+    registry.removeTarget('fm-aaaa000002');                    // 지울 때 빼는 길을 거치지 않은 고아를 만든다
+    const n2 = svc.pruneOrphans(t0 + 60_000);                  // 10분 안 — 하지 않는다
+    const a2 = store.listSessions().map((s) => s.targets)[0];
+    const n3 = svc.pruneOrphans(t0 + svc.ORPHAN_EVERY_MS + 1);
+    const a3 = store.listSessions().map((s) => s.targets)[0];
+    svc.stopFocusMon?.();
+    console.log(JSON.stringify({ a1, n2, a2, n3, a3 }));`, { DATA_SOURCE: 'live' }, setup);
+  assert.deepEqual(out.a1, ['fm-aaaa000001', 'fm-aaaa000002'], '틱이 고아를 뺐다');
+  assert.equal(out.n2, 0); assert.deepEqual(out.a2, ['fm-aaaa000001', 'fm-aaaa000002'], '10분 안에는 다시 보지 않는다');
+  assert.equal(out.n3, 1); assert.deepEqual(out.a3, ['fm-aaaa000001']);
+});
+
+test('K2 — 알림 상태 지우기는 그 대상 열쇠만(앞부분이 같은 다른 대상은 남긴다) · 파일에도 쓴다', () => {
+  const out = sub(`const alerts = await import(${J('focusmon/alerts.js')});
+    const id = 'fm-aaaa0000'; const longer = 'fm-aaaa00001111';
+    alerts.saveState({ ['r1|' + id]: { state: 'firing' }, ['r1|' + longer]: { state: 'firing' }, ['r2|' + id]: { state: 'ok' } });
+    alerts.forgetTargetAlerts(id);
+    alerts._resetForTest();   // 메모리 캐시를 버리고 파일에서 다시 읽는다
+    console.log(JSON.stringify(Object.keys(alerts.loadState()).sort()));`);
+  assert.deepEqual(out, ['r1|fm-aaaa00001111']);
 });

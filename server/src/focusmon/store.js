@@ -552,7 +552,8 @@ function queueJson(kind, key, now, obj) {
   try { data = JSON.stringify(obj); } catch { return; }
   if (data.length > LOAD_MAX_JSON) return;
   const prev = lastQueued.get(k);
-  if (prev && prev.minute === minute) {
+  // v3.54.0 묶음 B: 대기열 상한에서 잘린 줄(dropped)이면 그 분의 새 값을 새 줄로 다시 넣는다(예전엔 버린 줄을 고쳐 그 분이 사라졌다)
+  if (prev && prev.minute === minute && !prev.row.dropped) {
     if (!prev.row.written) prev.row.data = data; // 아직 대기열에 있으면 새 값으로
     return;
   }
@@ -563,13 +564,13 @@ function queueJson(kind, key, now, obj) {
 }
 /**
  * v3.54.0 묶음 B(29회차 남긴 것): 대기열을 자를 때 — 잘린 줄의 사건 수를 빼고(예전엔 qEv 가 그대로 남아 사건 상한이 일찍 찼다) ·
- *   잘린 줄은 '쓴 것' 으로 표시한다(그 분의 새 값이 이미 버린 줄을 고치지 않게 — 그 분은 건너뛴다) · 몇 줄 잘랐는지 센다.
+ *   잘린 줄은 dropped 로 표시한다(그 분의 새 값은 queueJson 이 새 줄로 다시 넣는다 — 처음 판의 '쓴 것' 표시는 그 분을 버리는 것과 같아 변이 검증이 동등 변이로 잡았다) · 몇 줄 잘랐는지 센다.
  */
 export const WRITEQ_MAX = 20_000;
 function cutWriteQ() {
   const gone = writeQ.splice(0, writeQ.length - WRITEQ_MAX);
   let ev = 0;
-  for (const r of gone) { r.written = true; if (r.kind === 'e') ev += 1; }
+  for (const r of gone) { r.dropped = true; if (r.kind === 'e') ev += 1; }
   if (ev) qEv = Math.max(0, qEv - ev);
   counters.queueCut += gone.length;
 }
