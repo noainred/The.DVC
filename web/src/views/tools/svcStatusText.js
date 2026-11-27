@@ -717,9 +717,11 @@ export function chartModel(series = [], { w = 900, h = 240, start, end, baseMs =
     }
   }
   const fails = pts.filter((p) => (numOrNull(p.fail) ?? 0) > 0).map((p) => ({ x: x(p.ts), ts: p.ts, down: numOrNull(p.worst) === 3, n: numOrNull(p.fail) }));
+  // 축 눈금 — 값이 없으면 0 만(빈 차트에 '2 · 2 · 1 · 1' 같은 눈금이 나왔다 — Chromium 1440 실측), 작은 범위는 소수 한 자리(반올림으로 같은 글자가 겹치지 않게).
   const grid = [0, 1, 2, 3, 4].map((k) => {
     const v = (top * k) / 4;
-    return { y: y(v), label: k === 0 ? '0 ms' : comma(v) };
+    const label = k === 0 ? '0 ms' : !vals.length ? '' : top < 10 ? String(Math.round(v * 10) / 10) : comma(v);
+    return { y: y(v), label };
   });
   const multiDay = t1 - t0 > 2 * DAY;
   const xticks = [0, 1, 2, 3, 4].map((k) => {

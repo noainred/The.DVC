@@ -482,3 +482,13 @@ describe('문구 규칙', () => {
     expect(man.title).toMatch(/^수동 측정 — /);
   });
 });
+
+describe('차트 축 눈금', () => {
+  it('값이 없으면 0 만 · 작은 범위는 같은 글자가 겹치지 않는다', () => {
+    const empty = W.chartModel([{ ts: 1_000, avg: null, n: 0 }], { start: 0, end: 10_000 });
+    expect(empty.grid.map((g) => g.label)).toEqual(['0 ms', '', '', '', '']);
+    const small = W.chartModel([{ ts: 1_000, avg: 1.5, max: 1.8, n: 1 }, { ts: 2_000, avg: 1.2, max: 1.4, n: 1 }], { start: 0, end: 10_000 });
+    const labels = small.grid.slice(1).map((g) => g.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+});
