@@ -79,7 +79,7 @@ export function planTargets(built = {}, { settings = {}, siteOwner = new Map(), 
     const k = SOURCE_KIND[t(e?.source)];
     if (!k) continue;
     held.add(k);
-    sourceErrors.push({ kind: k, reason: t(e?.reason).slice(0, 200) });
+    sourceErrors.push({ kind: k, label: KIND_LABEL[k], off: kinds[k] === false, reason: t(e?.reason).slice(0, 200) });
   }
   const fresh = new Map(KIND_KEYS.map((k) => [k, []]));
   const raw = new Map(KIND_KEYS.map((k) => [k, []]));   // 다음 주기의 보류용 — 카탈로그 원본(제외 · 꺼짐은 그때 설정으로 다시 판정한다)
@@ -94,10 +94,12 @@ export function planTargets(built = {}, { settings = {}, siteOwner = new Map(), 
     const port = numOrNull(x.port);
     const host = t(x.host);
     const defaultPort = problem ? null : defaultPortOf(x);
-    const ex = excluded.get(t(x.id));
+    // 설정 오류(problems) 항목에는 id 가 없다 — 카탈로그와 같은 규칙(kind|ref)으로 만든다(점검 반증 #5: 빈 id 라 상세 · 제외 · 행 키가 깨졌다).
+    const id = t(x.id) || `${t(x.kind)}|${t(x.ref) || '-'}`;
+    const ex = excluded.get(id);
     const demo = isDemoTarget({ ...x, host });
     const row = {
-      id: t(x.id), kind, kindLabel: KIND_LABEL[kind],
+      id, kind, kindLabel: KIND_LABEL[kind],
       sub: kind === 'vcenter' ? (vcSite ? 'site' : 'direct') : kind === 'storage' ? (x.kind === 'set:storage-ssh' ? 'ssh' : 'api') : '',
       type: kind === 'storage' ? t(x.facts?.type) : '',
       typeLabel: kind === 'storage' ? t(typeLabel[t(x.facts?.type)] || x.facts?.type) : '',

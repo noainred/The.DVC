@@ -310,6 +310,9 @@ test('⑥ 엣지 보고 — 자기 몫 · 중앙이 준 접속처와 같을 때�
   assert.equal(lat.find((x) => x.id === 'set:cvp|c1').fk, 'unknown', '모르는 실패 종류는 unknown');
   assert.ok(!lat.some((x) => x.id === 'set:collector|e1' && x.by_node === 'edge-2'));
   await assert.rejects(() => SVC.putEdgeReport('', {}), /agent/);
+  // 중앙이 준 접속처와 다른 행만 온 보고 — 대상당 한 행 규칙과 별개로 접속처 대조가 막는다(변이 M11 이 1회차 뒤 살아남았던 자리)
+  const mis = await SVC.putEdgeReport('edge-2', { results: [{ id: 'set:vcenter|vc-s', host: '10.2.1.10', port: 443, ok: false, fk: 'refused', a: 0 }] }, { now: now + 1_000 });
+  assert.equal(mis.stored, 0); assert.equal(mis.rejected, 1);
   const big = await SVC.putEdgeReport('edge-2', { results: new Array(SVC.REPORT_MAX + 3).fill({ id: 'nope' }) }, { now });
   assert.equal(big.omitted, 3, '상한을 넘는 것은 버리고 센다');
 });
@@ -547,4 +550,163 @@ test('⑩ 설정을 못 읽어도 제외 목록 · 알림을 풀지 않는다(�
   const n = SET.normalizeSettings({ intervalMs: '', failThreshold: '7', slowFactor: 2.55, retentionDays: 99999, kinds: { cvp: false }, alerts: { unknownMin: -3 } });
   assert.equal(n.intervalMs, SET.LIMITS.intervalMs.def); assert.equal(n.failThreshold, 7); assert.equal(n.slowFactor, 2.6); assert.equal(n.retentionDays, SET.LIMITS.retentionDays.max);
   assert.equal(n.kinds.cvp, false); assert.equal(n.kinds.storage, true); assert.equal(n.alerts.unknownMin, 0);
+});
+
+/* ───────────────────────── ⑪ 점검 반증 확정분(2026-11-27) ───────────────────────── */
+
+test('⑪ #1 측정을 꺼 두면 메일 틱은 아무것도 하지 않는다(커서 그대로) · 다시 켠 시각 + 멈춤 경계 전에는 못 잼을 세지 않는다 · 꺼짐 행은 합계 밖', async () => {
+  if (!(await DB.available())) return;
+  await seedPlan();
+  SET._resetSvcStatusSettingsForTest(); SET.saveSvcStatusSettings({}, { replace: true });
+  SET.saveSvcStatusSettings({ enabled: false });
+  N._resetSvcStatusMailForTest();
+  const before = (await DB.latestRows()).map((x) => [x.tid, x.notified]);
+  const r = await N.svcStatusMailTick({ now: NOW, mock: false, send: async () => { throw new Error('보내면 안 된다'); } });
+  assert.equal(r.skipped, 'disabled');
+  assert.deepEqual((await DB.latestRows()).map((x) => [x.tid, x.notified]), before, '커서를 건드리지 않는다');
+  const saved = SET.saveSvcStatusSettings({ enabled: true });
+  assert.ok(saved.enabledAt >= NOW - HOUR, '꺼짐 → 켜짐 저장이 다시 켠 시각을 남긴다');
+  // 못 잼 시계 — 중앙 기동 · 다시 켠 시각 + 멈춤 경계 이후만
+  const row = { state: 'unknown', since: null, lastTs: NOW - 5 * HOUR };
+  assert.equal(J.unknownForMsOf(row, { now: NOW, staleMs: 240_000, armedAt: 0 }), 5 * HOUR - 240_000);
+  assert.equal(J.unknownForMsOf(row, { now: NOW, staleMs: 240_000, armedAt: NOW - 10 * 60_000 }), 10 * 60_000 - 240_000, '다시 켠 뒤만 센다');
+  assert.equal(J.unknownForMsOf(row, { now: NOW, staleMs: 240_000, armedAt: NOW }), 0);
+  assert.equal(J.unknownForMsOf({ ...row, state: 'ok' }, { now: NOW, staleMs: 1, armedAt: 0 }), 0);
+  const ev = N.planMail([{ ...R({ tid: 9, state: 'unknown', notified: 'ok' }), since: null, lastTs: NOW - 5 * HOUR }], { alerts: { unknownMin: 30 }, now: NOW, staleMs: 240_000, armedAt: NOW - 5 * 60_000 });
+  assert.equal(ev.events.length, 0, '중앙 재기동 직후 · 다시 켠 직후에는 못 잼을 보내지 않는다');
+  // 꺼짐 행
+  const { rows: plan } = T.planTargets(cat(), { settings: SETTINGS, siteOwner: new Map([['vc-s', 'edge-2']]) });
+  const off = V.buildRows(plan, new Map(), new Map(), { now: NOW, settings: { ...S, enabled: false }, staleMs: 240_000 });
+  assert.ok(off.filter((x) => ['central', 'edge'].includes(plan.find((p) => p.id === x.id).plan)).every((x) => x.state === 'off' && x.reason === 'measure-off'));
+  assert.equal(V.countsOf(off).unknown, 0, '측정을 꺼 둔 동안 못 잼으로 부풀지 않는다(담당 모름도 측정 꺼짐이 먼저)');
+});
+
+test('⑪ #2 · #3 측정하는 곳이 바뀌면 평소를 비우고 그 시각부터 · 주소가 바뀐 새 단위는 직전 알림 커서를 이어받는다', async () => {
+  if (!(await DB.available())) return;
+  const id = 'set:vcenter|moved';
+  const rows = [];
+  for (let i = 0; i < J.BASELINE_MIN_SAMPLES + 5; i++) rows.push({ id, host: '192.0.2.30', port: 443, kind: 'vcenter', ts: NOW - 6 * HOUR + i * 60_000, ok: true, ms: 2, by: 'edge-pl' });
+  await DB.recordResults(rows, { settings: S });
+  await DB.refreshBaselines({ now: NOW - 5 * HOUR, force: true });
+  let lat = (await DB.latestRows()).find((x) => x.id === id);
+  assert.equal(lat.base_ms, 2);
+  await DB.recordResults([{ id, host: '192.0.2.30', port: 443, kind: 'vcenter', ts: NOW - 4 * HOUR, ok: true, ms: 800, by: 'central' }], { settings: S });
+  lat = (await DB.latestRows()).find((x) => x.id === id);
+  assert.equal(lat.state, 'ok', '옛 지점의 평소(2ms)로 800ms 를 지연이라 하지 않는다'); assert.equal(lat.base_ms, null); assert.equal(lat.by_since, NOW - 4 * HOUR);
+  // 대소문자만 다른 같은 지점은 바뀐 것이 아니다
+  await DB.recordResults([{ id, host: '192.0.2.30', port: 443, kind: 'vcenter', ts: NOW - 4 * HOUR + 60_000, ok: true, ms: 801, by: 'CENTRAL' }], { settings: S });
+  assert.equal((await DB.latestRows()).find((x) => x.id === id).by_since, NOW - 4 * HOUR);
+  // 새 지점 표본만으로 평소(옛 2ms 표본을 섞지 않는다)
+  const more = [];
+  for (let i = 2; i < J.BASELINE_MIN_SAMPLES + 2; i++) more.push({ id, host: '192.0.2.30', port: 443, kind: 'vcenter', ts: NOW - 4 * HOUR + i * 60_000, ok: true, ms: 800, by: 'central' });
+  await DB.recordResults(more, { settings: S });
+  await DB.refreshBaselines({ now: NOW - 3 * HOUR, force: true });
+  assert.equal((await DB.latestRows()).find((x) => x.id === id).base_ms, 800);
+  // #3 커서 승계 — 옛 단위 커서 'ok' → 새 주소 단위가 이어받는다
+  const old = (await DB.latestRows()).find((x) => x.id === id);
+  await DB.setNotified([[old.tid, 'ok']], NOW - 2 * HOUR);
+  await DB.recordResults([{ id, host: '192.0.2.31', port: 8443, kind: 'vcenter', ts: NOW - HOUR, ok: false, fk: 'refused', by: 'central' }], { settings: S });
+  const neu = (await DB.latestRows()).find((x) => x.id === id && x.port === 8443);
+  assert.equal(neu.notified, 'ok', '새 단위가 직전 커서를 이어받아 끊김을 알릴 수 있다');
+});
+
+test('⑪ #8 평소를 모르는 단위는 표본이 늘면 다음 틱에 다시 계산한다(1시간 도장 금지)', async () => {
+  if (!(await DB.available())) return;
+  const id = 'set:cvp|base';
+  const mk = (from, n) => Array.from({ length: n }, (_, i) => ({ id, host: '192.0.2.40', port: 443, kind: 'cvp', ts: from + i * 60_000, ok: true, ms: 50, by: 'central' }));
+  const t0 = NOW - 2 * HOUR;
+  await DB.recordResults(mk(t0, 10), { settings: S });
+  await DB.refreshBaselines({ now: t0 + 15 * 60_000 });
+  assert.equal((await DB.latestRows()).find((x) => x.id === id).base_ms, null, '10표본 — 모름');
+  await DB.recordResults(mk(t0 + 10 * 60_000, 25), { settings: S });
+  await DB.refreshBaselines({ now: t0 + 40 * 60_000 });
+  assert.equal((await DB.latestRows()).find((x) => x.id === id).base_ms, 50, '25분 뒤 다음 틱에 채워진다(1시간을 기다리지 않는다)');
+});
+
+test('⑪ #5 · #6 · #15 설정 오류 행 id · 엣지 대상 못 잼 시작 시각 · DB 못 씀 사유 · #7 엣지에 건넨 주기로 멈춤 경계 · 성공률 내림', () => {
+  const { rows: plan } = T.planTargets(cat({ problems: [{ kind: 'set:storage-api', ref: 's9', name: 'bad', address: '::', reason: 'x' }, { kind: 'set:cvp', ref: 'c9', name: 'bad2', address: '::', reason: 'y' }] }), { settings: SET.normalizeSettings({ excluded: [{ id: 'set:storage-api|s9' }] }), siteOwner: new Map([['vc-s', 'edge-2']]) });
+  const probs = plan.filter((r) => r.problem);
+  assert.deepEqual(probs.map((r) => r.id), ['set:cvp|c9', 'set:storage-api|s9']);
+  assert.equal(probs.find((r) => r.id === 'set:storage-api|s9').excluded != null, true); assert.equal(probs.find((r) => r.id === 'set:storage-api|s9').plan, 'problem');
+  const vs = plan.find((r) => r.id === 'set:vcenter|vc-s');
+  const staleMs = 240_000;
+  const lat = new Map([[V.unitKey(vs.id, vs.host, vs.port), { tid: 7, ts: NOW - staleMs - 5 * 60_000, ok: 1, ms: 3, state: 'ok', since_ts: NOW - HOUR, fail_streak: 0 }]]);
+  const edge = { reports: new Map(), versions: new Map([['edge-2', '9.0.0']]), minEdgeVersion: '3.54.0', startedAt: NOW - HOUR, intervalMs: 60_000 };
+  let rows = V.buildRows(plan, lat, new Map(), { now: NOW, settings: S, staleMs, edge });
+  let r = rows.find((x) => x.id === vs.id);
+  assert.match(r.reason, /^edge-/); assert.equal(r.since, NOW - 5 * 60_000, '엣지 사유로 바꾼 행도 언제부터 못 잼을 준다');
+  // 엣지에 10분 주기를 건넸다 → 그 엣지의 멈춤 경계는 넓다(주기를 줄인 직후 거짓 못 잼 금지)
+  rows = V.buildRows(plan, lat, new Map(), { now: NOW, settings: S, staleMs, edge, edgeStaleMs: new Map([['edge-2', J.staleLimitMs(600_000)]]) });
+  assert.equal(rows.find((x) => x.id === vs.id).state, 'ok');
+  rows = V.buildRows(plan, lat, new Map(), { now: NOW, settings: S, staleMs, edge, dbOk: false });
+  assert.equal(rows.find((x) => x.id === vs.id).reason, 'db-unavailable');
+  assert.equal(rows.find((x) => x.id === 'set:collector|e1').reason, 'db-unavailable', '중앙 대상도 첫 측정 대기라 하지 않는다');
+  const rep = V.buildRows(plan, new Map(), new Map(), { now: NOW, settings: S, staleMs, edge: { ...edge, reports: new Map([['edge-2', { at: NOW - 10_000, dbUnavailable: true }]]) } });
+  assert.equal(rep.find((x) => x.id === vs.id).reason, 'db-unavailable');
+  const curB = Math.floor(NOW / DB.BUCKET_MS) * DB.BUCKET_MS;
+  assert.equal(V.stripOf([{ b: curB, n: 2880, ok_n: 2879, worst: 3 }], NOW).avail24, 99.9, '실패가 있으면 100 % 가 아니다');
+  for (const c of ['measure-off', 'db-unavailable']) assert.ok(J.REASON_CODES.includes(c));
+});
+
+test('⑪ #13 · #10 등록부 하나를 못 읽어도 엣지 설정 · 보고를 통째로 막지 않는다 · 한 보고에 한 대상은 한 행', async () => {
+  if (!(await DB.available())) return;
+  SVC._resetSvcStatusServiceForTest();
+  SET._resetSvcStatusSettingsForTest(); SET.saveSvcStatusSettings({}, { replace: true });
+  const broken = cat({ targets: cat().targets.filter((x) => x.kind !== 'set:cvp'), sourceErrors: [{ source: 'cvp', reason: '못 읽음' }] });
+  await SVC.getPlan({ force: true, deps: { build: async () => broken, siteOwner: new Map([['vc-s', 'edge-2']]), corpOf: () => ({ key: '', label: '' }), settings: SETTINGS, mock: false } });
+  const cfg = await SVC.edgeConfigFor('edge-2');
+  assert.equal(cfg.status, 200); assert.deepEqual(cfg.body.targets.map((x) => x.id), ['set:vcenter|vc-s']);
+  assert.deepEqual(cfg.body.heldEmpty, [{ kind: 'cvp', label: 'CVP' }]);
+  const out = await SVC.putEdgeReport('edge-2', { results: [
+    { id: 'set:vcenter|vc-s', host: '10.2.1.10', port: 8443, ok: false, fk: 'timeout', a: 1 },
+    { id: 'set:vcenter|vc-s', host: '10.2.1.10', port: 8443, ok: false, fk: 'timeout', a: 0 },
+    { id: 'set:vcenter|vc-s', host: '10.2.1.10', port: 8443, ok: false, fk: 'timeout', a: 2 },
+  ] }, { now: NOW + 3 * HOUR });
+  assert.equal(out.ok, true); assert.equal(out.stored, 1, '같은 대상은 한 행만'); assert.equal(out.rejected, 2);
+});
+
+test('⑪ 웹 점검 서버 몫 — 상세 generatedAt · 데모 계정 같은 주소 · 꺼진 종류 등록 수 · 받는 사람 상한 · 비관리자 폴러 화이트리스트', async () => {
+  if (!(await DB.available())) return;
+  await seedPlan();
+  const d = await SVC.detailPayload('set:collector|e1', { range: '30d', now: NOW });
+  assert.equal(d.generatedAt, NOW); assert.ok(d.end >= NOW);
+  const sh = cat({ targets: [...cat().targets, { id: 'set:storage-api|mock-x', kind: 'set:storage-api', ref: 'mock-x', name: 'demo-same', host: 'edge1.corp', port: 443, enabled: true, agent: '', facts: { type: 'unity480', defaultPort: 443 } }] });
+  SVC._resetSvcStatusServiceForTest();
+  await SVC.getPlan({ force: true, deps: { build: async () => sh, siteOwner: new Map(), corpOf: () => ({ key: '', label: '' }), settings: SETTINGS, mock: true } });
+  const all = await SVC.detailPayload('set:storage-api|mock-x', { now: NOW });
+  assert.ok(all.sameHost.some((x) => x.id === 'set:collector|e1'));
+  const demo = await SVC.detailPayload('set:storage-api|mock-x', { now: NOW, demoOnly: true });
+  assert.ok(!demo.sameHost.some((x) => x.id === 'set:collector|e1'), '데모 계정에는 실제 등록 항목을 섞지 않는다');
+  SVC._resetSvcStatusServiceForTest();
+  await SVC.getPlan({ force: true, deps: { build: async () => cat(), siteOwner: new Map(), corpOf: () => ({ key: '', label: '' }), settings: SET.normalizeSettings({ kinds: { storage: false } }), mock: false } });
+  const src = await SVC.sourcesPayload();
+  const st = src.find((s) => s.kind === 'storage');
+  assert.equal(st.measured, false); assert.equal(st.registered, 5, '측정을 꺼도 등록 수는 센다'); assert.equal(st.targets, null);
+  SET._resetSvcStatusSettingsForTest(); SET.saveSvcStatusSettings({}, { replace: true });
+  const many = Array.from({ length: SET.ALERT_TO_MAX + 1 }, (_, i) => `u${i}@example.invalid`);
+  assert.throws(() => SET.saveSvcStatusSettings({ alerts: { to: many } }), (e) => e.status === 400 && e.field === 'alerts.to');
+  const { maskPollerForNonAdmin } = await import('../src/routes/api/svcStatus.js');
+  const m = maskPollerForNonAdmin({ enabled: true, running: false, last: { at: 1, error: 'smtp.corp:25 거부' }, mail: { at: 1, sent: 0, reason: 'smtp.corp:25 연결 거부' }, baseline: { at: 1, error: 'x' } });
+  assert.ok(!JSON.stringify(m).includes('smtp.corp'), 'SMTP 주소 · 오류 원문이 비관리자 판본에 실리지 않는다');
+});
+
+test('⑪ #14 엣지 워커 — 설정 응답 모양이 다르면 실패로 끝낸다(중앙에서 꺼짐이라는 거짓 보고 금지)', async () => {
+  const W = await import('../src/agent/svcStatusWorker.js');
+  const { config } = await import('../src/config.js');
+  const posts = [];
+  const central = http.createServer((req, res) => {
+    if (req.method === 'GET') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{"hello":"not central"}'); }
+    posts.push(1); res.writeHead(200); res.end('{}');
+  });
+  const cport = await listen(central);
+  const saved = { url: config.agent.centralUrl, name: config.agent.name, token: config.agent.centralToken };
+  config.agent.centralUrl = `http://127.0.0.1:${cport}`; config.agent.name = 'edge-y'; config.agent.centralToken = 'tok-y';
+  try {
+    const r = await W.runSvcStatusWorkerOnce();
+    assert.equal(r.ok, false); assert.equal(posts.length, 0, '꺼짐 보고를 올리지 않는다');
+    assert.equal(W.svcStatusWorkerStatus().last.kind, 'bad-shape');
+  } finally {
+    config.agent.centralUrl = saved.url; config.agent.name = saved.name; config.agent.centralToken = saved.token;
+    await closeSrv(central);
+  }
 });

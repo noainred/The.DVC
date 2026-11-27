@@ -12,8 +12,8 @@
  */
 import { config } from '../config.js';
 import { loadSvcStatusSettings } from './settings.js';
-import { getPlan, currentRows } from './service.js';
-import { alertLevelOf } from './judge.js';
+import { getPlan, currentRows, STARTED_AT } from './service.js';
+import { alertLevelOf, unknownForMsOf } from './judge.js';
 import * as db from './db.js';
 import { isMockMode } from '../mock/demo/flags.js';
 
@@ -34,12 +34,13 @@ const fmtTs = (ms) => { try { return new Date(ms).toLocaleString('ko-KR', { time
  * @param {Array} rows view.buildRows 행(서버 칸 `_tid` · `_notified` 포함)
  * @returns {{ events:Array<{row,from,to}>, quiet:Array<[tid, level]> }}
  */
-export function planMail(rows, { alerts = {}, now = Date.now() } = {}) {
+export function planMail(rows, { alerts = {}, now = Date.now(), staleMs = 0, armedAt = 0 } = {}) {
   const events = []; const quiet = [];
   for (const r of rows) {
     if (r._tid == null) continue;            // 측정한 적 없는 대상 — 알릴 것이 없다
     const cur = r._notified ?? null;
-    const unknownForMs = r.state === 'unknown' ? (r.since != null ? now - r.since : (r.lastTs != null ? now - r.lastTs : 0)) : 0;
+    // 못 잼 경과는 중앙 기동 · 측정을 다시 켠 뒤부터만(judge.unknownForMsOf — 재기동 직후 '못 잼' → '복구' 폭주 방지)
+    const unknownForMs = unknownForMsOf(r, { now, staleMs: r._staleMs ?? staleMs, armedAt });
     const level = alertLevelOf(r.state, { alerts, unknownForMs });
     if (level === 'hold') continue;
     if (level === 'quiet') { if (cur != null && cur !== 'ok') quiet.push([r._tid, 'ok']); continue; }
@@ -89,10 +90,14 @@ export async function svcStatusMailTick({ now = Date.now(), send = null, mock = 
   _busy = true;
   try {
     const settings = loadSvcStatusSettings();
+    // 측정을 꺼 둔 동안은 아무것도 알리지 않고 커서도 건드리지 않는다(점검 반증 #1 — 재현: 꺼 둔 지 30여 분 뒤 전 대상 '못 잼', 다시 켜면 전 대상 '복구' 메일).
+    //   커서를 그대로 두므로 다시 켠 뒤 첫 측정이 정상이면 '복구' 가 나가지 않고, 꺼 두는 동안 실제로 끊긴 대상은 다시 켠 뒤 연속 실패로 알린다.
+    if (settings.enabled === false) { _last = { at: now, skipped: 'disabled' }; return _last; }
     const plan = await getPlan();
-    const { rows, dbOk } = await currentRows({ plan, now });
+    const { rows, dbOk, staleMs } = await currentRows({ plan, now });
     if (!dbOk) { _last = { at: now, skipped: 'db-unavailable' }; return _last; }
-    const { events, quiet } = planMail(rows, { alerts: settings.alerts, now });
+    const armedAt = Math.max(STARTED_AT, Number(settings.enabledAt) || 0);
+    const { events, quiet } = planMail(rows, { alerts: settings.alerts, now, staleMs, armedAt });
     if (quiet.length) await db.setNotified(quiet, now);
     if (!events.length) return { ok: true, events: 0 };
     const isMock = mock ?? isMockMode();

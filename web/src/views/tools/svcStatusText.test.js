@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import * as W from './svcStatusText.js';
 import * as S from '../../../../server/src/svcstatus/judge.js';
 import { FAIL_KINDS } from '../../../../server/src/linkcheck/phases.js';
+import { KIND_LABEL } from '../../../../server/src/svcstatus/targets.js';
 
 const HOUR = 3_600_000;
 // 순수 함수에 now · offsetMin 을 주입하므로 고정 시각을 쓴다(실제 시각에 기대지 않는다).
@@ -40,6 +41,9 @@ describe('서버 judge.js 와 코드 대조', () => {
     expect(W.STRIP[S.SAMPLE.slow].label).toBe('지연');
     expect(W.STRIP[S.SAMPLE.fail].label).toMatch(/^일시 실패/);
     expect(W.STRIP[S.SAMPLE.down].label).toBe('끊김');
+  });
+  it('종류 라벨 폴백 == 서버 targets.js KIND_LABEL', () => {
+    expect(W.KIND_FALLBACK_LABEL).toEqual({ ...KIND_LABEL });
   });
   it('실패 종류 라벨 == 서버 linkcheck FAIL_KINDS 라벨(키가 서버 표에 있다)', () => {
     for (const [k, label] of Object.entries(W.FAIL_TEXT)) {
@@ -97,9 +101,24 @@ describe('못 읽은 값은 0 이 아니다', () => {
 
 describe('행 문구 — 서버 값 그대로', () => {
   it('측정하는 곳 — 엣지면 엣지 이름(청록), 중앙이면 중앙, 모르면 —', () => {
-    expect(W.byText({ by: 'central', byEdge: false })).toEqual({ text: '중앙', edge: false });
-    expect(W.byText({ by: 'edge-us-east', byEdge: true })).toEqual({ text: 'edge-us-east', edge: true });
-    expect(W.byText({ by: '', byEdge: false })).toEqual({ text: '—', edge: false });
+    expect(W.byText({ by: 'central', byEdge: false, state: 'ok' })).toEqual({ text: '중앙', edge: false, measured: true });
+    expect(W.byText({ by: 'edge-us-east', byEdge: true, state: 'down' })).toEqual({ text: 'edge-us-east', edge: true, measured: true });
+    expect(W.byText({ by: '', byEdge: false, state: 'unknown' })).toEqual({ text: '—', edge: false, measured: null });
+  });
+  it('꺼짐 · 제외 · 설정 오류 행은 측정 안 함(중앙 측정 · 엣지 측정이라고 쓰지 않는다) — 표 · 카드 · 상세 공통', () => {
+    for (const state of ['off', 'excluded', 'problem']) {
+      expect(W.byText({ by: 'central', state }).measured).toBe(false);
+      expect(W.byLine({ by: 'edge-x', byEdge: true, state })).toBe('측정 안 함');
+    }
+    expect(W.byLine({ by: 'central', state: 'ok' })).toBe('중앙 측정');
+    expect(W.byLine({ by: 'edge-x', byEdge: true, state: 'slow' })).toBe('edge-x 측정');
+    expect(W.byLine({ by: '', state: 'unknown', reason: 'unassigned' })).toBe('측정하는 곳 —');
+  });
+  it('등록 출처 문구 — 스토리지 REST · SSH · 그 밖', () => {
+    expect(W.portSourceText({ kind: 'storage', sub: 'api' })).toBe('포트는 기종별 포탈 설정값(등록부에 포트 칸 없음)');
+    expect(W.portSourceText({ kind: 'storage', sub: 'ssh' })).toBe('등록부의 주소 · SSH 포트');
+    expect(W.portSourceText({ kind: 'vcenter', sub: 'direct' })).toBe('등록부의 주소:포트(없으면 https 443 · http 80)');
+    expect(W.portSourceText({ kind: 'collector', sub: '' })).toBe('등록부의 주소:포트(없으면 https 443 · http 80)');
   });
   it('접속처 — 가린 응답이면 —', () => {
     expect(W.addrText({ address: '198.51.100.24:20444' }, false)).toBe('198.51.100.24:20444');
@@ -114,6 +133,33 @@ describe('행 문구 — 서버 값 그대로', () => {
     expect(W.whyText({ state: 'unknown', reason: 'judging', failStreak: 2, failKind: 'refused' })).toBe('판정 중 · 실패 2회째 · 연결 거부');
     // 모르는 코드는 코드 그대로(지어내지 않는다)
     expect(W.whyText({ state: 'unknown', reason: 'brand-new' })).toBe('brand-new');
+  });
+  it('정상 · 지연인데 마지막 측정이 실패(연속 실패 < 기준) — 일시 실패 N회째 · 실패 종류(기준 숫자는 응답 값으로만)', () => {
+    const r = { state: 'ok', ms: null, baseMs: 11, failStreak: 2, failKind: 'timeout' };
+    expect(W.whyText(r, { failThreshold: 3 })).toBe('일시 실패 2회째(끊김 판정 전 — 연속 3회째에 끊김) · 타임아웃');
+    expect(W.whyText(r)).toBe('일시 실패 2회째(끊김 판정 전) · 타임아웃');
+    expect(W.whyText({ ...r, state: 'slow' }, { failThreshold: 5 })).toBe('일시 실패 2회째(끊김 판정 전 — 연속 5회째에 끊김) · 타임아웃');
+    expect(W.whyText({ ...r, failStreak: 0 })).toBe('');               // 성공 표본이면 서버가 0 으로 되돌린다
+    expect(W.whyText({ ...r, state: 'down', failStreak: 4 })).toBe('연속 4회 실패 · 타임아웃'); // 끊김은 기존 문구
+    expect(W.nowSubText(r, { failThreshold: 3 })).toBe('일시 실패 2회째(끊김 판정 전 — 연속 3회째에 끊김) · 타임아웃 · 평소 11 ms');
+    expect(W.nowSubText({ ...r, baseMs: null })).toBe('일시 실패 2회째(끊김 판정 전) · 타임아웃');
+    expect(W.nowSubText({ state: 'down', failStreak: 3, failKind: 'refused' })).toBe('연속 3회 실패 · 연결 거부');
+    expect(W.nowSubText({ state: 'unknown', reason: 'stale' })).toBe('측정이 멈춤');
+    expect(W.nowSubText({ state: 'slow', ms: 1930, baseMs: 820 })).toBe('평소 820 ms 의 2.4배');
+    expect(W.nowSubText({ state: 'ok', ms: 12, baseMs: null })).toBe('평소 —');
+  });
+  it('제외 표지 — 사유 · 시각 · 누가 · 꺼짐 · 설정 오류와 겹치면 두 사실을 함께', () => {
+    const ex = { at: NOW - 3 * 24 * HOUR, by: 'admin', reason: '이전 작업 중' };
+    expect(W.excludedText(ex, NOW, { offsetMin: KST })).toBe('제외 11-24 12:30 · admin · 사유: 이전 작업 중');
+    expect(W.excludedText({ at: null, by: '', reason: '' }, NOW)).toBe('제외 —');
+    expect(W.excludedText(null)).toBe('');
+    expect(W.isExcludedRow({ state: 'ok', excluded: null })).toBe(false);
+    expect(W.isExcludedRow({ state: 'off', excluded: ex })).toBe(true);
+    expect(W.isExcludedRow({ state: 'excluded' })).toBe(true);
+    expect(W.excludedNote({ state: 'excluded', excluded: ex }, NOW, { offsetMin: KST })).toBe('제외 11-24 12:30 · admin · 사유: 이전 작업 중');
+    expect(W.excludedNote({ state: 'off', excluded: ex }, NOW, { offsetMin: KST })).toMatch(/^제외 11-24 12:30 · admin · 사유: 이전 작업 중 — 지금 ‘꺼짐’ 상태이기도 해 측정하지 않습니다/);
+    expect(W.excludedNote({ state: 'excluded', excluded: null }, NOW)).toBe('측정에서 제외한 대상입니다');
+    expect(W.excludedNote({ state: 'ok' }, NOW)).toBe('');
   });
   it('사유 설명의 숫자는 응답 값(없으면 숫자 없이)', () => {
     expect(W.reasonLong('judging', { failThreshold: 5 })).toMatch(/연속 5회째/);
@@ -263,6 +309,10 @@ describe('실행 · 표본 문구', () => {
     expect(W.runResultText({ ok: true, measured: 1 })).toBe('1개를 쟀습니다 — 표는 곧 새 값으로 바뀝니다.');
     expect(W.runResultText({ ok: true, measured: 9, failed: 1, note: '' })).toBe('9개를 쟀습니다(그중 연결 실패 1개) — 표는 곧 새 값으로 바뀝니다.');
     expect(W.runResultText({ ok: true, measured: 9, failed: 0 })).toBe('9개를 쟀습니다 — 표는 곧 새 값으로 바뀝니다.');
+    // 0개를 잰 경우에 '표가 곧 바뀐다' 고 말하지 않는다
+    expect(W.runResultText({ ok: true, measured: 0, failed: 0, note: '' })).toBe('중앙이 이번에 잰 대상은 없습니다 — 엣지가 재는 대상은 다음 엣지 보고 때 반영됩니다.');
+    expect(W.runResultText({ ok: true, measured: 0, failed: 0, skipped: 2 })).toBe('중앙이 이번에 잰 대상은 없습니다(측정하지 못한 대상 2개) — 엣지가 재는 대상은 다음 엣지 보고 때 반영됩니다.');
+    expect(W.runResultText({ ok: true, measured: 5, failed: 1, skipped: 2 })).toBe('5개를 쟀습니다(그중 연결 실패 1개) · 측정하지 못한 대상 2개 — 표는 곧 새 값으로 바뀝니다.');
     expect(W.runResultText({ ok: true, queued: 9 })).toBe('9개 측정을 시작했습니다 — 결과는 곧 표에 보입니다.');
     expect(W.runResultText({ ok: true, queued: true })).toBe('측정을 시작했습니다 — 결과는 곧 표에 보입니다.');
     expect(W.runResultText({ ok: true })).toBe('측정을 요청했습니다.');
@@ -270,6 +320,33 @@ describe('실행 · 표본 문구', () => {
   it('표본 합 문구', () => {
     expect(W.tallyText({ n: 1440, fail: 0 })).toBe('1,440회 중 실패 0회');
     expect(W.tallyText(null)).toBe('');
+  });
+});
+
+describe('상세 기준 시각 · 꺼진 종류 문구', () => {
+  it('상세 기준 시각은 응답 generatedAt — 칸 경계로 올린 end 를 쓰면 저녁 시각이 어제가 된다(30일 · KST 22:10)', () => {
+    const gen = Date.UTC(2026, 10, 27, 13, 10, 0);          // KST 22:10
+    const step = 6 * HOUR;                                   // 30일 보기의 칸
+    const end = Math.ceil(gen / step) * step;                // KST 03:00 다음 날 — 칸 경계로 올림
+    const d = { generatedAt: gen, end, start: end - 30 * 24 * HOUR, stepMs: step };
+    const lastTs = gen - 40_000;                              // 오늘 22:09
+    expect(W.clockText(lastTs, end, { offsetMin: KST })).toBe('어제 22:09');   // 예전 결함 재현(now = d.end)
+    expect(W.detailNowOf(d, 0)).toBe(gen);
+    expect(W.clockText(lastTs, W.detailNowOf(d), { offsetMin: KST, sec: true })).toBe('22:09:20');
+    expect(W.detailNowOf({}, 123)).toBe(123);
+    expect(W.detailNowOf({ generatedAt: '' }, 123)).toBe(123);
+  });
+  it('등록부 오류 배너 — 서버 label 우선 · 꺼진 종류 표지 · 영문 키를 그대로 보이지 않는다', () => {
+    expect(W.sourceErrorText({ kind: 'storage', label: '스토리지', off: true, reason: '등록부 파일을 읽지 못했습니다' })).toBe('스토리지 등록부(측정 꺼짐) — 등록부 파일을 읽지 못했습니다');
+    expect(W.sourceErrorText({ kind: 'storage', reason: 'x' }, [])).toBe('스토리지 등록부 — x');   // kinds 에 없어도(꺼진 종류) 라벨
+    expect(W.sourceErrorText({ kind: 'cvp' }, [{ key: 'cvp', label: 'CVP' }])).toBe('CVP 등록부 — 읽지 못했습니다');
+  });
+  it('꺼진 종류 안내 · 빈 목록 문구(전부 껐으면 거짓 대상 없음이라 하지 않는다)', () => {
+    expect(W.kindsOffText([], [])).toBe('');
+    expect(W.kindsOffText(['storage', 'cvp'], [{ key: 'vcenter', label: 'vCenter' }])).toBe('측정이 꺼진 종류: 스토리지 · CVP — 자동 등록 · 설정에서 켜면 대상이 됩니다.');
+    expect(W.emptyRowsText({ kinds: [], sourceErrors: [] })).toBe('측정할 종류가 모두 꺼져 있습니다 — 자동 등록 · 설정에서 켜세요.');
+    expect(W.emptyRowsText({ kinds: [{ key: 'vcenter', label: 'vCenter' }], sourceErrors: [{ kind: 'vcenter' }] })).toMatch(/^등록부를 읽지 못한 종류가 있습니다/);
+    expect(W.emptyRowsText({ kinds: [{ key: 'vcenter', label: 'vCenter' }, { key: 'cvp', label: 'CVP' }], sourceErrors: [] })).toBe('등록부에 대상이 없습니다 — vCenter · CVP에 장비를 등록하면 다음 측정 주기에 대상이 됩니다.');
   });
 });
 
@@ -330,6 +407,14 @@ describe('설정 폼 ↔ 본문', () => {
     expect(W.bodyFromForm({ ...base, unknownMin: 'x' }, settings, limits).issues[0].reason).toBe('숫자가 아닙니다');
     expect(W.bodyFromForm({ ...base, unknownOn: true, unknownMin: '' }, { ...settings, alerts: { ...settings.alerts, unknownMin: 0 } }, limits).issues[0].reason).toBe('분을 입력하세요');
   });
+  it('받는 사람 상한 — 서버 limits.alertsTo.max 를 넘으면 저장 전에 막는다(숫자는 응답 값)', () => {
+    const many = Array.from({ length: 4 }, (_, i) => `a${i}@x.io`).join(', ');
+    const f = { ...W.formFromSettings(settings), to: many };
+    const r = W.bodyFromForm(f, settings, { ...limits, alertsTo: { max: 3 } });
+    expect(r.issues).toEqual([{ key: 'to', label: '받는 사람', reason: '3명까지 넣을 수 있습니다(지금 4명)' }]);
+    expect(W.bodyFromForm(f, settings, { ...limits, alertsTo: { max: 4 } }).issues).toEqual([]);
+    expect(W.bodyFromForm(f, settings, limits).issues).toEqual([]);   // 상한을 모르면 막지 않는다(서버가 판정)
+  });
   it('받는 사람 — 나눔 · 형식 검사 · 바뀜 감지', () => {
     expect(W.parseRecipients('a@x.io, b@x.io;  a@x.io\nc@x.io')).toEqual(['a@x.io', 'b@x.io', 'c@x.io']);
     const f = { ...W.formFromSettings(settings), to: 'ops@example.invalid, nope' };
@@ -380,5 +465,20 @@ describe('문구 규칙', () => {
     const r = W.lastRunText({ last: { at: NOW - 60_000, ms: 812, measured: 9, failed: 1, skipped: 0 } }, 60000, NOW, { offsetMin: KST });
     expect(r.text).toBe('마지막 측정 12:29:00 · 주기 60초');
     expect(r.title).toBe('마지막 측정 주기 — 측정 9 · 실패 1 · 건너뜀 0 · 걸린 시간 812 ms');
+    expect(r.tone).toBe('');
+  });
+  it('마지막 측정 줄 — 주기 실패는 문구에 실패 + warn 톤, 꺼진 주기는 자동 측정 꺼짐(마지막 측정이라 하지 않는다)', () => {
+    const f = W.lastRunText({ last: { at: NOW - 60_000, ms: 30, ok: false, error: 'DB 잠김' } }, 60000, NOW, { offsetMin: KST });
+    expect(f.text).toBe('마지막 주기 실패 12:29:00 · 주기 60초');
+    expect(f.tone).toBe('warn');
+    expect(f.error).toBe('DB 잠김');
+    expect(f.title).toBe('주기 실패 — DB 잠김 · 걸린 시간 30 ms');
+    expect(W.lastRunText({ last: { at: NOW, error: 'x' } }, 60000, NOW).tone).toBe('warn');   // ok 없이 error 만 있어도 실패
+    const off = W.lastRunText({ last: { at: NOW - 60_000, ms: 0, trigger: 'timer', disabled: true } }, 60000, NOW, { offsetMin: KST });
+    expect(off.text).toBe('자동 측정 꺼짐');
+    expect(off.text).not.toMatch(/마지막 측정|0 ms/);
+    expect(off.title).toBe('마지막 확인 12:29:00');
+    const man = W.lastRunText({ last: { at: NOW - 60_000, ms: 10, measured: 1, trigger: 'manual' } }, 60000, NOW, { offsetMin: KST });
+    expect(man.title).toMatch(/^수동 측정 — /);
   });
 });

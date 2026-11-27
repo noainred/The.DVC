@@ -86,8 +86,16 @@ export async function runSvcStatusWorkerOnce() {
       }
     }
     if (!r.ok) throw Object.assign(new Error(`svc-status-config <- HTTP ${r.status}`), { status: r.status });
-    const cfg = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES).catch(() => ({}));
-    _intervalMs = clampInt(cfg?.intervalMs, SVC_INTERVAL_MIN_MS, SVC_INTERVAL_MAX_MS, FALLBACK_MS);
+    // ⚠ 본문을 못 읽거나 모양이 다르면 실패로 끝낸다 — {} 로 넘기면 '중앙에서 꺼짐' 이라는 거짓 보고를 올렸다(점검 반증 #14).
+    let cfg;
+    try { cfg = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, 'svc-status-config 응답'); }
+    catch (e) { throw Object.assign(new Error(`svc-status-config 응답 본문을 읽지 못했습니다 — ${String(e?.message || e).slice(0, 160)}`), { status: r.status, kind: 'bad-body' }); }
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg) || cfg.ok !== true || typeof cfg.enabled !== 'boolean') {
+      throw Object.assign(new Error('svc-status-config 응답 형식이 다릅니다(중앙이 아닌 서버에 닿았을 수 있습니다)'), { status: r.status, kind: 'bad-shape' });
+    }
+    _intervalMs = clampInt(cfg.intervalMs, SVC_INTERVAL_MIN_MS, SVC_INTERVAL_MAX_MS, _intervalMs);
+    const heldEmpty = (Array.isArray(cfg.heldEmpty) ? cfg.heldEmpty : []).map((x) => String(x?.label || x?.kind || '').slice(0, 40)).filter(Boolean).slice(0, 8);
+    const heldNote = heldEmpty.length ? `중앙이 등록부(${heldEmpty.join(' · ')})를 읽지 못해 그 종류는 이번 목록에서 빠졌습니다.` : '';
     if (cfg?.enabled !== true) {
       const note = '중앙에서 포탈 서비스 상태 측정이 꺼져 있습니다.';
       const ack = await pushReport(base, agent, { results: [], note, disabled: true });
@@ -97,7 +105,7 @@ export async function runSvcStatusWorkerOnce() {
     const targets = (Array.isArray(cfg.targets) ? cfg.targets : []).filter((x) => x && typeof x === 'object').slice(0, SVC_TARGETS_MAX);
     if (!targets.length) {
       // ⚠ 0건이어도 보고한다 — 조기 return 으로 되돌리지 말 것(중앙이 '첫 보고 대기' 로 영원히 기다린다).
-      const note = '이 엣지가 잴 대상이 없습니다(담당으로 지정된 vCenter · CVP · 스토리지가 없습니다).';
+      const note = heldNote || '이 엣지가 잴 대상이 없습니다(담당으로 지정된 vCenter · CVP · 스토리지가 없습니다).';
       const ack = await pushReport(base, agent, { results: [], note });
       _last = { at: Date.now(), ms: Date.now() - t0, ok: true, targets: 0, note, ...ackFields(ack) };
       return { ok: true, targets: 0 };
@@ -123,8 +131,8 @@ export async function runSvcStatusWorkerOnce() {
       const { doneAt, ...rest } = v;
       results.push({ ...rest, a: Math.max(0, sentAt - doneAt) });
     }
-    const ack = await pushReport(base, agent, { results });
-    _last = { at: Date.now(), ms: Date.now() - t0, ok: true, targets: targets.length, measured: results.length, failed, skipped, ...ackFields(ack) };
+    const ack = await pushReport(base, agent, { results, note: heldNote });
+    _last = { at: Date.now(), ms: Date.now() - t0, ok: true, targets: targets.length, measured: results.length, failed, skipped, ...(heldNote ? { note: heldNote } : {}), ...ackFields(ack) };
     console.log(`[svc-status-worker] 대상 ${targets.length}개 측정 — 실패 ${failed} · 건너뜀 ${skipped} · ${Date.now() - t0}ms`);
     return { ok: true, measured: results.length, failed };
   } catch (e) {

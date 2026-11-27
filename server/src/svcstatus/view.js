@@ -37,6 +37,7 @@ export function edgeReasonOf(row, ctx = {}) {
   const now = n(ctx.now) ?? Date.now();
   if (rep && now - n(rep.at) <= n(ctx.staleMs)) {
     if (rep.disabled) return 'edge-disabled';
+    if (rep.dbUnavailable) return 'db-unavailable';   // 보고는 왔는데 중앙이 저장하지 못했다 — '보고에 없음' 이 아니다(점검 반증 #15)
     return 'edge-missing';
   }
   const k = classifyCvpEdge({ edgeVersion: ctx.versions?.get?.(key) || '', minVersion: ctx.minEdgeVersion || '0.0.0', sinceMs: rep ? n(rep.at) : ctx.startedAt, intervalMs: ctx.intervalMs, now });
@@ -58,7 +59,8 @@ export function stripOf(buckets = [], now = Date.now()) {
     cells[i] = Math.max(cells[i] ?? 0, n(b.worst) ?? 0);
     total += cnt; okN += n(b.ok_n) ?? 0;
   }
-  return { strip: cells, avail24: total > 0 ? Math.round((okN / total) * 1000) / 10 : null };
+  // 내림 — 실패가 한 번이라도 있으면 100 % 로 보이지 않게(점검 반증 웹 #8 · 정수 곱 먼저라 부동소수 오차가 없다).
+  return { strip: cells, avail24: total > 0 ? Math.floor((okN * 1000) / total) / 10 : null };
 }
 
 /**
@@ -71,19 +73,25 @@ export function stripOf(buckets = [], now = Date.now()) {
 export function buildRows(planRows = [], latestByKey = new Map(), bucketsByTid = new Map(), ctx = {}) {
   const now = n(ctx.now) ?? Date.now();
   const settings = ctx.settings || {};
-  const staleMs = n(ctx.staleMs);
+  const baseStaleMs = n(ctx.staleMs);
+  const measuring = settings.enabled !== false;
+  const dbOk = ctx.dbOk !== false;
   const rows = [];
   for (const p of planRows) {
     const lat = p.host ? latestByKey.get(unitKey(p.id, p.host, p.port)) || null : null;
-    let state; let reason = null;
+    // 엣지 대상의 멈춤 경계는 그 엣지에 **건넨** 주기로(주기를 줄인 직후 엣지는 옛 타이머가 울려야 새 주기를 안다 — 점검 반증 #7).
+    const staleMs = p.plan === 'edge' ? Math.max(baseStaleMs ?? 0, n(ctx.edgeStaleMs?.get?.(t(p.by).toLowerCase())) ?? 0) : baseStaleMs;
+    let state; let reason = null; let rawReason = null;
     if (p.plan === 'problem') { state = 'problem'; reason = 'bad-address'; }
     else if (p.plan === 'off') { state = 'off'; reason = 'disabled'; }
     else if (p.plan === 'excluded') { state = 'excluded'; reason = 'excluded'; }
     else if (p.plan === 'demo-live') { state = 'off'; reason = 'demo-live'; }
+    else if (!measuring) { state = 'off'; reason = 'measure-off'; }       // 측정을 꺼 둔 동안은 '못 잼' 이 아니다(합계 밖 — 점검 반증 #1)
     else if (p.plan === 'unassigned') { state = 'unknown'; reason = 'unassigned'; }
+    else if (!dbOk) { state = 'unknown'; reason = 'db-unavailable'; }  // 측정 DB 를 못 읽는다 — '첫 측정 대기' · '보고에 없음' 이 아니다(점검 반증 #15)
     else {
       const ps = presentState(lat, { now, staleMs });
-      state = ps.state; reason = ps.reason;
+      state = ps.state; reason = ps.reason; rawReason = ps.reason;
       if (p.plan === 'edge' && (reason === 'no-data' || reason === 'stale')) reason = edgeReasonOf(p, { ...(ctx.edge || {}), now, staleMs });
     }
     if (p.held && state === 'unknown' && !reason) reason = 'registry-held';
@@ -93,7 +101,7 @@ export function buildRows(planRows = [], latestByKey = new Map(), bucketsByTid =
     const { strip, avail24 } = lat ? stripOf(bucketsByTid.get(lat.tid) || [], now) : { strip: new Array(STRIP_CELLS).fill(null), avail24: null };
     let since = null;
     if (measuredNow) since = n(lat?.since_ts);
-    else if (state === 'unknown' && reason === 'stale' && lat) since = n(lat.ts) + staleMs;   // '언제부터 못 잼' — 마지막 측정 + 멈춤 경계
+    else if (state === 'unknown' && rawReason === 'stale' && lat) since = n(lat.ts) + staleMs;   // '언제부터 못 잼' — 마지막 측정 + 멈춤 경계(엣지 사유로 바꾼 행도 — 점검 반증 #6)
     const localPort = lat ? n(lat.local_port) : null;
     const note = localPort != null && p.port != null && localPort !== p.port
       ? `엣지의 포트 설정이 중앙과 다릅니다(중앙 ${p.port} · 엣지 ${localPort}) — 엣지는 중앙이 준 ${p.port} 로 잽니다.` : '';
@@ -112,7 +120,7 @@ export function buildRows(planRows = [], latestByKey = new Map(), bucketsByTid =
       problem: p.problem || null,
       excluded: p.excluded || null,
       // 서버 전용(응답에서 뺀다) — 알림 · 상세가 쓴다
-      _tid: lat ? lat.tid : null, _notified: lat ? (lat.notified ?? null) : null, _host: p.host, _port: p.port,
+      _tid: lat ? lat.tid : null, _notified: lat ? (lat.notified ?? null) : null, _host: p.host, _port: p.port, _staleMs: staleMs,
     });
   }
   rows.sort((a, b) => (SEVERITY[b.state] ?? 0) - (SEVERITY[a.state] ?? 0)
@@ -122,7 +130,7 @@ export function buildRows(planRows = [], latestByKey = new Map(), bucketsByTid =
 }
 
 /** 응답용 — 서버 전용 칸을 뺀다. */
-export const publicRow = (r) => { const { _tid, _notified, _host, _port, ...rest } = r; return rest; };
+export const publicRow = (r) => { const { _tid, _notified, _host, _port, _staleMs, ...rest } = r; return rest; };
 
 export function countsOf(rows = []) {
   const c = { total: 0, ok: 0, slow: 0, down: 0, unknown: 0, off: 0, excluded: 0, problem: 0 };

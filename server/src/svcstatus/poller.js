@@ -104,7 +104,7 @@ export async function pollSvcStatusOnce({ trigger = 'timer', onlyId = '', now = 
       heldKinds: plan.heldKinds,
     };
     if (rec.dbUnavailable) console.warn('[svc-status] 측정 DB 를 쓸 수 없어 이번 측정을 저장하지 못했습니다(svc-status.db 확인).');
-    return { ok: true, measured: rows.length, failed, skipped };
+    return { ok: true, measured: rows.length, failed, skipped };   // skipped = 측정하지 못한 대상 수(항목 시한 · 예외)
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, trigger, ok: false, error: String(e?.message || e).slice(0, 300) };
     console.warn(`[svc-status] 주기 실패: ${_last.error}`);

@@ -28,7 +28,8 @@ const PLAN_TTL_MS = 15_000;
 let _previous = new Map();    // 종류 → 직전 카탈로그 원본(못 읽은 종류의 보류용)
 let _plan = null;             // { at, rows, heldKinds, heldEmpty, sourceErrors, registered }
 let _planning = null;
-const _reports = new Map();   // agent 소문자 → { agent, at, version, note, disabled, n, stored, rejected, omitted, notAssigned }
+const _reports = new Map();   // agent 소문자 → { agent, at, version, note, disabled, n, stored, rejected, omitted, notAssigned, dbUnavailable }
+const _issued = new Map();    // agent 소문자 → { intervalMs, at } — 그 엣지에 마지막으로 건넨 주기(멈춤 경계 — 점검 반증 #7)
 
 /** 등록부를 읽어 대상을 계산한다(15초 안 재사용 · 진행 중 계산 공유). `force` 는 폴러 주기. */
 export async function getPlan({ force = false, deps = {} } = {}) {
@@ -83,8 +84,9 @@ async function computePlan(deps = {}) {
   const plan = planTargets(built, { settings, siteOwner, corpOf, mock, previous: _previous, typeLabel });
   const heldEmpty = plan.heldKinds.filter((k) => !(_previous.get(k) || []).length);
   _previous = plan.raw;
+  // 종류별 등록 수 — 측정을 끈 종류도 센다(카탈로그 원본 · 점검 반증 웹 #5). 처음부터 못 읽은 종류는 모른다(null — 0 이 아니다).
   const registered = {};
-  for (const r of plan.rows) registered[r.kind] = (registered[r.kind] || 0) + 1;
+  for (const [k, list] of plan.raw) registered[k] = heldEmpty.includes(k) ? null : list.length;
   _plan = { at: Date.now(), rows: plan.rows, heldKinds: plan.heldKinds, heldEmpty, sourceErrors: plan.sourceErrors, registered, settings, mock };
   return _plan;
 }
@@ -115,24 +117,28 @@ export async function currentRows({ plan, maskAddress = false, now = Date.now() 
   for (const b of buckets || []) { if (!byTid.has(b.tid)) byTid.set(b.tid, []); byTid.get(b.tid).push(b); }
   const agents = [...new Set(p.rows.filter((r) => r.plan === 'edge').map((r) => r.by))];
   const versions = await edgeVersions(agents);
+  const edgeStaleMs = new Map();
+  for (const [k, v] of _issued) edgeStaleMs.set(k, staleLimitMs(Math.max(settings.intervalMs, n(v.intervalMs) ?? 0)));
   const rows = buildRows(p.rows, latestByKey, byTid, {
-    now, settings, staleMs, maskAddress,
+    now, settings, staleMs, maskAddress, dbOk: latest != null, edgeStaleMs,
     edge: { reports: new Map(_reports), versions, minEdgeVersion: svcStatusMinEdgeVersion(), startedAt: STARTED_AT, intervalMs: settings.intervalMs },
   });
-  return { rows, dbOk: latest != null, settings, staleMs, agents, versions };
+  return { rows, dbOk: latest != null, settings, staleMs, agents, versions, edgeStaleMs };
 }
 
 /** 메인 응답 본문(관리자 판본 — 가림은 라우트가 캐시 밖에서). */
 export async function mainPayload({ maskAddress = false, now = Date.now(), pollerStatus = null } = {}) {
   const plan = await getPlan();
-  const { rows, dbOk, settings, staleMs, agents, versions } = await currentRows({ plan, maskAddress, now });
+  const { rows, dbOk, settings, staleMs, agents, versions, edgeStaleMs } = await currentRows({ plan, maskAddress, now });
   const kinds = Object.keys(KIND_LABEL).filter((k) => settings.kinds?.[k] !== false)
     .map((k) => ({ key: k, label: KIND_LABEL[k], n: rows.filter((r) => r.kind === k).length }));
+  const kindsOff = Object.keys(KIND_LABEL).filter((k) => settings.kinds?.[k] === false);
   const edges = agents.map((a) => {
     const rep = _reports.get(a.toLowerCase()) || null;
+    const lim = Math.max(staleMs, edgeStaleMs.get(a.toLowerCase()) ?? 0);
     return {
       agent: a, version: versions.get(a.toLowerCase()) || '', lastReportAt: rep?.at ?? null,
-      stale: rep ? now - rep.at > staleMs : null, targets: rows.filter((r) => r.byEdge && r.by.toLowerCase() === a.toLowerCase()).length,
+      stale: rep ? now - rep.at > lim : null, targets: rows.filter((r) => r.byEdge && r.by.toLowerCase() === a.toLowerCase()).length,
       note: rep?.note || '', rejected: rep?.rejected ?? 0, disabled: !!rep?.disabled,
     };
   });
@@ -141,7 +147,7 @@ export async function mainPayload({ maskAddress = false, now = Date.now(), polle
     enabled: settings.enabled !== false,
     intervalMs: settings.intervalMs, staleMs, rawDays: db.RAW_DAYS, bucketMs: db.BUCKET_MS,
     rules: { failThreshold: settings.failThreshold, slowFactor: settings.slowFactor, slowMinDeltaMs: settings.slowMinDeltaMs, timeoutMs: settings.timeoutMs, baselineDays: 7 },
-    counts: countsOf(rows), kinds, rows: rows.map(publicRow), edges,
+    counts: countsOf(rows), kinds, kindsOff, rows: rows.map(publicRow), edges,
     minEdgeVersion: svcStatusMinEdgeVersion(),
     sourceErrors: plan.sourceErrors, heldKinds: plan.heldKinds,
     settingsLoadError: svcStatusSettingsLoadError(), usingLastGood: svcStatusUsingLastGood(),
@@ -150,7 +156,7 @@ export async function mainPayload({ maskAddress = false, now = Date.now(), polle
 }
 
 /** 상세 본문. 없는 id 면 null. */
-export async function detailPayload(id, { range = '24h', maskAddress = false, now = Date.now() } = {}) {
+export async function detailPayload(id, { range = '24h', maskAddress = false, demoOnly = false, now = Date.now() } = {}) {
   const plan = await getPlan();
   const { rows, settings } = await currentRows({ plan, maskAddress, now });
   const row = rows.find((r) => r.id === t(id));
@@ -176,17 +182,25 @@ export async function detailPayload(id, { range = '24h', maskAddress = false, no
     ...units.map((u) => ({ ts: u.first_ts, from: null, to: 'registered', ms: null, failKind: null, by: '', note: '', address: maskAddress ? '' : addressOf(u.host, u.port) })),
   ].sort((a, b) => b.ts - a.ts).slice(0, 50);
   const hostKey = t(row._host).toLowerCase();
-  const sameHost = hostKey ? rows.filter((r) => r.id !== row.id && t(r._host).toLowerCase() === hostKey)
+  // 데모 계정은 데모 항목만 — 같은 주소의 실제 등록 항목을 섞지 않는다(점검 반증 웹 #13 · 판정은 여기 한 곳).
+  const sameHost = hostKey ? rows.filter((r) => r.id !== row.id && t(r._host).toLowerCase() === hostKey && (!demoOnly || r.demo))
     .map((r) => ({ id: r.id, kind: r.kind, kindLabel: r.kindLabel, name: r.name, port: maskAddress ? null : r._port, state: r.state, reason: r.reason, ms: r.ms, baseMs: r.baseMs })) : [];
-  return { ok: true, row: publicRow(row), range: rangeKey, start, end, stepMs, series, truncated, events, sameHost, addressHidden: !!maskAddress, intervalMs: settings.intervalMs };
+  // generatedAt = 서버의 '지금' — 화면의 오늘/어제 판정 기준(end 는 칸 경계로 올린 축 끝이라 최대 6시간 미래다 — 점검 반증 웹 #2).
+  return { ok: true, generatedAt: now, row: publicRow(row), range: rangeKey, start, end, stepMs, series, truncated, events, sameHost, addressHidden: !!maskAddress, intervalMs: settings.intervalMs };
 }
 
 /** 설정 화면 '대상을 가져오는 등록부' 표. */
 export async function sourcesPayload() {
   const plan = await getPlan();
+  const kinds = plan.settings?.kinds || {};
   return SOURCES.map((s) => {
+    const measured = kinds[s.kind] !== false;
     const rows = plan.rows.filter((r) => r.kind === s.kind);
-    return { ...s, registered: rows.length, targets: rows.filter((r) => r.plan === 'central' || r.plan === 'edge').length, held: plan.heldKinds.includes(s.kind) };
+    return {
+      ...s, measured, registered: plan.registered?.[s.kind] ?? null,
+      targets: measured ? rows.filter((r) => r.plan === 'central' || r.plan === 'edge').length : null,
+      held: plan.heldKinds.includes(s.kind),
+    };
   });
 }
 
@@ -202,10 +216,12 @@ export async function edgeConfigFor(agent) {
   const err = svcStatusSettingsLoadError();
   if (err && !svcStatusUsingLastGood()) return { status: 503, body: { ok: false, reason: 'settingsUnreadable', detail: String(err.reason || '').slice(0, 300) } };
   const plan = await getPlan();
-  if (plan.heldEmpty.length) return { status: 503, body: { ok: false, reason: 'registryUnreadable', detail: `등록부를 읽지 못했습니다(${plan.heldEmpty.map((k) => KIND_LABEL[k]).join(' · ')}).` } };
+  // ⚠ 등록부 하나를 못 읽었다고 503 을 내리지 않는다 — 엣지 워커는 상태 없이 매 틱 목록을 새로 받으므로 503 은 **읽힌 종류의 측정까지** 멈춘다(점검 반증 #13 · #17 — 재현).
+  //   못 읽은 종류는 계획에 행이 없어(직전 목록이 있으면 보류 행) 그 종류만 빠지고, 그 사실을 heldKinds · heldEmpty 로 함께 내린다(엣지 note).
   const settings = plan.settings;
   const latest = await db.latestRows();
   const baseOf = new Map((latest || []).map((r) => [unitKey(r.id, r.host, r.port), n(r.base_ms)]));
+  _issued.set(t(agent).toLowerCase(), { intervalMs: settings.intervalMs, at: Date.now() });
   const targets = plan.rows.filter((r) => r.plan === 'edge' && sameAgent(r.by, agent)).map((r) => ({
     id: r.id, kind: r.kind, host: r.host, port: r.port,
     timeoutMs: timeoutFor(baseOf.get(unitKey(r.id, r.host, r.port)), settings),
@@ -213,7 +229,10 @@ export async function edgeConfigFor(agent) {
   }));
   return {
     status: 200,
-    body: { ok: true, enabled: settings.enabled !== false, intervalMs: settings.intervalMs, concurrency: settings.concurrency, dnsTimeoutMs: 3_000, targets, count: targets.length, centralVersion: currentVersion() },
+    body: {
+      ok: true, enabled: settings.enabled !== false, intervalMs: settings.intervalMs, concurrency: settings.concurrency, dnsTimeoutMs: 3_000, targets, count: targets.length,
+      heldKinds: plan.heldKinds, heldEmpty: plan.heldEmpty.map((k) => ({ kind: k, label: KIND_LABEL[k] })), centralVersion: currentVersion(),
+    },
   };
 }
 
@@ -226,7 +245,7 @@ export async function putEdgeReport(agent, body, { now = Date.now() } = {}) {
   if (!ag) throw new Error('agent 가 비어 있습니다.');
   const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
   const plan = await getPlan();
-  if (plan.heldEmpty.length) return { ok: false, registryUnreadable: true, stored: 0 };
+  // 못 읽은 종류의 행은 계획에 없어 아래 배정 대조가 notAssigned 로 센다 — 보고 전체를 거절하지 않는다(점검 반증 #13).
   const assigned = new Map(plan.rows.filter((r) => r.plan === 'edge' && sameAgent(r.by, ag)).map((r) => [r.id, r]));
   const list = Array.isArray(b.results) ? b.results : [];
   const omitted = Math.max(0, list.length - REPORT_MAX);
@@ -241,12 +260,12 @@ export async function putEdgeReport(agent, body, { now = Date.now() } = {}) {
     const host = typeof r.host === 'string' ? r.host.trim() : '';
     const port = Number(r.port);
     if (host.toLowerCase() !== t(a.host).toLowerCase() || port !== a.port) { rejected += 1; continue; }   // 중앙이 준 접속처가 아니다
+    // 한 보고에 한 대상은 한 행 — 행 나이만 바꾼 같은 id 를 여러 번 실어 한 보고로 '끊김' 을 만들 수 없게(점검 반증 #10).
+    if (seen.has(id)) { rejected += 1; continue; }
+    seen.add(id);
     let age = n(r.a);
     if (age == null || age < 0 || age > 86_400_000) { badTime += 1; age = 0; }
     const ts = Math.round(now - age);
-    const k = `${id}\u0001${ts}`;
-    if (seen.has(k)) { rejected += 1; continue; }
-    seen.add(k);
     const ok = r.ok === true;
     const ms = ok ? n(r.ms) : null;
     const fk = ok ? null : (typeof r.fk === 'string' && Object.hasOwn(FAIL_KINDS, r.fk) ? r.fk : 'unknown');
@@ -258,11 +277,11 @@ export async function putEdgeReport(agent, body, { now = Date.now() } = {}) {
   _reports.set(ag.toLowerCase(), {
     agent: ag, at: now, version: typeof b.version === 'string' ? b.version.trim().slice(0, 40) : '',
     note: typeof b.note === 'string' ? b.note.trim().slice(0, 200) : '', disabled: b.disabled === true,
-    n: list.length, stored: out.stored || 0, rejected, omitted, notAssigned, badTime,
+    n: list.length, stored: out.stored || 0, rejected, omitted, notAssigned, badTime, dbUnavailable: !!out.dbUnavailable,
   });
   if (out.dbUnavailable) return { ok: false, dbUnavailable: true, stored: 0 };
   return { ok: true, stored: out.stored || 0, dup: out.dup || 0, rejected, omitted, notAssigned, badTime };
 }
 export function edgeReports() { return [..._reports.values()].map((r) => ({ ...r })); }
 
-export function _resetSvcStatusServiceForTest() { _previous = new Map(); _plan = null; _planning = null; _reports.clear(); }
+export function _resetSvcStatusServiceForTest() { _previous = new Map(); _plan = null; _planning = null; _reports.clear(); _issued.clear(); }

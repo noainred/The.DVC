@@ -87,6 +87,8 @@ export const REASON_TEXT = Object.freeze({
   'demo-live': { short: '데모 항목', long: () => '데모 항목이라 실제로 재지 않습니다.' },
   excluded: { short: '측정 제외', long: () => '관리자가 측정에서 제외한 대상입니다 — 등록부에서는 지워지지 않습니다.' },
   'bad-address': { short: '주소 해석 실패', long: () => '등록된 주소에서 접속처(주소:포트)를 만들지 못했습니다 — 등록부의 주소를 확인하세요.' },
+  'measure-off': { short: '자동 측정 꺼짐', long: () => '자동 측정을 꺼 두어 재지 않고 있습니다 — 자동 등록 · 설정에서 켜면 다음 주기부터 잽니다(꺼 둔 동안은 알림을 보내지 않습니다).' },
+  'db-unavailable': { short: '측정 DB 못 씀', long: () => '중앙의 측정 DB(svc-status.db)를 읽거나 쓰지 못하고 있습니다 — 측정 결과를 저장 · 표시할 수 없습니다. 서비스 점검과 서버 로그를 확인하세요.' },
 });
 
 /** 사유 표지(짧은 것). 모르는 코드는 코드 그대로(지어내지 않는다) · 없으면 ''. */
@@ -221,12 +223,29 @@ export function subText(row = {}) {
   const s = sub ? (map && Object.hasOwn(map, sub) ? map[sub] : sub) : '';
   return [t(row.typeLabel), s].filter(Boolean).join(' · ');
 }
-/** 측정하는 곳 — 엣지면 엣지 이름(edge:true — 화면이 청록으로), 중앙이면 '중앙', 모르면 '—'. 서버 값을 다시 판정하지 않는다. */
+/**
+ * 측정하는 곳 — 엣지면 엣지 이름(edge:true — 화면이 청록으로), 중앙이면 '중앙', 모르면 '—'. 서버 값을 다시 판정하지 않는다.
+ * 꺼짐 · 제외 · 설정 오류 행은 재지 않는다 — '중앙 측정' · '엣지 측정' 이라고 쓰지 않고 '측정 안 함'(measured:false).
+ */
 export function byText(row = {}) {
+  if (SIDE.includes(t(row.state))) return { text: '측정 안 함', edge: false, measured: false };
   const by = t(row.by);
-  if (by === 'central') return { text: '중앙', edge: false };
-  if (by) return { text: by, edge: row.byEdge === true };
-  return { text: '—', edge: false };
+  if (by === 'central') return { text: '중앙', edge: false, measured: true };
+  if (by) return { text: by, edge: row.byEdge === true, measured: true };
+  return { text: '—', edge: false, measured: null };
+}
+/** 표 · 카드 한 줄 — '중앙 측정' · 'edge-x 측정' · '측정 안 함' · '측정하는 곳 —'. */
+export function byLine(row = {}) {
+  const b = byText(row);
+  if (b.measured === false) return '측정 안 함';
+  if (b.text === '—') return '측정하는 곳 —';
+  return `${b.text} 측정`;
+}
+/** 상세 '등록 출처' — 접속처를 정하는 곳(종류 · 수집 방식별). 스토리지 REST 는 등록부에 포트 칸이 없다. */
+export function portSourceText(row = {}) {
+  if (t(row.kind) === 'storage' && t(row.sub) === 'api') return '포트는 기종별 포탈 설정값(등록부에 포트 칸 없음)';
+  if (t(row.kind) === 'storage' && t(row.sub) === 'ssh') return '등록부의 주소 · SSH 포트';
+  return '등록부의 주소:포트(없으면 https 443 · http 80)';
 }
 /** 접속처 — 가린 응답이거나 비었으면 '—'. */
 export function addrText(row = {}, addressHidden = false) {
@@ -239,10 +258,24 @@ export function corpLabel(row = {}) {
 }
 
 /**
- * 행의 짧은 사유 줄 — 서버 사유 코드 문구 · 실패 종류 · 연속 실패 · 평소 대비. 행 보충(note)은 뒤에 붙인다.
- * 상태를 다시 판정하지 않는다(서버 state 그대로 — 지연이면 배수만 말한다).
+ * 정상 · 지연인데 마지막 측정이 실패한 행(연속 실패가 끊김 기준 미만) — '일시 실패 2회째(끊김 판정 전 — 연속 3회째에 끊김)'.
+ * 성공 표본은 서버가 failStreak 을 0 으로 되돌리므로 ok · slow 에서 failStreak > 0 이면 마지막 측정이 실패였다(서버 값 그대로 — 다시 판정하지 않는다).
+ * 끊김 기준 숫자는 응답 rules.failThreshold 로만(없으면 숫자 없이). 해당 없으면 ''.
  */
-export function whyText(row = {}) {
+export function transientFailText(row = {}, failThreshold = null) {
+  const st = t(row.state);
+  const streak = numOrNull(row.failStreak);
+  if ((st !== 'ok' && st !== 'slow') || streak == null || streak <= 0) return '';
+  const th = numOrNull(failThreshold);
+  const head = `일시 실패 ${streak}회째(끊김 판정 전${th != null && th > 0 ? ` — 연속 ${th}회째에 끊김` : ''})`;
+  return [head, failText(row.failKind)].filter(Boolean).join(' · ');
+}
+
+/**
+ * 행의 짧은 사유 줄 — 서버 사유 코드 문구 · 실패 종류 · 연속 실패 · 일시 실패 · 평소 대비. 행 보충(note)은 뒤에 붙인다.
+ * 상태를 다시 판정하지 않는다(서버 state 그대로 — 지연이면 배수만 말한다). ctx.failThreshold = 응답 rules.failThreshold.
+ */
+export function whyText(row = {}, ctx = {}) {
   const st = t(row.state);
   const streak = numOrNull(row.failStreak);
   const parts = [];
@@ -256,6 +289,8 @@ export function whyText(row = {}) {
     const fk = failText(row.failKind);
     if (fk) parts.push(fk);
   }
+  const tf = transientFailText(row, ctx?.failThreshold);
+  if (tf) parts.push(tf);
   if (st === 'slow') {
     const ratio = ratioText(row.ms, row.baseMs);
     if (ratio) parts.push(`평소의 ${ratio}`);
@@ -263,6 +298,31 @@ export function whyText(row = {}) {
   const note = t(row.note);
   if (note) parts.push(note);
   return parts.join(' · ');
+}
+
+/** 상세 '지금 연결 시간' 카드의 보조 줄 — 끊김 · 일시 실패 · 사유 · 평소 대비 순(서버 값 그대로). */
+export function nowSubText(row = {}, ctx = {}) {
+  const base = numOrNull(row.baseMs);
+  const baseText = base == null ? '평소 —' : `평소 ${msText(base)}`;
+  if (t(row.state) === 'down') {
+    const streak = numOrNull(row.failStreak);
+    return [streak != null && streak > 0 ? `연속 ${streak}회 실패` : '', failText(row.failKind)].filter(Boolean).join(' · ') || '연결 실패';
+  }
+  const tf = transientFailText(row, ctx?.failThreshold);
+  if (tf) return [tf, base == null ? '' : baseText].filter(Boolean).join(' · ');
+  if (t(row.reason)) return reasonShort(row.reason);
+  const ratio = ratioText(row.ms, row.baseMs);
+  return base == null ? baseText : `${baseText}${ratio ? ` 의 ${ratio}` : ''}`;
+}
+
+/** 제외 표지(row.excluded · 설정 excluded[]) → '제외 11-18 12:32 · admin · 사유: 이전 작업 중'. 시각을 모르면 '제외 —'. 없으면 ''. */
+export function excludedText(ex, now = Date.now(), o = {}) {
+  if (!ex || typeof ex !== 'object') return '';
+  const at = numOrNull(ex.at);
+  const bits = [`제외 ${at != null && at > 0 ? clockText(at, now, { ...o, date: true }) : '—'}`];
+  if (t(ex.by)) bits.push(t(ex.by));
+  if (t(ex.reason)) bits.push(`사유: ${t(ex.reason)}`);
+  return bits.join(' · ');
 }
 
 /** 표 아래 각주 — 보이는 행의 사유 코드마다 긴 설명 한 번(행 순서대로 처음 나온 순). */
@@ -342,20 +402,32 @@ export function measureText({ intervalMs, timeoutMs } = {}) {
   return parts.join(' · ');
 }
 
-/** 머리의 마지막 측정 줄 + 툴팁. poller 가 없으면 '측정 기록 없음'. */
+/**
+ * 머리의 마지막 측정 줄 + 툴팁 + 톤. 주기가 실패했으면(last.ok === false · error) '마지막 주기 실패' + tone 'warn'(문구에 '실패' — 색만으로 말하지 않는다) ·
+ * 자동 측정이 꺼져 건너뛴 주기(last.disabled)는 '자동 측정 꺼짐'(그 시각을 '마지막 측정' 이라고 하지 않는다). poller 가 없으면 '측정 기록 없음'.
+ */
 export function lastRunText(poller, intervalMs, now = Date.now(), o = {}) {
   const iv = numOrNull(intervalMs) != null ? ` · 주기 ${intervalText(intervalMs)}` : '';
-  if (poller?.running) return { text: `측정 중…${iv}`, title: '' };
+  if (poller?.running) return { text: `측정 중…${iv}`, title: '', tone: '' };
   const last = poller?.last;
   const at = numOrNull(last?.at);
-  if (at == null || at <= 0) return { text: `아직 측정 기록 없음${iv}`, title: '' };
+  const when = at != null && at > 0 ? ` ${clockText(at, now, { ...o, sec: true })}` : '';
+  const err = t(last?.error);
+  if (last && (last.ok === false || err)) {
+    const bits = [`주기 실패 — ${err.slice(0, 300) || '사유 없음'}`];
+    if (numOrNull(last.ms) != null) bits.push(`걸린 시간 ${msText(last.ms)}`);
+    return { text: `마지막 주기 실패${when}${iv}`, title: bits.join(' · '), tone: 'warn', error: err.slice(0, 300) };
+  }
+  if (last?.disabled === true) return { text: '자동 측정 꺼짐', title: when ? `마지막 확인${when}` : '', tone: '' };
+  if (at == null || at <= 0) return { text: `아직 측정 기록 없음${iv}`, title: '', tone: '' };
   const bits = [];
   for (const [k, label] of [['measured', '측정'], ['failed', '실패'], ['skipped', '건너뜀']]) {
     const v = numOrNull(last[k]);
     if (v != null) bits.push(`${label} ${v}`);
   }
   if (numOrNull(last.ms) != null) bits.push(`걸린 시간 ${msText(last.ms)}`);
-  return { text: `마지막 측정 ${clockText(at, now, { ...o, sec: true })}${iv}`, title: bits.length ? `마지막 측정 주기 — ${bits.join(' · ')}` : '' };
+  const head = last.trigger === 'manual' ? '수동 측정 — ' : '';
+  return { text: `마지막 측정${when}${iv}`, title: bits.length ? `${head}마지막 측정 주기 — ${bits.join(' · ')}` : '', tone: '' };
 }
 
 /** 엣지 보고 각주 — 오래됨 · 받지 않은 항목 · 보충이 있는 엣지만. */
@@ -374,6 +446,56 @@ export function edgeNotes(edges = [], now = Date.now(), o = {}) {
     out.push(bits.join(' · '));
   }
   return out;
+}
+
+/**
+ * 종류 키 → 라벨(서버 응답 라벨이 없을 때만 — 꺼진 종류는 kinds 에 오지 않는다). 서버 targets.js KIND_LABEL 과 같은 글자(시험이 대조).
+ */
+export const KIND_FALLBACK_LABEL = Object.freeze({ collector: '엣지 포탈', vcenter: 'vCenter', cvp: 'CVP', storage: '스토리지' });
+export function kindName(key, kinds = []) {
+  const k = t(key);
+  const hit = (Array.isArray(kinds) ? kinds : []).find((x) => t(x?.key) === k);
+  if (hit && t(hit.label)) return t(hit.label);
+  return Object.hasOwn(KIND_FALLBACK_LABEL, k) ? KIND_FALLBACK_LABEL[k] : (k || '—');
+}
+/** 등록부 오류 배너 한 줄 — 라벨은 서버 label 이 먼저, 측정이 꺼진 종류면 '(측정 꺼짐)'. */
+export function sourceErrorText(e = {}, kinds = []) {
+  const label = t(e?.label) || kindName(e?.kind, kinds);
+  return `${label} 등록부${e?.off === true ? '(측정 꺼짐)' : ''} — ${t(e?.reason) || '읽지 못했습니다'}`;
+}
+/** 꺼진 종류 안내(없으면 ''). */
+export function kindsOffText(kindsOff = [], kinds = []) {
+  const keys = (Array.isArray(kindsOff) ? kindsOff : []).map(t).filter(Boolean);
+  if (!keys.length) return '';
+  return `측정이 꺼진 종류: ${keys.map((k) => kindName(k, kinds)).join(' · ')} — 자동 등록 · 설정에서 켜면 대상이 됩니다.`;
+}
+/** 대상이 0개일 때의 빈 문구 — 종류가 전부 꺼졌으면 그 사실을, 등록부 오류가 있으면 그것을(거짓 '대상 없음' 금지). */
+export function emptyRowsText({ kinds = null, sourceErrors = [] } = {}) {
+  if (Array.isArray(kinds) && kinds.length === 0) return '측정할 종류가 모두 꺼져 있습니다 — 자동 등록 · 설정에서 켜세요.';
+  if (Array.isArray(sourceErrors) && sourceErrors.length) return '등록부를 읽지 못한 종류가 있습니다(위 안내) — 목록이 비어 보여도 등록이 없는 것이 아닐 수 있습니다.';
+  const names = (Array.isArray(kinds) ? kinds : []).map((k) => t(k?.label) || kindName(k?.key)).filter(Boolean);
+  return `등록부에 대상이 없습니다 — ${names.length ? names.join(' · ') : '등록부'}에 장비를 등록하면 다음 측정 주기에 대상이 됩니다.`;
+}
+
+/** 상세의 '지금' 기준 — 서버 generatedAt(응답을 만든 시각). d.end 는 추이 칸 경계로 올린 값(최대 한 칸 미래)이라 '오늘 · 어제' 판정에 쓰면 저녁 시각이 '어제' 가 된다 — 축에만 쓴다. */
+export function detailNowOf(d, fallback = Date.now()) {
+  const g = numOrNull(d?.generatedAt);
+  return g != null && g > 0 ? g : fallback;
+}
+/** 측정에서 제외한 대상인가 — 서버 row.excluded 표지 또는 state. */
+export function isExcludedRow(row = {}) {
+  return (row?.excluded != null && row.excluded !== false) || t(row?.state) === 'excluded';
+}
+/**
+ * 상세의 제외 줄 — '제외 11-18 12:32 · admin · 사유: …'. 제외인데 지금 상태가 꺼짐 · 설정 오류면 두 사실을 함께 밝힌다
+ * (다시 측정으로 바꿔도 그 상태가 풀릴 때까지 재지 않는다). 제외가 아니면 ''.
+ */
+export function excludedNote(row = {}, now = Date.now(), o = {}) {
+  if (!isExcludedRow(row)) return '';
+  const base = excludedText(row.excluded && typeof row.excluded === 'object' ? row.excluded : null, now, o) || '측정에서 제외한 대상입니다';
+  const st = t(row.state);
+  if (st === 'off' || st === 'problem') return `${base} — 지금 ‘${STATES[st].label}’ 상태이기도 해 측정하지 않습니다(다시 측정으로 바꿔도 ‘${STATES[st].label}’ 이 풀릴 때까지 재지 않습니다).`;
+  return base;
 }
 
 // ── 거르기 · 격자 ────────────────────────────────────────────────────────────
@@ -639,13 +761,19 @@ export function tallyText(tally) {
   return `${comma(tally.n)}회 중 실패 ${comma(tally.fail)}회`;
 }
 
-/** '지금 측정' 응답 → 안내 한 줄. 서버 note 가 먼저 · 그 밖은 measured/queued 값으로. */
+/**
+ * '지금 측정' 응답 → 안내 한 줄. 서버 note 가 먼저 · 그 밖은 measured · failed · skipped 값으로.
+ * 0개를 잰 경우에 '표가 곧 바뀐다' 고 말하지 않는다(원인은 단정하지 않는다).
+ */
 export function runResultText(r = {}) {
   const note = t(r?.note);
   if (note) return note;
   const m = numOrNull(r?.measured);
   const f = numOrNull(r?.failed);
-  if (m != null) return `${m}개를 쟀습니다${f != null && f > 0 ? `(그중 연결 실패 ${f}개)` : ''} — 표는 곧 새 값으로 바뀝니다.`;
+  const sk = numOrNull(r?.skipped);
+  const skip = sk != null && sk > 0 ? `(측정하지 못한 대상 ${sk}개)` : '';
+  if (m === 0) return `중앙이 이번에 잰 대상은 없습니다${skip} — 엣지가 재는 대상은 다음 엣지 보고 때 반영됩니다.`;
+  if (m != null) return `${m}개를 쟀습니다${f != null && f > 0 ? `(그중 연결 실패 ${f}개)` : ''}${skip ? ` · 측정하지 못한 대상 ${sk}개` : ''} — 표는 곧 새 값으로 바뀝니다.`;
   const q = numOrNull(r?.queued);
   if (q != null) return `${q}개 측정을 시작했습니다 — 결과는 곧 표에 보입니다.`;
   if (r?.queued === true) return '측정을 시작했습니다 — 결과는 곧 표에 보입니다.';
@@ -751,6 +879,9 @@ export function bodyFromForm(form = {}, settings = {}, limits = {}) {
   const to = parseRecipients(form.to);
   const badMail = to.filter((x) => !MAIL_RE.test(x));
   if (badMail.length) issues.push({ key: 'to', label: '받는 사람', reason: `메일 주소 형식이 아닙니다(${badMail.slice(0, 3).join(', ')})` });
+  // 상한은 서버 limits.alertsTo.max(숫자를 박지 않는다) — 넘는 몫을 서버가 자르기 전에 저장을 막는다.
+  const toMax = numOrNull(limits?.alertsTo?.max);
+  if (toMax != null && toMax >= 0 && to.length > toMax) issues.push({ key: 'to', label: '받는 사람', reason: `${toMax}명까지 넣을 수 있습니다(지금 ${to.length}명)` });
   body.alerts = { down: !!form.alertDown, slow: !!form.alertSlow, unknownMin, to };
   return { body, issues, kept };
 }

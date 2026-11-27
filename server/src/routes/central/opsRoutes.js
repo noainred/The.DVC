@@ -557,7 +557,8 @@ export function registerOpsRoutes(centralRouter, deps) {
   /*
    * v3.54 포탈 서비스 상태 모니터링 — `GET /svc-status-config` 는 **그 엣지가 잴 대상**(자기 몫 · 토큰 없음)을 중앙이 계산해 내려주고,
    * `POST /svc-status` 는 그 측정을 받는다(인증된 agent · 배정 대조 · 행 나이로 시각 환산 — svcstatus/service.js).
-   * ⚠ 개별 토큰만(공유 토큰으로는 어느 엣지의 측정인지 신뢰할 수 없다) · 설정/등록부를 처음부터 못 읽었으면 503(빈 목록이 엣지 측정을 멈추게 하지 않는다).
+   * ⚠ 개별 토큰만(공유 토큰으로는 어느 엣지의 측정인지 신뢰할 수 없다) · 설정을 처음부터 못 읽었을 때만 503(제외 · 꺼짐을 모른다).
+   *   등록부 하나를 못 읽은 것은 503 이 아니다 — 엣지는 상태 없이 매 틱 목록을 받으므로 503 은 읽힌 종류까지 멈춘다(그 종류만 빠지고 heldEmpty 로 알린다).
    */
   centralRouter.get('/svc-status-config', requireCentral(), async (req, res) => {
     if (req.centralAuth.mode !== 'agent') {

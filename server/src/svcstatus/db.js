@@ -77,7 +77,7 @@ async function openDb() {
         tid INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL, ok INTEGER NOT NULL, ms INTEGER, fk TEXT,
         state TEXT NOT NULL, since_ts INTEGER NOT NULL, fail_streak INTEGER NOT NULL DEFAULT 0,
-        by_node TEXT, last_ok_ts INTEGER, local_port INTEGER,
+        by_node TEXT, by_since INTEGER, last_ok_ts INTEGER, local_port INTEGER,
         base_ms REAL, base_n INTEGER, base_at INTEGER,
         notified TEXT, notified_at INTEGER
       );
@@ -135,12 +135,22 @@ export async function recordResults(rows, { settings = {} } = {}) {
     bucket: db.prepare(`INSERT INTO sv_bucket (tid, b, n, ok_n, ms_sum, ms_n, ms_max, worst) VALUES (?,?,1,?,?,?,?,?)
       ON CONFLICT(tid, b) DO UPDATE SET n = n + 1, ok_n = ok_n + excluded.ok_n, ms_sum = ms_sum + excluded.ms_sum, ms_n = ms_n + excluded.ms_n,
         ms_max = NULLIF(MAX(IFNULL(ms_max, -1), IFNULL(excluded.ms_max, -1)), -1), worst = MAX(worst, excluded.worst)`),
-    upLatest: db.prepare(`INSERT INTO sv_latest (tid, ts, ok, ms, fk, state, since_ts, fail_streak, by_node, last_ok_ts, local_port)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    // 측정하는 곳(by_node)이 바뀌면 평소를 비우고 그 시각(by_since)부터 다시 모은다 — 엣지 LAN 2ms 와 중앙 800ms 가 한 중앙값에 섞이면
+    //   며칠 동안 거짓 '지연' 이거나 지연을 못 잡는다(점검 반증 #2 — 재현). 단위(tid)는 그대로라 띠 · 성공률 · 알림 커서가 이어진다.
+    upLatest: db.prepare(`INSERT INTO sv_latest (tid, ts, ok, ms, fk, state, since_ts, fail_streak, by_node, by_since, last_ok_ts, local_port)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(tid) DO UPDATE SET ts = excluded.ts, ok = excluded.ok, ms = excluded.ms, fk = excluded.fk, state = excluded.state,
-        since_ts = excluded.since_ts, fail_streak = excluded.fail_streak, by_node = excluded.by_node,
+        since_ts = excluded.since_ts, fail_streak = excluded.fail_streak, by_node = excluded.by_node, by_since = excluded.by_since,
+        base_ms = CASE WHEN excluded.by_since > IFNULL(sv_latest.by_since, 0) THEN NULL ELSE sv_latest.base_ms END,
+        base_n = CASE WHEN excluded.by_since > IFNULL(sv_latest.by_since, 0) THEN NULL ELSE sv_latest.base_n END,
+        base_at = CASE WHEN excluded.by_since > IFNULL(sv_latest.by_since, 0) THEN NULL ELSE sv_latest.base_at END,
         last_ok_ts = COALESCE(excluded.last_ok_ts, sv_latest.last_ok_ts), local_port = excluded.local_port
       WHERE excluded.ts >= sv_latest.ts`),
+    // 주소 · 포트가 바뀌어 새 단위가 생기면 같은 대상의 직전 알림 커서를 이어받는다 — 비어 있으면 '처음 본 상태는 기준점만' 규칙 때문에
+    //   새 주소에서 처음부터 끊긴 대상의 '끊김' 메일이 영영 나가지 않았다(점검 반증 #3 — 재현). 직전 단위가 없으면(신규 등록) 그대로 비어 기준점 규칙이 산다.
+    inherit: db.prepare(`UPDATE sv_latest SET notified = (SELECT l2.notified FROM sv_latest l2 JOIN sv_target t2 ON t2.tid = l2.tid
+        WHERE t2.id = ? AND l2.tid <> ? AND l2.notified IS NOT NULL ORDER BY l2.notified_at DESC LIMIT 1), notified_at = ?
+      WHERE tid = ? AND notified IS NULL`),
     event: db.prepare('INSERT INTO sv_event (tid, ts, from_state, to_state, ms, fk, by_node) VALUES (?,?,?,?,?,?,?)'),
   };
   let stored = 0; let dup = 0; let events = 0;
@@ -156,7 +166,9 @@ export async function recordResults(rows, { settings = {} } = {}) {
       q.touch.run(ts, tid);
       const prev = q.latest.get(tid) || null;
       const prevState = prev ? String(prev.state) : null;
-      const baseMs = prev ? n(prev.base_ms) : null;
+      const byNow = String(r.by || '').slice(0, 128);
+      const nodeMoved = !!prev && String(prev.by_node || '').toLowerCase() !== byNow.toLowerCase();
+      const baseMs = prev && !nodeMoved ? n(prev.base_ms) : null;   // 측정하는 곳이 바뀐 첫 측정부터 옛 평소로 판정하지 않는다
       let st; let next = null;
       if (prev && ts <= n(prev.ts)) {
         // 늦게 온(또는 같은 시각) 행 — 표본 · 칸만. 판정 · 최신값은 이미 더 새 측정이 정했다.
@@ -173,8 +185,10 @@ export async function recordResults(rows, { settings = {} } = {}) {
       if (!next) continue;
       const changed = next.state !== prevState;
       const since = changed ? ts : (n(prev?.since_ts) ?? ts);
-      q.upLatest.run(tid, ts, ok ? 1 : 0, msInt, fk, next.state, since, next.failStreak, String(r.by || '').slice(0, 128),
+      const bySince = !prev || nodeMoved ? ts : (n(prev.by_since) ?? n(prev.ts) ?? ts);
+      q.upLatest.run(tid, ts, ok ? 1 : 0, msInt, fk, next.state, since, next.failStreak, byNow, bySince,
         ok ? ts : null, Number.isInteger(r.localPort) ? r.localPort : null);
+      if (!prev) q.inherit.run(r.id, tid, ts, tid);
       // 이벤트는 '판정이 바뀐 때' 만 — 판정 중(pending)은 이벤트가 아니다. 판정 중에서 처음 판정된 것은 첫 판정(from null).
       if (changed && next.state !== 'pending') {
         const from = prevState === 'ok' || prevState === 'slow' || prevState === 'down' ? prevState : null;
@@ -196,7 +210,7 @@ export async function recordResults(rows, { settings = {} } = {}) {
 export async function latestRows() {
   const db = await getDb();
   if (!db) return null;
-  return db.prepare(`SELECT t.tid, t.id, t.host, t.port, t.kind, t.first_ts, l.ts, l.ok, l.ms, l.fk, l.state, l.since_ts, l.fail_streak, l.by_node,
+  return db.prepare(`SELECT t.tid, t.id, t.host, t.port, t.kind, t.first_ts, l.ts, l.ok, l.ms, l.fk, l.state, l.since_ts, l.fail_streak, l.by_node, l.by_since,
       l.last_ok_ts, l.local_port, l.base_ms, l.base_n, l.base_at, l.notified, l.notified_at
     FROM sv_target t JOIN sv_latest l ON l.tid = t.tid`).all();
 }
@@ -258,14 +272,25 @@ export async function setNotified(pairs, at = Date.now()) {
 export async function refreshBaselines({ now = Date.now(), yieldFn = () => new Promise((r) => setImmediate(r)), force = false } = {}) {
   const db = await getDb();
   if (!db) return { ok: false, updated: 0 };
-  const due = db.prepare('SELECT tid, base_at FROM sv_latest WHERE ts >= ?').all(now - RAW_DAYS * 86_400_000)
-    .filter((r) => force || n(r.base_at) == null || now - n(r.base_at) >= BASELINE_REFRESH_MS);
+  // 평소를 아직 모르는 단위(표본 부족)는 표본이 늘었으면 다음 틱(10분)에 다시 본다 — 예전에는 1시간 도장을 찍어 새 단위 · 주소 변경 · 측정 지점 변경 뒤
+  //   지연 판정이 30~40분 더 늦게 켜졌다(점검 반증 #8 · #12). 표본 수는 30분 칸의 성공 수 합(집계 하나 · 칸 336행 이하)으로 먼저 본다 — 계속 끊긴 대상이
+  //   매 틱 원시 7일을 읽지 않게.
+  const rows = db.prepare('SELECT tid, base_at, base_ms, base_n, by_since FROM sv_latest WHERE ts >= ?').all(now - RAW_DAYS * 86_400_000);
+  const okCount = db.prepare('SELECT SUM(ms_n) AS v FROM sv_bucket WHERE tid = ? AND b >= ?');
   const read = db.prepare('SELECT ms FROM sv_sample WHERE tid = ? AND ts >= ? AND ok = 1 AND ms IS NOT NULL');
   const up = db.prepare('UPDATE sv_latest SET base_ms = ?, base_n = ?, base_at = ? WHERE tid = ?');
-  const since = now - BASELINE_DAYS * 86_400_000;
+  const winStart = now - BASELINE_DAYS * 86_400_000;
   let updated = 0;
-  for (const r of due) {
-    const vals = read.all(r.tid, since).map((x) => x.ms);
+  for (const r of rows) {
+    const from = Math.max(winStart, n(r.by_since) ?? 0);   // 측정하는 곳이 바뀐 뒤 표본만(옛 지점 표본을 섞지 않는다)
+    const unknown = n(r.base_ms) == null;
+    const old = n(r.base_at) == null || now - n(r.base_at) >= BASELINE_REFRESH_MS;
+    if (!force && !old && !unknown) continue;
+    if (!force && unknown && !old) {
+      const have = n(okCount.get(r.tid, Math.floor(from / BUCKET_MS) * BUCKET_MS)?.v) ?? 0;
+      if (have < BASELINE_MIN_SAMPLES || have <= (n(r.base_n) ?? -1)) continue;   // 아직 모자라거나 늘지 않았다
+    }
+    const vals = read.all(r.tid, from).map((x) => x.ms);
     const enough = vals.length >= BASELINE_MIN_SAMPLES;
     const m = enough ? median(vals) : null;
     up.run(m == null ? null : Math.round(m * 10) / 10, vals.length, now, r.tid);

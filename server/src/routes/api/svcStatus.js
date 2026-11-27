@@ -14,7 +14,7 @@ import { isAdminDetailUser, isDemoGuest } from '../../auth/demoGuest.js';
 import { unreadMark } from '../settingsUnreadMark.js';
 import { strOf } from '../../util/coercionTrap.js';
 import {
-  loadSvcStatusSettings, saveSvcStatusSettings, setExcluded, svcStatusWriteRefusal, svcStatusSettingsLoadError, svcStatusUsingLastGood, LIMITS,
+  loadSvcStatusSettings, saveSvcStatusSettings, setExcluded, svcStatusWriteRefusal, svcStatusSettingsLoadError, svcStatusUsingLastGood, LIMITS, ALERT_TO_MAX,
 } from '../../svcstatus/settings.js';
 import { mainPayload, detailPayload, sourcesPayload, getPlan, invalidatePlan } from '../../svcstatus/service.js';
 import { svcStatusPollerStatus, runSvcStatusNow } from '../../svcstatus/poller.js';
@@ -36,9 +36,22 @@ export function maskForDemoGuest(body) {
   const edges = body.edges.filter((e) => /^mock-/i.test(e.agent));
   return { ...body, rows, kinds, edges, counts: countsOf(rows), demoMasked: body.rows.length - rows.length, sourceErrors: [] };
 }
-/** 주소 가림 판본(관리자 판본이 아닌 계정). */
+/**
+ * 주소 가림 판본(관리자 판본이 아닌 계정 — 데모 계정 포함). 폴러 상태는 **아는 칸만** 남긴다(화이트리스트):
+ * 메일 결과 사유 · 주기 오류 원문에는 SMTP 서버 주소:포트 · 오류 원문이 실린다(점검 반증 #9 — 재현).
+ */
+const pick = (o, ks) => (o && typeof o === 'object' ? Object.fromEntries(ks.filter((k) => k in o).map((k) => [k, o[k]])) : null);
+export function maskPollerForNonAdmin(p) {
+  if (!p || typeof p !== 'object') return p ?? null;
+  return {
+    enabled: p.enabled, intervalMs: p.intervalMs, running: p.running, stuckReleases: p.stuckReleases, ...(p.demo ? { demo: true } : {}),
+    last: pick(p.last, ['at', 'ms', 'trigger', 'measured', 'failed', 'skipped', 'edgeTargets', 'stored', 'dbOk', 'disabled', 'ok', 'demoEdges', 'heldKinds']),
+    baseline: pick(p.baseline, ['at', 'ms', 'updated', 'ok']),
+    mail: pick(p.mail, ['at', 'events', 'mails', 'sent', 'failed', 'skipped', 'ok']),
+  };
+}
 export function maskAddresses(body) {
-  return { ...body, addressHidden: true, rows: body.rows.map((r) => ({ ...r, host: '', port: null, address: '' })) };
+  return { ...body, addressHidden: true, rows: body.rows.map((r) => ({ ...r, host: '', port: null, address: '' })), poller: maskPollerForNonAdmin(body.poller) };
 }
 
 export function registerSvcStatus(api) {
@@ -61,7 +74,7 @@ api.get('/tools/svc-status/target', adminOnly, fullScopeOnly, async (req, res) =
   const id = strOf(req.query.id, 300);
   if (!id) return res.status(400).json({ ok: false, reason: 'id 가 필요합니다.', field: 'id' });
   const range = strOf(req.query.range, 8) || '24h';
-  const out = await detailPayload(id, { range, maskAddress: !isAdminDetailUser(req.user) });
+  const out = await detailPayload(id, { range, maskAddress: !isAdminDetailUser(req.user), demoOnly: isDemoGuest(req.user) });
   if (!out || (isDemoGuest(req.user) && !out.row.demo)) return res.status(404).json({ ok: false, reason: '그런 감시 대상이 없습니다.' });
   res.set('Cache-Control', 'no-store');
   res.json(out);
@@ -84,7 +97,7 @@ async function settingsBody() {
   return {
     ok: true,
     settings: { ...s, excluded },
-    limits: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max }])),
+    limits: { ...Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max }])), alertsTo: { max: ALERT_TO_MAX } },
     sources: await sourcesPayload(),
     mail: { kind: MAIL_KIND, kindLabel: '포탈 서비스 상태', configured: mailConfigured },
     rawDays: db.RAW_DAYS,
@@ -146,7 +159,7 @@ api.post('/tools/svc-status/run', adminOnly, fullScopeOnly, async (req, res) => 
   if (out?.skipped === 'edge-node') return res.status(409).json({ ok: false, reason: '엣지 포탈에서는 중앙 측정을 돌리지 않습니다.' });
   logAudit({ user: req.user?.username, action: 'svc-status.run', target: id || '(전체)', ip: req.ip });
   _memo = null;
-  res.json({ ok: out?.ok !== false, measured: out?.measured ?? 0, failed: out?.failed ?? 0, note: out?.reason || '' });
+  res.json({ ok: out?.ok !== false, measured: out?.measured ?? 0, failed: out?.failed ?? 0, skipped: out?.skipped ?? 0, note: out?.reason || '' });
 });
 
 }

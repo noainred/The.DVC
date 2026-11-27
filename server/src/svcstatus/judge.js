@@ -25,6 +25,7 @@ export const REASON_CODES = Object.freeze([
   'edge-waiting', 'edge-silent', 'edge-old-version', 'edge-unknown-version', 'edge-disabled', 'edge-missing',
   'unassigned', 'registry-held',
   'disabled', 'demo-live', 'excluded', 'bad-address',
+  'measure-off', 'db-unavailable',
 ]);
 
 /**
@@ -109,6 +110,21 @@ export function presentState(latest, { now = Date.now(), staleMs } = {}) {
   const s = String(latest.state || '');
   if (s === 'ok' || s === 'slow' || s === 'down') return { state: s, reason: null };
   return { state: 'unknown', reason: 'judging' };
+}
+
+/**
+ * 알림용 '못 잼' 경과(ms) — 측정값을 받을 수 있었던 때부터만 센다(점검 반증 #1 · #4 — 재현):
+ *   시작 = 화면의 '언제부터 못 잼'(since) 또는 마지막 측정 + 멈춤 경계, 그리고 **중앙 기동 · 측정을 다시 켠 시각 + 멈춤 경계** 이후.
+ *   중앙이 꺼져 있던 시간 · 측정을 꺼 둔 시간을 '못 잼' 으로 세면 재기동 · 다시 켜기 직후 전 대상 '못 잼' → 곧바로 '복구' 메일이 쏟아졌다.
+ */
+export function unknownForMsOf(row, { now = Date.now(), staleMs = 0, armedAt = 0 } = {}) {
+  if (!row || row.state !== 'unknown') return 0;
+  const since = n(row.since);
+  const last = n(row.lastTs);
+  const start = since != null ? since : (last != null ? last + (n(staleMs) ?? 0) : null);
+  if (start == null) return 0;
+  const from = Math.max(start, (n(armedAt) ?? 0) + (n(staleMs) ?? 0));
+  return Math.max(0, now - from);
 }
 
 /** 성공 표본 배열의 중앙값(null · 비수치는 뺀다). 비면 null. */

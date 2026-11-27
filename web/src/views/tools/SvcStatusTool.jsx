@@ -29,8 +29,9 @@ import { agoText } from './relTime.js';
 import { addressHiddenNote } from './addressHiddenText.js';
 import BoldText from '../../components/boldText.jsx';
 import {
-  BASE, routeOf, hashOf, shouldStopPolling, stateInfo, stateSort, reasonShort, reasonLong, reasonNotes, failText,
-  msText, pctText, ratioText, spanText, clockText, sinceText, subText, byText, addrText, corpLabel, whyText,
+  BASE, routeOf, hashOf, shouldStopPolling, stateInfo, stateSort, reasonShort, reasonLong, reasonNotes,
+  msText, pctText, spanText, clockText, sinceText, subText, byText, byLine, portSourceText, addrText, corpLabel, whyText, nowSubText,
+  excludedNote, isExcludedRow, detailNowOf, sourceErrorText, kindsOffText, emptyRowsText,
   countsOf, tilesOf, sideText, legendOf, measureText, lastRunText, edgeNotes, filterRows, kindTabs, matrixOf,
   stripCells, stripHourly, stripSummary, stripHead, eventView, seriesTally, tallyText, sameHostRows, chartModel, hoverAt,
   RANGES, runResultText, SETTING_FIELDS, rangeText, formFromSettings, bodyFromForm, changedLabels, NO_CHANGE_TEXT,
@@ -79,16 +80,23 @@ function useMainData(onData) {
       stopRef.current = shouldStopPolling(e);
     }
   }, []);
+  // api.js usePolling 규약: 첫 조회는 숨은 탭이어도 한 번 한다(안 하면 탭을 봐도 다음 주기까지 '불러오는 중') ·
+  //   숨은 동안의 주기 조회는 건너뛴다 · 탭이 다시 보이면 곧바로 한 번 갱신한다.
   useEffect(() => {
     let alive = true; let timer = null;
-    const loop = async (gen) => {
+    const loop = async (gen, force = false) => {
       if (!alive || gen !== genRef.current) return;
-      if (typeof document === 'undefined' || !document.hidden) await load(gen);
+      if (force || typeof document === 'undefined' || !document.hidden) await load(gen);
       if (alive && gen === genRef.current && !stopRef.current) timer = setTimeout(() => loop(gen), runningRef.current ? 5_000 : 30_000);
     };
-    tickRef.current = () => { if (timer) clearTimeout(timer); loop(++genRef.current); };
-    loop(++genRef.current);
-    return () => { alive = false; genRef.current += 1; if (timer) clearTimeout(timer); };
+    tickRef.current = () => { if (timer) clearTimeout(timer); loop(++genRef.current, true); };
+    loop(++genRef.current, true);
+    const onVis = () => { if (alive && !stopRef.current && typeof document !== 'undefined' && !document.hidden) tickRef.current?.(); };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    return () => {
+      alive = false; genRef.current += 1; if (timer) clearTimeout(timer);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
+    };
   }, [load]);
   const refresh = useCallback(() => tickRef.current?.(), []);
   return { data, error, failedAt, refresh };
@@ -164,7 +172,8 @@ function Main({ cache }) {
   const corpName = corp == null ? '' : (matrix.corps.find((c) => c.key === corp)?.label || corp || '—');
   const sourceErrors = Array.isArray(data.sourceErrors) ? data.sourceErrors : [];
   const mainLe = unreadMarkOf(data);
-  const kindsSentence = tabs.length ? tabs.map((x) => x.label).join(' · ') : '엣지 포탈 · vCenter · CVP · 스토리지';
+  const kindsSentence = tabs.length ? tabs.map((x) => x.label).join(' · ') : '엣지 포탈 · vCenter · CVP · 스토리지 중 측정을 켠 종류';
+  const offText = kindsOffText(data.kindsOff, data.kinds);
 
   const runNow = async () => {
     setRunBusy(true); setMsg(null);
@@ -183,7 +192,7 @@ function Main({ cache }) {
   const tr = (r) => {
     const by = byText(r);
     const sub = subText(r);
-    const why = whyText(r);
+    const why = whyText(r, ctx);
     const addr = addrText(r, hidden);
     const cells = [
       <td key="st" data-sort={stateSort(r.state)} className="ss-nowrap"><Badge state={r.state} /></td>,
@@ -197,7 +206,7 @@ function Main({ cache }) {
       <td key="a" className="ss-addrcell" data-sort={addr}>
         <span className="ss-mono">{addr}</span>
         {r.nonDefaultPort && !hidden ? <span className="badge blue ss-tag" title={numOrNull(r.defaultPort) != null ? `이 종류의 기본 포트는 ${r.defaultPort} 입니다` : ''}>기본 포트 아님</span> : null}
-        <div className={`ss-sub${by.edge ? ' ss-edge' : ''}`}>{by.text === '—' ? '측정하는 곳 —' : `${by.text} 측정`}</div>
+        <div className={`ss-sub${by.edge ? ' ss-edge' : ''}`}>{byLine(r)}</div>
       </td>,
       <td key="ms" className={`ss-r ss-mono ss-nowrap${msTone(r.state)}`} data-sort={numOrNull(r.ms) ?? ''}>{msText(r.ms)}</td>,
       <td key="b" className="ss-r ss-mono ss-nowrap ss-dim" data-sort={numOrNull(r.baseMs) ?? ''}>{msText(r.baseMs)}</td>,
@@ -223,7 +232,7 @@ function Main({ cache }) {
           <div className="ss-lead">포탈에 등록된 {kindsSentence} 를 자동으로 대상에 올리고, 등록된 주소:포트로 TCP 연결을 재서 상태를 봅니다. 장비 자체의 건강 상태가 아니라 ‘포탈이 그 포트에 닿는가’ 입니다.</div>
         </div>
         <div className="ss-actions">
-          <span className="ss-last" title={lr.title || undefined}>{lr.text}</span>
+          <span className={`ss-last${lr.tone === 'warn' ? ' ss-t-amber' : ''}`} title={lr.title || undefined}>{lr.text}</span>
           <button type="button" className="ss-btn" onClick={runNow} disabled={runBusy || running} title={running ? '측정이 진행 중입니다' : '중앙이 재는 대상을 지금 1회 잽니다(엣지가 재는 대상은 다음 엣지 보고를 기다립니다)'}>{runBusy || running ? '측정 중…' : '지금 측정'}</button>
           <a className="ss-btn" href={hashOf('settings')}>자동 등록 · 설정</a>
         </div>
@@ -231,10 +240,12 @@ function Main({ cache }) {
 
       {error ? <Banner tone="warn">조회가 {agoText(failedAt, Date.now())}부터 실패하고 있어 아래는 직전 값입니다 — {String(error?.message || error)}</Banner> : null}
       {msg ? <Banner tone={msg.tone}>{msg.text}</Banner> : null}
+      {lr.tone === 'warn' ? <Banner tone="warn">자동 측정 주기가 실패했습니다 — {lr.error || '사유 없음'}</Banner> : null}
       {data.enabled === false ? <Banner tone="warn">자동 측정이 꺼져 있습니다 — 자동 등록 · 설정에서 켜면 주기마다 잽니다.</Banner> : null}
-      {sourceErrors.map((e, i) => <Banner key={`se${i}`} tone="warn">{kindLabel(e?.kind)} 등록부 — {String(e?.reason || '읽지 못했습니다')}</Banner>)}
+      {offText ? <Banner>{offText}</Banner> : null}
+      {sourceErrors.map((e, i) => <Banner key={`se${i}`} tone="warn">{sourceErrorText(e, data.kinds)}</Banner>)}
       {mainLe ? <Banner tone="warn">포탈 서비스 상태 설정 — {String(mainLe.reason || '설정 파일을 읽지 못했습니다')}{data.usingLastGood === true ? ' — 마지막으로 읽은 설정(제외 목록 · 알림 포함)으로 돕니다.' : ''}</Banner> : null}
-      {data.dbOk === false || data.poller?.dbOk === false ? <Banner tone="warn">측정 기록 DB 상태가 정상이 아닙니다(서버 표지) — 측정 기록 · 추이가 남지 않을 수 있습니다.</Banner> : null}
+      {data.dbOk === false || data.poller?.last?.dbOk === false ? <Banner tone="warn">측정 기록 DB 상태가 정상이 아닙니다(서버 표지) — 측정 기록 · 추이가 남지 않을 수 있습니다.</Banner> : null}
       {hidden ? <Banner><BoldText text={addressHiddenNote(data)} /></Banner> : null}
       {numOrNull(data.demoMasked) > 0 ? <Banner>데모 계정 보기 — 실제로 등록된 대상 {data.demoMasked}개는 이 보기에 넣지 않았습니다.</Banner> : null}
 
@@ -307,21 +318,19 @@ function Main({ cache }) {
         ) : null}
 
         {!rows.length ? (
-          <div className="ss-empty">{sourceErrors.length
-            ? '등록부를 읽지 못한 종류가 있습니다(위 안내) — 목록이 비어 보여도 등록이 없는 것이 아닐 수 있습니다.'
-            : '등록부에 대상이 없습니다 — 수집 서버 · vCenter · CVP · 스토리지를 등록하면 다음 측정 주기에 대상이 됩니다.'}</div>
+          <div className="ss-empty">{emptyRowsText({ kinds: data.kinds, sourceErrors })}</div>
         ) : !shown.length ? (
           <div className="ss-empty">조건에 맞는 대상이 없습니다.</div>
         ) : narrow ? (
           <div className="ss-cards">
             {shown.map((r) => {
               const by = byText(r);
-              const why = whyText(r);
+              const why = whyText(r, ctx);
               return (
                 <a key={r.id} className={`ss-rcard s-${r.state}`} href={hashOf('target', r.id)}>
                   <div className="ss-rc1"><Badge state={r.state} /><span className="ss-dim ss-ellip">{r.kindLabel || kindLabel(r.kind)} · <span className="ss-mono">{corpLabel(r)}</span></span></div>
                   <div className="ss-rc2"><span className="ss-rcname">{r.name || '—'}</span><span className={`ss-mono ss-nowrap${msTone(r.state)}`}>{msText(r.ms)}</span></div>
-                  <div className="ss-rc3"><span className="ss-mono">{addrText(r, hidden)}</span> <span className={by.edge ? 'ss-edge' : 'ss-dim'}>· {by.text === '—' ? '측정하는 곳 —' : `${by.text} 측정`}</span></div>
+                  <div className="ss-rc3"><span className="ss-mono">{addrText(r, hidden)}</span> <span className={by.edge ? 'ss-edge' : 'ss-dim'}>· {byLine(r)}</span></div>
                   <Strip strip={r.strip} bucketMs={data.bucketMs} name={r.name} hourly full />
                   <div className="ss-sub">{[sinceText(r.since, now, tz), why].filter((x) => x && x !== '—').join(' · ') || '—'}</div>
                 </a>
@@ -465,13 +474,14 @@ function Detail({ id, cache }) {
   if (!d) return <Loading label="대상 상세" />;
 
   const row = d.row || {};
-  const now = numOrNull(d.end) ?? Date.now();
+  const now = detailNowOf(d);   // '오늘 · 어제' 기준은 응답 시각 — d.end(칸 경계로 올린 값)는 추이 축에만
   const tz = { offsetMin: numOrNull(main?.offsetMin) ?? undefined };
   const hidden = d.addressHidden === true;
   const by = byText(row);
   const sub = subText(row);
   const ctx = { staleMs: main?.staleMs, failThreshold: main?.rules?.failThreshold, minEdgeVersion: main?.minEdgeVersion };
-  const excluded = row.state === 'excluded';
+  const excluded = isExcludedRow(row);
+  const exNote = excludedNote(row, now, tz);
   const tally = d.range === '24h' ? seriesTally(d.series) : null;
   const same = sameHostRows(row, d.sameHost);
   const events = Array.isArray(d.events) ? d.events : [];
@@ -479,13 +489,7 @@ function Detail({ id, cache }) {
   const sh = stripHead(main?.bucketMs, Array.isArray(row.strip) ? row.strip.length : null);
   const stripTitle = sh === '상태 띠' ? sh : `최근 ${sh} 상태 띠`;
 
-  const nowSub = (() => {
-    if (row.state === 'down') return [numOrNull(row.failStreak) > 0 ? `연속 ${row.failStreak}회 실패` : '', failText(row.failKind)].filter(Boolean).join(' · ') || '연결 실패';
-    if (row.reason) return reasonShort(row.reason);
-    const base = numOrNull(row.baseMs);
-    const ratio = ratioText(row.ms, row.baseMs);
-    return base == null ? '평소 —' : `평소 ${msText(base)}${ratio ? ` 의 ${ratio}` : ''}`;
-  })();
+  const nowSub = nowSubText(row, ctx);
 
   const runOne = async () => {
     setBusy('run'); setMsg(null);
@@ -509,7 +513,7 @@ function Detail({ id, cache }) {
       load();
     } catch (e) { setMsg({ tone: 'warn', text: e?.message || String(e) }); } finally { setBusy(''); }
   };
-  const runTitle = row.byEdge ? '엣지가 재는 대상입니다 — 다음 엣지 보고를 기다리세요.' : '이 대상만 지금 1회 잽니다';
+  const runTitle = by.measured === false ? '측정하지 않는 대상입니다(꺼짐 · 제외 · 설정 오류)' : row.byEdge ? '엣지가 재는 대상입니다 — 다음 엣지 보고를 기다리세요.' : '이 대상만 지금 1회 잽니다';
 
   return (
     <div className="ss">
@@ -526,7 +530,7 @@ function Detail({ id, cache }) {
         </div>
         <div className="ss-actions">
           <button type="button" className="ss-btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로 고침'}</button>
-          <button type="button" className="ss-btn" onClick={runOne} disabled={!!busy || !!row.byEdge} title={runTitle}>{busy === 'run' ? '측정 중…' : '이 대상만 지금 측정'}</button>
+          <button type="button" className="ss-btn" onClick={runOne} disabled={!!busy || !!row.byEdge || by.measured === false} title={runTitle}>{busy === 'run' ? '측정 중…' : '이 대상만 지금 측정'}</button>
           {excluded
             ? <button type="button" className="ss-btn" onClick={() => setExcluded(false)} disabled={!!busy}>{busy === 'exclude' ? '바꾸는 중…' : '다시 측정'}</button>
             : <button type="button" className="ss-btn" onClick={() => setExOpen((x) => !x)} disabled={!!busy} aria-expanded={exOpen}>측정에서 제외</button>}
@@ -548,12 +552,15 @@ function Detail({ id, cache }) {
       ) : null}
       {row.reason ? <div className="ss-note">{reasonShort(row.reason)} — {reasonLong(row.reason, ctx) || reasonShort(row.reason)}</div> : null}
       {row.note ? <div className="ss-note">{row.note}</div> : null}
+      {row.problem && !hidden ? <div className="ss-note">설정 오류 — {String(row.problem)}</div> : null}
+      {exNote ? <div className="ss-note">{exNote}</div> : null}
 
       <div className="ss-stats">
         <Stat label="지금 연결 시간" value={msText(row.ms)} valueClass={`ss-mono${msTone(row.state)}`} sub={[nowSub, numOrNull(row.lastTs) > 0 ? `마지막 측정 ${clockText(row.lastTs, now, { ...tz, sec: true })}` : ''].filter(Boolean).join(' · ')} />
         <Stat label="24시간 성공률" value={pctText(row.avail24)} valueClass="ss-mono" sub={tallyText(tally)} />
-        <Stat label="등록 출처" value={`${row.kindLabel || row.kind || '—'} 등록부`} sub={[sub, '등록부의 주소:포트 그대로', row.nonDefaultPort && numOrNull(row.defaultPort) != null ? `기본 포트 ${row.defaultPort} 아님` : ''].filter(Boolean).join(' · ')} />
-        <Stat label="측정하는 곳" value={by.text === '중앙' ? '중앙 포탈' : by.text} valueClass={by.edge ? 'ss-edge' : ''} sub={measureText({ intervalMs: main?.intervalMs ?? d.intervalMs, timeoutMs: main?.rules?.timeoutMs })} />
+        <Stat label="등록 출처" value={`${row.kindLabel || row.kind || '—'} 등록부`} sub={[sub, portSourceText(row), row.nonDefaultPort && numOrNull(row.defaultPort) != null ? `기본 포트 ${row.defaultPort} 아님` : ''].filter(Boolean).join(' · ')} />
+        <Stat label="측정하는 곳" value={by.measured === false ? '측정 안 함' : by.text === '중앙' ? '중앙 포탈' : by.text} valueClass={by.edge ? 'ss-edge' : ''}
+          sub={by.measured === false ? reasonShort(row.reason) : measureText({ intervalMs: main?.intervalMs ?? d.intervalMs, timeoutMs: main?.rules?.timeoutMs })} />
       </div>
 
       <section className="ss-card">
@@ -652,7 +659,9 @@ function Settings({ cache }) {
   const s = d.settings || {};
   const limits = d.limits || {};
   const le = unreadMarkOf(d);
-  const saveLocked = saveLockedByUnread(le);
+  // 손상(보존본으로 옮김)도 서버가 저장 · 제외를 409 로 거절한다 — 읽기 오류와 같이 잠근다(corruptLocks).
+  const saveLocked = saveLockedByUnread(le, { corruptLocks: true });
+  const lockWhy = saveLocked ? '설정 파일을 읽지 못했거나 손상된 동안은 서버가 바꾸기를 거절합니다 — 풀린 뒤 다시 확인하세요.' : undefined;
   const sources = Array.isArray(d.sources) ? d.sources : [];
   const excluded = Array.isArray(s.excluded) ? s.excluded : [];
   const totalTargets = sources.reduce((a, x) => a + (numOrNull(x?.targets) ?? 0), 0);
@@ -701,7 +710,8 @@ function Settings({ cache }) {
         </div>
       </div>
 
-      <SettingsUnreadBanner le={le} what="포탈 서비스 상태 설정" save="저장" lastGood={d.usingLastGood === true} />
+      <SettingsUnreadBanner le={le} what="포탈 서비스 상태 설정" save="저장" corruptLocks lastGood={d.usingLastGood === true} onRecheck={load} busy={loading} />
+      {d.usingLastGood === true && unreadKind(le) !== 'read' ? <div className="ss-note">지금 보이는 값은 마지막으로 읽은 값입니다 — 서버는 그 값(제외 목록 · 알림 포함)으로 돌고 있습니다.</div> : null}
       {err ? <Banner tone="warn">다시 읽지 못해 직전 값을 보여 줍니다 — {String(err?.message || err)}</Banner> : null}
 
       <label className="ss-switch">
@@ -721,14 +731,15 @@ function Settings({ cache }) {
           <tbody>
             {sources.map((x) => {
               const on = form.kinds?.[x.kind] !== false;
+              const off = x.measured === false || s.kinds?.[x.kind] === false;   // 저장된 설정 기준(편집 중인 체크가 아니라) — 대상 수가 없는 이유
               return (
                 <tr key={x.kind}>
                   {[
                     <td key="on"><input type="checkbox" checked={on} onChange={(e) => set({ kinds: { ...form.kinds, [x.kind]: e.target.checked } })} aria-label={`${x.label || x.kind} 측정`} /></td>,
-                    <td key="k" className="ss-nowrap">{x.label || x.kind}</td>,
+                    <td key="k" className="ss-nowrap">{x.label || x.kind}{x.held ? <span className="badge amber ss-tag" title={reasonLong('registry-held')}>{reasonShort('registry-held')}</span> : null}</td>,
                     <td key="r">{x.hash ? <a className="ss-link" href={x.hash}>{x.settings || x.hash}</a> : (x.settings || '—')}</td>,
                     <td key="n" className="ss-r ss-mono" data-sort={numOrNull(x.registered) ?? ''}>{numOrNull(x.registered) ?? '—'}</td>,
-                    <td key="t" className="ss-r ss-mono" data-sort={numOrNull(x.targets) ?? ''}>{numOrNull(x.targets) ?? '—'}</td>,
+                    <td key="t" className="ss-r ss-mono" data-sort={off ? '' : (numOrNull(x.targets) ?? '')}>{off ? <span className="ss-dim">— <small>측정 안 함</small></span> : (numOrNull(x.targets) ?? '—')}</td>,
                     <td key="rule" className="ss-wrap">{x.rule || '—'}</td>,
                     <td key="by" className="ss-wrap">{x.measuredBy || '—'}</td>,
                   ]}
@@ -777,6 +788,7 @@ function Settings({ cache }) {
           <div className="ss-field">
             <label htmlFor="ss-to">받는 사람(쉼표로 여럿)</label>
             <input id="ss-to" className="input" value={form.to} onChange={(e) => set({ to: e.target.value })} placeholder="받는 사람 메일 주소" />
+            {numOrNull(limits.alertsTo?.max) != null ? <small>{limits.alertsTo.max}명까지</small> : null}
           </div>
           {d.mail ? (
             <div className="ss-note">메일 종류 ‘{d.mail.kindLabel || d.mail.kind || '—'}’{d.mail.configured === false ? ' — 메일 발송 설정이 없어 알림 메일이 나가지 않습니다.' : ''}</div>
@@ -800,7 +812,7 @@ function Settings({ cache }) {
                   <span className="ss-mono ss-dim">{x.address || '—'}</span>
                   <span className="ss-note">제외 {clockText(x.at, Date.now(), { date: true })}{x.by ? ` · ${x.by}` : ''}{x.reason ? ` · 사유: ${x.reason}` : ''}</span>
                 </div>
-                <button type="button" className="ss-btn" onClick={() => unexclude(x.id)} disabled={!!exBusy}>{exBusy === x.id ? '바꾸는 중…' : '다시 측정'}</button>
+                <button type="button" className="ss-btn" onClick={() => unexclude(x.id)} disabled={!!exBusy || saveLocked} title={lockWhy}>{exBusy === x.id ? '바꾸는 중…' : '다시 측정'}</button>
               </li>
             ))}
           </ul>
@@ -810,7 +822,7 @@ function Settings({ cache }) {
       {msg ? <Banner tone={msg.tone}>{msg.text}</Banner> : null}
       <div className="ss-savebar">
         <a className="ss-btn" href={hashOf('main')}>취소</a>
-        <button type="button" className="ss-btn primary" onClick={save} disabled={busy || saveLocked} title={saveLocked ? '설정 파일을 읽지 못한 동안은 저장을 잠급니다' : undefined}>{busy ? '저장 중…' : '저장'}</button>
+        <button type="button" className="ss-btn primary" onClick={save} disabled={busy || saveLocked} title={lockWhy}>{busy ? '저장 중…' : '저장'}</button>
       </div>
     </div>
   );

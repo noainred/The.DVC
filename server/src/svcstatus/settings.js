@@ -74,6 +74,8 @@ export function normalizeSettings(input = {}) {
       to: normalizeAddresses(Array.isArray(al.to) ? al.to : t(al.to)).ok.slice(0, ALERT_TO_MAX),
     },
     excluded: normalizeExcluded(s.excluded),
+    // 측정을 다시 켠 시각(꺼짐 → 켜짐 저장 때만) — 알림의 '못 잼' 시계가 꺼 둔 시간을 세지 않게(점검 반증 #1).
+    enabledAt: (() => { const v = numOrNull(s.enabledAt); return v != null && v > 0 ? Math.round(v) : null; })(),
   };
 }
 
@@ -125,7 +127,7 @@ export function saveSvcStatusSettings(input = {}, { replace = false } = {}) {
     for (const k of ['intervalMs', 'timeoutMs', 'concurrency', 'failThreshold', 'slowFactor', 'slowMinDeltaMs', 'retentionDays']) {
       if (numOrNull(src[k]) != null) merged[k] = src[k];
     }
-    if (typeof src.enabled === 'boolean') merged.enabled = src.enabled;
+    if (typeof src.enabled === 'boolean') { merged.enabled = src.enabled; if (src.enabled && cur.enabled === false) merged.enabledAt = Date.now(); }
     if (isObj(src.kinds)) merged.kinds = { ...cur.kinds, ...Object.fromEntries(KIND_KEYS.filter((k) => typeof src.kinds[k] === 'boolean').map((k) => [k, src.kinds[k]])) };
     if (isObj(src.alerts)) {
       const a = src.alerts;
@@ -136,6 +138,8 @@ export function saveSvcStatusSettings(input = {}, { replace = false } = {}) {
       if (a.to !== undefined) {
         const r = normalizeAddresses(Array.isArray(a.to) ? a.to : t(a.to));
         if (r.bad.length) throw Object.assign(new Error(`받는 사람 주소 형식이 올바르지 않습니다: ${r.bad.slice(0, 3).join(', ')}`), { status: 400, field: 'alerts.to' });
+        // 점검 반증 #11: 상한을 넘으면 조용히 자르지 않고 거절한다(중복 제거 뒤 개수 — 대소문자만 다른 주소는 하나).
+        if (r.ok.length > ALERT_TO_MAX) throw Object.assign(new Error(`받는 사람은 ${ALERT_TO_MAX}명까지입니다(지금 ${r.ok.length}명).`), { status: 400, field: 'alerts.to' });
         merged.alerts.to = r.ok;
       }
     }
