@@ -238,7 +238,7 @@ export function PartFaults() {
         )}
         {holdNote(open) && <div style={{ marginTop: 4, fontSize: 12, color: 'var(--amber)' }}><BoldText text={holdNote(open)} /></div>}
         {rn && <div style={{ marginTop: 4, fontSize: 12, color: 'var(--amber)' }}><BoldText text={rn} /></div>}
-        {notifyNote(poller?.last) && <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-faint)' }}><BoldText text={notifyNote(poller.last)} /></div>}
+        {notifyNote(poller?.last, poller?.notifyQueue) && <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-faint)' }}><BoldText text={notifyNote(poller.last, poller.notifyQueue)} /></div>}
         {poller && !isEdge && (
           <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-faint)' }}>
             자동 점검 {poller.enabled ? `켜짐(${poller.source}) · 주기 ${intervalText(poller.intervalMs)}` : `꺼짐(${poller.source})`}

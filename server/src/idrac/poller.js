@@ -114,8 +114,9 @@ const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드�
 //     몫이 없으면 함대가 상한보다 클 때 이벤트 읽기가 남은 정규 주기를 다 기다렸다(7회차 엣지 #4: 기본 16 · 함대 160 에서 이벤트 → 첫 요청 12.7초).
 //     상한 1 은 몫 0 — 정규 먼저(6회차 P1).
 //   · 이벤트 읽기에는 **전용 자리 1**(상한 밖 — 사용자 결정 2026-11-27)을 더 둔다: 전체 iDRAC 동시 세션 ≤ IDRAC_POLL_CONCURRENCY + 1.
-//     상한 1 에서도 이벤트 읽기가 정규 주기의 하나뿐인 자리를 쥐지 않는다(6회차 성능 P1 남긴 것 — 주기 사이 이벤트 읽기가 다음 주기를 밀었다).
-//     전용 자리가 차 있으면 공용 자리(몫 · 정규 먼저 규칙)로 간다. 같은 장비 동시 세션은 여전히 1(_eventIds · _cycleInflight).
+//     상한 1(몫 0)이면 이벤트 읽기는 **전용 자리만** 쓴다 — 정규 주기의 하나뿐인 자리를 쥐지 않는다(6회차 성능 P1 남긴 것). 묶음이 여럿 함께 돌 때 둘째 읽기가
+//     주기 사이의 빈 공용 자리를 받아 다음 주기 시작을 그 읽기만큼 밀었다(반증 12a F1 — 1.8초). 몫이 있으면(상한 2 이상) 전용이 차 있을 때 공용 자리(몫 · 정규 먼저 규칙)로 간다.
+//     같은 장비 동시 세션은 여전히 1(_eventIds · _cycleInflight).
 //   · 이벤트 묶음은 **여러 개가 함께 돈다**(v3.52 설계 ④ — 사용자 결정 2026-11-27). 예전에는 한 번에 하나(_eventRunning)라 느린 서버 하나가 낀 묶음이 끝날 때까지
 //     다른 서버의 이벤트가 기다렸다. 묶음 수 상한은 eventSub(EVT_BATCH_CONC) · 장비 세션 상한은 위 자리(공용 + 전용)가 지킨다 · 같은 서버를 두 묶음이 함께 읽지 않는다(_eventIds).
 let _eventBatches = 0;            // 진행 중인 이벤트 묶음 수(진단용)
@@ -161,15 +162,17 @@ function releaseSlot(kind = 'cycle', token = 's') {
 function drainEventSlots() {
   const max = slotMax();
   while (_slot.qe.length && _slot.ded < EVENT_DEDICATED_SLOTS) { _slot.ded += 1; _slot.qe.shift()('d'); }
-  while (_slot.n < max && _slot.qe.length && (!_slot.q.length || _slot.ev < eventShare(max))) { _slot.n += 1; _slot.ev += 1; _slot.qe.shift()('s'); }
+  const share = eventShare(max);
+  // 몫 0(상한 1)이면 공용 자리를 빌리지 않는다 — 정규 대기자가 없는 주기 사이에 빌리면 다음 주기가 그 읽기를 기다린다(반증 12a F1)
+  while (share > 0 && _slot.n < max && _slot.qe.length && (!_slot.q.length || _slot.ev < share)) { _slot.n += 1; _slot.ev += 1; _slot.qe.shift()('s'); }
 }
-async function pollOnce({ manual = false, only = null, onRefreshed = null } = {}) {
+async function pollOnce({ manual = false, only = null, onRefreshed = null, onServerDone = null } = {}) {
   if (only) {
     // 이벤트 묶음끼리는 막지 않는다(설계 ④) — 지금 읽는 서버 표시(_eventIds)는 서버를 실제로 읽기 시작할 때 넣고 다 읽으면 바로 뺀다(5회차 엣지 #2)
     const eventLeft = new Set([...only].map(String));   // 이 묶음이 맡은 표시 중 아직 내려놓지 않은 것(서버마다 다 읽으면 바로 · 나머지는 끝에)
     for (const id of eventLeft) pendAdd(id);
     _eventBatches += 1;
-    try { return await withJob('idrac.poll.event', () => pollOnceInner({ manual, only, onRefreshed, eventLeft })); } finally { for (const id of eventLeft) pendDel(id); _eventBatches -= 1; }
+    try { return await withJob('idrac.poll.event', () => pollOnceInner({ manual, only, onRefreshed, eventLeft, onServerDone })); } finally { for (const id of eventLeft) pendDel(id); _eventBatches -= 1; }
   }
   if (running) return BUSY; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
@@ -191,7 +194,7 @@ async function pollOnce({ manual = false, only = null, onRefreshed = null } = {}
  *   (한 대짜리 실행이 ‘마지막 주기 1대’ · ‘주기 0.3초’ 로 보이면 신선도 판정이 흔들린다). 파트 장애 훅도 부르지 않는다 — 호출부(eventSub)가 바로 판정한다(P5 — 두 번 돌지 않게).
  *   돌려주는 값 — 읽은 서버 수(servers)와 인벤토리를 다시 읽은 서버 수.
  */
-async function pollOnceInner({ manual = false, only = null, onRefreshed = null, eventLeft = null } = {}) {
+async function pollOnceInner({ manual = false, only = null, onRefreshed = null, eventLeft = null, onServerDone = null } = {}) {
   // v2.583: 이 카운터는 v2.548 부터 **pollOnce() 안에** 선언돼 있었다 — 쓰는 곳은 이 함수라 실장비(목 모드가
   // 아닌) 폴마다 마지막 줄에서 ReferenceError 가 났고, pollNow 가 잡아 `[idrac] pollNow 실패: invRefreshed is
   // not defined` 를 **폴마다** 찍었다. 그 결과 v2.548 F7(인벤토리 갱신 즉시 파트 장애 판정) 훅은 한 번도 돌지
@@ -265,7 +268,11 @@ async function pollOnceInner({ manual = false, only = null, onRefreshed = null, 
       // 다른 이벤트 묶음이 지금 이 서버를 읽는 중 — 같은 장비에 세션을 둘 열지 않는다. 그 읽기는 이 이벤트 전에 시작했을 수 있어 빼고 다시 잡게 돌려준다(설계 ④ · eventSub 는 도는 묶음의 서버를 새 묶음에 넣지 않는다)
       if (_eventIds.has(sid)) { releaseSlot('event', tok); skippedForCycle.push(sid); return; }
       _eventIds.add(sid);
-      try { await pollServer(s); } finally { _eventIds.delete(sid); if (eventLeft?.delete(sid)) pendDel(sid); releaseSlot('event', tok); }
+      try { await pollServer(s); } finally {
+        _eventIds.delete(sid); if (eventLeft?.delete(sid)) pendDel(sid); releaseSlot('event', tok);
+        // 이 서버는 이 묶음에서 끝났다 — 호출부(eventSub)가 묶음 전체를 기다리지 않고 이 서버의 새 이벤트를 다음 묶음에 넣게(반증 12a F2)
+        if (onServerDone) { try { onServerDone(sid); } catch { /* 알림 실패가 읽기를 막지 않는다 */ } }
+      }
       return;
     }
     await acquireSlot();
@@ -464,11 +471,11 @@ export async function pollNow({ manual = false } = {}) {
  * 묶음끼리는 함께 돈다(설계 ④) · 정규 주기 · 다른 묶음이 읽던 서버는 skipped 로 돌려준다(호출부가 다시 잡는다).
  * @returns {Promise<{ busy:boolean, servers:number, invRefreshed:number, skipped:string[], unread:string[] }>} busy 는 이제 늘 false(호출부 호환)
  */
-export async function pollNowForEvent(ids = [], { onRefreshed = null } = {}) {
+export async function pollNowForEvent(ids = [], { onRefreshed = null, onServerDone = null } = {}) {
   const only = new Set((Array.isArray(ids) ? ids : []).map(String));
   if (!only.size) return { busy: false, servers: 0, invRefreshed: 0 };
   let r;
-  try { r = await pollOnce({ manual: false, only, onRefreshed: typeof onRefreshed === 'function' ? onRefreshed : null }); } catch (err) { console.error('[idrac] 이벤트 뒤 수집 실패:', err.message); }
+  try { r = await pollOnce({ manual: false, only, onRefreshed: typeof onRefreshed === 'function' ? onRefreshed : null, onServerDone: typeof onServerDone === 'function' ? onServerDone : null }); } catch (err) { console.error('[idrac] 이벤트 뒤 수집 실패:', err.message); }
   if (r === BUSY) return { busy: true };
   return { busy: false, servers: Number(r?.servers) || 0, invRefreshed: Number(r?.invRefreshed) || 0, skipped: Array.isArray(r?.skipped) ? r.skipped : [], unread: Array.isArray(r?.unread) ? r.unread : [] };
 }

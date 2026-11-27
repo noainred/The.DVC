@@ -10,11 +10,16 @@ export default [
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
-      globals: { ...globals.node, ...globals.es2021 },
+      // nodeBuiltin — ESM 에 없는 require · __dirname · __filename · module · exports 는 전역이 아니다(globals.node 는 CommonJS 이름까지 넣어 놓쳤다 — 반증 12b #7)
+      globals: { ...globals.nodeBuiltin, ...globals.es2021 },
     },
     // 소스의 ‘eslint-disable import/no-unresolved’(node:sqlite 등) 주석이 규칙 정의 없음 오류가 되지 않게 빈 규칙을 둔다(검사는 하지 않는다)
     plugins: { import: { rules: { 'no-unresolved': { create: () => ({}) } } } },
     linterOptions: { reportUnusedDisableDirectives: 'off' },
-    rules: { 'no-undef': 'error' },
+    rules: {
+      'no-undef': 'error',
+      // 전역 crypto 는 Web Crypto — node:crypto 의 createHash · randomBytes 가 없다. import 를 빠뜨리면 실행 때 TypeError(반증 12b #7)
+      'no-restricted-globals': ['error', { name: 'crypto', message: 'node:crypto 를 import 하십시오(전역 crypto 는 Web Crypto — createHash 등이 없습니다)' }],
+    },
   },
 ];

@@ -8,11 +8,11 @@
  *  · 받는 곳 하나 이상에 ‘갔다’ 를 확인한 것만 ‘보냄’ — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 당직 없음은 ‘안 감’ 으로 적고 다음 회차에 다시(ESC_RETRY_MAX 번까지 · 반증 A8 · B1).
  */
 import { config } from '../config.js';
-import { openFaultsOrNull, partFaultDbMissing, partFaultDbHasHistory } from './db.js';
+import { openFaultsOrNull, partFaultDbMissing, partFaultJudgedAgentsOrNull } from './db.js';
 import { alertOf } from './notify.js';
 import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { sendPortalMail } from '../mail/service.js';
-import { escalationStore, loadEscalationState, saveEscalationState, escalationStateUnreadable, escalationPlan, recordSends, ESC_SENDS_PER_RUN, partKeyOf, partSigOf } from './escalation.js';
+import { escalationStore, loadEscalationState, saveEscalationState, escalationStateUnreadable, escalationPlan, recordSends, ESC_SENDS_PER_RUN, partKeyOf, partSigOf, agentOfEscKey } from './escalation.js';
 
 export const ESC_TICK_MS = 60_000;   // 회차 주기 — 화면은 API 값(tickMs)으로 쓴다(숫자를 화면에 박지 않는다 — 반증 B10)
 const TICK_MS = ESC_TICK_MS;
@@ -88,14 +88,15 @@ const DEFAULT_DEPS = {
   // DB 파일이 없는 노드(부품 장애 점검을 켠 적 없음)에는 파일을 만들지 않는다 — 열린 장애도 없다(만들면 ‘수집 안 함’ 이 ‘읽었고 0건’ 으로 바뀌었다 — 디버깅 8회차 판정 #3).
   //   ‘없음’ 은 ENOENT 만 — 권한 · 링크 고리 · 디스크 오류는 열기로 넘겨 회차를 건너뛴다(9회차 보안 #1)
   //   진행 기록이 있는데 DB 파일이 없으면 ‘0건’ 이 아니라 못 읽음이다(볼륨이 아직 안 붙음 · 경로가 바뀜 — 지우면 확인한 장애에도 단계가 다시 갔다 · 9회차 판정 #1)
-  //   열었는데 0건이고 이 DB 에 기록이 한 번도 없으면(새로 만들어진 빈 DB) 진행 기록이 있는 동안은 닫힘이 아니다 — 못 읽음으로 건너뛴다(10회차 보안 #1).
-  //   부품 장애 판정이 장애를 다시 잡으면 DB 에 기록이 생겨 보통 회차로 돌아간다(그때 빠진 장애는 진짜 닫힘 — 반증 A5)
+  //   ‘열린 장애에 없음 = 닫힘’ 은 **이 DB 에서 판정된 수집 주체의 기록에만** 쓴다(judged — 판정이 같은 트랜잭션에 적는다). 새로 만들어진 DB · 재시작 뒤
+  //   엣지 보고 전의 첫 판정 · 계속 빈 DB 는 그 주체를 보지 못했으므로 기록을 남긴다(11회차 반증 D1 · D2 — 10 · 11회차의 시간 유예 · ‘이력 있음’ 기준을 대신한다).
+  //   판정 기록을 못 읽으면 못 읽음(D3). 돌려주는 값 { open, judged } — 배열만 돌려주면(시험 대체) 모든 주체를 판정된 것으로 본다.
   open: async () => {
     const hasItems = () => Object.keys(loadEscalationState().items || {}).length > 0;
-    if (partFaultDbMissing()) { if (hasItems()) throw new Error('부품 장애 DB 파일이 없습니다(진행 기록은 있음 — 볼륨 · 경로 확인)'); return []; }
+    if (partFaultDbMissing()) { if (hasItems()) throw new Error('부품 장애 DB 파일이 없습니다(진행 기록은 있음 — 볼륨 · 경로 확인)'); return { open: [], judged: new Set() }; }
     const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다');
-    if (!r.length && hasItems() && (await partFaultDbHasHistory()) === false) throw new Error('부품 장애 DB 가 비어 있습니다(새로 만들어짐 — 장애를 다시 잡을 때까지 진행 기록을 지우지 않습니다)');
-    return r;
+    const judged = await partFaultJudgedAgentsOrNull(); if (!judged) throw new Error('부품 장애 DB 의 판정 기록을 읽지 못했습니다');
+    return { open: r, judged };
   }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
   partFaultSwitch: async () => (await import('./settings.js')).partFaultEnabled(),
   hold: async (open, now) => {
@@ -104,6 +105,8 @@ const DEFAULT_DEPS = {
     return { hold: r.hold, keyOf: M.maintHoldKeyOf };
   },
 };
+/** deps.open 결과를 { open, judged } 로(배열이면 모든 주체 판정됨 — judged null). 형식이 아니면 null. */
+const normOpen = (o) => (Array.isArray(o) ? { open: o, judged: null } : (o && Array.isArray(o.open) ? { open: o.open, judged: o.judged instanceof Set ? o.judged : null } : null));
 let _deps = DEFAULT_DEPS;
 export function _setEscalationDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
 
@@ -119,10 +122,11 @@ export async function runEscalationNow() {
     if (escalationStore.loadError()) {
       // 계획 · lp 는 쓰지 않되 **닫힌 장애의 기록은 정리한다**(반증 A5 — 다시 열린 장애가 옛 확인 · 보낸 단계를 물려받지 않게). 키 이전 후보(같은 sig)는 남긴다(디버깅 8회차 판정 #1)
       if (!escalationStateUnreadable()) {
-        let o = null; try { o = await deps.open(); } catch { o = null; }
-        if (Array.isArray(o)) {
-          const st = loadEscalationState(); const keys = new Set(o.map(partKeyOf)); const sigs = new Set(o.map(partSigOf));
-          const kept = Object.fromEntries(Object.entries(st.items).filter(([k, v]) => keys.has(k) || (v?.sig && sigs.has(v.sig))));
+        let o = null; try { o = normOpen(await deps.open()); } catch { o = null; }
+        if (o) {
+          const st = loadEscalationState(); const keys = new Set(o.open.map(partKeyOf)); const sigs = new Set(o.open.map(partSigOf));
+          const unjudged = (k) => o.judged != null && !o.judged.has(agentOfEscKey(k));   // 아직 이 DB 가 보지 못한 주체의 기록은 닫힘을 모른다(11회차 반증 D1)
+          const kept = Object.fromEntries(Object.entries(st.items).filter(([k, v]) => keys.has(k) || unjudged(k) || (v?.sig && sigs.has(v.sig))));
           if (Object.keys(kept).length !== Object.keys(st.items).length) saveEscalationState({ ...st, items: kept });
         }
       }
@@ -130,15 +134,15 @@ export async function runEscalationNow() {
     }
     if (escalationStateUnreadable()) { _heldKeys = new Set(); _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'state-unreadable', errors: ['진행 기록을 읽지 못해 보내지 않았습니다(보낸 단계를 모르는 채 보내지 않는다).'] }; return _last; }
     const state = loadEscalationState();
-    let open = [];
-    try { open = await deps.open(); } catch (e) { _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, errors: [`열린 장애를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`] }; return _last; }
+    let open = []; let judged = null;
+    try { const o = normOpen(await deps.open()); if (!o) throw new Error('열린 장애 목록 형식이 아닙니다'); open = o.open; judged = o.judged; } catch (e) { _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, errors: [`열린 장애를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`] }; return _last; }
     // 점검 스위치 — 꺼짐 · 데모로만 켜짐이면 보내지 않는다(기록 정리는 한다)
     let sw = { enabled: true, source: '' };
     try { sw = (await deps.partFaultSwitch()) || sw; } catch { /* 모르면 막지 않는다 */ }
     const why = !settings.enabled ? 'off' : !sw.enabled ? 'partfault-off' : sw.source === 'demo' ? 'demo' : '';
     let hold = null; let keyOf = null;
     if (!why) { try { const h = await deps.hold(open, now); hold = h?.hold || null; keyOf = h?.keyOf || null; } catch { hold = null; } }
-    const plan = escalationPlan({ settings: why ? { ...settings, enabled: false } : settings, state, open, now, maxSends: ESC_SENDS_PER_RUN, hold, holdKeyOf: keyOf });
+    const plan = escalationPlan({ settings: why ? { ...settings, enabled: false } : settings, state, open, now, maxSends: ESC_SENDS_PER_RUN, hold, holdKeyOf: keyOf, judged });
     _heldKeys = new Set(plan.heldKeys || []);
     const results = [];
     for (const s of plan.sends) {

@@ -279,7 +279,7 @@ test('3회차 화면 · 성능 — 등록부 못 읽음 503 은 ‘모름’ 잠
     const s = { enabled: true, base: 'https://portal.example.test', secret: 'E'.repeat(43), ctxKey: 'F'.repeat(43) };
     for (let i = 0; i < E.EVT_BATCH_MAX; i += 1) E.acceptEvents(s, { context: E.contextOf(s, `q-${i}`), events: [{ sev: 'critical' }] });
     E.acceptEvents(s, { context: E.contextOf(s, 'q-over'), events: [{ sev: 'critical' }] });
-    assert.match(src('../src/idrac/eventSub.js'), /const ids = \[\.\.\._staleIds\]\.filter\(\(id\) => !_inflightIds\.has\(id\)\);\s*if \(!ids\.length\) return;\s*for \(const id of ids\) \{ _staleIds\.delete\(id\); _inflightIds\.add\(id\); \}/, '묶음마다 미룬 서버 집합을 비우지 않는다(화면 R3)');
+    assert.match(src('../src/idrac/eventSub.js'), /const ids = \[\.\.\._staleIds\]\.filter\(\(id\) => !_inflightIds\.has\(id\)\);\s*if \(!ids\.length\) return;\s*const tok = \+\+_batchSeq; const gen = _gen;\s*for \(const id of ids\) \{ _staleIds\.delete\(id\); _inflightIds\.set\(id, tok\); \}/, '묶음마다 미룬 서버 집합을 비우지 않는다(화면 R3)');
     assert.deepEqual(src('../src/idrac/eventSub.js').split('\n').filter((l) => l.includes('_deferredIds.clear()') && !l.includes('function _resetEventsForTest')), [], '미룬 서버 집합은 시험 초기화에서만 비운다');
     assert.equal(E.eventStatus().deferred, 1);
   } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); }

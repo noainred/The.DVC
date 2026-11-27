@@ -137,9 +137,14 @@ test('③ 알림 발송 분리 — 판정은 발송을 기다리지 않고 · �
   const { putEdgeReport } = await import('../src/central/partFaultEdge.js');
   const PF = await import('../src/partfault/poller.js');
   const calls = []; const marks = []; let release = null; let gate = new Promise((r) => { release = r; });
+  const pid = (k) => String(k).split(':').pop();
   PF._setNotifyDepsForTest({
-    notifyTransition: async (tr) => { calls.push({ opened: tr.opened.map((p) => p.partId), closed: tr.closed.map((p) => p.partId), at: Date.now() }); await gate; return { sent: tr.opened.length + tr.closed.length, skipped: 0, capped: 0, results: [], total: tr.opened.length + tr.closed.length }; },
-    markNotified: async (keys) => { marks.push({ n: keys.length, afterCalls: calls.length, released: release == null }); },
+    sendAlerts: async (alerts) => {
+      calls.push({ opened: alerts.filter((a) => !a.closed).map((a) => pid(a.partKey)), closed: alerts.filter((a) => a.closed).map((a) => pid(a.partKey)), at: Date.now() });
+      await gate;
+      return { sent: alerts.length, skipped: 0, failed: 0, results: alerts.map((a) => ({ partKey: a.partKey, closed: a.closed, result: 'webhook:ok', outcome: 'delivered' })) };
+    },
+    markNotified: async (keys) => { marks.push({ n: keys.length, afterCalls: calls.length, firstSeen: keys.map((k) => typeof k.firstSeen) }); },
   });
   try {
     assert.equal((await putEdgeReport('synth-site', report([], false))).ok, true);
@@ -163,7 +168,7 @@ test('③ 알림 발송 분리 — 판정은 발송을 기다리지 않고 · �
     release(); release = null;
     await PF._notifyIdleForTest();
     assert.deepEqual(calls.map((c) => [c.opened, c.closed]), [[['PSU.D3.1'], []], [[], ['PSU.D3.1']]], '열림 → 해소 순서');
-    assert.deepEqual(marks.map((m) => [m.n, m.afterCalls]), [[1, 1]], '열림 판정의 발송 뒤 표시');
+    assert.deepEqual(marks.map((m) => [m.n, m.afterCalls, m.firstSeen]), [[1, 1, ['number']]], '열림 판정의 발송 뒤 표시 · 그 판정이 연 행(처음 감지 시각)으로');
     assert.equal(r1.notify.pending, false); assert.equal(r1.notify.sent, 1, '판정 결과의 표지가 발송 뒤 채워진다');
     assert.equal(r2.notify.pending, false);
   } finally { if (release) release(); PF._setNotifyDepsForTest(null); await PF._notifyIdleForTest(); }
@@ -173,10 +178,10 @@ test('③ 대기열 넘침 — 가장 오래된 대기 판정부터 보내지 �
   const PF = await import('../src/partfault/poller.js');
   PF._resetNotifyForTest();
   let release = null; const gate = new Promise((r) => { release = r; }); const sentJobs = [];
-  PF._setNotifyDepsForTest({ notifyTransition: async (tr) => { sentJobs.push(tr.opened[0].partKey); await gate; return { sent: 0, skipped: 0, capped: 0, results: [], total: 0 }; }, markNotified: async () => {} });
+  PF._setNotifyDepsForTest({ sendAlerts: async (alerts) => { sentJobs.push(alerts[0].partKey); await gate; return { sent: 0, skipped: 0, failed: 0, results: [] }; }, markNotified: async () => {}, enabled: () => ({ enabled: true, source: 'saved' }) });
   const warns = []; const ow = console.warn; console.warn = (...a) => { warns.push(a.map(String).join(' ')); };
   try {
-    const job = (j) => ({ opened: Array.from({ length: 200 }, (_, k) => ({ agent: '', partKey: `ov-${j}-${k}`, state: 'fault' })), updated: [], closed: [] });
+    const job = (j) => ({ opened: Array.from({ length: 200 }, (_, k) => ({ agent: '', partKey: `ov-${j}-${k}`, state: 'fault', scope: 'idrac', kind: 'psu', label: `PSU ${k}` })), updated: [], closed: [] });
     const views = Array.from({ length: 12 }, (_, j) => PF._enqueueNotifyForTest(job(j), `ov-${j}`));
     const q = PF._notifyQueueStatusForTest();
     assert.equal(q.waitingItems <= PF.NOTIFY_QUEUE_MAX_ITEMS, true, `대기량 ≤ 상한(${q.waitingItems})`);

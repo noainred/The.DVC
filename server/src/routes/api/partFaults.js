@@ -71,6 +71,7 @@ const t = (v) => String(v ?? '').trim();
 import { cmpVersion } from '../../util/cmpVersion.js';
 import { pageArgs } from '../../util/pageArgs.js';   // v2.607 DB2607-04
 import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
+import { numOrNull } from '../../util/numOrNull.js';
 
 export { cmpVersion };
 
@@ -169,6 +170,14 @@ function hidePathsDeep(v, depth = 0) {
     if (y !== x) { out ||= { ...v }; out[k] = y; }
   }
   return out || v;
+}
+/** 알림 발송 큐 상태 — 건수 필드만(아는 키 · 수만). */
+export function queueView(q) {
+  if (!q || typeof q !== 'object') return null;
+  const out = {};
+  for (const k of ['waiting', 'waitingItems', 'maxItems', 'enqueued', 'done', 'overflowDropped', 'superseded', 'disabledSkipped', 'lastDoneAt']) out[k] = numOrNull(q[k]);   // Number(null) === 0 함정 — 못 읽은 값은 null
+  out.running = q.running === true;
+  return out;
 }
 export function lastView(last, isAdmin) {
   if (isAdmin || !last || typeof last !== 'object') return last ?? null;
@@ -382,7 +391,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     open: shown, summary: { ...summary, devices: devices.size },
     ...(isAdmin ? {} : { addressHidden: true }),
     labels: LABELS,
-    poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: lastView(st.last, isAdmin) } : null,
+    // 알림 발송 큐 — 건수만(넘침 · 대신함 · 꺼짐으로 안 보냄은 가장 새 판정 표지에 실리지 않는다 — 반증 12b #1)
+    poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: lastView(st.last, isAdmin), notifyQueue: queueView(st.notifyQueue) } : null,
     db: dbView(st ? st.db : await partFaultDbStatus().catch(() => null), isAdmin),
     reset: st?.reset || null,
     edges: role === 'central' ? edgesNow() : null,

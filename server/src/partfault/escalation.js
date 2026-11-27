@@ -291,15 +291,27 @@ export function shortWhy(t) {
   const head = String(t || '').split(/[(/—]/)[0].replace(/\s+/g, ' ').trim();
   return head.length > 24 ? `${head.slice(0, 24)}…` : head;
 }
-export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null }) {
+/** 기록 열쇠(`agent|partKey`)의 수집 주체(소문자). */
+export const agentOfEscKey = (k) => { const s = String(k); const i = s.indexOf('|'); return i < 0 ? '' : s.slice(0, i); };
+/**
+ * @param judged 이 DB 에서 판정된 수집 주체 집합(partFaultJudgedAgentsOrNull) — null 이면 모두 판정된 것으로 본다(호출부 호환).
+ *   판정되지 않은 주체의 기록은 열린 장애에 없어도 **닫힘이 아니다** — 손대지 않고 남긴다(키 이전 후보에도 넣지 않는다).
+ *   새로 만들어진 DB · 재시작 뒤 엣지 보고 전의 판정이 그 주체를 보지 못한 0건으로 확인 · 단계 기록을 지웠다(11회차 반증 D1 · D2).
+ */
+export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null, judged = null }) {
   const items = {};
   const sends = []; let deferred = 0; let overCap = 0; let held = 0; const heldKeys = [];
   const prev = state?.items || {};
   const list = Array.isArray(open) ? open : [];
   const openKeys = new Set(list.map(partKeyOf));
+  const unjudged = (k) => judged != null && !judged.has(agentOfEscKey(k));
   // 닫힌 장애의 기록 — 키만 바뀐 같은 장애가 이어받을 후보(sig). 꺼져 있어도 닫힌 것은 정리한다(다시 열린 장애가 옛 확인을 물려받지 않게 — 반증 A5)
   const staleBySig = new Map();
-  for (const [k, v] of Object.entries(prev)) if (!openKeys.has(k) && v.sig) staleBySig.set(v.sig, v);
+  for (const [k, v] of Object.entries(prev)) {
+    if (openKeys.has(k)) continue;
+    if (unjudged(k)) { items[k] = v; continue; }   // 아직 이 DB 가 보지 못한 주체 — 그대로 남긴다(닫힘을 모른다)
+    if (v.sig) staleBySig.set(v.sig, v);
+  }
   const enabled = settings?.enabled === true;
   const enabledAt = numOrNull(settings?.enabledAt);
   // 다시 켰다(켠 시각이 바뀌었다) — 확인하지 않은 기록은 지금부터 다시 센다(옛 since 로 켜자마자 높은 단계가 가지 않게 — 반증 A5)

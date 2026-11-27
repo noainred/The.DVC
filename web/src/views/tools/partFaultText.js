@@ -400,15 +400,36 @@ export function eventText(ev, labels = {}) {
   return ev.event || '';
 }
 
-/** 알림 상태 한 줄. **상한으로 빠진 건수를 밝힌다**(조용한 상한 금지). v3.52 설계 ③ — 발송은 판정 뒤 큐에서 차례로 하므로 ‘발송 대기’ 가 있다. */
-export function notifyNote(last) {
+/**
+ * 알림 상태 한 줄. **상한 · 실패 · 넘침으로 빠진 건수를 밝힌다**(조용한 상한 금지). v3.52 설계 ③ — 발송은 판정 뒤 큐에서 차례로 하므로 ‘발송 대기’ 가 있고,
+ * 큐의 넘침 · 대신함은 가장 새 판정의 표지에 실리지 않으므로 큐 상태(queue — 포탈 시작 뒤 누적)로 따로 말한다(반증 12b #1).
+ */
+export function notifyNote(last, queue = null) {
   const nt = last?.notify;
-  if (!nt) return '';
-  if (nt.pending) return `알림 ${num(nt.queued)}건 발송 대기(판정 순서대로 차례로 보냅니다)`;
-  if (num(nt.queueDropped)) return `**알림 대기열이 넘쳐 ${num(nt.queueDropped)}건은 보내지 않았습니다** — 알림 채널 응답을 확인하십시오`;
-  const bits = [`알림 ${num(nt.sent)}건 발송`];
-  if (num(nt.capped)) bits.push(`**상한으로 ${num(nt.capped)}건은 보내지 않았습니다**`);
-  if (num(nt.dropped)) bits.push(`채널 미설정 등으로 ${num(nt.dropped)}건 미발송`);
+  const bits = [];
+  if (nt) {
+    if (nt.pending) {
+      bits.push(`알림 ${num(nt.queued)}건 발송 대기(판정 순서대로 차례로 보냅니다)`);
+      if (num(nt.capped)) bits.push(`**상한으로 ${num(nt.capped)}건은 보내지 않습니다**`);
+    } else if (num(nt.queueDropped)) {
+      bits.push(`**알림 대기열이 넘쳐 ${num(nt.queueDropped)}건은 보내지 않았습니다** — 알림 채널 응답을 확인하십시오`);
+    } else if (num(nt.disabledSkipped)) {
+      bits.push(`부품 장애 점검이 꺼져 알림 ${num(nt.disabledSkipped)}건은 보내지 않았습니다`);
+    } else {
+      bits.push(`알림 ${num(nt.sent)}건 발송`);
+      if (num(nt.failed)) bits.push(`**${num(nt.failed)}건은 채널 오류로 받지 못했습니다**`);
+      if (num(nt.capped)) bits.push(`**상한으로 ${num(nt.capped)}건은 보내지 않았습니다**`);
+      if (num(nt.dropped)) bits.push(`채널 미설정 등으로 ${num(nt.dropped)}건 미발송`);
+      if (num(nt.delayedMs) >= 60_000) bits.push(`알림 채널이 늦어 약 ${Math.round(num(nt.delayedMs) / 60_000)}분 뒤에 보냈습니다`);
+      if (nt.error) bits.push(`**발송 오류: ${String(nt.error).slice(0, 80)}**`);
+    }
+    if (num(nt.superseded)) bits.push(`대기열이 넘쳐 같은 부품의 뒤 알림으로 ${num(nt.superseded)}건을 대신했습니다`);
+  }
+  if (queue) {
+    if (num(queue.waiting) && !nt?.pending) bits.push(`발송 대기 판정 ${num(queue.waiting)}개`);
+    if (num(queue.overflowDropped)) bits.push(`**포탈 시작 뒤 알림 대기열이 넘쳐 ${num(queue.overflowDropped)}건을 보내지 않았습니다**`);
+    else if (num(queue.superseded) && !num(nt?.superseded)) bits.push(`포탈 시작 뒤 대기열이 넘쳐 같은 부품의 뒤 알림으로 ${num(queue.superseded)}건을 대신했습니다`);
+  }
   return bits.join(' · ');
 }
 

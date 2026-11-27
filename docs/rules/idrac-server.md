@@ -2320,3 +2320,19 @@ v3.54.0 으로 번호를 다시 매겼다(릴리스 노트 · 버전 파일만 �
   `_last.notify` 는 일꾼이 채우는 **살아 있는 표지**(복사하지 말 것 — pending → sent · dropped). 대기량 상한 `NOTIFY_QUEUE_MAX_ITEMS`(판정마다 200 까지 셈)를 넘으면
   가장 오래된 대기 판정을 빼고 센다(`queueDropped` · `notifyQueue.overflowDropped` · 경고). 재시작하면 대기 중 알림은 사라진다(발송 표시 없이 남음).
 - 회귀: `server/test/bmDesign352.test.js`(상한 1 · 3 동시 · 누수 · 묶음 동시 · 알림 큐 순서 · 넘침) · `bmDebug3`·`bmDebug5`(상한 1 시험을 전용 자리 불변조건으로 바꿈) · `bmDebug9`(판정이 발송을 기다리지 않아 5회 연속 합류가 없음).
+
+### v3.54 반증 12 반영(2026-11-27 — 설계 과제 · 11회차 수정분 반증 3인 · 기록은 `docs/rules/audits.md` ‘반증 12’)
+
+- **상한 1(몫 0)이면 이벤트 읽기는 전용 자리만** — 공용 자리를 빌리지 않는다(`drainEventSlots` 의 `share > 0`). 묶음 둘이면 둘째 읽기가 주기 사이의 하나뿐인 자리를 쥐어 다음 주기를 밀었다.
+- **서버를 다 읽으면 그 서버만 먼저 푼다**(`pollNowForEvent(…, { onServerDone })` → eventSub `_inflightIds` 는 서버 → 묶음 표 Map · 그 묶음의 표일 때만 푼다).
+  바로 읽기 상한(EVT_BATCH_MAX)은 **기다리는 서버 + 도는 묶음이 맡은 서버** 합계. 시험 초기화는 세대(`_gen`)로 — 앞 세대 묶음의 끝 처리는 무시.
+- **알림 큐는 알림만 담는다**(`notify.js transitionAlerts` — 본문을 판정 때 만든다 · 전이 전체를 붙잡지 않는다) · 무게 ≥ 1 · 대기 수(queued)는 상한까지(상한 밖은 대기 중에도 capped).
+  넘치면 ① 같은 부품의 뒤 알림이 있는 앞 알림부터 대신(superseded — 받는 쪽 마지막 상태 유지) ② 그래도 넘치면 가장 오래된 판정을 뺀다(queueDropped). 판정 뒤 점검이 꺼지면 안 보냄(disabledSkipped —
+  꺼진 채 수동 점검이 만든 판정은 보냄). 1분 넘게 기다린 알림은 본문 끝에 판정 시각. 채널 결과는 `alerts.deliveryOutcome` 으로 셈(받은 채널 없이 오류 = failed — 예전에는 ‘발송’).
+  발송 표시는 **받은 열림만 · 그 판정이 연 행만**(first_seen 일치). 큐 상태는 `GET /tools/part-faults` 의 `poller.notifyQueue`(queueView — 아는 수 필드만 · numOrNull)로 화면이 말한다.
+- **알림 단계의 ‘닫힘’ 은 판정된 수집 주체에만**(`db.js` meta `judged_agents` — applyTransition 이 그 판정의 agentsReported 를 같은 트랜잭션에 적는다 · 스키마 재설정 때 지운다).
+  `escalationPlan({ judged })` 는 판정되지 않은 주체의 기록을 손대지 않고 남긴다(키 이전 후보에도 넣지 않음). 판정 기록을 못 읽으면 회차를 건너뛴다. 7~11회차의 ‘DB 를 못 엶 · 파일 없음 · 빈 새 DB · 이력 없음 · 시간 유예’ 판단은 이 하나로 대신한다(파일 없음 + 기록 있음 = 못 읽음은 유지).
+- **조회 · 상태 · 발송 표시는 DB 파일을 만들지 않는다**(`openRead` — ENOENT 면 null · 상태는 `notCreated`). 파일을 만드는 것은 applyTransition 하나.
+- 판정 몫(`_lastJudgeCost`)은 던진 판정에도 적고 꺼져 건너뛴 회차는 0.
+- 서버 린트: `globals.nodeBuiltin`(ESM 에 없는 require · __dirname 를 잡는다) + 전역 `crypto` 금지(`no-restricted-globals` — node:crypto import 누락).
+- 회귀: `server/test/bmDesign352b.test.js` · `bmDebug8.test.js`(판정 주체 기준으로 다시 씀) · 변이 11개.
