@@ -76,9 +76,9 @@
 <!-- arch-doc:modules:start -->
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
-| `agent/` | 53 | 8,384 | `agent/envTimeout.js` (27) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
+| `agent/` | 54 | 8,540 | `agent/envTimeout.js` (27) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
 | `attach/` | 1 | 333 | `attach/store.js` (3) | attach/store.js — 위키 문서 · 이슈 첨부 파일(v2.889 · 시안 ⑨⑩ '첨부' · C-4). |
-| `auth/` | 16 | 4,565 | `auth/scope.js` (111) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
+| `auth/` | 16 | 4,566 | `auth/scope.js` (111) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
 | `backup/` | 5 | 1,785 | `backup/settings.js` (4) | 백업 설정 + 스케줄러 + 변경 감시. |
 | `bareos/` | 56 | 15,326 | `bareos/settings.js` (14) | bareos/settings.js — Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). |
@@ -88,9 +88,9 @@
 | `bmusage/` | 111 | 25,944 | `bmusage/poller.js` (19) | bmusage/poller.js — 베어메탈 사용률 주기 수집(v2.550). |
 | `bulletin/` | 1 | 851 | `bulletin/store.js` (4) | bulletin/store.js — 접속 공지(팝업)와 게시판 글 저장소(v2.722). |
 | `capacity/` | 4 | 860 | `capacity/sampler.js` (4) | Capacity Advisor 샘플러 — 운영 중인 포탈 프로세스 안에서 30초마다 자기 호스트를 실측한다 |
-| `central/` | 63 | 11,969 | `central/bmUsageEdgePull.js` (19) | central/bmUsageEdgePull.js — 중앙이 엣지에서 베어메탈 사용률을 **당긴다**(v2.554). |
+| `central/` | 63 | 11,972 | `central/inventory.js` (20) | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. |
 | `clustercfg/` | 4 | 582 | `clustercfg/analyze.js` (13) | clustercfg/analyze.js — 특수 기능 '클러스터 HA·DRS 점검'(도구 키 `cluster-check`, v2.701) 판정(순수). |
-| `collector/` | 11 | 2,529 | `collector/registry.js` (84) | Collector registry — the list of remote collector agents (one per datacenter) |
+| `collector/` | 11 | 2,529 | `collector/registry.js` (85) | Collector registry — the list of remote collector agents (one per datacenter) |
 | `commmap/` | 2 | 461 | `commmap/demoMask.js` (3) | commmap/demoMask.js — 통신 지도·데이터 흐름 지도·3단 지도의 **데모 계정 판본** 입력 가림(v2.768 점검 R3-C2-2). |
 | `contention/` | 4 | 512 | `contention/cache.js` (4) | CPU 경합·디스크 지연 캐시(v2.706 C2·C3) — vCenter 별 · moref 별 최근 5분 창 요약. 인메모리다. |
 | `corelicense/` | 1 | 289 | `corelicense/analyze.js` (12) | corelicense/analyze.js — 특수 기능 '코어 라이선스 산정'(도구 키 `core-license`, v2.703 — A13) 판정(순수). |
@@ -104,32 +104,32 @@
 | `dirusage/` | 5 | 1,149 | `dirusage/db.js` (3) | dirusage/db.js — 폴더 사용량 스캔 이력 DB (`dirusage.db`, v2.454). |
 | `diskbad/` | 17 | 3,617 | `diskbad/jobs.js` (4) | diskbad/jobs.js — **중앙**의 점검 작업(전체 · 법인 · 서버 1대)과 6시간 자동 점검(v3.8.0). |
 | `dscfg/` | 4 | 408 | `dscfg/collect.js` (7) | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. |
-| `edgelog/` | 3 | 505 | `edgelog/spec.js` (6) | edgelog/spec.js — 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). |
+| `edgelog/` | 3 | 506 | `edgelog/spec.js` (6) | edgelog/spec.js — 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). |
 | `fieldcheck/` | 1 | 151 | `fieldcheck/judge.js` (1) | fieldcheck/judge.js — 법인별 실환경 확인(v2.938 · 사용자 요청 '개선 포인트 8번은 법인별로 적용'). |
 | `focusmon/` | 38 | 8,994 | `focusmon/service.js` (6) | focusmon/service.js — 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. |
 | `gpu/` | 18 | 3,632 | `gpu/settings.js` (10) | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 |
 | `guest/` | 1 | 69 | `guest/accountService.js` (1) | 게스트 계정 추가 오케스트레이션 — vCenter에 로그인해 선택된 VM들의 게스트 OS에 sudo 계정을 |
 | `guestdisk/` | 5 | 1,451 | `guestdisk/settings.js` (6) | guestdisk/settings.js — 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). |
 | `guestpart/` | 5 | 1,426 | `guestpart/notify.js` (2) | guestpart/notify.js — 게스트 파티션 사용률 메일 발송·일정·기록(v2.749). 규칙은 아이실론 디렉터리 사용량과 같은 코어를 쓴다 |
-| `health/` | 2 | 639 | `health/services.js` (2) | 다빈치 서비스 점검 — 포탈 내부 서비스/수집기의 상태를 한 번에 집계한다(빠르고 비차단). |
+| `health/` | 2 | 643 | `health/services.js` (2) | 다빈치 서비스 점검 — 포탈 내부 서비스/수집기의 상태를 한 번에 집계한다(빠르고 비차단). |
 | `horizon/` | 11 | 2,696 | `horizon/horizon.js` (4) | Horizon Connection Server 연동 — 등록부 · 공용 로그인 세션 · 연결 테스트 · 라이선스 만료일 조회. |
 | `hostaccess/` | 4 | 657 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
 | `hostcfg/` | 6 | 1,172 | `hostcfg/parse.js` (4) | 호스트 구성·보안(v2.699 — A1 보안 하드닝 · A9 구성 드리프트 · A11 재부팅 필요·빌드 불일치 · A12 호스트 인증서 만료). |
 | `idrac/` | 47 | 10,239 | `idrac/registry.js` (32) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
-| `insights/` | 29 | 11,134 | `insights/analysisServers.js` (18) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
+| `insights/` | 29 | 11,206 | `insights/analysisServers.js` (18) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 15 | 2,346 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
 | `ipam/` | 49 | 9,289 | `ipam/ledger.js` (11) | IPAM ledger builder — turns a snapshot into a per-center IP record list. |
 | `isidu/` | 21 | 4,832 | `isidu/digestRules.js` (8) | isidu/digestRules.js — 아이실론 디렉터리 사용량 **종합 메일**의 순수 규칙(v2.742). 파일·타이머·메일 발송 없음. |
 | `issues/` | 17 | 5,031 | `issues/store.js` (6) | issues/store.js — 이슈 트래커 저장소(v2.864). 포탈 공용 이슈(장애·작업·요청·개선)를 등록하고 담당자에게 할당해 끝날 때까지 추적한다. |
-| `linkcheck/` | 12 | 2,955 | `linkcheck/settings.js` (6) | linkcheck/settings.js — 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` |
+| `linkcheck/` | 12 | 2,962 | `linkcheck/settings.js` (6) | linkcheck/settings.js — 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` |
 | `llm/` | 6 | 831 | `llm/config.js` (4) | Local LLM (Ollama) settings for natural-language search. Stored in |
 | `loganalysis/` | 8 | 2,092 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › 로그 › 로그 분석 파사드(v2.583). |
 | `logs/` | 6 | 2,168 | `logs/db.js` (18) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
-| `mail/` | 3 | 557 | `mail/settings.js` (23) | mail/settings.js — 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). |
+| `mail/` | 3 | 558 | `mail/settings.js` (25) | mail/settings.js — 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). |
 | `metrics/` | 8 | 2,233 | `metrics/unreadVcenters.js` (19) | metrics/unreadVcenters.js — '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). |
 | `migration/` | 1 | 140 | `migration/analyze.js` (1) | migration/analyze.js — 특수 기능 'VM 이전 준비도'(도구 키 `migration-readiness`, v2.707 — C7) 판정(순수). |
-| `mock/` | 29 | 8,249 | `mock/demo/flags.js` (68) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
+| `mock/` | 30 | 8,299 | `mock/demo/flags.js` (71) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
 | `net/` | 4 | 789 | `net/captureHistory.js` (5) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
 | `nsx/` | 6 | 1,134 | `nsx/store.js` (10) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
 | `overview/` | 1 | 170 | `overview/trend.js` (1) | overview/trend.js — 경영 보기 Overview 핵심 지표 추이(v2.670, 순수 모듈). |
@@ -148,7 +148,7 @@
 | `relaytopo/` | 4 | 757 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 1,050 | `reports/compliance.js` (6) | 버전/패치 준수 리포트 — VMware Tools 상태·VM 하드웨어 버전·ESXi 버전 분포를 스냅샷만으로 |
 | `rma/` | 14 | 2,917 | `rma/jobs.js` (8) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 182 | 58,144 | `routes/bmEvents.js` (1) | routes/bmEvents.js — 물리서버 장애 바로 받기(v3.52 · ⑬) — 장비(iDRAC)가 보내는 Redfish 이벤트를 받는다. **사용자 인증이 없다**(index.js 가 authMiddleware 없이 단다). |
+| `routes/` | 183 | 58,354 | `routes/bmEvents.js` (1) | routes/bmEvents.js — 물리서버 장애 바로 받기(v3.52 · ⑬) — 장비(iDRAC)가 보내는 Redfish 이벤트를 받는다. **사용자 인증이 없다**(index.js 가 authMiddleware 없이 단다). |
 | `sanswitch/` | 51 | 11,672 | `sanswitch/registry.js` (12) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 944 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 20 | 5,224 | `security/secretVault.js` (38) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -158,9 +158,10 @@
 | `settingsStatus/` | 2 | 288 | `settingsStatus/sources.js` (3) | 설정 메뉴 상태 배지 — 사실 수집(v2.916). 판정은 grade.js 하나. |
 | `snaphist/` | 6 | 1,068 | `snaphist/poller.js` (2) | snaphist/poller.js — VM 별 스냅샷 이력 기록 폴러(v3.26.0 · 설계 docs/design/snapshots §5 · §8 ⑧ 기본값 ‘하루 1번(새벽)’). |
 | `sshaccess/` | 12 | 2,452 | `sshaccess/loginMark.js` (5) | sshaccess/loginMark.js — ‘로그인은 됐다’ 표시(점검 1회차 R2 · T4 · 2회차 상태 Q1(b)). |
-| `storage/` | 73 | 16,486 | `storage/registry.js` (23) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
+| `storage/` | 74 | 16,539 | `storage/registry.js` (23) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
 | `storpath/` | 4 | 391 | `storpath/cache.js` (2) | ESXi 경로 카운터 캐시(v2.935 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다. |
 | `svcmon/` | 22 | 8,235 | `svcmon/store.js` (16) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
+| `svcstatus/` | 9 | 1,690 | `svcstatus/poller.js` (3) | svcstatus/poller.js — 중앙이 재는 대상의 주기 측정(v3.54 — **중앙 전용**: CENTRAL_URL 이 있는 엣지 노드에서는 돌지 않는다. |
 | `system/` | 2 | 336 | `system/nfsMounts.js` (4) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
 | `tags/` | 4 | 502 | `tags/analyze.js` (6) | tags/analyze.js — 특수 기능 '태그·사용자 지정 속성 점검'(도구 키 `vm-tags`, v2.703 — A15) 판정(순수). |
 | `toolcats/` | 2 | 384 | `toolcats/settings.js` (3) | toolcats/settings.js — 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). |
@@ -168,8 +169,8 @@
 | `upgrade/` | 21 | 4,617 | `upgrade/manager.js` (8) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
 | `usage/` | 4 | 937 | `usage/settings.js` (2) | usage/settings.js — 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음). |
 | `usermenu/` | 1 | 386 | `usermenu/store.js` (1) | usermenu/store.js — 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). |
-| `util/` | 96 | 10,077 | `util/numOrNull.js` (339) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
-| `vcenter/` | 30 | 8,487 | `vcenter/registry.js` (31) | vCenter registry — read/write the managed list of vCenters in |
+| `util/` | 96 | 10,077 | `util/numOrNull.js` (345) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
+| `vcenter/` | 30 | 8,487 | `vcenter/registry.js` (32) | vCenter registry — read/write the managed list of vCenters in |
 | `vcinfo/` | 2 | 790 | `vcinfo/collect.js` (6) | vCenter 알람 · 최근 작업 · 권한 목록 갱신(v2.898). 인벤토리 수집 한 주기 안에서(soapClient runAux) vCenter 마다 종류별 주기로 한 번. |
 | `veeam/` | 51 | 9,664 | `veeam/backupStatus.js` (11) | veeam/backupStatus.js — '백업' 메뉴(백업 서머리 · 백업 세부내용, v2.779 — 사용자 요청 "1개 vcenter 를 선택하면 VM 백업 전체 현황 · |
 | `vmcfg/` | 3 | 485 | `vmcfg/cache.js` (4) | VM 구성 속성 캐시(B10, v2.697) — vCenter 별 · VM moref 별. 인메모리(재시작하면 비고 몇 주기에 걸쳐 다시 찬다 — |
@@ -185,7 +186,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 108개 · 파일 1602개 · 373,120줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 109개 · 파일 1615개 · 375,368줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
