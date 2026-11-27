@@ -13,15 +13,24 @@
  * 계약(한 곳 — 아래 RUNTIME_CONTRACT):
  *   · supportedMajors [22] — 전역 fetch 와 undici 6 Agent 가 같은 계약을 쓰는 major.
  *   · minVersion 22.5.0 — 내장 `node:sqlite` 가 처음 들어간 버전(기술적 하한). **검증한 버전이 아니다**.
- *   · releaseVersion 22.23.2 — CI(ci.yml)·릴리스(release.yml NODE_VERSION)·오프라인 번들(build-package.sh 기본값)이 쓰는 값.
+ *   · releaseVersion 22.23.5 — CI(ci.yml)·릴리스(release.yml NODE_VERSION)·오프라인 번들(build-package.sh 기본값)이 쓰는 값.
+ *     번들 압축본의 기대 해시는 packaging/node-runtime.sha256(저장소 고정값 — SHASUMS256.txt 와 다른 채널)에 둔다.
+ *   · securityFloor 22.23.5 — 보안 잔여 11-27 G4: 이 계약이 아는 22.x 보안 릴리스(22.23.4 · 22.23.5)를 모두 담은 가장 낮은 패치.
+ *     그보다 낮은 런타임은 계약 안(supported)이어도 '보안 하한 미만(belowSecurityFloor)' 으로 따로 알린다 — 포탈 자동 업그레이드는
+ *     앱만 바꾸고 런타임은 설치 패키지 재설치(install.sh)로만 바뀌므로, 알리지 않으면 패치 없는 런타임이 조용히 '정상' 으로 보인다.
+ *     불변조건 minVersion ≤ securityFloor ≤ releaseVersion(시험이 고정). 새 22.x 보안 릴리스가 나오면 둘을 함께 올린다.
  *   package.json 3개의 engines(`>=22.5.0 <23`)·`.nvmrc`·`.node-version` 이 이 값과 같아야 하고
  *   `test/rvE_runtimeCheck.test.js` 가 그 일치를 고정한다(어느 한쪽만 바꾸면 테스트가 실패한다).
+ *
+ * 판정(judgeVersion) — 결과의 belowSecurityFloor: true(보안 하한 미만 — 사전 배포판은 같은 숫자여도 미만) · false(하한 이상 —
+ *   '안전하다' 는 뜻이 아니라 '이 계약이 아는 하한 이상' 일 뿐이라 화면·로그는 아무 말도 하지 않는다) · null(판정 안 함 — 계약 밖·판독 불가는 이미 warn).
+ *   ⚠ overallState 는 이 값으로 바꾸지 않는다 — 새 state 값을 만들면 구버전 웹 배너가 '모르는 값 → 배너 없음' 으로 조용히 넘긴다(별도 필드가 하위 호환).
  *
  * 판정(judgeVersion):
  *   · release            — releaseVersion 과 정확히 같다.
  *   · supported          — 지원 major 이고 minVersion 이상(패치가 releaseVersion 과 다르면 releaseRelation 'older'|'newer').
- *                          예: 이 저장소의 개발 컨테이너 Node 22.22.2 → supported · older. 동작 계약 안이므로 경고하지 않는다
- *                          (실제 호환은 자가 점검이 따로 확인한다).
+ *                          예: 이 저장소의 개발 컨테이너 Node 22.23.4 → supported · older. 동작 계약 안이므로 '불일치' 경고는 하지 않는다
+ *                          (실제 호환은 자가 점검이 따로 확인한다). 다만 securityFloor 미만이면 belowSecurityFloor=true 로 보안 경고를 낸다.
  *   · below-minimum      — major 는 맞지만 minVersion 미만(node:sqlite 없음 → NDJSON 폴백).
  *   · unsupported-major  — 지원 major 가 아니다(20·24·26 …).
  *   · unparsed           — 버전 문자열을 읽지 못했다(판정 불가 — 지원이라 말하지 않는다).
@@ -44,7 +53,8 @@ import { withSsrfLookup } from './ssrfLookup.js';
 export const RUNTIME_CONTRACT = Object.freeze({
   supportedMajors: Object.freeze([22]),
   minVersion: '22.5.0',
-  releaseVersion: '22.23.2',
+  releaseVersion: '22.23.5',
+  securityFloor: '22.23.5', // 보안 잔여 11-27 G4 — 위 머리 주석
 });
 
 /** package.json engines 에 쓰는 범위(계약에서 만든다 — 손으로 두 벌 쓰지 않는다). */
@@ -56,7 +66,7 @@ export function enginesRange(contract = RUNTIME_CONTRACT) {
 
 const VERSION_RE = /^v?(\d{1,4})\.(\d{1,4})\.(\d{1,4})(?:[-+]([0-9A-Za-z.-]{1,64}))?$/;
 
-/** 'v22.23.2' · '22.23.2' · 'v23.0.0-nightly…' → { major, minor, patch, pre } | null. 입력 길이 상한 80자. */
+/** 'v22.23.5' · '22.23.5' · 'v23.0.0-nightly…' → { major, minor, patch, pre } | null. 입력 길이 상한 80자. */
 export function parseNodeVersion(v) {
   if (typeof v !== 'string') return null;
   const s = v.trim();
@@ -71,16 +81,27 @@ function cmp(a, b) {
 }
 
 /**
+ * 보안 잔여 11-27 G4: 보안 하한 미만인가. p 는 지원 major · minVersion 이상으로 판정된 버전.
+ * 하한이 없거나(계약에 없음) major 가 다르면 null(판정하지 않는다 — 지어내지 않는다). 같은 숫자의 사전 배포판은 미만이다(semver).
+ */
+function belowFloor(p, contract) {
+  const floor = parseNodeVersion(contract.securityFloor);
+  if (!floor || floor.major !== p.major) return null;
+  const c = cmp(p, floor);
+  return c < 0 || (c === 0 && Boolean(p.pre));
+}
+
+/**
  * 버전 문자열 판정. 결과는 화면·서비스 점검·기동 로그가 같이 쓴다.
  * @returns {{node:string, major:number|null, supported:boolean|null, code:string, level:'ok'|'warn'|'unknown',
- *            releaseRelation:'same'|'older'|'newer'|null, prerelease:boolean}}
+ *            releaseRelation:'same'|'older'|'newer'|null, prerelease:boolean, belowSecurityFloor:boolean|null}}
  */
 export function judgeVersion(v, contract = RUNTIME_CONTRACT) {
   const node = typeof v === 'string' ? capStr(v.trim(), 80) : '';
   const p = parseNodeVersion(v);
-  if (!p) return { node, major: null, supported: null, code: 'unparsed', level: 'unknown', releaseRelation: null, prerelease: false };
+  if (!p) return { node, major: null, supported: null, code: 'unparsed', level: 'unknown', releaseRelation: null, prerelease: false, belowSecurityFloor: null };
   const prerelease = Boolean(p.pre);
-  const base = { node, major: p.major, prerelease };
+  const base = { node, major: p.major, prerelease, belowSecurityFloor: null };
   if (!contract.supportedMajors.includes(p.major)) {
     return { ...base, supported: false, code: 'unsupported-major', level: 'warn', releaseRelation: null };
   }
@@ -89,7 +110,7 @@ export function judgeVersion(v, contract = RUNTIME_CONTRACT) {
   const rel = parseNodeVersion(contract.releaseVersion);
   const c = rel ? cmp(p, rel) : null;
   const releaseRelation = c == null ? null : c === 0 ? 'same' : c < 0 ? 'older' : 'newer';
-  return { ...base, supported: true, code: c === 0 && !prerelease ? 'release' : 'supported', level: 'ok', releaseRelation };
+  return { ...base, supported: true, code: c === 0 && !prerelease ? 'release' : 'supported', level: 'ok', releaseRelation, belowSecurityFloor: belowFloor(p, contract) };
 }
 
 function errCode(e) {
@@ -218,10 +239,12 @@ export function runtimeStatus() {
     supported: v.supported,
     code: v.code,
     releaseRelation: v.releaseRelation,
+    belowSecurityFloor: v.belowSecurityFloor ?? null, // 보안 잔여 11-27 G4 — 관리자 판본에만(runtimeForHealth(false) 는 state 하나)
     contract: {
       supportedMajors: [...RUNTIME_CONTRACT.supportedMajors],
       minVersion: RUNTIME_CONTRACT.minVersion,
       releaseVersion: RUNTIME_CONTRACT.releaseVersion,
+      securityFloor: RUNTIME_CONTRACT.securityFloor,
       engines: enginesRange(),
     },
     selfCheck: { ...sc },
@@ -257,17 +280,21 @@ export function runtimeLogLine(s = runtimeStatus()) {
       : s.code === 'below-minimum' ? `최소 ${c.minVersion} 미만(node:sqlite 없음 → NDJSON 폴백)`
         : s.code === 'unsupported-major' ? `지원하지 않는 major(지원 ${c.supportedMajors.join('·')}.x, 계약 ${c.engines})`
           : '버전 판독 불가';
+  // 보안 잔여 11-27 G4: 보안 하한 미만 — 고친 항목을 나열하지 않는다(어느 패치에서 무엇이 빠졌는지는 버전마다 다르다 · 정직).
+  const floor = s.belowSecurityFloor === true
+    ? ` · ⚠ 보안 하한(${c.securityFloor}) 미만 — 그 뒤 나온 Node 보안 수정이 빠져 있습니다. 포탈 자동 업그레이드는 Node 런타임을 바꾸지 않으니 최신 설치 패키지로 다시 설치하세요`
+    : '';
   const sc = s.selfCheck || {};
   const chk = sc.state === 'ok' ? `전역 fetch + undici Agent 자가 점검 통과(${sc.ms}ms)`
     : sc.state === 'mismatch' ? `⚠ 전역 fetch + undici Agent 자가 점검 실패(${sc.code}) — 패키지 undici.fetch 는 통과: 런타임 불일치. 장비·엣지 통신 실패는 장비 장애가 아닐 수 있습니다`
       : sc.state === 'timeout' || sc.state === 'error' ? `자가 점검 판정 불가(${sc.code || sc.state})`
         : sc.state === 'running' ? '자가 점검 중' : '자가 점검 안 함';
-  return `[runtime] Node ${s.node || '?'} — ${ver} · ${chk}`;
+  return `[runtime] Node ${s.node || '?'} — ${ver}${floor} · ${chk}`;
 }
 
 /**
  * 기동 진입점이 부른다(index.js — 리드 요청). 기다리지 않아도 된다: 끝나면 로그 한 줄을 남긴다.
- * 비지원·불일치는 console.warn, 나머지는 console.log. 같은 프로세스에서 두 번 불러도 한 번만 돈다(진행 중 합류).
+ * 비지원·불일치·보안 하한 미만(보안 잔여 11-27 G4)은 console.warn, 나머지는 console.log. 같은 프로세스에서 두 번 불러도 한 번만 돈다(진행 중 합류).
  *
  * '판정 불가(error·timeout)' 는 기동 직후 부하(폴러 수십 개가 동시에 뜬다)로도 생길 수 있어, 그 경우만 `retryDelaysMs`
  * 간격으로 다시 본다(기본 1분·5분 — 두 번). 불일치(mismatch)는 결정적이므로 다시 보지 않는다. 런타임은 프로세스 수명 동안
@@ -277,7 +304,8 @@ export function runtimeLogLine(s = runtimeStatus()) {
 export function startRuntimeCheck({ log = console, retryDelaysMs = [60_000, 300_000], ...opts } = {}) {
   const say = (s) => {
     const line = runtimeLogLine(s);
-    try { (s.state === 'ok' || s.state === 'unchecked' || s.state === 'checking' ? log.log : log.warn).call(log, line); } catch { /* 로그 실패 무시 */ }
+    const quiet = (s.state === 'ok' || s.state === 'unchecked' || s.state === 'checking') && s.belowSecurityFloor !== true;
+    try { (quiet ? log.log : log.warn).call(log, line); } catch { /* 로그 실패 무시 */ }
   };
   const delays = Array.isArray(retryDelaysMs) ? retryDelaysMs.filter((n) => Number.isFinite(n) && n >= 0).slice(0, 5) : [];
   const attempt = (i) => runRuntimeSelfCheck(opts).then((s) => {
@@ -303,10 +331,16 @@ export function runtimeServiceRow({ isAdmin = false } = {}) {
   const s = runtimeStatus();
   const at = s.selfCheck?.at || Date.now();
   const tail = isAdmin ? ` — ${runtimeLogLine(s).replace(/^\[runtime\] /, '')}` : '';
+  // 보안 잔여 11-27 G4: 보안 하한 미만은 ok·checking 이어도 warn. 비관리자 문구에는 버전 숫자(서버 · 하한)를 싣지 않는다.
+  //   정기 점검 보고의 '포탈 내부 서비스'(periodic/readers/services.js — 비관리자 판본)도 이 행을 세어 '주의' 가 된다(의도 — 재설치 전까지).
+  const below = s.belowSecurityFloor === true;
+  const floorMsg = isAdmin
+    ? '보안 패치가 빠진 Node 런타임 — 엣지는 중앙의 엣지 배포를 다시 실행하고, 소스 설치면 Node 를 보안 하한 이상으로 올리세요'
+    : '보안 패치가 빠진 Node 런타임 — 관리자에게 알리세요';
   switch (s.state) {
-    case 'ok': return { status: 'ok', detail: `지원 런타임 · 통신 자가 점검 통과${tail}`, at };
-    case 'checking': return { status: 'ok', detail: `통신 자가 점검 중${tail}`, at };
-    case 'unchecked': return { status: 'warn', detail: `통신 자가 점검을 돌리지 않았습니다(기동 진입점 확인)${tail}`, at };
+    case 'ok': return below ? { status: 'warn', detail: `${floorMsg}${tail}`, at } : { status: 'ok', detail: `지원 런타임 · 통신 자가 점검 통과${tail}`, at };
+    case 'checking': return { status: below ? 'warn' : 'ok', detail: `${below ? `${floorMsg} · ` : ''}통신 자가 점검 중${tail}`, at };
+    case 'unchecked': return { status: 'warn', detail: `통신 자가 점검을 돌리지 않았습니다(기동 진입점 확인)${below ? ` · ${floorMsg}` : ''}${tail}`, at };
     case 'mismatch': return { status: 'warn', detail: `런타임 불일치 — 전역 fetch 와 undici Agent 가 맞지 않아 장비·엣지 HTTPS 통신이 실패합니다. 수집 실패를 장비 장애로 판단하지 마세요. 설치 패키지에 든 Node(계약 ${s.contract.engines})로 실행하세요${tail}`, at };
     case 'unsupported': return { status: 'warn', detail: `지원 범위 밖 Node(계약 ${s.contract.engines}) — 검증하지 않은 런타임입니다${tail}`, at };
     default: return { status: 'warn', detail: `통신 자가 점검을 판정하지 못했습니다${tail}`, at };

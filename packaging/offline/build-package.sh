@@ -17,12 +17,21 @@
 #           script can be re-run on an air-gapped build host.
 #
 # Usage:
-#   packaging/offline/build-package.sh [--node-version 22.23.2] [--out DIR]
-#   packaging/offline/build-package.sh --offline --node-tarball /path/node-v22.23.2-linux-x64.tar.xz
+#   packaging/offline/build-package.sh [--node-version 22.23.5] [--out DIR]
+#   packaging/offline/build-package.sh --offline --node-tarball /path/node-v22.23.5-linux-x64.tar.xz
+#   packaging/offline/build-package.sh ... --node-sha256 <64자리 sha256>   # 저장소에 고정되지 않은 다른 버전을 넣을 때만
+#
+# 런타임 무결성(보안 잔여 11-27 G4): Node 압축본은 풀기 전에 packaging/node-runtime.sha256(저장소 고정값)과 대조한다.
+#   온라인 받기는 SHASUMS256.txt(같은 채널 — 전송 손상)와 저장소 고정값(다른 채널) 둘 다 맞아야 하고, --node-tarball 도 같은 고정값과 맞아야 한다.
+#   고정되지 않은 버전은 nodejs.org SHASUMS256.txt 의 서명을 확인한 뒤 --node-sha256 으로 명시한다(환경 변수로는 받지 않는다 —
+#   셸에 남은 값이 조용히 고정값을 건너뛰지 않게).
 
 set -euo pipefail
 
-NODE_VERSION="${NODE_VERSION:-22.23.2}"
+NODE_VERSION="${NODE_VERSION:-22.23.5}"
+# 검증 버전(server/src/util/runtimeCheck.js RUNTIME_CONTRACT.releaseVersion 과 같아야 한다 — 시험이 대조). 아래 판정·문구는 이 변수 하나만 쓴다.
+VERIFIED_NODE_VERSION="22.23.5"
+NODE_SHA256=""
 ARCH="x64"
 OUT_DIR=""
 OFFLINE="${OFFLINE:-0}"
@@ -34,12 +43,53 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --node-version) NODE_VERSION="$2"; shift 2 ;;
     --node-tarball) NODE_TARBALL="$2"; shift 2 ;;
+    --node-sha256) NODE_SHA256="$2"; shift 2 ;;
     --offline) OFFLINE=1; shift ;;
     --out) OUT_DIR="$2"; shift 2 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+
+# 보안 잔여 11-27 G4 — 런타임 압축본 해시 확인(풀기 전 · mktemp · 웹 빌드보다 먼저 — 실패가 싸게).
+NODE_PIN_FILE="$REPO_ROOT/packaging/node-runtime.sha256"
+if [[ -n "$NODE_SHA256" ]]; then
+  NODE_SHA256="$(printf '%s' "$NODE_SHA256" | tr '[:upper:]' '[:lower:]')"
+  [[ "$NODE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "ERROR: --node-sha256 은 64자리 16진수 sha256 이어야 합니다." >&2; exit 1; }
+fi
+vp_node_pin_check() { # <압축본 경로> <기대 파일 이름(node-vX.Y.Z-linux-ARCH.tar.xz)>
+  local file="$1" name="$2" actual expected n
+  actual="$(sha256sum -- "$file" | cut -d' ' -f1)" || actual=""
+  [[ "$actual" =~ ^[0-9a-f]{64}$ ]] || { echo "ERROR: Node 런타임 압축본의 해시를 계산하지 못했습니다($file)." >&2; return 1; }
+  if [[ -n "$NODE_SHA256" ]]; then
+    if [[ "$actual" == "$NODE_SHA256" ]]; then
+      echo "    런타임 해시 확인: --node-sha256 명시값 일치(저장소 고정값이 아님 — 운영 배포 전 확인)"
+      return 0
+    fi
+    echo "ERROR: Node 런타임 압축본의 해시가 --node-sha256 명시값과 다릅니다 — 변조·손상되었거나 다른 파일입니다." >&2
+    return 1
+  fi
+  [[ -r "$NODE_PIN_FILE" ]] || { echo "ERROR: 저장소 고정값 파일(packaging/node-runtime.sha256)을 읽지 못했습니다 — 런타임 무결성을 확인할 수 없어 중단합니다." >&2; return 1; }
+  # 기대 이름은 압축본 파일 이름이 아니라 NODE_VERSION 에서 만든다(이름을 믿지 않는다 — 내용 해시로 판정).
+  expected="$(awk -v n="$name" '$0 !~ /^#/ && NF == 2 && $2 == n { print $1 }' "$NODE_PIN_FILE")"
+  n="$(printf '%s' "$expected" | grep -c . || true)"
+  if [[ "$n" != "1" ]]; then
+    echo "ERROR: Node ${NODE_VERSION} 은 저장소에 고정된 해시가 없습니다(packaging/node-runtime.sha256 의 ${name}) — 검증 버전 ${VERIFIED_NODE_VERSION} 을 쓰거나," >&2
+    echo "       nodejs.org SHASUMS256.txt 의 서명을 확인한 뒤 --node-sha256 <해시> 로 명시하세요. (NODE_VERSION 환경 변수가 있으면 기본값이 바뀝니다 — 공식 node 도커 이미지가 설정합니다.)" >&2
+    return 1
+  fi
+  if [[ "$actual" != "$expected" ]]; then
+    echo "ERROR: Node 런타임 압축본의 해시가 저장소 고정값(packaging/node-runtime.sha256)과 다릅니다 — 변조·손상되었거나 다른 버전입니다." >&2
+    echo "       검증 버전 ${VERIFIED_NODE_VERSION} 의 node-v${VERIFIED_NODE_VERSION}-linux-${ARCH}.tar.xz 를 받으세요. 다른 버전을 꼭 넣어야 하면 nodejs.org SHASUMS256.txt 의 서명을 확인한 뒤 --node-sha256 <해시> 로 지정하세요." >&2
+    return 1
+  fi
+  echo "    런타임 해시 확인: 저장소 고정값 일치(${name})"
+}
+if [[ -n "$NODE_TARBALL" ]]; then
+  [[ -f "$NODE_TARBALL" ]] || { echo "node tarball not found: $NODE_TARBALL" >&2; exit 1; }
+  echo "==> Node 런타임 압축본 해시 확인: $NODE_TARBALL"
+  vp_node_pin_check "$NODE_TARBALL" "node-v${NODE_VERSION}-linux-${ARCH}.tar.xz" || exit 1
+fi
 
 VERSION="$(node -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || echo 0.0.0)"
 PKG_NAME="vmware-portal"
@@ -61,8 +111,7 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 # 1) Obtain the Node.js runtime --------------------------------------------
 mkdir -p "$STAGE/runtime"
 if [[ -n "$NODE_TARBALL" ]]; then
-  echo "==> Using local Node.js tarball: $NODE_TARBALL"
-  [[ -f "$NODE_TARBALL" ]] || { echo "node tarball not found: $NODE_TARBALL" >&2; exit 1; }
+  echo "==> Using local Node.js tarball: $NODE_TARBALL"   # 해시는 위(인자 파싱 직후 — 보안 잔여 11-27 G4)에서 이미 확인했다
   tar -xf "$NODE_TARBALL" -C "$STAGE/runtime"
 elif [[ "$OFFLINE" == "1" ]]; then
   echo "ERROR: --offline 모드에서는 --node-tarball 로 미리 받은 Node 압축본을 지정해야 합니다." >&2
@@ -75,6 +124,8 @@ else
   curl -fsSL "$NODE_SHA_URL" -o "$BUILD_DIR/SHASUMS256.txt" || { echo "ERROR: SHASUMS256.txt 다운로드 실패 — Node 런타임 무결성을 검증할 수 없어 빌드를 중단합니다" >&2; exit 1; }
   ( cd "$BUILD_DIR" && grep " ${NODE_PKG}.tar.xz\$" SHASUMS256.txt | sha256sum -c - )
   echo "    checksum OK"
+  # 보안 잔여 11-27 G4: SHASUMS256.txt 는 압축본과 같은 채널이다 — 저장소 고정값과도 맞아야 푼다.
+  vp_node_pin_check "$BUILD_DIR/${NODE_PKG}.tar.xz" "${NODE_PKG}.tar.xz" || exit 1
   tar -xJf "$BUILD_DIR/${NODE_PKG}.tar.xz" -C "$STAGE/runtime"
 fi
 # Normalize the extracted runtime directory to runtime/node
@@ -84,13 +135,13 @@ mv "$EXTRACTED" "$STAGE/runtime/node"
 
 NODE_BIN="$STAGE/runtime/node/bin/node"
 NPM_CLI="$STAGE/runtime/node/lib/node_modules/npm/bin/npm-cli.js"
-# 검토 I-06: 런타임 계약은 Node 22.x(검증 22.23.2 — server/src/util/runtimeCheck.js RUNTIME_CONTRACT). 다른 major 를 넣으면
+# 검토 I-06: 런타임 계약은 Node 22.x(검증 버전 = VERIFIED_NODE_VERSION — server/src/util/runtimeCheck.js RUNTIME_CONTRACT). 다른 major 를 넣으면
 # 장비 통신(전역 fetch + undici Agent)이 실패할 수 있다 — 패키지는 만들되 크게 경고한다(포탈도 기동 때 같은 점검을 한다).
 BUNDLED_NODE_VER="$("$NODE_BIN" -v 2>/dev/null || echo unknown)"
 if [[ "$BUNDLED_NODE_VER" != v22.* ]]; then
-  echo "⚠⚠ 번들 Node 런타임이 ${BUNDLED_NODE_VER} 입니다 — 지원 범위는 Node 22.x(검증 22.23.2)입니다. 장비 통신이 실패할 수 있습니다(docs/INSTALL.md 부록 A.0)." >&2
-elif [[ "$BUNDLED_NODE_VER" != "v22.23.2" ]]; then
-  echo "ⓘ 번들 Node 런타임 ${BUNDLED_NODE_VER} — 계약(22.x) 안이지만 검증 버전(22.23.2)과 다릅니다."
+  echo "⚠⚠ 번들 Node 런타임이 ${BUNDLED_NODE_VER} 입니다 — 지원 범위는 Node 22.x(검증 ${VERIFIED_NODE_VERSION})입니다. 장비 통신이 실패할 수 있습니다(docs/INSTALL.md 부록 A.0)." >&2
+elif [[ "$BUNDLED_NODE_VER" != "v${VERIFIED_NODE_VERSION}" ]]; then
+  echo "ⓘ 번들 Node 런타임 ${BUNDLED_NODE_VER} — 계약(22.x) 안이지만 검증 버전(${VERIFIED_NODE_VERSION})과 다릅니다."
 fi
 run_npm() { "$NODE_BIN" "$NPM_CLI" "$@"; }
 

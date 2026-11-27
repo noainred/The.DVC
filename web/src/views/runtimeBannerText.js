@@ -12,7 +12,8 @@
  * 규칙:
  *   · mismatch(통신 불일치 확인) — 모든 계정에 보인다(장비 장애 오판을 막는 것이 목적). 상세는 관리자 응답에만 있다.
  *   · unsupported(계약 밖 버전, 통신 자가 점검은 통과했거나 아직) · error(판정 불가) — 관리자 응답(상세 필드)이 있을 때만.
- *   · ok · checking · unchecked · 모르는 값 — 배너 없음(없는 문제를 만들지 않는다).
+ *   · ok · checking · unchecked · 모르는 값 — 배너 없음(없는 문제를 만들지 않는다). 단 관리자 응답의 belowSecurityFloor === true 면
+ *     '보안 패치가 빠진 Node 런타임'(warn — 보안 잔여 11-27 G4). mismatch · unsupported · error 가 먼저다.
  * ⚠ 문구에 백틱 금지(BoldText 는 강조 표기만 해석한다) — 값 인용은 홑화살괄호. 버전 숫자 뒤에 조사를 붙이지 않는다.
  */
 
@@ -68,6 +69,17 @@ export function runtimeBanner(health) {
       tone: 'warn', state, title: '런타임 통신 자가 점검 판정 불가',
       text: `포탈 서버 ${nodeTag}의 통신 자가 점검을 판정하지 못했습니다${scCode ? `(${q(scCode)})` : ''} — 루프백 통신이 막혔거나 점검이 시한을 넘겼습니다. `
         + '장비 수집 실패가 함께 보이면 특수 기능 › 다빈치 서비스 점검의 Node 런타임 호환성 행을 확인하세요.',
+    };
+  }
+  // 보안 잔여 11-27 G4: 계약 안이지만 보안 하한 미만 — 관리자 응답에만 있는 belowSecurityFloor 가 정확히 true 일 때만(구버전 서버 · false · 없음 → 배너 없음).
+  //   고친 항목을 나열하지 않는다(빠진 수정은 버전마다 다르다). 하한 숫자는 API 의 contract.securityFloor 에서 — 화면에 박지 않는다.
+  if ((state === 'ok' || state === 'checking' || state === 'unchecked') && rt.belowSecurityFloor === true) {
+    const floor = str(rt.contract?.securityFloor);
+    return {
+      tone: 'warn', state, title: '보안 패치가 빠진 Node 런타임',
+      text: `포탈 서버의 ${nodeTag}는 ${floor ? `보안 하한(${q(floor)})` : '보안 하한'}보다 낮아 그 뒤 나온 Node 보안 수정이 빠져 있습니다. `
+        + '포탈 자동 업그레이드는 Node 런타임을 바꾸지 않으니 최신 설치 패키지(리눅스 install.sh · Windows 수집기 zip)로 다시 설치하세요. '
+        + '엣지는 중앙의 엣지 배포를 다시 실행하고, 소스 설치면 Node 를 보안 하한 이상으로 올리세요.',
     };
   }
   return null;

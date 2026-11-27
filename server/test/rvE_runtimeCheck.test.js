@@ -1,7 +1,8 @@
 // 검토 I-06 — Node 런타임 계약(engines·.nvmrc·.node-version·CI·릴리스·오프라인 번들)과 기동 시 호환성 자가 점검.
 //
 // 고정하는 것:
-//   ① 버전 판정(문자열 여러 개 — 지원 major·하한·릴리스 일치·판독 불가). 이 컨테이너의 22.22.2 는 'supported · older'.
+//   ① 버전 판정(문자열 여러 개 — 지원 major·하한·릴리스 일치·판독 불가). 22.22.2 같은 낮은 패치는 'supported · older'.
+//   보안 잔여 11-27 G4: 검증 버전 리터럴은 닻 하나('22.23.5')만 두고 나머지는 RUNTIME_CONTRACT.releaseVersion 에서 만든다(REL).
 //   ② 계약 일치 — package.json 3개 engines · .nvmrc · .node-version · ci.yml · release.yml · build-package.sh 기본값 · 설치 문서.
 //   ③ 자가 점검을 **실제 루프백 서버**로: 지원 런타임에서 통과 / 다른 major 의 전역 fetch 를 흉내 낸 호출(새 형식 핸들러로
 //      패키지 undici 6 Agent 를 직접 dispatch — 그 Agent 가 실제로 'invalid onError method' 를 던진다)이면 'mismatch' /
@@ -24,6 +25,8 @@ import {
 const SERVER = path.resolve(new URL('..', import.meta.url).pathname);
 const ROOT = path.resolve(SERVER, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+const REL = RUNTIME_CONTRACT.releaseVersion;
+const RE_REL = REL.replace(/\./g, '\\.');
 
 /**
  * 다른 major(Node 24+) 의 전역 fetch 흉내: 내장 undici 7+ 는 디스패처에 **새 형식 핸들러**(onRequestStart·onResponseStart…)를 준다.
@@ -50,11 +53,11 @@ const newStyleFetch = async (url, init = {}) => {
 test('① 버전 판정 — 지원 major·하한·릴리스 일치·판독 불가', () => {
   const j = (v) => judgeVersion(v);
   assert.deepEqual(RUNTIME_CONTRACT.supportedMajors, [22]);
-  assert.equal(RUNTIME_CONTRACT.releaseVersion, '22.23.2');
+  assert.equal(RUNTIME_CONTRACT.releaseVersion, '22.23.5'); // 닻(보안 잔여 11-27 G4)
   // 릴리스와 정확히 같다
-  assert.equal(j('v22.23.2').code, 'release');
-  assert.equal(j('22.23.2').code, 'release');
-  assert.equal(j('v22.23.2').releaseRelation, 'same');
+  assert.equal(j(`v${REL}`).code, 'release');
+  assert.equal(j(REL).code, 'release');
+  assert.equal(j(`v${REL}`).releaseRelation, 'same');
   // 이 개발 컨테이너의 22.22.2 — 지원 major · 하한 이상 · 릴리스보다 낮은 패치 → 계약 안(경고 아님)
   const dev = j('v22.22.2');
   assert.deepEqual([dev.supported, dev.code, dev.level, dev.releaseRelation], [true, 'supported', 'ok', 'older']);
@@ -73,7 +76,7 @@ test('① 버전 판정 — 지원 major·하한·릴리스 일치·판독 불�
     assert.deepEqual([r.supported, r.code, r.level], [null, 'unparsed', 'unknown'], String(v).slice(0, 30));
   }
   // 사전 배포판은 'release' 가 아니다(같은 숫자라도)
-  const pre = j('v22.23.2-rc.1');
+  const pre = j(`v${REL}-rc.1`);
   assert.deepEqual([pre.supported, pre.code, pre.prerelease, pre.releaseRelation], [true, 'supported', true, 'same']);
   assert.equal(parseNodeVersion('v22.23.2').patch, 2);
   // 이 프로세스(node -v)도 판정된다
@@ -115,7 +118,7 @@ test('② 계약 일치 — engines 3개 · .nvmrc · .node-version · CI · 릴
     const t = read(p);
     assert.doesNotMatch(t, /Node 20\+|Node\.js 22 LTS 이상|node-v22\.20\.0/, `${p} 에 옛 요구 버전`);
   }
-  assert.match(read('docs/INSTALL.md'), /22\.23\.2/, 'INSTALL.md 가 릴리스 검증 버전을 말한다');
+  assert.match(read('docs/INSTALL.md'), new RegExp(RE_REL), 'INSTALL.md 가 릴리스 검증 버전을 말한다');
   assert.match(read('docs/INSTALL.md'), />=22\.5\.0 <23/, 'INSTALL.md 가 engines 범위를 말한다');
 });
 
@@ -162,7 +165,7 @@ test('③ 자가 점검 — 둘 다 실패면 error(루프백 자체가 막힘 �
 });
 
 test('④ 상태 · 서비스 점검 행 · 기동 로그 — 불일치를 주입하면 warn 과 경고 로그', async () => {
-  _resetRuntimeCheckForTest('v22.23.2');
+  _resetRuntimeCheckForTest(`v${REL}`);
   assert.equal(runtimeStatus().state, 'unchecked');
   assert.equal(runtimeServiceRow().status, 'warn', '자가 점검을 안 돌렸으면 정상이라 말하지 않는다');
   const lines = { log: [], warn: [] };
@@ -170,13 +173,13 @@ test('④ 상태 · 서비스 점검 행 · 기동 로그 — 불일치를 주�
   const s = await startRuntimeCheck({ log, fetchImpl: newStyleFetch, timeoutMs: 5000 });
   assert.equal(s.state, 'mismatch');
   assert.equal(lines.warn.length, 1);
-  assert.match(lines.warn[0], /^\[runtime\] Node v22\.23\.2 — .*자가 점검 실패\(UND_ERR_INVALID_ARG\).*장비 장애가 아닐 수 있습니다/);
+  assert.match(lines.warn[0], new RegExp(`^\\[runtime\\] Node v${RE_REL} — .*자가 점검 실패\\(UND_ERR_INVALID_ARG\\).*장비 장애가 아닐 수 있습니다`));
   const row = runtimeServiceRow({ isAdmin: true });
   assert.equal(row.status, 'warn');
   assert.match(row.detail, /런타임 불일치/);
   assert.match(row.detail, /UND_ERR_INVALID_ARG/);
   const rowOp = runtimeServiceRow({ isAdmin: false });
-  assert.doesNotMatch(rowOp.detail, /v22\.23\.2|UND_ERR/, '버전·코드는 관리자에게만');
+  assert.doesNotMatch(rowOp.detail, new RegExp(`v${RE_REL}|UND_ERR`), '버전·코드는 관리자에게만');
   // 비관리자 /health 모양은 state 하나
   assert.deepEqual(runtimeForHealth(false), { state: 'mismatch' });
   assert.equal(runtimeForHealth(true).selfCheck.code, 'UND_ERR_INVALID_ARG');
@@ -184,13 +187,13 @@ test('④ 상태 · 서비스 점검 행 · 기동 로그 — 불일치를 주�
   const s2 = await startRuntimeCheck({ log, timeoutMs: 5000 });
   assert.equal(s2.state, 'ok');
   assert.equal(lines.log.length, 1);
-  assert.match(lines.log[0], /릴리스 검증 버전\(22\.23\.2\)과 같음 · 전역 fetch \+ undici Agent 자가 점검 통과/);
+  assert.match(lines.log[0], new RegExp(`릴리스 검증 버전\\(${RE_REL}\\)과 같음 · 전역 fetch \\+ undici Agent 자가 점검 통과`));
   assert.equal(runtimeServiceRow().status, 'ok');
-  // 이 컨테이너 버전(22.22.2)처럼 패치가 다르면 — ok 이고 그 사실을 말한다
+  // 22.22.2 처럼 패치가 다르면 — ok 이고 그 사실을 말한다(보안 하한 미만 경고는 secResidual1127Runtime 이 본다)
   _resetRuntimeCheckForTest('v22.22.2');
   await runRuntimeSelfCheck({ timeoutMs: 5000 });
   assert.equal(runtimeStatus().state, 'ok');
-  assert.match(runtimeLogLine(), /릴리스 검증 버전\(22\.23\.2\)보다 낮은 버전 — 계약 안/);
+  assert.match(runtimeLogLine(), new RegExp(`릴리스 검증 버전\\(${RE_REL}\\)보다 낮은 버전 — 계약 안`));
   // 비지원 major 는 자가 점검이 통과해도 unsupported(warn)
   _resetRuntimeCheckForTest('v26.6.0');
   await runRuntimeSelfCheck({ timeoutMs: 5000 });
@@ -207,7 +210,7 @@ test('④ 상태 · 서비스 점검 행 · 기동 로그 — 불일치를 주�
 });
 
 test('④ 판정 불가(error)는 기동 직후 부하일 수 있어 다시 본다 — 불일치는 다시 보지 않는다(결정적)', async () => {
-  _resetRuntimeCheckForTest('v22.23.2');
+  _resetRuntimeCheckForTest(`v${REL}`); // 보안 하한 이상이어야 '통과 = log' 가 된다(하한 미만은 warn — secResidual1127Runtime)
   let n = 0;
   const flaky = async (u, i) => { n++; if (n === 1) throw new TypeError('fetch failed', { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) }); return fetch(u, i); };
   const flakyUndici = async () => { const m = await import('undici'); return { Agent: m.Agent, fetch: async (u, i) => { if (n <= 1) throw new Error('loopback down'); return m.fetch(u, i); } }; };
@@ -218,14 +221,14 @@ test('④ 판정 불가(error)는 기동 직후 부하일 수 있어 다시 본�
   assert.deepEqual(lines.map((l) => l[0]), ['warn', 'log'], '판정 불가 경고 1줄 + 통과 1줄');
   assert.match(lines[0][1], /자가 점검 판정 불가\(ECONNRESET\)/);
   // 불일치는 다시 보지 않는다
-  _resetRuntimeCheckForTest('v22.23.2');
+  _resetRuntimeCheckForTest(`v${REL}`);
   let calls = 0;
   const mm = async (u, i) => { calls++; return newStyleFetch(u, i); };
   const s2 = await startRuntimeCheck({ log, fetchImpl: mm, retryDelaysMs: [5, 5], timeoutMs: 5000 });
   assert.equal(s2.state, 'mismatch');
   assert.equal(calls, 1);
   // 재시도 상한 — 계속 판정 불가면 delays 개수 + 1 번만 시도하고 끝난다(무한 루프 금지)
-  _resetRuntimeCheckForTest('v22.23.2');
+  _resetRuntimeCheckForTest(`v${REL}`);
   let tries = 0;
   const down = async () => { tries++; throw new Error('down'); };
   const s3 = await startRuntimeCheck({ log, fetchImpl: down, loadUndici: async () => ({ Agent, fetch: down }), retryDelaysMs: [1, 1], timeoutMs: 1000 });

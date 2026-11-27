@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runtimeBanner } from './runtimeBannerText.js';
 
-const contract = { supportedMajors: [22], minVersion: '22.5.0', releaseVersion: '22.23.2', engines: '>=22.5.0 <23' };
-const admin = (over) => ({ runtime: { state: 'ok', node: 'v22.23.2', major: 22, supported: true, code: 'release', contract, selfCheck: { state: 'ok', code: null }, ...over } });
+const contract = { supportedMajors: [22], minVersion: '22.5.0', releaseVersion: '22.23.5', securityFloor: '22.23.5', engines: '>=22.5.0 <23' };
+const admin = (over) => ({ runtime: { state: 'ok', node: 'v22.23.5', major: 22, supported: true, code: 'release', contract, selfCheck: { state: 'ok', code: null }, ...over } });
 
 describe('runtimeBanner — 판정', () => {
   it('정상·점검 중·미점검·필드 없음(구버전 서버)·모르는 값은 배너 없음', () => {
@@ -26,7 +26,7 @@ describe('runtimeBanner — 판정', () => {
     expect(b.text).toContain('‘UND_ERR_INVALID_ARG’');
     expect(b.text).toContain('‘>=22.5.0 <23’');
     expect(b.text).toContain('장비 장애가 아닐 수 있습니다');
-    expect(b.text).toContain('검증 버전 ‘22.23.2’');
+    expect(b.text).toContain('검증 버전 ‘22.23.5’');
   });
 
   it('불일치 — 관리자가 아닌 계정(state 만)에도 보이되 버전·코드는 없다', () => {
@@ -66,5 +66,45 @@ describe('runtimeBanner — 판정', () => {
     }
     const src = fs.readFileSync(fileURLToPath(new URL('./runtimeBannerText.js', import.meta.url)), 'utf8');
     expect(src).not.toMatch(/\\`/);
+  });
+});
+
+// 보안 잔여 11-27 G4 — 계약 안이지만 보안 하한 미만(belowSecurityFloor) 런타임.
+describe('runtimeBanner — 보안 하한 미만', () => {
+  const low = (over) => admin({ node: 'v22.23.2', code: 'supported', releaseRelation: 'older', belowSecurityFloor: true, ...over });
+
+  it('관리자 · ok/checking/unchecked · belowSecurityFloor true → warn 배너(하한 숫자는 API 값 · 재설치 안내)', () => {
+    for (const state of ['ok', 'checking', 'unchecked']) {
+      const b = runtimeBanner(low({ state }));
+      expect(b, state).not.toBeNull();
+      expect(b.tone).toBe('warn');
+      expect(b.state).toBe(state);
+      expect(b.title).toBe('보안 패치가 빠진 Node 런타임');
+      expect(b.text).toContain('Node(‘v22.23.2’)는 보안 하한(‘22.23.5’)보다 낮아');
+      expect(b.text).toContain('자동 업그레이드는 Node 런타임을 바꾸지 않으니');
+      expect(b.text).toContain('소스 설치면');
+      expect(b.text).not.toMatch(/`|\*\*|undefined|null|\s{2,}|TLS|Brotli/);
+    }
+    // 하한 숫자는 API 의 contract.securityFloor 에서 온다(화면에 박지 않는다)
+    const other = runtimeBanner(low({ contract: { ...contract, securityFloor: '22.99.1' } }));
+    expect(other.text).toContain('보안 하한(‘22.99.1’)');
+    const none = runtimeBanner(low({ contract: { engines: '>=22.5.0 <23' } }));
+    expect(none.text).toContain('보안 하한보다 낮아');
+  });
+
+  it('false · 없음(구버전 서버) · 참이 아닌 값 · 비관리자(state 만) → 배너 없음', () => {
+    expect(runtimeBanner(low({ belowSecurityFloor: false }))).toBeNull();
+    expect(runtimeBanner(low({ belowSecurityFloor: undefined }))).toBeNull();
+    expect(runtimeBanner(low({ belowSecurityFloor: 'true' }))).toBeNull();
+    expect(runtimeBanner(low({ belowSecurityFloor: 1 }))).toBeNull();
+    expect(runtimeBanner({ runtime: { state: 'ok' } })).toBeNull();
+    expect(runtimeBanner({ runtime: { state: 'ok', belowSecurityFloor: true } })).toBeNull();
+    expect(runtimeBanner(low({ state: 'weird' }))).toBeNull();
+  });
+
+  it('불일치 · 지원 범위 밖 · 판정 불가가 먼저다', () => {
+    expect(runtimeBanner(low({ state: 'mismatch', selfCheck: { state: 'mismatch', code: 'X' } })).title).toBe('포탈 서버 런타임 불일치');
+    expect(runtimeBanner(low({ state: 'unsupported' })).title).toBe('지원 범위 밖 Node 런타임');
+    expect(runtimeBanner(low({ state: 'error' })).title).toBe('런타임 통신 자가 점검 판정 불가');
   });
 });

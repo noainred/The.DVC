@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: '22.23.2'
+  NODE_VERSION: '22.23.5'
   RELEASE_TAG: downloads
   # macOS 앱을 마지막으로 빌드한 '입력 소스의 내용 해시'를 담는 마커 자산.
   # ⚠ 파일명에 버전(x.y.z)을 넣지 말 것 — `packaging/release/prune-assets.mjs:41` 이 파일명에서
@@ -159,6 +159,10 @@ jobs:
           grep -F "  ${zip}" SHASUMS256.txt > node-win.sha256
           cat node-win.sha256
           sha256sum -c node-win.sha256
+          # 보안 잔여 11-27 G4: SHASUMS256.txt 는 zip 과 같은 채널이다 — 저장소 고정값(packaging/node-runtime.sha256)과도 맞아야 한다.
+          awk -v n="$zip" '$0 !~ /^#/ && NF == 2 && $2 == n' packaging/node-runtime.sha256 > node-win.pin
+          [ "$(grep -c . node-win.pin)" = "1" ] || { echo "ERROR: packaging/node-runtime.sha256 에 ${zip} 고정값이 없습니다(NODE_VERSION 과 고정값을 함께 올릴 것)" >&2; exit 1; }
+          sha256sum -c node-win.pin
           mv "$zip" node-win.zip
 
       - name: Build Windows collector package

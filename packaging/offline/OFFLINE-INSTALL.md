@@ -36,15 +36,17 @@ packaging/offline/build-package.sh
 미리 두 가지만 준비하면 네트워크 없이도 패키지를 만들 수 있습니다:
 
 1. Node.js 런타임 압축본을 미리 받아 복사:
-   `https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz`
-   (런타임 계약: Node 22.x 만, 검증 버전 22.23.2 — 다른 major 를 넣으면 장비 통신이 실패할 수 있습니다. `docs/INSTALL.md` 부록 A.0)
+   `https://nodejs.org/dist/v22.23.5/node-v22.23.5-linux-x64.tar.xz`
+   (런타임 계약: Node 22.x 만, 검증 버전 22.23.5 — 다른 major 를 넣으면 장비 통신이 실패할 수 있습니다. `docs/INSTALL.md` 부록 A.0)
+   빌드는 압축본을 풀기 전에 해시를 저장소 고정값(`packaging/node-runtime.sha256`)과 대조하고, 다르면 멈춥니다.
+   고정되지 않은 다른 버전은 nodejs.org `SHASUMS256.txt` 의 서명을 확인한 뒤 `--node-sha256 <해시>` 로 지정해야 합니다.
 2. 의존성이 포함된 저장소(온라인에서 `npm run install:all` 1회 실행 → `node_modules` 포함).
 
 그런 다음 네트워크 없이:
 
 ```bash
 packaging/offline/build-package.sh --offline \
-  --node-tarball /경로/node-v22.23.2-linux-x64.tar.xz
+  --node-tarball /경로/node-v22.23.5-linux-x64.tar.xz
 ```
 
 > 인터넷이 어디에도 없다면 빌드 과정 없이 **미리 빌드된 tarball을 받아** 바로 설치하면 됩니다.

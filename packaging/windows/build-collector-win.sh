@@ -16,13 +16,20 @@
 #
 # Usage (run on any machine; provide a downloaded Windows Node zip):
 #   packaging/windows/build-collector-win.sh \
-#       --node-zip /path/node-v22.23.2-win-x64.zip [--out DIR]
+#       --node-zip /path/node-v22.23.5-win-x64.zip [--out DIR] [--node-sha256 <64자리 sha256>]
 #
-# Get the Node zip from: https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip
+# Get the Node zip from: https://nodejs.org/dist/v22.23.5/node-v22.23.5-win-x64.zip
+#
+# 런타임 무결성(보안 잔여 11-27 G4): zip 은 풀기 전에 packaging/node-runtime.sha256(저장소 고정값)과 대조한다.
+#   릴리스 워크플로가 zip 이름을 node-win.zip 으로 바꾸므로 이름이 아니라 **해시로** 고정값 줄을 찾는다.
+#   고정되지 않은 zip 은 nodejs.org SHASUMS256.txt 의 서명을 확인한 뒤 --node-sha256 으로 명시해야 한다(환경 변수로는 받지 않는다).
 
 set -euo pipefail
 
+# 검증 버전(server/src/util/runtimeCheck.js RUNTIME_CONTRACT.releaseVersion 과 같아야 한다 — 시험이 대조).
+VERIFIED_NODE_VERSION="22.23.5"
 NODE_ZIP="${NODE_ZIP:-}"
+NODE_SHA256=""
 OUT_DIR=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -30,6 +37,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --node-zip) NODE_ZIP="$2"; shift 2 ;;
+    --node-sha256) NODE_SHA256="$2"; shift 2 ;;
     --out) OUT_DIR="$2"; shift 2 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
@@ -37,6 +45,31 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$NODE_ZIP" && -f "$NODE_ZIP" ]] || { echo "ERROR: --node-zip <node-vXX-win-x64.zip> 가 필요합니다." >&2; exit 1; }
+
+# 보안 잔여 11-27 G4 — 런타임 zip 해시 확인(도구 검사 · unzip · 웹 빌드보다 먼저).
+if [[ -n "$NODE_SHA256" ]]; then
+  NODE_SHA256="$(printf '%s' "$NODE_SHA256" | tr '[:upper:]' '[:lower:]')"
+  [[ "$NODE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "ERROR: --node-sha256 은 64자리 16진수 sha256 이어야 합니다." >&2; exit 1; }
+fi
+if command -v sha256sum >/dev/null; then NODE_ZIP_SHA="$(sha256sum -- "$NODE_ZIP" | cut -d' ' -f1)" || NODE_ZIP_SHA=""
+elif command -v shasum >/dev/null; then NODE_ZIP_SHA="$(shasum -a 256 -- "$NODE_ZIP" | cut -d' ' -f1)" || NODE_ZIP_SHA=""
+else NODE_ZIP_SHA=""; fi
+[[ "$NODE_ZIP_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "ERROR: Node 런타임 zip 의 해시를 계산하지 못했습니다(sha256sum 또는 shasum 필요) — 무결성을 확인할 수 없어 중단합니다." >&2; exit 1; }
+if [[ -n "$NODE_SHA256" ]]; then
+  [[ "$NODE_ZIP_SHA" == "$NODE_SHA256" ]] || { echo "ERROR: Node 런타임 zip 의 해시가 --node-sha256 명시값과 다릅니다 — 변조·손상되었거나 다른 파일입니다." >&2; exit 1; }
+  echo "    런타임 해시 확인: --node-sha256 명시값 일치(저장소 고정값이 아님 — 운영 배포 전 확인)"
+else
+  NODE_PIN_FILE="$REPO_ROOT/packaging/node-runtime.sha256"
+  [[ -r "$NODE_PIN_FILE" ]] || { echo "ERROR: 저장소 고정값 파일(packaging/node-runtime.sha256)을 읽지 못했습니다 — 런타임 무결성을 확인할 수 없어 중단합니다." >&2; exit 1; }
+  NODE_PIN_NAME="$(awk -v h="$NODE_ZIP_SHA" '$0 !~ /^#/ && NF == 2 && $1 == h && $2 ~ /^node-v[0-9]+\.[0-9]+\.[0-9]+-win-x64\.zip$/ { print $2; exit }' "$NODE_PIN_FILE")"
+  if [[ -z "$NODE_PIN_NAME" ]]; then
+    echo "ERROR: Node 런타임 zip 의 해시가 저장소 고정값(packaging/node-runtime.sha256)에 없습니다 — 변조·손상되었거나 다른 버전입니다." >&2
+    echo "       검증 버전 ${VERIFIED_NODE_VERSION} 의 node-v${VERIFIED_NODE_VERSION}-win-x64.zip 을 받으세요. 다른 버전을 꼭 넣어야 하면 nodejs.org SHASUMS256.txt 의 서명을 확인한 뒤 --node-sha256 <해시> 로 지정하세요." >&2
+    exit 1
+  fi
+  echo "    런타임 해시 확인: 저장소 고정값 일치(${NODE_PIN_NAME})"
+fi
+
 command -v unzip >/dev/null || { echo "ERROR: unzip 필요" >&2; exit 1; }
 command -v zip   >/dev/null || { echo "ERROR: zip 필요" >&2; exit 1; }
 
@@ -56,6 +89,12 @@ echo "==> Windows 패키지 빌드: $PKG"
 unzip -q "$NODE_ZIP" -d "$STAGE/runtime"
 EXTRACTED="$(find "$STAGE/runtime" -maxdepth 1 -type d -name 'node-v*-win-x64' | head -1)"
 [[ -n "$EXTRACTED" ]] || { echo "node 런타임 추출 실패" >&2; exit 1; }
+# 검토 I-06 · 보안 잔여 11-27 G4: 풀린 폴더 이름으로 버전을 알린다(Windows node.exe 는 여기서 실행할 수 없다 — build-package.sh 와 같은 안내).
+case "$(basename "$EXTRACTED")" in
+  "node-v${VERIFIED_NODE_VERSION}-win-x64") ;;
+  node-v22.*) echo "ⓘ 번들 Node 런타임 $(basename "$EXTRACTED") — 계약(22.x) 안이지만 검증 버전(${VERIFIED_NODE_VERSION})과 다릅니다." ;;
+  *) echo "⚠⚠ 번들 Node 런타임이 $(basename "$EXTRACTED") 입니다 — 지원 범위는 Node 22.x(검증 ${VERIFIED_NODE_VERSION})입니다. 장비 통신이 실패할 수 있습니다(docs/INSTALL.md 부록 A.0)." >&2 ;;
+esac
 mv "$EXTRACTED" "$STAGE/runtime/node"
 
 # 2) Build web client (needs web/node_modules already installed)

@@ -48,7 +48,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.23.2' # v2.597(DEPS2597-06): release.yml NODE_VERSION 과 같은 값 — 검증한 런타임으로 빌드한다
+          node-version: '22.23.5' # v2.597(DEPS2597-06): release.yml NODE_VERSION 과 같은 값 — 검증한 런타임으로 빌드한다
 
       - name: 의존성 설치
         run: |

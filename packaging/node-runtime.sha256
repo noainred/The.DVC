@@ -1,0 +1,14 @@
+# 보안 잔여 11-27 G4 — 번들 Node 런타임 압축본의 기대 sha256(저장소 고정값 · sha256sum -c 형식).
+#
+# 왜 SHASUMS256.txt 만으로 부족한가: SHASUMS256.txt 는 압축본과 같은 채널(nodejs.org · 미러)에서 오므로 전송 손상만 잡는다.
+# 이 파일은 PR 검토를 거친 다른 채널(저장소)의 값이다 — 빌드는 둘 다 맞아야 런타임을 푼다:
+#   packaging/offline/build-package.sh(온라인 · --node-tarball) · packaging/windows/build-collector-win.sh(--node-zip) ·
+#   .github/workflows/release.yml(Windows zip 받기).
+# 검증 버전 = server/src/util/runtimeCheck.js RUNTIME_CONTRACT.releaseVersion (server/test/secResidual1127Runtime.test.js 가 대조한다).
+#
+# 출처: https://nodejs.org/dist/v22.23.5/SHASUMS256.txt — 두 줄을 그대로 복사(손으로 치지 않음).
+# 서명: SHASUMS256.txt.sig GPG 분리 서명 Good — 키 5BE8A3F6C8A5C01D106C0AD820B1A390B168D356(Antoine du Hamel ·
+#       nodejs/node v22.23.5 README 릴리스 키 목록에 있음) · 확인 2026-11-27(gpgv).
+# 버전을 올릴 때: 새 SHASUMS256.txt 의 서명을 확인한 뒤 두 줄을 함께 바꾸고, 위 확인 기록(키 지문 · 날짜)도 고친다.
+cdeb8670a0c81f51b4dc4ac61919f9b1ad917b304bf8221eb939570663d240f8  node-v22.23.5-linux-x64.tar.xz
+4a191082e9706866830379d577d2cc8a50c776fcd9436a8d061b063ed0d9a0e3  node-v22.23.5-win-x64.zip
