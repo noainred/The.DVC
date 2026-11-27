@@ -107,8 +107,10 @@ test('K — 기계가 바뀌면(주소) 기록은 잇고 경계 뒤 표본만 �
     const keep = { latest: !!store.latestOf(id), alert: !!alerts.loadState()['r1|' + id], reset: store.resetAtOf(id) };
     svc.targetsEndpointChanged([[t, { ...t, host: '10.2.0.99' }]], now + 1);
     const gone = { blocksKept: store.memBlocks(id).length === blocks0 && blocks0 > 0, latest: !!store.latestOf(id), hello: store.helloOf(id), alert: !!alerts.loadState()['r1|' + id], other: !!alerts.loadState()['r1|fm-other0001'], reset: store.resetAtOf(id) === now + 1 };
-    store.ingestSample(id, now - 500, { cpu: { pct: 99 }, up: 5 }, { hostname: 'old-late' }, now + 2);   // 늦게 온 예전 서버 표본(경계 앞)
-    const late = { latest: !!store.latestOf(id), hello: store.helloOf(id) };
+    // 늦게 온 예전 서버 표본(경계 앞) — 가동 시간이 큰 예전 서버 · 커널 메시지 · 프로세스
+    store.ingestSample(id, now - 500, { cpu: { pct: 99 }, up: 100500, km: { f: true, rc: 0, boot: Math.round(now / 1000) - 100500, bid: '11111111-1111-1111-1111-111111111111', oom: [], en: 7, es: '50.000001' } }, { hostname: 'old-late' }, now + 2);
+    store.ingestProcs(id, now - 400, { n: 9, top: [] });
+    const late = { latest: !!store.latestOf(id), hello: store.helloOf(id), km: store.kmsgOf(id), procs: !!store.latestProcsOf(id) };
     store.ingestSample(id, now + 5000, { cpu: { pct: 7 }, up: 300 }, { hostname: 'new' }, now + 5000);
     const rule = { id: 'r1', metric: 'cpu', threshold: 90, durMin: 1, op: 'ge' };
     const pts = alerts.pointsFor(store, rule, id, now + 5000);
@@ -117,7 +119,7 @@ test('K — 기계가 바뀌면(주소) 기록은 잇고 경계 뒤 표본만 �
     console.log(JSON.stringify({ keep, gone, late, now: { cpu: store.latestOf(id)?.sample?.cpu?.pct, hello: store.helloOf(id)?.hostname }, pts: pts.map((p) => p[1]), ev }));`);
   assert.deepEqual(out.keep, { latest: true, alert: true, reset: 0 }, '계정만 바뀌면 같은 기계 — 경계 없음 · 남긴다');
   assert.deepEqual(out.gone, { blocksKept: true, latest: false, hello: null, alert: false, other: true, reset: true }, '수정 전(처음 판): 메모리 묶음을 버렸다(열린 분 유실 · 늦은 표본이 쓴 분을 덮음)');
-  assert.deepEqual(out.late, { latest: false, hello: null }, '경계 앞 늦은 표본은 기록에만 — 지금 값 · OS 가 되지 않는다');
+  assert.deepEqual(out.late, { latest: false, hello: null, km: null, procs: false }, '경계 앞 늦은 표본은 기록에만 — 지금 값 · OS · 커널 메시지 기준 · 프로세스가 되지 않는다');
   assert.deepEqual(out.now, { cpu: 7, hello: 'new' });
   assert.deepEqual(out.pts, [7], '알림 판정은 경계 뒤 표본만(예전 서버의 95% 가 새 서버의 발생 · 해제가 되지 않는다)');
   assert.deepEqual(out.ev, ['endpoint:접속 주소를 바꿈 — 이 앞의 값은 예전 서버의 것입니다'], '주소를 바꾼 사건 한 줄 · 재부팅 사건 없음 · 계정만 바꾼 것은 사건 없음');
@@ -194,6 +196,75 @@ test('M — 메모리에 없던 분으로 만든 묶음은 DB 의 있는 줄과 
   assert.equal(out.after, 25, '수정 전: 재시작 뒤 15표본짜리 묶음이 INSERT OR REPLACE 로 앞 10표본을 덮었다(n=15)');
   assert.equal(out.sumN, 25, '1분 요약도 합친 묶음에서'); assert.equal(out.sumA, 58, '평균 (10×10 + 15×90) / 25');
   assert.deepEqual(out.procs, [5, 6, 7], '프로세스 묶음도 합친다');
+});
+
+test('M2 — 다시 연 묶음: 메모리에 없던 분(재시작 뒤 더 앞선 분)도 합쳐 쓰고 · 합쳐 쓴 분을 다시 열어도 합친다(얼림 · 풀림이 표시를 잇는다)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')});
+    const db = await import(${J('focusmon/db.js')});
+    const M0 = Math.floor(Date.now() / 60_000) * 60_000 - 10 * 60_000; const m0 = M0 / 60_000; const M1 = M0 + 60_000;
+    const id = 'fm-rrrrrrrr02';
+    const write = async () => { const w = await db.writeBlocks(store.drainWrites(100000)); if (!w.ok) throw new Error(w.error); };
+    const nOf = async (m) => (await db.readMetric(id, m, m))[0]?.n ?? 0;
+    for (let i = 0; i < 10; i++) store.ingestSample(id, M0 + i * 2000, { cpu: { pct: 10 } }, null, M0 + i * 2000);
+    store.closeAll(); await write();
+    store._resetForTest();
+    // 재시작 뒤 엣지가 M1 을 먼저 보내고(메모리 첫 묶음) 이어 M0 의 늦은 표본 5 를 보냈다 — M0 은 메모리에 없는 분(다시 연 새 묶음)
+    for (let i = 0; i < 5; i++) store.ingestSample(id, M1 + i * 2000, { cpu: { pct: 20 } }, null, M1 + 20_000);
+    for (let i = 0; i < 5; i++) store.ingestSample(id, M0 + 30_000 + i * 2000, { cpu: { pct: 30 } }, null, M1 + 21_000);
+    store.flushReopened(id); await write();
+    const a = await nOf(m0);
+    // 그 분(M0 — 메모리엔 늦은 5표본뿐)을 또 다시 연다 — 얼려 둔 묶음에도 합쳐 쓰기 표시가 남아야 한다
+    store.ingestSample(id, M0 + 50_000, { cpu: { pct: 40 } }, null, M1 + 22_000);
+    store.flushReopened(id); await write();
+    const b = await nOf(m0);
+    console.log(JSON.stringify({ a, b }));`, { DATA_SOURCE: 'live' });
+  assert.equal(out.a, 15, '수정 전: 다시 연 새 묶음(5표본)이 앞 10표본을 덮었다');
+  assert.equal(out.b, 16, '두 번째로 다시 열어도 합친다(얼림 · 풀림이 표시를 버리면 메모리의 6표본으로 덮는다)');
+});
+
+test('Q3 — 분 묶음이 대기열 상한을 넘겨도 같은 자르기(잘린 줄 표시 · 센다 · 그 분의 새 부하 값은 새 줄로)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')});
+    const t0 = Math.floor(Date.now() / 60_000) * 60_000;
+    store.setLoad('fm-keep00000002', { cpuPct: 1 }, t0);
+    for (let i = 0; i < store.WRITEQ_MAX - 1; i++) store.setLoad('fm-l' + String(i).padStart(9, '0'), { cpuPct: 1 }, t0 + 1);
+    const id = 'fm-bbbbbbbb09';
+    for (let i = 0; i < 3; i++) store.ingestSample(id, t0 - 60_000 + i * 1000, { cpu: { pct: 5 } }, null, t0);
+    store.closeMinutes(t0 + store.GRACE_MS + 1, new Set([id]));   // m · s1 두 줄 → 상한을 넘는다
+    const st = store.memStats();
+    store.setLoad('fm-keep00000002', { cpuPct: 2 }, t0 + 2);
+    const keep = store.drainWrites(100000).filter((r) => r.target === 'fm-keep00000002').map((r) => JSON.parse(r.data).cpuPct);
+    console.log(JSON.stringify({ queue: st.queue, cut: st.queueCut, keep }));`);
+  assert.equal(out.queue, 20_000); assert.equal(out.cut, 2, '분 묶음 · 1분 요약 두 줄만큼(수정 전: 묶음 쪽 자르기는 세지 않았다 — 0)');
+  assert.deepEqual(out.keep, [2], '수정 전: 표시 없이 잘린 줄을 고쳐 그 분의 새 값이 사라졌다');
+});
+
+test('M3 — 프로세스 합치기는 시각 합집합 · 같은 시각은 뒤 것 · 분당 상한 · 앱 묶음은 마지막에만', async () => {
+  const { mergeProcLists, PROC_PER_MIN } = await import('../src/focusmon/codec.js');
+  const a = Array.from({ length: 50 }, (_, i) => ({ t: 1000 + i * 2, n: 1 }));
+  const b = Array.from({ length: 50 }, (_, i) => ({ t: 1001 + i * 2, n: 2, apps: { sv: [], cm: [], all: { x: 1 } } }));
+  b.push({ t: 1000, n: 3 });
+  const m = mergeProcLists(a, b);
+  assert.equal(m.length, PROC_PER_MIN, '상한');
+  assert.deepEqual(m.map((x) => x.t), [...m.map((x) => x.t)].sort((x, y) => x - y));
+  assert.equal(m[m.length - 1].t, 1099, '최근 것을 남긴다');
+  assert.deepEqual(m[m.length - 1].apps, { sv: [], cm: [] }); assert.ok(m.slice(0, -1).every((x) => x.apps === undefined));
+  assert.equal(mergeProcLists(a, b.slice(-1)).find((x) => x.t === 1000).n, 3, '같은 시각은 뒤(새) 것');
+});
+
+test('E4 — 엣지 워커: 받은 시험의 접속처 표지를 결과에 그대로 돌려준다', () => {
+  const out = sub(`const http = await import('node:http');
+    const worker = await import(${J('agent/focusMonWorker.js')}); const mock = await import(${J('focusmon/mock.js')}); const { config } = await import(${J('config.js')});
+    const id = mock.DEMO_TARGETS[0].id; const EP = 'c'.repeat(12);
+    const srv = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, now: Date.now(), validUntil: Date.now() + 30000, targets: [], tests: [{ id, host: '10.10.20.11', port: 22, username: 'dvcmon', ep: EP }] })); }); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    config.agent.centralUrl = 'http://127.0.0.1:' + srv.address().port; config.agent.centralToken = 'tok'; config.agent.name = 'edge-t';
+    const r = await worker.syncOnce();
+    await new Promise((x) => setTimeout(x, 200));
+    const tests = worker._bufForTest().tests;
+    worker.stopFocusMonWorker(); srv.close();
+    console.log(JSON.stringify({ ok: r?.ok ?? null, tests: tests.map((x) => ({ id: x.id === id, ep: x.ep || null, ok: x.result?.ok ?? null })) }));
+    process.exit(0);`, { DATA_SOURCE: 'mock' });
+  assert.equal(out.ok, true); assert.deepEqual(out.tests, [{ id: true, ep: 'c'.repeat(12), ok: true }]);
 });
 
 test('F — 실패한 발송의 되돌리기는 그 사이 지운 짝(주소를 고침)을 되살리지 않는다(반증 alerts F1 · service F3)', async () => {
