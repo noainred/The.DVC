@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1657개** |
+| 엔드포인트 | **1658개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 165개 |
-| GET | 880개 |
+| GET | 881개 |
 | POST | 524개 |
 | PUT | 163개 |
 | PATCH | 3개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 21 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 992 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 993 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -1475,12 +1475,13 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/ps-inspect/run` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/psInspect.js:108](../server/src/routes/api/psInspect.js#L108) |
 | PUT | `/tools/ps-inspect/settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/psInspect.js:117](../server/src/routes/api/psInspect.js#L117) |
 | GET | `/tools/ps-inspect/top-nodes` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/psInspect.js:77](../server/src/routes/api/psInspect.js#L77) |
-| GET | `/tools/rack` | 권한 `tools` | [server/src/routes/api/rack.js:654](../server/src/routes/api/rack.js#L654) |
-| POST | `/tools/rack/op` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/rack.js:715](../server/src/routes/api/rack.js#L715) |
-| GET | `/tools/rack/room/:id` | 권한 `tools` | [server/src/routes/api/rack.js:690](../server/src/routes/api/rack.js#L690) |
-| GET | `/tools/rack/room/:id/xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/rack.js:698](../server/src/routes/api/rack.js#L698) |
-| GET | `/tools/rack/versions` | 권한 `tools` | [server/src/routes/api/rack.js:667](../server/src/routes/api/rack.js#L667) |
-| GET | `/tools/rack/versions/:vid` | 권한 `tools` | [server/src/routes/api/rack.js:678](../server/src/routes/api/rack.js#L678) |
+| GET | `/tools/rack` | 권한 `tools` | [server/src/routes/api/rack.js:747](../server/src/routes/api/rack.js#L747) |
+| GET | `/tools/rack/mask-census` | 권한 `tools` | [server/src/routes/api/rack.js:764](../server/src/routes/api/rack.js#L764) |
+| POST | `/tools/rack/op` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/rack.js:841](../server/src/routes/api/rack.js#L841) |
+| GET | `/tools/rack/room/:id` | 권한 `tools` | [server/src/routes/api/rack.js:816](../server/src/routes/api/rack.js#L816) |
+| GET | `/tools/rack/room/:id/xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/rack.js:824](../server/src/routes/api/rack.js#L824) |
+| GET | `/tools/rack/versions` | 권한 `tools` | [server/src/routes/api/rack.js:781](../server/src/routes/api/rack.js#L781) |
+| GET | `/tools/rack/versions/:vid` | 권한 `tools` | [server/src/routes/api/rack.js:794](../server/src/routes/api/rack.js#L794) |
 | GET | `/tools/relaycheck` | 권한 `tools` | [server/src/routes/api/relaycheck.js:20](../server/src/routes/api/relaycheck.js#L20) |
 | POST | `/tools/relaycheck/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:47](../server/src/routes/api/relaycheck.js#L47) |
 | PUT | `/tools/relaycheck/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:40](../server/src/routes/api/relaycheck.js#L40) |
