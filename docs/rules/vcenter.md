@@ -32,6 +32,7 @@
 - 54회차 F4 · F5 — VM 사양 변경 · SOAP 호스트 용량의 못 읽음은 null(0 아님) · 현재 값을 모르면 변경을 막는다 · 용량 판정 서버 ↔ 웹 한 벌
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 - (v3.35.0 추가) 스냅샷 보류 목록 — 지금 상태는 holdRows 하나 · 풀기는 VM 이 없어도 · 걸기 · 연장은 VM 이 있어야 · 여러 건은 전부 아니면 0
+- (v3.54.0 추가) 실제 설치 OS 1단계 — VMware Tools 보고(guestDetailedData)는 이 요청만 SOAP 8.0.2.0 · 판 미달이면 묻지 않음 · 점검 카드는 VM 이름 없이
 
 ## 본문
 
@@ -592,3 +593,22 @@
     ⑨ 한 관측 안 중복 VM id 는 첫 것만 · 처음 보는 VM 은 첫 관측이면 기록 시작(src watch), 관측 중이면 목록에 나타남(src appear — Power On 이 아니다).
     ⑩ 화면: 오차는 전환마다 실제 창 폭 · 개체 보기 탭 `key={vm.id}` · 달력은 요청 기준 시각(q.base) · 이전 12개월 창의 기본 선택 날은 범위 끝(포함 안 함) 1ms 앞.
     회귀 `server/test/vmPower3420.test.js` · `web/src/views/vms/powerHistText.test.js`. 남긴 것: 위임 vCenter 의 관측 시각은 데이터 시각이 아니라 관측 시각(엣지 수집 지연만큼 창이 밀림 — 추정 · 재현 안 함).
+
+### (v3.54.0 추가) 실제 설치 OS 1단계 — VMware Tools 보고 수집 · 수집 점검(설계 `docs/design/real-os/README.md`)
+
+- **출처**: `GuestInfo.guestDetailedData`(vSphere API **8.0.2.0** 부터 · Tools 11.2.0 이상 · 게스트 계정 불필요 · 꺼진 VM 도 마지막 값) + `config.vAppConfig.product`(OVF 어플라이언스 제품 정보).
+  파서 · 정제 · 판 판정은 `server/src/inventory/guestDetail.js` 하나. 키=값 목록은 정규식이 아니라 **한 번 훑는 스캐너**(입력 4KB 로 먼저 자른다 — 선형 시험).
+- **SOAP 판**: 포탈의 SOAPAction 은 `urn:vim25/8.0.0.1` 이다. 이 속성만 `retrieveManyObjectProps(…, { soapVersion: '8.0.2.0' })` 로 보낸다(첫 요청 · 이어 받기 · 취소 · 예전 방식 모두 같은 판).
+  **전역 판을 올리지 말 것**(다른 응답의 직렬화가 바뀔 수 있다). 판 문자열은 `SOAP_VERSION_RE` 꼴만 헤더에 싣는다. vCenter `about.apiVersion` 이 8.0.2 미만이거나 못 읽으면 **묻지 않는다**
+  (`asked:false` — 화면이 'Tools 가 보고하지 않음' 과 '묻지 않음' 을 가른다). 없는 속성은 요청 전체를 InvalidProperty 로 만든다.
+- **수집**: vmcfg 의 셋째 종류 `os`(`vmcfg/collect.js` — cfg 다음 · dev 앞 · 6시간 · 주기당 1,000 · 실패는 그 종류만 쉼). 설정 객체에 `vmOsScan` 이 없으면 끈 것으로 본다(옛 호출 · 시험 보존).
+  스냅샷 `vm.gos`(없으면 미수집). 정상 보고는 원문을 싣지 않고, **아는 키를 하나도 못 읽은 원문만** `raw`(512자) — 실측으로 형식을 고치기 위해서다.
+- **엣지 수신**: `routes/central.js sanitizeInventoryList` 가 `sanitizeVmGos` 로 다시 좁힌다(아는 키만 · 글자만 · 상한 · 시각은 수신 시각 이하). 수집기가 `vm.gos` 에 필드를 더하면 여기에도.
+- **점검**: `GET /api/admin/os-scan/probe`(관리자 · 조회 범위 먼저 · 요청 필터 뒤) — 집계는 `inventory/osProbe.js buildOsProbe`(O(N) 1회 · 목록마다 상한 + 생략 수). **VM 이름을 싣지 않는다**
+  (화면이 응답을 그대로 JSON 파일로 내려받게 한다). 보고 없음 사유 키는 `NO_DETAIL_REASONS` 하나 — 웹 문구 `views/tools/realOsProbeText.js REASON_TEXT` 와 시험이 대조.
+  수집 상태(`vmCfgStatus`)는 이 포탈이 직접 수집하는 vCenter 만 있다 — 엣지 수집분은 '엣지 수집(상태는 엣지에)' 로 말한다(없는 값을 지어내지 않는다).
+  **형식을 못 읽은 보고(raw · extra)는 사유 'unparsed' 로 따로** — 'Tools 정상인데 보고 없음'(other)과 섞으면 파서 결함이 Tools 미보고로 읽힌다(반증 지적).
+  **어플라이언스 = OVF 제품 정보(vapp)가 있는 VM 만** — 확장이 관리하는 VM(managedBy: 복제본 · vCLS)은 '확장 관리' 로 따로 센다. 묶음 키는 `JSON.stringify([…])`(값 안 구분자로 합쳐지지 않게).
+- 남긴 것(다음 단계): 판정 코어(종류 · 버전 · Windows 빌드 → 릴리스) · Summary OS 합계 전환 · VM 성격(일반 / 어플라이언스 / 시스템 VM)과 수동 지정 · EOL · SQLite 저장 · 게스트 조회 스캐너를 '보고 없는 VM 만' 으로.
+  Windows 의 실제 보고 글자 · 값 안 이스케이프 규칙은 **실측 전**이다(데모 생성기의 Windows 값은 가정).
+  회귀 `server/test/realOs354.test.js`.

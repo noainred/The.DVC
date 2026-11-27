@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import BoldText from '../../components/boldText.jsx';
 import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
+import { RealOsProbe } from './RealOsProbe.jsx'; // v3.54(실제 OS 1단계 실측): VMware Tools 보고 수집 점검
 import { allocText } from '../summaryAllocText.js';   // v3.28.1: 할당 vCPU — 못 읽은 VM 은 0 이 아니라 '미상 N'(하나도 못 읽었으면 '—')
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
@@ -265,6 +266,7 @@ export function RealOs({ scope }) {
 
   return (
     <>
+      <RealOsProbe scope={scope} />
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="스캔된 VM" value={(sum.scanned ?? 0).toLocaleString()} meta={st.lastRun ? `마지막 ${new Date(st.lastRun).toLocaleString('ko-KR')}` : '아직 실행 안 함'} />
         <Card label="불일치(ESXi≠실제)" value={sum.mismatches ?? 0} accent={sum.mismatches ? 'var(--amber)' : ''} meta="ESXi 보고와 실제 설치 OS 차이" />

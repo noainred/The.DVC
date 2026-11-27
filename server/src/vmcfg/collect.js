@@ -6,26 +6,28 @@ import { config } from '../config.js';
 import { VM_CFG_PATHS, VM_DEV_PATHS, parseVmCfgProps, parseVmDeviceHygiene } from './parse.js';
 import { pickDue, put, prune, setStatus, statusOf } from './cache.js';
 import { createRetryTracker, isRequestTimeout } from '../dscfg/collect.js'; // v2.721(감사 S1-03) — 대상별 재시도 백오프(한 벌)
+import { GOS_SOAP_VERSION, detailedApiOk, gosPaths, parseVmGosProps } from '../inventory/guestDetail.js'; // v3.54(실제 OS 1단계)
 
 const CHUNK = 250;
 const DEV_CHUNK = 75;
 export const VM_CFG_BUDGET_MS = 20_000;
 // v2.721(감사 S1-03): 종류(cfg·dev)마다 요청 시한에 걸린 조각의 VM 을 쉬게 한다 — 예전에는 그 VM 들이 at=0 으로 남아
 //   매 주기 맨 먼저 다시 골라져 매 주기 요청 시한(최대 30초)을 먹었다. 수집 중단(abort)은 세지 않고, 읽으면 지운다.
-const _retry = { cfg: createRetryTracker(), dev: createRetryTracker() };
+const _retry = { cfg: createRetryTracker(), dev: createRetryTracker(), os: createRetryTracker() };
 export function vmCfgRetryOf(vcId, ref, kind = 'cfg') { return _retry[kind]?.get(vcId, ref) || null; }
-export function vmCfgRetrySummary(vcId) { return { cfg: _retry.cfg.summary(vcId), dev: _retry.dev.summary(vcId) }; }
+export function vmCfgRetrySummary(vcId) { return { cfg: _retry.cfg.summary(vcId), dev: _retry.dev.summary(vcId), os: _retry.os.summary(vcId) }; }
 /** vCenter 삭제·접속처 변경 때 함께 버린다(hostcfg/cache.js CACHE_DROPPERS 가 부른다 — v2.727 감사 F-04 에 연결, 그 전에는 호출부 0). */
-export function dropVcRetry(vcId) { _retry.cfg.drop(vcId); _retry.dev.drop(vcId); }
-export function _resetVmCfgRetry() { _retry.cfg.reset(); _retry.dev.reset(); }
+export function dropVcRetry(vcId) { _retry.cfg.drop(vcId); _retry.dev.drop(vcId); _retry.os.drop(vcId); }
+export function _resetVmCfgRetry() { _retry.cfg.reset(); _retry.dev.reset(); _retry.os.reset(); }
 
-async function fetchKind(c, vcId, refs, { kind, paths, chunk, parse, now, budgetEnd, track = {} }) {
+async function fetchKind(c, vcId, refs, { kind, paths, chunk, parse, now, budgetEnd, track = {}, retrieveOpts = undefined }) {
   let fetched = 0;
   for (let i = 0; i < refs.length; i += chunk) {
     if (Date.now() >= budgetEnd) return { fetched, cut: refs.length - i };
     const slice = refs.slice(i, i + chunk);
     track.slice = slice; // v2.721(S1-03): 실패하면 이 조각만 쉰다
-    const objs = await c.retrieveManyObjectProps('VirtualMachine', slice, paths, chunk);
+    // v3.54: retrieveOpts(예: 이 요청만의 SOAP API 판) — 없으면 예전 호출 그대로(인자 4개).
+    const objs = retrieveOpts ? await c.retrieveManyObjectProps('VirtualMachine', slice, paths, chunk, retrieveOpts) : await c.retrieveManyObjectProps('VirtualMachine', slice, paths, chunk);
     const seen = new Set();
     for (const o of objs) {
       seen.add(o.ref);
@@ -47,10 +49,10 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
   if (!settings.vmCfgScan) return { skipped: 'off' };
   const live = new Set(vmRefs);
   prune(vcId, live);
-  _retry.cfg.prune(vcId, live); _retry.dev.prune(vcId, live);
+  _retry.cfg.prune(vcId, live); _retry.dev.prune(vcId, live); _retry.os.prune(vcId, live);
   const budgetEnd = Date.now() + budgetMs;
   const st = statusOf(vcId) || {};
-  const out = { cfg: null, dev: null };
+  const out = { cfg: null, dev: null, os: null };
   // 경로 오류(InvalidProperty 등)는 같은 요청을 반복해도 결과가 같다 — 그 종류만 갱신 주기만큼 쉰다.
   if (!(st.cfgBackoffUntil > now)) {
     const due = pickDue(vcId, vmRefs.filter((r) => !_retry.cfg.resting(vcId, r, now)), 'cfg', { now, periodMs: settings.vmCfgRefreshMs, max: settings.vmCfgPerCycle });
@@ -66,6 +68,34 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
         setStatus(vcId, { cfgError: msg, cfgErrorAt: now, cfgBackoffUntil: /InvalidProperty|InvalidArgument/i.test(msg) ? now + settings.vmCfgRefreshMs : 0, cfgBackoffVms: _retry.cfg.summary(vcId).backoffTargets });
         console.warn(`[vmcfg] ${vcId} VM 구성 속성 갱신 실패: ${msg}`);
         out.cfg = { error: msg };
+      }
+    }
+  }
+  // v3.54(실제 OS 1단계): 실제 설치 OS(VMware Tools 보고 guestDetailedData) · 어플라이언스 제품 정보(vAppConfig.product).
+  //   OS 는 거의 바뀌지 않아 갱신 주기가 길다(기본 6시간). cfg 다음 · dev 앞 — 장치 목록(VM 당 수 KB)이 예산을 먼저 먹지 않게.
+  //   guestDetailedData 는 API 8.0.2.0 속성이라 **이 요청만** SOAPAction 을 그 판으로 보낸다(포탈 기본 8.0.0.1). 판이 8.0.2 미만이거나
+  //   못 읽은 vCenter 에는 묻지 않는다(asked:false — 화면이 'Tools 가 보고하지 않음' 과 '묻지 않음' 을 가른다).
+  //   settings.vmOsScan 이 없는 설정 객체(옛 호출·테스트)는 끈 것으로 본다 — 운영 설정(config.js)은 기본 켜짐.
+  if (settings.vmOsScan && !(st.osBackoffUntil > now) && Date.now() < budgetEnd) {
+    const asked = detailedApiOk(c?.sc?.apiVersion);
+    const periodMs = settings.vmOsRefreshMs || 21_600_000;
+    const due = pickDue(vcId, vmRefs.filter((r) => !_retry.os.resting(vcId, r, now)), 'os', { now, periodMs, max: settings.vmOsPerCycle || 1_000 });
+    if (due.length) {
+      const track = {};
+      try {
+        const r = await fetchKind(c, vcId, due, {
+          kind: 'os', paths: gosPaths(asked), chunk: CHUNK, now, budgetEnd, track,
+          retrieveOpts: asked ? { soapVersion: GOS_SOAP_VERSION } : undefined,
+          parse: (props, at) => parseVmGosProps(props, at, { asked }),
+        });
+        out.os = { due: due.length, asked, ...r };
+        setStatus(vcId, { osAt: now, osError: null, osFetched: r.fetched, osCut: r.cut, osAsked: asked, osApiVersion: typeof c?.sc?.apiVersion === 'string' ? c.sc.apiVersion.slice(0, 32) : null, osBackoffVms: _retry.os.summary(vcId).backoffTargets });
+      } catch (err) {
+        const msg = String(err?.message || err).slice(0, 300);
+        if (isRequestTimeout(err, c?.signal) && track.slice) _retry.os.note(vcId, track.slice, { now, periodMs });
+        setStatus(vcId, { osError: msg, osErrorAt: now, osAsked: asked, osBackoffUntil: /InvalidProperty|InvalidArgument|InvalidRequest|version/i.test(msg) ? now + periodMs : 0, osBackoffVms: _retry.os.summary(vcId).backoffTargets });
+        console.warn(`[vmcfg] ${vcId} 실제 OS(Tools 보고) 갱신 실패: ${msg}`);
+        out.os = { error: msg };
       }
     }
   }
