@@ -184,6 +184,32 @@ export function demoAccountView(user, value, keys = ACCOUNT_KEYS) {
   return walk(value);
 }
 
+/**
+ * 보안 잔여 11-27 L7(반증 4회차 must — 재현): 메일 발송 상태 · 기록의 **자유 글자**(사유 · 비고 · 오류 메시지)는 메일 서버 응답 원문이다 —
+ *   SMTP 서버 주소(util/smtp.js 'SMTP 접속 실패(host:port)') · 배너 · 받는 사람이 실리고, 그 원본 설정(/api/admin/mail)은 데모에게 READ_DENY 다.
+ *   주소 꼴만 지우는 정규식 가림(edgelog/redact.js)은 IP · 호스트 이름 · 배너를 놓쳤다. 데모 판본은 그 칸의 글자를 고정 문구로 바꾸고
+ *   구조(상태 · 개수 · 시각 · code)는 남긴다. 판정은 isDemoGuest 하나. 일반 객체 · 배열만 따라 내려가고 원본은 바꾸지 않는다(캐시 · 메모리 상태 공유).
+ */
+export const DEMO_MAIL_TEXT = '(데모 계정에는 메일 서버 응답 원문을 보이지 않습니다)';
+export const MAIL_TEXT_KEYS = Object.freeze(['reason', 'note', 'message', 'error', 'lastError', 'lastReason', 'detail']);
+export function demoMailText(value, keys = MAIL_TEXT_KEYS) {
+  const ks = new Set(keys);
+  const plain = (v) => { const pr = Object.getPrototypeOf(v); return pr === Object.prototype || pr === null; };
+  const walk = (v, d) => {
+    if (v === null || typeof v !== 'object' || d > 12) return v;
+    if (Array.isArray(v)) return v.map((x) => walk(x, d + 1));
+    if (!plain(v)) return v;
+    const out = {};
+    for (const [k, x] of Object.entries(v)) out[k] = ks.has(k) && typeof x === 'string' && x ? DEMO_MAIL_TEXT : walk(x, d + 1);
+    return out;
+  };
+  return walk(value, 0);
+}
+/** demoMailText 를 데모 계정에만 — 메일 발송 상태를 싣는 adminOnly 조회가 응답 직전에 부른다(관리자 · operator 판본은 그대로). */
+export function demoMailTextView(user, value, keys = MAIL_TEXT_KEYS) {
+  return isDemoGuest(user) ? demoMailText(value, keys) : value;
+}
+
 /** 보안 잔여 11-27 L7: 관리자 API(/api/admin 아래) 요청인가 — normApiPath(READ_DENY 와 같은 정규화 — 절대형 · 겹친 슬래시 포함) 기준. */
 export function isAdminApiPath(originalUrl) {
   const p = normApiPath(originalUrl);

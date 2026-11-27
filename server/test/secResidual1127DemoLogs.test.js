@@ -64,12 +64,14 @@ test('① M-1 경로 정규화 — 절대형 요청 대상 · 겹친 슬래시 �
     assert.ok(demoGuestDenial('GET', u), u);
   assert.equal(normApiPath('http://x/api/admin/idrac?a=http://y/b'), '/api/admin/idrac');
   assert.equal(normApiPath('/API//Admin///idrac/'), '/api/admin/idrac');
-  // 쓰기도 같은 정규화(SAFE_ACTIONS 판정이 절대형에서 빗나가 거부되던 것은 거부 쪽이라 안전했지만 판정은 하나로)
-  assert.equal(demoGuestDenial('POST', 'http://x/api/tools/storage/collect-all'), null);
+  // 통합(main v3.58 디버깅 4회차 보안 #1): 데모 계정은 '/' 로 시작하는 평범한 꼴의 요청 주소만 받는다 — 절대형 요청 대상은 경로가 무엇이든 통째로 거절
+  //   (예전 이 시험은 'http://x/api/tools/storage' · 절대형 안전 POST 를 허용(null)으로 봤다 — 더 엄격한 main 규칙을 따른다).
+  assert.ok(demoGuestDenial('POST', 'http://x/api/tools/storage/collect-all'));
   assert.ok(demoGuestDenial('POST', 'http://x/api/admin/users'));
-  // 정상 경로는 그대로
+  assert.ok(demoGuestDenial('GET', 'http://x/api/tools/storage'));
+  // 정상 경로는 그대로(같은 경로의 평범한 꼴 · 안전 POST)
   assert.equal(demoGuestDenial('GET', '/api/tools/storage'), null);
-  assert.equal(demoGuestDenial('GET', 'http://x/api/tools/storage'), null);
+  assert.equal(demoGuestDenial('POST', '/api/tools/storage/collect-all'), null);
 });
 
 test('② L7 demoRegistryView — 데모 + /api/admin 만(데모 판정 isDemoGuest · 경로 정규화 공유)', async () => {
@@ -434,6 +436,9 @@ function harnessScript(phase) {
           return uniqTake(valsOf(s && s.hosts, 'k'), 4).flatMap((k) => ms.map((m) => '/api/capacity/history?k=' + E(k) + '&metric=' + E(m) + '&window=day')); },
         // overviewNsx.js group-members: groupId '<managerId>:<rawId>'(스냅샷 보안그룹 — mock 이면 합성 멤버)
         '/api/nsx/group-members': async () => uniqTake([...valsOf((await jget('demo', '/api/nsx') || {}).securityGroups, 'id'), 'mock-nsx-1:grp-demo'], 2).map((g) => '/api/nsx/group-members?groupId=' + E(g)),
+        // svcStatus.js /tools/svc-status/target(main v3.57 — 통합 때 더함): id = 목록 rows 의 id(데모 판본 · 관리자 판본 — 사람 대상은 데모 404)
+        '/api/tools/svc-status/target': async () => uniqTake([...valsOf(await jget('demo', '/api/tools/svc-status'), 'id'), ...valsOf(await jget('fadm', '/api/tools/svc-status'), 'id')], 4)
+          .map((id) => '/api/tools/svc-status/target?id=' + E(id) + '&range=24h'),
         // searchNotes.js /release-notes/since: from = a.b.c
         '/api/release-notes/since': async () => ['/api/release-notes/since?from=1.0.0'],
         // hardwareGpu.js /tools/ip-ping: vcenterId + ips(그 vCenter VM 의 IP)
@@ -1095,18 +1100,28 @@ test('③-r3 must 2: 게스트 파티션 메일 상태 — 데모 판본에 SMTP
   assert.equal(body(v.fadm).server.from, 'qmail3@corpq.example', '관리자 판본이 바뀌었다');
 });
 
-test('③-r3 데모 판본 메일 상태 — 실패 사유 · 마지막 오류의 메일 주소를 가리고 원본은 바꾸지 않는다', async () => {
+test('③-r3 데모 판본 메일 상태 — 실패 사유 · 마지막 오류의 자유 글자(메일 서버 응답 원문)를 고정 문구로 · 구조 유지 · 원본 무변경 (반증 4회차 must)', async () => {
   const { demoMailStatusView } = await import(path.join(SRC, 'routes/api/toolsGuestPart.js'));
-  const st = { history: [{ at: 1, kind: 'digest', ok: false, reason: '550 5.1.1 <qmail9@corpq.example> recipient rejected' }, { at: 2, ok: true, note: 'to qmail8@corpq.example' }, null],
-    lastError: { at: 3, message: 'RCPT qmail7@corpq.example refused' }, edge: false };
+  const { demoMailText, demoMailTextView, DEMO_MAIL_TEXT } = await import(path.join(SRC, 'auth/demoGuest.js'));
+  const st = { history: [{ at: 1, kind: 'digest', ok: false, state: 'failed', reason: '550 5.1.1 <qmail9@corpq.example> recipient rejected' }, { at: 2, ok: true, note: 'to qmail8@corpq.example' },
+    { at: 4, ok: false, reason: 'SMTP 접속 실패(10.66.50.50:25): connect ECONNREFUSED 10.66.50.50:25' }, { at: 5, ok: true, reason: '' }, null],
+    lastError: { at: 3, message: 'RCPT qmail7@corpq.example refused' }, edge: false, counts: { sent: 1, failed: 2 } };
   const v = demoMailStatusView(st);
-  assert.ok(!JSON.stringify(v).includes('@corpq.example'), JSON.stringify(v));
-  assert.match(v.history[0].reason, /^550 5\.1\.1 </);
-  assert.equal(v.history[2], null);
-  assert.equal(v.lastError.at, 3);
-  assert.equal(st.history[0].reason.includes('qmail9@corpq.example'), true, '원본을 바꿨다');
+  assert.ok(!/@corpq\.example|10\.66\./.test(JSON.stringify(v)), JSON.stringify(v));
+  assert.equal(v.history[0].reason, DEMO_MAIL_TEXT);
+  assert.equal(v.history[2].reason, DEMO_MAIL_TEXT, '4회차 must — SMTP 서버 주소가 실린 접속 실패 사유');
+  assert.equal(v.history[3].reason, '', '빈 글자는 그대로(사유 없음과 구분)');
+  assert.equal(v.history[0].state, 'failed'); assert.equal(v.history[0].kind, 'digest'); assert.deepEqual(v.counts, { sent: 1, failed: 2 });
+  assert.equal(v.history[4], null);
+  assert.equal(v.lastError.at, 3); assert.equal(v.lastError.message, DEMO_MAIL_TEXT);
+  assert.equal(st.history[2].reason.includes('10.66.50.50'), true, '원본을 바꿨다');
   assert.equal(demoMailStatusView(null), null);
   assert.deepEqual(demoMailStatusView({ history: [], lastError: null }), { history: [], lastError: null });
+  // 판정은 isDemoGuest 하나 — 관리자 · operator 판본은 그대로(같은 객체)
+  assert.equal(demoMailTextView({ role: 'admin', username: 'fadm' }, st), st);
+  assert.equal(demoMailTextView({ role: 'operator', username: 'oper' }, st), st);
+  assert.equal(demoMailTextView({ role: 'admin', demoGuest: true, username: 'thedvcdemp' }, st).history[2].reason, DEMO_MAIL_TEXT);
+  assert.equal(demoMailText('그대로'), '그대로', '최상위 글자는 칸 이름이 없어 바꾸지 않는다');
 });
 
 test('③-r3 should: 필수 질의를 채워도 데모가 2xx 를 못 받는 GET 은 알려진 목록 안에만(새 필수 질의 라우트가 스윕에서 조용히 빠지지 않게)', () => {

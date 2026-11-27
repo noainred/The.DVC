@@ -9,8 +9,7 @@
  */
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { isAdminDetailUser, isDemoGuest } from '../../auth/demoGuest.js';
-import { redactSystemLogLine } from '../../edgelog/redact.js';   // 보안 잔여 11-27 L7 반증 3회차 — 데모 판본의 실패 사유 속 메일 주소
+import { isAdminDetailUser, isDemoGuest, demoMailText } from '../../auth/demoGuest.js';   // 보안 잔여 11-27 L7 반증 3 · 4회차 — 데모 판본의 메일 서버 응답 원문
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
@@ -144,15 +143,9 @@ export function registerToolsGuestPart(api) {
 }
 
 /**
- * 보안 잔여 11-27 L7(반증 3회차): 데모 판본의 게스트 파티션 메일 상태 — 실패 사유 글자의 메일 주소 등만 가린다(구조 · 개수 · 시각은 그대로).
- * 원본(메모리 상태)은 바꾸지 않는다.
+ * 보안 잔여 11-27 L7(반증 3회차 · 4회차): 데모 판본의 게스트 파티션 메일 상태 — 기록 · 마지막 오류의 자유 글자를 고정 문구로(auth/demoGuest.js demoMailText —
+ *   4회차 must: 3회차의 메일 주소 꼴 가림은 'SMTP 접속 실패(10.66.50.50:25)' 같은 서버 주소를 놓쳤다). 구조 · 개수 · 시각은 그대로, 원본은 바꾸지 않는다.
  */
 export function demoMailStatusView(st) {
-  if (!st || typeof st !== 'object') return st;
-  const t = (v) => (typeof v === 'string' && v ? redactSystemLogLine(v) : v);
-  return {
-    ...st,
-    history: Array.isArray(st.history) ? st.history.map((h) => (h && typeof h === 'object' ? { ...h, ...(h.reason != null ? { reason: t(h.reason) } : {}), ...(h.note != null ? { note: t(h.note) } : {}) } : h)) : st.history,
-    lastError: st.lastError && typeof st.lastError === 'object' ? { ...st.lastError, message: t(st.lastError.message) } : t(st.lastError),   // notify.js: { at, message }
-  };
+  return demoMailText(st);
 }
