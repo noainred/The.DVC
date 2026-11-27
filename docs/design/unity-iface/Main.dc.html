@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>스토리지 모니터링 › 인터페이스 (전 장비 · 1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.teal{background:rgba(45,212,191,.14);color:#5eead4}
+.kpi{padding:13px 15px;display:flex;flex-direction:column;gap:3px}
+.kpi .l{font-size:12px;color:#8b9bb4;font-weight:600}
+.kpi .v{font-size:25px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
+.kpi .s{font-size:11.5px;color:#8b9bb4}
+table{border-collapse:collapse;width:100%;min-width:1340px}
+th{position:sticky;top:0;background:#0f1626;color:#8b9bb4;font-size:11.5px;font-weight:600;text-align:left;padding:8px 10px;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-align:middle;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.r{text-align:right}
+.bar{position:relative;height:8px;border-radius:4px;background:#0f1626;overflow:hidden;min-width:70px}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.strip{display:grid;grid-template-columns:repeat(24, minmax(0, 1fr));gap:1px;width:168px}
+.strip i{height:14px;border-radius:2px}
+.lg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#aebbd0;white-space:nowrap}
+.lg i{width:12px;height:10px;border-radius:2px;display:inline-block}
+.inp{height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#aebbd0}
+ul b{color:#e6edf6}
+</style>
+</helmet>
+<div style="min-height: 1500px; box-sizing: border-box; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 14px; min-width: 0">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap">
+    <b style="font-size: 18px">스토리지 모니터링</b>
+    <span class="muted" style="font-size: 12.5px">글로벌 법인 스토리지 사용량 · 버전 · 노드 통합 조회</span>
+  </div>
+
+  <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+    <button class="btn on">+ 장비 등록</button>
+    <button class="btn">장비별</button>
+    <button class="btn">법인별</button>
+    <button class="btn">타입별</button>
+    <button class="btn">장애 장비 3</button>
+    <button class="btn">추이</button>
+    <button class="btn on" aria-current="page">인터페이스 <span class="tag" style="background: rgba(255,255,255,.2); color: #fff; height: 17px">새 탭</span></button>
+    <span style="flex-grow: 1"></span>
+    <button class="btn">CSV 내보내기</button>
+  </div>
+
+  <div class="card" style="padding: 10px 14px; display: flex; gap: 10px 18px; flex-wrap: wrap; align-items: center; font-size: 12.5px">
+    <span><b>Unity 18대</b> <span class="muted">(SSH 15 · API 3)</span></span>
+    <span class="muted">포트 <b style="color: #e6edf6">288</b> — FC 144 · 이더넷 144(iSCSI 52 · NAS 68 · 겸용 24)</span>
+    <span class="muted">속도 · 구성은 장비 수집 때마다, 사용량은 <b style="color: #e6edf6">5분 표본</b> — <a href="#san-storage">SAN 스토리지 성능</a>과 같은 표본 경로를 씁니다</span>
+    <span style="flex-grow: 1"></span>
+    <span class="muted mono">마지막 수집 14:05 ~ 14:21</span>
+    <button class="btn" style="height: 28px">새로 고침</button>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px">
+    <div class="card kpi"><span class="l">포트</span><span class="v mono">288</span><span class="s">링크 업 251 · 다운 9 · 미연결 28</span></div>
+    <div class="card kpi" style="border-color: rgba(245,158,11,.5)"><span class="l">속도 저하</span><span class="v mono" style="color: #fcd34d">3</span><span class="s">최대 속도보다 낮게 연결됨</span></div>
+    <div class="card kpi" style="border-color: rgba(234,88,12,.55)"><span class="l">포화 근접</span><span class="v mono" style="color: #fdba74">5</span><span class="s">기간 피크가 기준(80%) 이상</span></div>
+    <div class="card kpi"><span class="l">유휴</span><span class="v mono">22</span><span class="s">링크 업 · 기간 내 1% 미만</span></div>
+    <div class="card kpi"><span class="l">SP 편중</span><span class="v mono">2<span style="font-size: 14px; font-weight: 600"> 대</span></span><span class="s">SPA · SPB 처리량 차이 큼</span></div>
+    <div class="card kpi" style="border-style: dashed"><span class="l">사용량 못 읽음</span><span class="v mono" style="color: #aebbd0">2<span style="font-size: 14px; font-weight: 600"> 대 · 32 포트</span></span><span class="s">정상에도 이상에도 넣지 않음</span></div>
+  </div>
+
+  <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center">
+    <div class="seg" role="group" aria-label="기간"><button class="on">24시간</button><button>7일</button><button>30일</button></div>
+    <div class="seg" role="group" aria-label="종류"><button class="on">전체</button><button>FC</button><button>iSCSI</button><button>NAS</button></div>
+    <div class="seg" role="group" aria-label="단위"><button class="on">MB/s</button><button>Gbps</button></div>
+    <select class="inp" aria-label="법인"><option>법인 전체</option></select>
+    <input class="inp" style="width: 220px" placeholder="장비 · 포트 · IP · NAS 서버 검색" aria-label="검색">
+    <button class="btn" style="height: 30px">문제만 보기 <span class="tag warn" style="height: 17px">11</span></button>
+    <span style="flex-grow: 1"></span>
+    <span class="lg"><i style="background: #1e3a5f"></i>20% 미만</span>
+    <span class="lg"><i style="background: #155e75"></i>20~40</span>
+    <span class="lg"><i style="background: #0e7490"></i>40~60</span>
+    <span class="lg"><i style="background: #22d3ee"></i>60~80</span>
+    <span class="lg"><i style="background: #ea580c"></i>80% 이상</span>
+    <span class="lg"><i style="background: repeating-linear-gradient(45deg, rgba(148,163,184,.35) 0 3px, transparent 3px 6px)"></i>값 없음</span>
+  </div>
+
+  <div class="card" style="overflow: hidden">
+    <div style="padding: 10px 14px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; border-bottom: 1px solid #1f2a40">
+      <b style="font-size: 13.5px">인터페이스 포트</b>
+      <span class="muted" style="font-size: 12px">288개 중 12개 표시 · 기간 피크 높은 순 · 제목을 누르면 정렬 · 행을 누르면 그 장비 화면(②)</span>
+    </div>
+    <div style="overflow-x: auto">
+      <table>
+        <thead><tr>
+          <th>법인</th><th>장비</th><th>포트</th><th>종류</th><th>링크 속도</th><th>상태</th>
+          <th class="r">읽기</th><th class="r">쓰기</th><th style="width: 130px">최근 5분 사용률</th>
+          <th class="r">기간 피크 ▼</th><th class="r">평균</th><th>24시간(1시간 칸 · 피크)</th><th>올라간 인터페이스 · WWN</th>
+        </tr></thead>
+        <tbody>
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="12">
+          <tr>
+            <td>{{r.corp}}</td>
+            <td><a href="Device.dc.html">{{r.dev}}</a></td>
+            <td class="mono">{{r.port}}</td>
+            <td><span class="{{r.kindCls}}">{{r.kind}}</span></td>
+            <td><span class="mono" style="{{r.spStyle}}">{{r.speed}}</span> <span class="muted" style="font-size: 11.5px">{{r.speedSub}}</span></td>
+            <td><span class="{{r.stCls}}">{{r.st}}</span></td>
+            <td class="r mono">{{r.rd}}</td>
+            <td class="r mono">{{r.wr}}</td>
+            <td><div style="display: flex; align-items: center; gap: 8px"><div class="bar" style="flex-grow: 1"><i style="{{r.barStyle}}"></i></div><span class="mono" style="width: 34px; text-align: right">{{r.now}}</span></div></td>
+            <td class="r"><span class="mono" style="{{r.peakStyle}}">{{r.peak}}</span> <span class="muted mono" style="font-size: 11.5px">{{r.peakAt}}</span></td>
+            <td class="r mono">{{r.avg}}</td>
+            <td><div class="strip" role="img" aria-label="{{r.stripLabel}}"><sc-for list="{{r.cells}}" as="c" hint-placeholder-count="24"><i style="{{c}}"></i></sc-for></div></td>
+            <td class="muted" style="font-size: 12px">{{r.ifs}}</td>
+          </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+    <div style="padding: 9px 14px; border-top: 1px solid #1f2a40; display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+      <button class="btn" style="height: 28px">더 보기(276)</button>
+      <span class="muted" style="font-size: 12px">‘—’ 는 0 이 아닙니다 — 그 값을 읽지 못했거나 링크가 내려가 있습니다</span>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px">
+    <div class="card" style="overflow: hidden">
+      <div style="padding: 10px 14px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; border-bottom: 1px solid #1f2a40">
+        <b style="font-size: 13.5px">속도 · 링크 변화 이력</b>
+        <span class="muted" style="font-size: 12px">최근 30일 · 7건 중 5건 — 시각은 그 변화를 처음 본 수집 시각(수집 주기만큼 늦을 수 있음)</span>
+      </div>
+      <div style="overflow-x: auto">
+        <table style="min-width: 760px">
+          <thead><tr><th>처음 본 시각</th><th>법인</th><th>장비 · 포트</th><th>변화</th><th>지금</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">11-23 09:05</td><td>UAE</td><td><a href="Device.dc.html">UNITY-DXB-01</a> <span class="mono muted">spa_iom_0_fc1</span></td><td><span class="mono">16 Gb → 8 Gb</span></td><td><span class="tag warn">저하 5시간째</span></td></tr>
+            <tr><td class="mono">11-22 22:05</td><td>독일</td><td><a href="Device.dc.html">UNITY-FRA-01</a> <span class="mono muted">spa_iom_0_fc2</span></td><td><span class="mono">16 Gb → 링크 다운</span></td><td><span class="tag crit">다운 16시간째</span></td></tr>
+            <tr><td class="mono">11-21 04:05</td><td>한국</td><td><a href="Device.dc.html">UNITY-SEL-01</a> <span class="mono muted">spb_eth3</span></td><td><span class="mono">10 Gb → 1 Gb</span></td><td><span class="tag warn">저하 2일째</span></td></tr>
+            <tr><td class="mono">11-19 14:05</td><td>미국 서부</td><td><a href="Device.dc.html">UNITY-SJC-01</a> <span class="mono muted">spa_eth2</span></td><td><span class="mono">링크 다운 → 10 Gb</span></td><td><span class="tag ok">복구됨</span> <span class="muted" style="font-size: 11.5px">다운은 수집 1회분</span></td></tr>
+            <tr><td class="mono">11-17 09:05</td><td>폴란드</td><td><a href="Device.dc.html">UNITY-WAW-01</a> <span class="mono muted">spa_la_1</span></td><td><span class="mono">20 Gb → 10 Gb → 20 Gb</span></td><td><span class="tag ok">복구됨</span> <span class="muted" style="font-size: 11.5px">묶음 멤버 eth5</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 10px">
+      <b style="font-size: 13.5px">이 표를 읽는 법</b>
+      <ul>
+        <li>사용률 = <b>읽기 · 쓰기 중 큰 쪽 ÷ 링크 속도</b>. FC 16 Gb 는 1,600 MB/s, 이더넷 10 Gb 는 1,250 MB/s 로 봅니다.</li>
+        <li>피크는 <b>5분 표본들 중 최댓값</b>입니다 — 표본 사이의 순간 최대는 보이지 않습니다.</li>
+        <li>FC 포트를 <b>스위치 쪽에서 본 값</b>(송수신 합)은 SAN 스토리지 성능에 있습니다. 여기는 Unity 가 스스로 보고한 값이라 숫자가 다를 수 있습니다.</li>
+        <li><b>NAS · iSCSI 인터페이스는 포트 단위 값</b>입니다. 한 포트에 인터페이스가 여럿이면 나눠 보여 줄 수 없습니다.</li>
+        <li>속도 저하 = 지금 연결 속도가 그 포트 · SFP 가 낼 수 있는 최대보다 낮음. 상대 장비 · 케이블 · SFP 를 확인합니다.</li>
+        <li>값이 없는 칸(빗금)은 0 이 아닙니다 — 수집이 없었거나 장비가 그 구간을 보관하지 않습니다.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var LV = [[80, '#ea580c'], [60, '#22d3ee'], [40, '#0e7490'], [20, '#155e75'], [0, '#1e3a5f']];
+    var GAP = 'repeating-linear-gradient(45deg, rgba(148,163,184,.35) 0 3px, transparent 3px 6px)';
+    function col(p) { for (var i = 0; i < LV.length; i++) { if (p >= LV[i][0]) return LV[i][1]; } return LV[4][1]; }
+    var seed = 11;
+    function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+    function cells(avg, peak, peakHour, gapFrom) {
+      var out = [];
+      for (var h = 0; h < 24; h++) {
+        if (gapFrom != null && h >= gapFrom) { out.push('background:' + GAP); continue; }
+        var v = avg * (0.55 + 0.9 * rnd());
+        if (h === peakHour) v = peak;
+        if (Math.abs(h - peakHour) === 1) v = Math.max(v, peak * 0.8);
+        out.push('background:' + col(Math.min(100, v)));
+      }
+      return out;
+    }
+    var T = { fc: 'tag blue', iscsi: 'tag teal', nas: 'tag gray' };
+    var S = { ok: 'tag ok', slow: 'tag warn', down: 'tag crit', idle: 'tag gray', none: 'tag gray' };
+    var raw = [
+      ['UAE', 'UNITY-DXB-01', 'spa_iom_0_fc1', 'FC', T.fc, '8 Gb', '최대 16', 'slow', '속도 저하', '310', '655', 82, 99, '02:10', '57%', 2, null, 'WWN …:60:47:3c:11'],
+      ['한국', 'UNITY-SEL-01', 'spb_eth3', 'NAS', T.nas, '1 Gb', '최대 10', 'slow', '속도 저하', '96', '41', 77, 100, '11:35', '60%', 11, null, 'nas-sel-home 10.20.40.12'],
+      ['미국 서부', 'UNITY-SJC-01', 'spa_eth2', 'iSCSI', T.iscsi, '10 Gb', '', 'ok', '정상', '880', '1,050', 84, 97, '02:40', '52%', 2, null, 'if_2 10.31.8.21 · VLAN 208'],
+      ['한국', 'UNITY-SEL-02', 'spa_iom_0_fc0', 'FC', T.fc, '16 Gb', '', 'ok', '정상', '612', '1,184', 74, 93, '03:10', '41%', 3, null, 'WWN …:60:47:20:4a'],
+      ['미국 서부', 'UNITY-SJC-01', 'spb_eth2', 'iSCSI', T.iscsi, '10 Gb', '', 'ok', '정상', '801', '962', 77, 91, '02:40', '48%', 2, null, 'if_3 10.31.8.22 · VLAN 208'],
+      ['폴란드', 'UNITY-WAW-01', 'spa_eth3', 'NAS', T.nas, '10 Gb', '', 'ok', '정상', '402', '118', 32, 71, '09:20', '22%', 9, null, 'nas-waw-prod 외 1'],
+      ['미국 서부', 'UNITY-SJC-01', 'spb_iom_1_fc3', 'FC', T.fc, '32 Gb', '', 'ok', '정상', '1,420', '980', 44, 68, '01:15', '31%', 1, null, 'WWN …:6b:08:60:9d'],
+      ['폴란드', 'UNITY-WAW-01', 'spa_la_1', 'NAS', T.nas, '20 Gb', '10 Gb × 2 묶음', 'ok', '정상', '640', '510', 26, 55, '10:05', '19%', 10, null, 'nas-waw-eng · nas-waw-bak'],
+      ['한국', 'UNITY-SEL-02', 'spb_iom_0_fc0', 'FC', T.fc, '16 Gb', '', 'ok', '정상', '208', '301', 19, 38, '03:10', '14%', 3, null, 'WWN …:68:47:20:4a'],
+      ['독일', 'UNITY-FRA-01', 'spa_iom_0_fc2', 'FC', T.fc, '—', '다운 전 16 Gb', 'down', '링크 다운', '—', '—', null, 12, '어제 20:40', '—', 20, 22, 'WWN …:60:3a:e0:72'],
+      ['한국', 'UNITY-SEL-02', 'spa_eth4', 'iSCSI', T.iscsi, '10 Gb', '', 'idle', '유휴', '0.2', '0.1', 0, 0.4, '06:00', '0.1%', 6, null, 'if_5 10.20.30.45 · VLAN 120'],
+      ['미국 동부', 'UNITY-IAD-01', 'spa_iom_0_fc0', 'FC', T.fc, '16 Gb', '', 'none', '사용량 못 읽음', '—', '—', null, null, '', '—', 0, 0, 'WWN …:60:49:e4:05']
+    ];
+    var rows = raw.map(function (a) {
+      var now = a[11], peak = a[12];
+      return {
+        corp: a[0], dev: a[1], port: a[2], kind: a[3], kindCls: a[4], speed: a[5], speedSub: a[6],
+        spStyle: a[7] === 'slow' ? 'color:#fcd34d;font-weight:600' : (a[7] === 'down' ? 'color:#8b9bb4' : ''),
+        stCls: S[a[7]], st: a[8], rd: a[9], wr: a[10],
+        now: now == null ? '—' : now + '%',
+        barStyle: now == null ? 'width:100%;background:' + GAP : 'width:' + Math.max(now, 1.5) + '%;background:' + col(now),
+        peak: peak == null ? '—' : peak + '%', peakAt: a[13],
+        peakStyle: peak != null && peak >= 80 ? 'color:#fdba74;font-weight:700' : '',
+        avg: a[14],
+        cells: cells(parseFloat(a[14]) || 0, peak || 0, a[15], a[16]),
+        stripLabel: a[2] + ' 24시간 시간대별 피크 사용률',
+        ifs: a[17]
+      };
+    });
+    return { rows: rows };
+  }
+}
+</script>
+</body>
+</html>

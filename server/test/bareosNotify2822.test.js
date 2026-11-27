@@ -5,7 +5,7 @@
  *  ② 본문(순수): 값 이스케이프 · 50행 상한 · 제목 개수
  *  ③ tick(자식 프로세스 — 메일·설정·store 모듈 대체): 발송 실패면 다음 틱 재시도 · 중복 없음 · 메일 꺼짐 동안의 실패는 켠 뒤 쏟지 않는다 · mock 인벤토리는 보내지 않는다
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,9 +13,16 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const J = (p) => JSON.stringify(pathToFileURL(path.join(SRC, p)).href);
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2822n-'));
+const tmp = tmpDir('bareos2822n-');
 process.env.CONFIG_DIR = tmp;
 const { collectBareosFailures, renderBareosMail } = await import('../src/bareos/notify.js');
 
@@ -74,7 +81,7 @@ test('② 본문 — 값 이스케이프 · 50행 상한 · 제목에 실패·�
 });
 
 test('③ tick — 발송 실패면 다음 틱 재시도 · 중복 없음 · 메일 꺼짐 동안의 실패는 켠 뒤 쏟지 않는다 · mock 이면 보내지 않는다', () => {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2822t-'));
+  const cfg = tmpDir('bareos2822t-');
   fs.writeFileSync(path.join(cfg, 'bareos-jobs.json'), JSON.stringify({ version: 1, jobs: [
     { id: 'j1', vcenterId: 'vcA', vmId: 'vcA:vm-1', vmName: 'web01', bareosJob: 'pv-aaaa-vm-1', client: 'kr-fd', level: 'Incremental', enabled: true, restores: [] },
   ] }));

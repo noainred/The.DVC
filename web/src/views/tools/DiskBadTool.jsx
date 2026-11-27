@@ -1,0 +1,615 @@
+/**
+ * 디스크 배드 섹터 분석(v3.8.0) — 전 법인 서버의 iDRAC Lifecycle 로그에서 찾은 배드 섹터 기록.
+ *
+ * 설계: docs/design/idrac-disk-badsector/README.md(시안 Fleet · FleetCorp · Scan · Refs · Basis).
+ * 구현 범위 A(사용자 선택 2026-11-14): 수집 · 분류 · 판정(근거 포함) · 전 법인 / 법인별 분석 · 점검(전체 · 법인 · 서버) · 6시간 자동 · 메일 · 근거.
+ * '지금 쓰이는 곳' · 조치 우선순위 · 디스크 상태 값 · 설정 점검은 다음 단계다(이 화면에 없다).
+ *
+ * 화면 규칙:
+ *  · 맨 위는 '이 숫자를 믿어도 되는가' — 읽은 서버 / 전체, 못 읽은 서버, 제외(HPE iLO), 데모 합성 여부.
+ *  · 판정 · 라벨 · 분류표는 서버가 내려준다(이 파일은 조립만). 문구 판정은 diskBadText.js(vitest).
+ *  · 무거운 집계라 폴링하지 않는다 — 마운트 1회 + 버튼. 점검이 도는 동안만 가벼운 작업 조회를 10초마다.
+ *  · 훅은 전부 조기 return 위.
+ */
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchJson, postJson, putJson, hasRole, usePolling } from '../../api.js';
+import { useHashTab } from '../../hooks/useHashTab.js';
+import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
+import Select from '../../components/Select.jsx';
+import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
+import { requireChanged } from '../changeResult.js';   // 112회차: 409(엣지 노드) 본문을 '저장했습니다' 로 읽지 않는다
+import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell, mailInfoText, corpSaveText, edgeLastText, serverRowBadge } from './diskBadText.js';
+
+const TABS = [
+  { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
+  { k: 'models', label: '모델' }, { k: 'trend', label: '추이' }, { k: 'servers', label: '서버' }, { k: 'basis', label: '근거' }, { k: 'scan', label: '점검' },
+];
+const VERDICT_FILTERS = [{ k: 'inUse', label: '아직 사용 중' }, { k: 'replaced', label: '교체됨' }, { k: 'unknown', label: '판단 불가' }, { k: '', label: '전체' }];
+
+const box = { border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', minWidth: 0 };
+const bar = (pct, color = 'var(--accent)') => <div style={{ height: 8, borderRadius: 4, background: 'var(--bg-soft)', overflow: 'hidden', minWidth: 80 }}><div style={{ width: `${Math.max(0, Math.min(100, pct || 0))}%`, height: '100%', background: color }} /></div>;
+
+export function DiskBadTool() {
+  const [tab, setTab] = useHashTab({ base: ['tools', 'disk-bad'], valid: TABS.map((t) => t.k), fallback: 'summary' });
+  const [corp, setCorp] = useState('');
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [jobs, setJobs] = useState(null);
+  const [vf, setVf] = useState('inUse');
+  const [detail, setDetail] = useState(null);
+  // 설정 저장 결과(담당자 보고) — 점검 칸이 다시 만들어져도(설정 파일 상태가 바뀌면 key 가 바뀐다) 사라지지 않게 여기 둔다(5회차 R5-5).
+  const [settingsMsg, setSettingsMsg] = useState({ text: '', bad: false });
+  const reqSeq = useRef(0);
+  const load = (c = corp) => {
+    const seq = ++reqSeq.current;
+    setErr(null);
+    return fetchJson('/tools/disk-bad', c ? { corp: c } : {})
+      .then((d) => { if (seq === reqSeq.current) { setData(d); setJobs(d.jobs); } })
+      .catch((e) => { if (seq === reqSeq.current) setErr(e); });
+  };
+  // 범위(법인)가 바뀌면 직전 범위의 수치를 비운다 — 다시 읽기가 실패하면 앞 범위 수치가 새 법인 이름 아래 남았다(반증 3회차 D2 · web.md).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setData(null); load(corp); }, [corp]);
+  const running = (jobs || []).some((j) => j.running);
+  // 점검이 도는 동안만 가벼운 작업 조회를 10초마다(무거운 집계는 다시 부르지 않는다 — 끝나면 한 번 다시 읽는다).
+  const jobsPoll = usePolling(running ? '/tools/disk-bad/jobs' : null, {}, 10_000);
+  useEffect(() => {
+    const d = jobsPoll.data;
+    if (!d) return;
+    setJobs(d.jobs);
+    if (!d.jobs.some((j) => j.running)) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobsPoll.data]);
+  const fleet = data?.fleet || null;
+  const labels = data?.labels || null;
+  // 엣지 포탈에서는 점검 · 설정이 중앙에서만 된다(늘 409) — 화면이 그렇다고 말하고 버튼을 숨긴다(반증 3회차 D6).
+  const isEdgePortal = data?.node?.role === 'edge';
+  const canScan = hasRole('admin', 'operator') && !isEdgePortal;
+  const corpName = useMemo(() => (data?.corps || []).find((c) => c.id === corp)?.name || '', [data, corp]);
+  // 이 계정이 점검할 수 있는 법인(서버 corps[].writable) — 옛 응답이면 null(막지 않는다).
+  const writableCorps = useMemo(() => {
+    const list = data?.corps || [];
+    return list.some((c) => typeof c.writable === 'boolean') ? new Set(list.filter((c) => c.writable).map((c) => c.id)) : null;
+  }, [data]);
+
+  // 4회차 반증 I3: 법인 범위를 읽지 못하면(그 법인이 사라짐 · 서버 오류) 범위 선택 칸까지 사라져 '전체로' 돌아갈 길이 없었다.
+  if (err && !data) return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+      <ErrorBox error={err} />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+        <button className="tab" style={{ flex: 'none', padding: '4px 12px' }} onClick={() => load()}>다시 읽기</button>
+        {corp && <button className="tab" style={{ flex: 'none', padding: '4px 12px' }} onClick={() => setCorp('')}>전체로</button>}
+      </div>
+    </div>
+  );
+  if (!data) return <Loading label="디스크 배드 섹터 분석" />;
+  if (!fleet) return <ErrorBox message={`디스크 배드 섹터 DB 를 열지 못했습니다 — ${data.db?.error || '포탈 로그를 확인하세요'}`} />;
+  const T = fleet.totals;
+  const shortNote = shortLogNote(T);
+  const noneRead = !(T.read > 0);   // 읽은 서버가 없으면 수치는 0 이 아니라 모름(반증 3회차 D7)
+  const kn = (v) => (noneRead ? '—' : num(v));
+  const refs = labels.refs;
+  const openServer = (r) => setDetail({ id: r.serverId, name: r.serverName, agent: r.agent ?? '' });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      <div className="flex between" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="muted" style={{ fontSize: 12.5 }}>서버 iDRAC Lifecycle 로그에서 찾은 배드 섹터 기록 — 아직 쓰고 있는 디스크, 국가 · 법인별, 모델별, 월별 추이.</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+            <label className="muted" htmlFor="dbad-corp" style={{ fontSize: 12 }}>범위</label>
+            <Select id="dbad-corp" className="select" value={corp} onChange={(e) => setCorp(e.target.value)} sort={false} style={{ minWidth: 220 }}>
+              <option value="">{data.scoped ? '내 법인 전체' : '전체 법인'}</option>
+              {data.corps.map((c) => <option key={c.id} value={c.id}>{c.country ? `${c.country} · ` : ''}{c.name} ({c.servers}대)</option>)}
+            </Select>
+            {corp && <span className="badge blue" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>{corpName} 만 보는 중 <button className="tab" style={{ flex: 'none', padding: '0 6px', fontSize: 11 }} onClick={() => setCorp('')}>전체로</button></span>}
+          </div>
+        </div>
+        <div className="tabs" role="tablist" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {TABS.map((t) => <button key={t.k} role="tab" aria-selected={tab === t.k} className={tab === t.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px' }} onClick={() => setTab(t.k)}>{t.label}</button>)}
+        </div>
+      </div>
+
+      <div className="flex between" style={{ ...box, gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ fontSize: 12.5, lineHeight: 1.6, minWidth: 0 }}>
+          <b>서버 {num(T.servers)}대 중 {num(T.read)}대 읽음</b> · 못 읽음 {num(T.unread)}대 · 제외 {num(T.excluded)}대(HPE iLO)
+          <div className="muted" style={{ fontSize: 12 }}>
+            {isEdgePortal ? '점검 · 자동 점검은 중앙 포탈에서 합니다' : (data.auto?.enabled ? `${data.auto.intervalHours}시간마다 자동 점검(새 로그만)` : '자동 점검 꺼짐 — 점검 탭에서 켜거나 직접 점검합니다')}
+            {' · '}못 읽은 서버의 디스크는 아래 수치에 들어 있지 않습니다{fleet.synthesized ? ' · 데모(합성) 결과가 섞여 있습니다' : ''}
+            {Number.isFinite(T.staleServers) && T.staleServers > 0 ? ` · 마지막 점검이 실패해 지난 결과로 집계 중인 서버 ${num(T.staleServers)}대(서버 탭에서 이유를 봅니다)` : ''}
+          </div>
+        </div>
+        {canScan && <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setTab('scan')}>{running ? '점검 진행 보기' : '지금 점검'}</button>}
+      </div>
+
+      {isEdgePortal && (
+        <div style={{ border: '1px solid rgba(59,130,246,.45)', background: 'rgba(59,130,246,.08)', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, lineHeight: 1.6 }}>
+          <b>엣지 포탈입니다 — 점검 결과는 중앙 포탈에서 봅니다.</b> 이 노드는 중앙이 보낸 점검을 법인 안에서 읽어 올리는 일만 합니다(점검 · 설정은 중앙에서).
+          {data.node?.edge ? <div className="muted" style={{ fontSize: 12 }}>{edgeLastText(data.node.edge)}</div> : null}
+        </div>
+      )}
+      {err && data && (
+        <div style={{ border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.08)', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ minWidth: 0 }}><b>다시 읽지 못했습니다</b> — 아래는 그 전에 읽은 결과입니다. {String(err?.message || err).slice(0, 200)}</span>
+          <button className="tab" style={{ flex: 'none', padding: '3px 10px' }} onClick={() => load()}>다시 읽기</button>
+        </div>
+      )}
+      {shortNote && (
+        <div style={{ border: '1px solid rgba(245,158,11,.55)', background: 'rgba(245,158,11,.09)', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, lineHeight: 1.6, minWidth: 0 }}>
+          <b>{shortNote.title}</b>
+          <div>{shortNote.body}</div>
+        </div>
+      )}
+
+      <div className="kpis">
+        <Kpi label="기록이 있는 디스크 자리" value={kn(T.recordSlots)} meta={noneRead ? '읽은 서버가 없습니다' : `서버 ${num(T.serversWithRecords)}대 · 기록 ${num(T.records)}건`} />
+        <Kpi label="그 디스크를 아직 사용 중" value={kn(T.inUse)} accent={!noneRead && T.inUse > 0 ? 'var(--red)' : undefined} meta="확정 + 추정" />
+        <Kpi label="이미 교체됨" value={kn(T.replaced)} />
+        <Kpi label="판단 불가" value={kn(T.unknown)} meta="근거가 모자라 말하지 않음" />
+        <Kpi label="디스크 1,000개당 기록 디스크" value={rateText(T.ratePer1000)} meta={`읽은 디스크 ${num(T.disks)}개 기준`} />
+      </div>
+
+      {tab === 'summary' && <Summary fleet={fleet} refs={refs} openServer={openServer} setTab={setTab} setCorp={setCorp} noneRead={noneRead} />}
+      {tab === 'disks' && <Disks fleet={fleet} refs={refs} vf={vf} setVf={setVf} openServer={openServer} noneRead={noneRead} />}
+      {tab === 'corps' && <Corps fleet={fleet} setCorp={setCorp} canScan={canScan} writable={writableCorps} onScanned={() => { setTab('scan'); load(); }} />}
+      {tab === 'models' && <Models fleet={fleet} />}
+      {tab === 'trend' && <Trend fleet={fleet} />}
+      {tab === 'servers' && <Servers fleet={fleet} labels={labels} openServer={openServer} />}
+      {tab === 'basis' && <Basis refs={refs} labels={labels} />}
+      {/* 112회차: 설정 칸은 열 때의 값으로 채운다 — 설정 파일 상태(읽음 · 읽기 오류 · 손상)가 바뀌면 다시 만들어 저장된 값으로 채운다(key). */}
+      {tab === 'scan' && <ScanPanel key={unreadKind(unreadMarkOf(data)) || 'ok'} data={data} jobs={jobs || []} corp={corp} canScan={canScan} reload={load} setJobs={setJobs} settingsMsg={settingsMsg} setSettingsMsg={setSettingsMsg} />}
+
+      {detail && (
+        <Modal title={`${detail.name} — 디스크 이력`} onClose={() => setDetail(null)} width={980}>
+          <DiskBadServerPanel serverId={detail.id} agent={detail.agent} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function InUseTable({ list, refs, openServer, limit = 0, emptyText = '해당하는 디스크가 없습니다.' }) {
+  if (!list.length) return <div className="muted" style={{ fontSize: 12.5 }}>{emptyText}</div>;
+  return (
+    // 1440px 카드(약 1,130px)에 '근거' 열까지 들어오게 — 위치는 서버 칸 아래, 최근 기록은 기록 칸 아래에 싣는다(화면 재확인에서 근거 열이 카드 밖으로 밀렸다).
+    <STable className="data-table" minWidth={1080} limit={limit} style={{ width: '100%', fontSize: 12.5 }}>
+      <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th>기록 · 최근</th><th>판정</th><th data-nosort style={{ minWidth: 240 }}>근거</th></tr></thead>
+      <tbody>{list.map((s) => (
+        <tr key={`${s.agent}|${s.serverId}|${s.slotKey}`}>
+          <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
+          <td data-sort={s.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(s)}>{s.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{s.label}</div></td>
+          <td>{s.drive ? <>{s.drive.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {s.drive.serial || '—'}</div></> : <span className="muted">—</span>}</td>
+          {/* 기록 ID 배지가 여럿이면 줄을 바꾼다 — 한 줄로 늘어서 표가 1440px 카드보다 넓어져 '근거' 열이 상자 밖으로 밀렸다(2회차 화면 확인). */}
+          <td data-sort={s.last} style={{ whiteSpace: 'normal', minWidth: 170, maxWidth: 260 }}>{Object.entries(s.byCode).map(([c, n]) => <span key={c} className={`badge ${clsTone(clsOfCode(c, refs))}`} style={{ marginRight: 4, marginBottom: 2, display: 'inline-flex' }} title={noteOf(c, refs)}>{c} {n}</span>)}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)', marginTop: 2 }}>최근 {fmtDate(s.last)}</div></td>
+          <td data-sort={s.verdict}><span className={`badge ${verdictTone(s.verdict)}`}>{s.verdictLabel}</span> <span className={`badge ${confidenceTone(s.confidence)}`}>{s.confidenceLabel}</span></td>
+          <td style={{ fontSize: 11.5, minWidth: 240, maxWidth: 360, whiteSpace: 'normal' }} className="muted">{s.evidence[s.evidence.length - 1]?.text || '—'}</td>
+        </tr>
+      ))}</tbody>
+    </STable>
+  );
+}
+
+/**
+ * iDRAC 가 **지금** 알리는 디스크 상태(v3.8.2) — Lifecycle 로그의 과거 기록과 별개의 근거다. 활성 로그가 며칠치뿐이어도 여기는 보인다.
+ * 판정 · 낱말은 서버가 준다(파트 장애 기능과 같은 코어 — 주의 · 이상). '배드 섹터가 났다' 는 뜻이 아니라고 밝힌다.
+ */
+function AlertingCard({ fleet, openServer }) {
+  const T = fleet.totals;
+  const list = fleet.alerting || [];
+  const [all, setAll] = useState(false);   // 10행만 보이고 펼칠 길이 없었다(반증 R15)
+  if (!Number.isFinite(T.alertingDisks)) return null;   // 3.8.2 이전 중앙 응답 — 표시하지 않는다(0 이라고 하지 않는다)
+  const unknown = Number.isFinite(T.drivesUnknownServers) && T.drivesUnknownServers > 0 ? ` · 디스크 목록을 읽지 못한 서버 ${num(T.drivesUnknownServers)}대는 빠져 있습니다` : '';
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <b style={{ fontSize: 13.5 }}>iDRAC 가 지금 이상을 알리는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{num(T.alertingDisks)}개 · 서버 {num(T.alertingServers)}대{Number.isFinite(fleet.alertingTotal) && fleet.alertingTotal > list.length ? ` · 이상 먼저 ${num(list.length)}개만 싣습니다` : ''}</span></b>
+      <div className="muted" style={{ fontSize: 12, margin: '2px 0 6px' }}>
+        iDRAC 가 보고하는 현재 디스크 상태(주의 · 이상)와 고장 예측입니다 — 배드 섹터 기록과는 별개의 근거이고, 이것만으로 ‘배드 섹터가 났다’ 고 하지 않습니다{unknown}.
+      </div>
+      {list.length === 0 ? <div className="muted" style={{ fontSize: 12.5 }}>지금 iDRAC 가 주의 · 이상으로 알리는 디스크는 없습니다(디스크 목록을 읽은 서버 기준).</div> : (
+        <STable className="data-table" minWidth={860} limit={all ? 0 : 10} style={{ width: '100%', fontSize: 12.5 }}>
+          <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th>iDRAC 상태</th><th>배드 섹터 기록</th></tr></thead>
+          <tbody>{list.map((a, i) => (
+            <tr key={`${a.agent}|${a.serverId}|${a.slotKey || a.serial || i}`}>
+              <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{a.country ? `${a.country} · ` : ''}{a.corpName}</td>
+              <td data-sort={a.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(a)}>{a.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{a.label || '위치 모름'}</div></td>
+              <td>{a.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {a.serial || '—'}</div></td>
+              <td data-sort={a.level === 'fault' ? 2 : 1}><span className={`badge ${a.level === 'fault' ? 'red' : 'amber'}`}>{a.levelLabel}</span>{a.predictive && <span className="badge blue" style={{ marginLeft: 4 }}>고장 예측</span>}{a.raw && <div className="muted" style={{ fontSize: 11.5 }}>iDRAC 값 {a.raw}</div>}</td>
+              <td data-sort={a.hasRecords ? 1 : 0}>{a.hasRecords ? <span className="badge red">기록 있음</span> : <span className="muted">읽은 로그에 없음</span>}</td>
+            </tr>
+          ))}</tbody>
+        </STable>
+      )}
+      {list.length > 10 && <button className="tab" style={{ flex: 'none', marginTop: 6 }} onClick={() => setAll((x) => !x)}>{all ? '10개만 보기' : `전부 보기(${num(list.length)}개)`}</button>}
+    </div>
+  );
+}
+
+/**
+ * 과거 기록 읽기 1단계(README §22) — 로그 기록은 없는데 디스크가 적어 둔 누적 값에 흔적이 있는 디스크. 판정 · 낱말은 서버(verdict.js)가 준다.
+ * 값은 누적이라 날짜가 없다 — '흔적 있음 · 날짜 모름'. 출처별로 몇 대를 읽었는지(못 읽은 서버는 0 이 아니라 모름)를 같이 말한다.
+ */
+function TraceCard({ fleet, openServer }) {
+  const T = fleet.totals;
+  const cov = pastCoverageText(T);
+  const [all, setAll] = useState(false);   // 10행만 보이고 펼칠 길이 없었다(반증 R15). 훅은 조기 return 위.
+  if (!cov) return null;   // 옛 중앙 응답 — 표시하지 않는다(0 이라고 하지 않는다)
+  const list = fleet.traces || [];
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <b style={{ fontSize: 13.5 }}>로그 기록은 없는데 디스크 값에 흔적이 있는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{num(T.traceDisks)}개 · 서버 {num(T.traceServers)}대 · 복구 불가 흔적 {num(T.traceUnrecoverable)}개{Number.isFinite(fleet.tracesTotal) && fleet.tracesTotal > list.length ? ` · 복구 불가 · 재할당 많은 순 ${num(list.length)}개만 싣습니다` : ''}</span></b>
+      <div className="muted" style={{ fontSize: 12, margin: '2px 0 6px', lineHeight: 1.6 }}>
+        디스크가 스스로 적어 둔 누적 값(재할당 · 보류 · 복구 불가)입니다 — 로그가 넘어가도 남지만 언제 생겼는지는 모릅니다. 값을 읽은 디스크만 셉니다.
+        <div>{cov.vals}</div>
+        <div>{cov.sel}</div>
+      </div>
+      {list.length === 0 ? <div className="muted" style={{ fontSize: 12.5 }}>값을 읽은 디스크 가운데 로그 기록 없이 흔적만 있는 디스크는 없습니다.</div> : (
+        <STable className="data-table" minWidth={900} limit={all ? 0 : 10} style={{ width: '100%', fontSize: 12.5 }}>
+          <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th style={{ textAlign: 'right' }}>재할당</th><th style={{ textAlign: 'right' }}>보류</th><th style={{ textAlign: 'right' }}>복구 불가</th><th>판정</th></tr></thead>
+          <tbody>{list.map((d, i) => (
+            <tr key={`${d.agent}|${d.serverId}|${d.id || i}`}>
+              <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{d.country ? `${d.country} · ` : ''}{d.corpName}</td>
+              <td data-sort={d.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(d)}>{d.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{d.label}{d.logRead === false ? ' · 로그는 못 읽음' : ''}</div></td>
+              <td>{d.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {d.serial || '—'}{d.vals?.stale ? ` · 지난 값(${fmtDate(d.vals.readAt)})` : ''}</div></td>
+              <td data-sort={d.vals?.realloc ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.realloc)}</td>
+              <td data-sort={d.vals?.pending ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.pending)}</td>
+              <td data-sort={d.vals?.uncorrectable ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.uncorrectable)}</td>
+              <td data-sort={d.trace}><span className={`badge ${traceTone(d.trace)}`}>{d.traceLabel}</span></td>
+            </tr>
+          ))}</tbody>
+        </STable>
+      )}
+      {list.length > 10 && <button className="tab" style={{ flex: 'none', marginTop: 6 }} onClick={() => setAll((x) => !x)}>{all ? '10개만 보기' : `전부 보기(${num(list.length)}개)`}</button>}
+    </div>
+  );
+}
+
+function Summary({ fleet, refs, openServer, setTab, setCorp, noneRead = false }) {
+  return (
+    <>
+      <div className="card" style={{ padding: 12, minWidth: 0 }}>
+        <div className="flex between" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+          <b style={{ fontSize: 13.5 }}>배드 섹터 기록이 있는데 아직 쓰고 있는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{noneRead ? '—' : `${fleet.inUse.length}개`} · 복구 불가 많은 순</span></b>
+          {fleet.inUse.length > 10 && <button className="tab" style={{ flex: 'none' }} onClick={() => setTab('disks')}>전부 보기</button>}
+        </div>
+        {/* 4회차 반증 F10: 읽은 서버가 없으면 '0개 · 해당 없음' 이 아니라 모름(KPI 와 같게). */}
+        <InUseTable list={fleet.inUse.slice(0, 10)} refs={refs} openServer={openServer} emptyText={noneRead ? '읽은 서버가 없습니다 — 점검한 뒤에 보입니다.' : undefined} />
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>빨강(복구 불가) = PDR46 · PDR47 · PDR63 · PDR64 / 주황 = PDR54(미디어 오류를 고쳐 씀) · PDR59(불량 블록을 옮김) · PDR57(불량 블록 표가 차 감) / 파랑 = PDR16(고장 예측 — 배드 섹터 수에 넣지 않음). 근거 칸은 판단 근거의 마지막 줄입니다 — 서버를 누르면 전부 봅니다.</div>
+      </div>
+      <AlertingCard fleet={fleet} openServer={openServer} />
+      <TraceCard fleet={fleet} openServer={openServer} />
+      {/* 법인 표(최소 640px)가 1440px 화면의 반쪽 카드에서 잘리지 않게 — 두 카드가 나란히 서려면 칸마다 700px 이상(넓은 화면만). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 700px), 1fr))', gap: 12 }}>
+        <div className="card" style={{ padding: 12, minWidth: 0 }}>
+          <b style={{ fontSize: 13.5 }}>국가 · 법인별 <span className="muted" style={{ fontWeight: 400 }}>1,000개당 많은 순</span></b>
+          <CorpTable rows={fleet.byCorp.slice(0, 8)} setCorp={setCorp} />
+          {fleet.byCorp.length > 8 && <button className="tab" style={{ flex: 'none', marginTop: 6 }} onClick={() => setTab('corps')}>나머지 {fleet.byCorp.length - 8}곳</button>}
+        </div>
+        <div className="card" style={{ padding: 12, minWidth: 0 }}>
+          <b style={{ fontSize: 13.5 }}>모델별 <span className="muted" style={{ fontWeight: 400 }}>지금 꽂혀 있는 디스크 기준</span></b>
+          <ModelTable fleet={fleet} limit={6} />
+        </div>
+      </div>
+      <Trend fleet={fleet} compact />
+    </>
+  );
+}
+
+function Disks({ fleet, refs, vf, setVf, openServer, noneRead = false }) {
+  const list = vf ? fleet.slots.filter((s) => s.verdict === vf) : fleet.slots;
+  // 5회차 R5-4: 읽은 서버가 없으면 0 이 아니라 모름(KPI · 요약과 같게).
+  const count = (k) => (noneRead ? '—' : (k ? fleet.slots.filter((s) => s.verdict === k).length : fleet.slots.length));
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+        {VERDICT_FILTERS.map((f) => <button key={f.k} className={vf === f.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }} onClick={() => setVf(f.k)}>{f.label} {count(f.k)}</button>)}
+      </div>
+      <InUseTable list={list} refs={refs} openServer={openServer} limit={200} emptyText={noneRead ? '읽은 서버가 없습니다 — 점검한 뒤에 보입니다.' : undefined} />
+      {list.length > 200 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{num(list.length)}곳 가운데 200곳만 보입니다 — 열을 눌러 정렬하면 정렬한 상위 200곳입니다. 서버를 누르면 그 서버의 전부를 봅니다.</div>}
+    </div>
+  );
+}
+
+function CorpTable({ rows, setCorp, canScan = false, scanCorp = null, busy = '', writable = null }) {
+  if (!rows.length) return <div className="muted" style={{ fontSize: 12.5 }}>법인이 없습니다.</div>;
+  const max = Math.max(1, ...rows.map((r) => r.ratePer1000 || 0));
+  return (
+    <STable className="data-table" minWidth={canScan ? 760 : 640} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
+      <thead><tr><th>국가 · 법인</th><th>서버 읽음</th><th>디스크</th><th>기록 디스크</th><th>1,000개당</th><th>사용 중</th>{canScan && <th data-nosort>법인 점검</th>}</tr></thead>
+      <tbody>{rows.map((c) => (
+        <tr key={c.id || '_none'}>
+          <td>{c.id ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => setCorp(c.id)}>{c.country ? `${c.country} · ` : ''}{c.name}</button> : c.name}</td>
+          <td data-sort={c.read} style={{ fontFamily: 'var(--mono)' }}>{num(c.read)} / {num(c.servers)}</td>
+          {/* 읽은 서버가 없는 법인은 0 이 아니라 모름(반증 R11). */}
+          <td data-sort={c.read ? c.disks : undefined} style={{ fontFamily: 'var(--mono)' }}>{c.read ? num(c.disks) : '—'}</td>
+          <td data-sort={c.read ? c.recordSlots : undefined} style={{ fontFamily: 'var(--mono)' }}>{c.read ? num(c.recordSlots) : '—'}</td>
+          <td data-sort={c.ratePer1000 ?? undefined}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(((c.ratePer1000 || 0) / max) * 100)}<span style={{ fontFamily: 'var(--mono)' }}>{rateText(c.ratePer1000)}</span></div></td>
+          <td data-sort={c.read ? c.inUse : undefined} style={{ fontFamily: 'var(--mono)' }}><b>{c.read ? num(c.inUse) : '—'}</b></td>
+          {/* 조회만 되는 법인(쓰기 범위 밖)은 버튼을 잠근다 — 누르면 403 이었다(개선 3회차 I1). */}
+          {canScan && <td>{c.id ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} disabled={!!busy || (writable && !writable.has(c.id))} title={writable && !writable.has(c.id) ? '이 법인은 조회만 할 수 있습니다' : undefined} onClick={() => scanCorp(c)}>{busy === c.id ? '보내는 중…' : '점검'}</button> : '—'}</td>}
+        </tr>
+      ))}</tbody>
+    </STable>
+  );
+}
+
+function Corps({ fleet, setCorp, canScan, onScanned, writable = null }) {
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+  const scanCorp = (c) => {
+    setBusy(c.id); setMsg('');
+    postJson('/tools/disk-bad/scan', { scope: 'corp', corpId: c.id, mode: 'incremental' })
+      .then((r) => { const sent = scanSent(r); if (sent.ok) onScanned(); else setMsg(sent.text); }).catch((e) => setMsg(e?.message || String(e))).finally(() => setBusy(''));
+  };
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <b style={{ fontSize: 13.5 }}>국가 · 법인별 <span className="muted" style={{ fontWeight: 400 }}>{fleet.byCorp.length}곳 · 법인 이름을 누르면 그 법인만 봅니다</span></b>
+      <CorpTable rows={fleet.byCorp} setCorp={setCorp} canScan={canScan} scanCorp={scanCorp} busy={busy} writable={writable} />
+      {msg && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>{msg}</div>}
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>‘서버 읽음’ 이 전체보다 적은 법인은 읽은 서버의 디스크만으로 낸 값입니다. 디스크 수가 적은 법인은 한두 개로 값이 크게 움직입니다.</div>
+    </div>
+  );
+}
+
+function ModelTable({ fleet, limit = 0 }) {
+  const rows = limit ? fleet.byModel.slice(0, limit) : fleet.byModel;
+  const max = Math.max(0.01, ...rows.map((r) => r.ratePct || 0));
+  return (
+    <>
+      <STable className="data-table" minWidth={560} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
+        <thead><tr><th>모델</th><th>장착 수</th><th>기록 디스크</th><th>비율</th><th>복구 불가</th></tr></thead>
+        <tbody>{rows.map((m) => (
+          <tr key={m.model}>
+            <td>{m.model}{m.small && <span className="badge gray" style={{ marginLeft: 6 }}>표본 적음</span>}</td>
+            <td data-sort={m.mounted} style={{ fontFamily: 'var(--mono)' }}>{num(m.mounted)}</td>
+            <td data-sort={m.recordDisks} style={{ fontFamily: 'var(--mono)' }}>{num(m.recordDisks)}</td>
+            <td data-sort={m.ratePct ?? undefined}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(((m.ratePct || 0) / max) * 100, m.small ? 'var(--text-faint)' : 'var(--accent)')}<span style={{ fontFamily: 'var(--mono)' }}>{pctText(m.ratePct)}</span></div></td>
+            <td data-sort={m.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{num(m.unrecoverable)}</td>
+          </tr>
+        ))}</tbody>
+      </STable>
+      <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+        로그에는 모델 · 시리얼이 없습니다. 이미 교체됐거나 판단 불가인 기록 디스크 {num(fleet.unknownModel)}개는 어느 모델이었는지 알 수 없어 비율에서 빠졌고, 그만큼 실제보다 낮게 나옵니다. 장착 30개 미만은 ‘표본 적음’.
+      </div>
+    </>
+  );
+}
+
+function Models({ fleet }) {
+  return <div className="card" style={{ padding: 12, minWidth: 0 }}><b style={{ fontSize: 13.5 }}>모델별 <span className="muted" style={{ fontWeight: 400 }}>지금 꽂혀 있는 디스크 기준</span></b><ModelTable fleet={fleet} /></div>;
+}
+
+function Trend({ fleet, compact = false }) {
+  const months = fleet.months;
+  const max = Math.max(1, ...months.map((m) => m.unrecoverable + m.other));
+  const H = compact ? 90 : 140;
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <div className="flex between" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <b style={{ fontSize: 13.5 }}>월별 추이 <span className="muted" style={{ fontWeight: 400 }}>최근 {months.length}개월 · 기록 건수</span></b>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12 }} className="muted">
+          <span><i style={{ display: 'inline-block', width: 9, height: 9, background: 'var(--red)', marginRight: 5 }} />복구 불가</span>
+          <span><i style={{ display: 'inline-block', width: 9, height: 9, background: 'var(--amber)', marginRight: 5 }} />PDR54 · PDR59 · PDR57</span>
+          <span><i style={{ display: 'inline-block', width: 9, height: 9, background: 'var(--accent)', opacity: 0.7, marginRight: 5 }} />그 달 로그가 남아 있는 서버 비율</span>
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 520, display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+          <div role="img" aria-label="월별 배드 섹터 기록 건수" style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: H, borderBottom: '1px solid var(--border)' }}>
+            {months.map((m) => {
+              const tot = m.unrecoverable + m.other;
+              return (
+                <div key={m.month} title={`${m.month}${m.partial ? '(진행 중)' : ''} · 복구 불가 ${m.unrecoverable} · 그 밖 ${m.other}`} style={{ flex: 1, minWidth: 14, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', opacity: m.partial ? 0.6 : 1 }}>
+                  {tot > 0 && <div style={{ height: `${(m.other / max) * 100}%`, background: 'var(--amber)', borderRadius: m.unrecoverable ? 0 : '3px 3px 0 0' }} />}
+                  {m.unrecoverable > 0 && <div style={{ height: `${(m.unrecoverable / max) * 100}%`, background: 'var(--red)', borderRadius: '3px 3px 0 0', marginTop: m.other ? 2 : 0 }} />}
+                </div>
+              );
+            })}
+          </div>
+          <div role="img" aria-label="그 달의 로그가 남아 있는 서버 비율" style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 30, borderBottom: '1px solid var(--border)' }}>
+            {months.map((m) => <div key={m.month} title={`${m.month} · ${m.coveragePct == null ? '—' : `${m.coveragePct}%`}`} style={{ flex: 1, minWidth: 14, height: `${m.coveragePct || 0}%`, background: 'var(--accent)', opacity: 0.7, borderRadius: '2px 2px 0 0' }} />)}
+          </div>
+          <div style={{ display: 'flex', gap: 4, fontSize: 10.5 }} className="muted">
+            {months.map((m, i) => <span key={m.month} style={{ flex: 1, minWidth: 14, textAlign: 'center', fontFamily: 'var(--mono)' }}>{i % 3 === 0 || i === months.length - 1 ? m.month.slice(2) : ''}</span>)}
+          </div>
+        </div>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>파란 막대가 낮은 달은 로그가 남아 있는 서버가 적어 건수가 적게 잡힙니다 — 실제로 늘었는지는 파란 막대가 비슷한 달끼리만 견줄 수 있습니다. 마지막 달은 진행 중입니다.</div>
+    </div>
+  );
+}
+
+function Servers({ fleet, labels, openServer }) {
+  const reasons = Object.entries(fleet.unreadReasons || {});
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <b style={{ fontSize: 13.5 }}>서버별 <span className="muted" style={{ fontWeight: 400 }}>{fleet.servers.length}대{fleet.servers.length > 300 ? ' · 표에는 300대만 보입니다(열을 눌러 정렬하면 정렬한 상위 300대)' : ''}</span></b>
+      {reasons.length > 0 && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>못 읽은 이유: {reasons.map(([k, n]) => `${k === 'never' ? '아직 점검하지 않음' : (labels.reason[k] || k)} ${n}대`).join(' · ')}</div>}
+      <STable className="data-table" minWidth={1020} limit={300} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
+        <thead><tr><th>국가 · 법인</th><th>서버</th><th>판정</th><th>기록 디스크</th><th>사용 중</th><th>복구 불가</th><th title="iDRAC 가 보여 주는 로그가 담고 있던 기간 — 로그 전체를 읽은 마지막 점검 기준(시간이 지나도 늘지 않습니다)">iDRAC 로그 길이</th><th>마지막 점검</th></tr></thead>
+        <tbody>{fleet.servers.map((s) => (
+          <tr key={`${s.agent}|${s.serverId}`}>
+            <td>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
+            <td><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(s)}>{s.serverName}</button></td>
+            {/* 4회차 반증 F9: 디스크 값 흔적을 서버 창 띠와 같은 기준으로(행은 초록인데 창은 빨강이었다). */}
+            {(() => { const b = serverRowBadge(s); return <td data-sort={s.status}><span className={`badge ${b.tone}`}>{b.label}</span>{b.note && <div style={{ fontSize: 11, color: b.tone === 'red' ? 'var(--red)' : undefined }}>{b.note}</div>}{s.lastStatusLabel && <div className="muted" style={{ fontSize: 11 }}>{s.lastStatusLabel}</div>}</td>; })()}
+            {/* 못 읽은 서버의 수치는 0 이 아니라 모름(반증 R11). */}
+            <td data-sort={s.status === 'unread' ? undefined : s.counts.slots} style={{ fontFamily: 'var(--mono)' }}>{s.status === 'unread' ? '—' : num(s.counts.slots)}</td>
+            <td data-sort={s.status === 'unread' ? undefined : s.counts.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{s.status === 'unread' ? '—' : num(s.counts.inUse)}</b></td>
+            <td data-sort={s.status === 'unread' ? undefined : s.counts.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{s.status === 'unread' ? '—' : num(s.counts.unrecoverable)}</td>
+            <td data-sort={Number.isFinite(s.logSpanMs) ? s.logSpanMs : undefined} style={{ whiteSpace: 'nowrap' }}>
+              {Number.isFinite(s.logSpanMs) ? <>{spanText(0, s.logSpanMs)}<div className="muted" style={{ fontSize: 11 }}>{Number.isFinite(s.continuousSince) ? `${fmtDate(s.continuousSince)} 부터 끊김 없이 봄` : '끊김 없이 본 구간 모름'}{Number.isFinite(s.loginShare) && s.loginShare >= 0.5 ? ` · 로그인 계열 ${Math.floor(s.loginShare * 100)}%+` : ''}</div></> : <span className="muted">—</span>}
+            </td>
+            <td data-sort={s.lastScanAt ?? undefined} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDateTime(s.lastScanAt)}</td>
+          </tr>
+        ))}</tbody>
+      </STable>
+    </div>
+  );
+}
+
+function Basis({ refs, labels }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="card" style={{ padding: 12, minWidth: 0 }}>
+        <b style={{ fontSize: 13.5 }}>기록 ID 가 뜻하는 것 <span className="muted" style={{ fontWeight: 400 }}>근거 문서가 있는 ID 만 분류합니다</span></b>
+        <STable className="data-table" minWidth={980} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
+          <thead><tr><th>ID</th><th>포탈 분류</th><th>Dell 문서가 말하는 뜻</th><th>Dell 권장 조치</th><th>출처</th><th>확인</th></tr></thead>
+          <tbody>{refs.map((r) => (
+            <tr key={r.id}>
+              <td><span className={`badge ${clsTone(r.cls)}`}>{r.id}</span></td>
+              <td>{r.clsLabel}{r.counted ? '' : <div className="muted" style={{ fontSize: 11 }}>배드 섹터 수에 안 셈</div>}</td>
+              <td style={{ whiteSpace: 'normal' }}>{r.note}</td>
+              <td style={{ whiteSpace: 'normal' }} className={r.action ? '' : 'muted'}>{r.action || '—'}</td>
+              <td style={{ whiteSpace: 'normal' }}>{r.sources.map((s, i) => <div key={i}><a href={s.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-2)' }}>{s.title}</a></div>)}</td>
+              <td><span className={`badge ${r.level === 'dell' ? 'green' : 'amber'}`}>{r.level === 'dell' ? 'Dell 문서' : '커뮤니티'}</span></td>
+            </tr>
+          ))}</tbody>
+        </STable>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>모든 출처는 검색 요약으로 확인했고 원문 · 실장비 대조는 아직입니다. 매뉴얼 일부는 Dell 공식 호스트가 아닌 사본입니다. 문서를 찾지 못한 ID(PDR56 · 디스크 삽입 ID 등)는 분류하지 않고 원문만 보관합니다.</div>
+      </div>
+      <div className="card" style={{ padding: 12, minWidth: 0, fontSize: 12.5, lineHeight: 1.7 }}>
+        <b style={{ fontSize: 13.5 }}>판정과 확신 수준</b>
+        <div style={{ marginTop: 6 }}><span className="badge green">{labels.confidence.confirmed}</span> 포탈이 점검 때마다 적어 둔 시리얼로 맞춤 · <span className="badge amber">{labels.confidence.estimated}</span> 기록 뒤로 그 자리에 디스크 빠짐 기록이 없고 그 구간 로그를 끊김 없이 읽음 · <span className="badge gray">{labels.confidence.none}</span> 근거가 모자라 어느 쪽으로도 말하지 않음</div>
+        <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+          <li>디스크 빠짐(PDR5)은 케이블 · 인클로저 · 펌웨어 문제로도 뜹니다 — 이것만으로 ‘교체됨’ 이라고 하지 않습니다. 교체는 시리얼이 바뀐 것을 봤을 때만 확정합니다.</li>
+          <li>고장 예측(PDR16)은 SSD 쓰기 수명으로도 뜨므로 배드 섹터 수에 넣지 않고 따로 셉니다.</li>
+          <li>RAID 로 묶이지 않은 디스크(HBA · 패스스루)는 Patrol Read 가 돌지 않아 이 방법으로 볼 수 없습니다 — ‘기록 없음’ 이 아니라 따로 셉니다.</li>
+          <li>‘기록 없음’ 은 ‘발생한 적 없음’ 이 아니라 ‘로그가 남은 구간에 기록 없음’ 입니다.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function ScanPanel({ data, jobs, corp, canScan, reload, setJobs, settingsMsg, setSettingsMsg }) {
+  const [scope, setScope] = useState(corp ? 'corp' : (data.canScanAll ? 'all' : 'corp'));
+  const [corpId, setCorpId] = useState(corp || '');
+  const [mode, setMode] = useState('incremental');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  // 설정 저장 결과는 설정 칸 안에(4회차 반증 F7 — '어디를 점검할까요' 칸에 떠 저장한 자리에서 보이지 않았고, 그 칸이 없는 화면에서는 아예 안 보였다).
+  //   상태는 부모(DiskBadTool)가 든다 — 이 칸이 다시 만들어져도 남게(5회차 R5-5).
+  const [st, setSt] = useState(data.settings || null);
+  const mailLine = mailInfoText(data.mail);
+  // 설정을 바꿀 수 있는가(관리자 ∧ 조회 · 쓰기 전체 — 서버가 정한다). 모르면(옛 응답) 막지 않는다.
+  const editable = data.settingsEditable !== false;
+  const [corpToText, setCorpToText] = useState(() => Object.entries(data.settings?.corpTo || {}).map(([k, v]) => `${k}=${v.join(',')}`).join('\n'));
+  const start = () => {
+    setBusy(true); setMsg('');
+    postJson('/tools/disk-bad/scan', scope === 'all' ? { scope, mode } : { scope: 'corp', corpId, mode })
+      .then((r) => { const sent = scanSent(r, '점검을 보냈습니다.'); if (sent.ok && r.job) setJobs([r.job, ...jobs.filter((j) => j.id !== r.job.id)]); setMsg(sent.text); })
+      .catch((e) => setMsg(e?.message || String(e))).finally(() => setBusy(false));
+  };
+  const act = (j, path, body) => postJson(`/tools/disk-bad/jobs/${encodeURIComponent(j.id)}/${path}`, body)
+    .then((r) => { requireChanged(r); if (r?.job) setJobs(jobs.map((x) => (x.id === j.id ? r.job : x))); }).catch((e) => setMsg(e?.message || String(e)));   // 128회차: 409 본문에는 job 이 없다 — 목록에 undefined 가 들어가 화면이 깨졌다
+  // 112회차: 서버가 설정 파일을 못 읽은 동안 data.settings 는 기본값(담당자 없음)이다 — 이 저장은 늘 법인 담당자(corpTo)를 함께 보내므로(전체 교체),
+  //   다시 읽힌 뒤 체크 하나만 바꿔도 저장된 담당자 메일 목록이 빈 값으로 덮였다. 읽기 오류 동안은 저장하지 않는다(서버도 503).
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread);
+  // 반증 3회차 D3: 체크박스(자동 점검 · 메일)는 담당자 글상자를 함께 보내지 않는다(편집 중인 글이 같이 저장됐다) — 담당자는 '담당자 저장' 만.
+  //   저장 뒤 서버가 실제로 남긴 값으로 글상자를 다시 채우고, 못 읽은 줄 · 버린 주소 · 모르는 법인을 알린다(예전에는 '저장했습니다' 만 남고 메일이 소리 없이 빠졌다).
+  const saveSettings = (patch, { withCorpTo = false } = {}) => {
+    if (saveLocked) { setSettingsMsg({ text: '설정 파일을 읽지 못한 상태라 저장하지 않았습니다.', bad: true }); return Promise.resolve(); }
+    let badLines = 0;
+    const corpTo = {};
+    if (withCorpTo) {
+      for (const line of corpToText.split('\n')) {
+        if (!line.trim()) continue;
+        const i = line.indexOf('=');
+        if (i > 0 && line.slice(0, i).trim()) corpTo[line.slice(0, i).trim()] = line.slice(i + 1).split(/[\s,;]+/).filter(Boolean);
+        else badLines += 1;
+      }
+    }
+    // 112회차(재현 — 엣지 노드 409): putJson 은 409 · 400 을 던지지 않고 본문을 준다 — 판정 없이 setSt(r.settings) 하면 설정 칸이 사라지고 '저장했습니다.' 가 남았다.
+    return putJson('/tools/disk-bad/settings', withCorpTo ? { ...patch, corpTo } : patch).then((r) => {
+      requireChanged(r); setSt(r.settings);
+      if (withCorpTo) setCorpToText(Object.entries(r.settings?.corpTo || {}).map(([k, v]) => `${k}=${v.join(',')}`).join('\n'));
+      setSettingsMsg({ text: corpSaveText(r.corpReport, badLines), bad: false });
+      reload();
+    }).catch((e) => setSettingsMsg({ text: e?.message || String(e), bad: true }));
+  };
+  const selCount = scope === 'all' ? null : (data.corps.find((c) => c.id === corpId)?.servers ?? 0);
+  // 4회차 반증 F6: 엣지 포탈은 점검 · 설정이 중앙에서만 된다 — 작업 목록(늘 비어 '아직 점검한 적이 없습니다')과 설정 칸(저장하면 409)을 보이지 않는다.
+  if (data.node?.role === 'edge') return (
+    <div className="card" style={{ padding: 14, minWidth: 0, fontSize: 12.5, lineHeight: 1.6 }}>
+      <b>엣지 포탈입니다 — 점검 작업 · 자동 점검 · 메일 설정은 중앙 포탈에서 합니다.</b>
+      <div className="muted" style={{ fontSize: 12 }}>이 노드는 중앙이 보낸 점검을 법인 안에서 읽어 올리기만 합니다. {data.node?.edge ? edgeLastText(data.node.edge) : ''}</div>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
+      {canScan && (
+        <div className="card" style={{ padding: 14, flex: '1 1 380px', maxWidth: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <b style={{ fontSize: 14 }}>어디를 점검할까요</b>
+          {data.canScanAll && <label style={{ display: 'flex', gap: 8, fontSize: 12.5 }}><input type="radio" name="dbad-scope" checked={scope === 'all'} onChange={() => setScope('all')} /><span><b>전체 — 모든 법인의 서버</b><div className="muted" style={{ fontSize: 12 }}>법인마다 따로 돌고, 도는 중에도 법인별로 다시 점검 · 중단할 수 있습니다</div></span></label>}
+          <label style={{ display: 'flex', gap: 8, fontSize: 12.5 }}><input type="radio" name="dbad-scope" checked={scope === 'corp'} onChange={() => setScope('corp')} /><span><b>법인을 골라서</b></span></label>
+          {scope === 'corp' && (
+            <Select className="select" value={corpId} onChange={(e) => setCorpId(e.target.value)} sort={false}>
+              <option value="">법인 선택</option>
+              {data.corps.map((c) => <option key={c.id} value={c.id}>{c.country ? `${c.country} · ` : ''}{c.name} ({c.servers}대)</option>)}
+            </Select>
+          )}
+          <b style={{ fontSize: 14 }}>어떻게 읽을까요</b>
+          <label style={{ display: 'flex', gap: 8, fontSize: 12.5 }}><input type="radio" name="dbad-mode" checked={mode === 'incremental'} onChange={() => setMode('incremental')} /><span><b>새 로그만 이어 읽기</b><div className="muted" style={{ fontSize: 12 }}>지난번 읽은 곳 뒤부터. 처음 점검하는 서버는 전체를 읽습니다</div></span></label>
+          <label style={{ display: 'flex', gap: 8, fontSize: 12.5 }}><input type="radio" name="dbad-mode" checked={mode === 'full'} onChange={() => setMode('full')} /><span><b>처음부터 다시 읽기</b><div className="muted" style={{ fontSize: 12 }}>서버마다 로그 전체를 다시 읽습니다. 오래 걸립니다</div></span></label>
+          <div className="flex between" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+            <span style={{ fontSize: 12.5 }}>{scope === 'all' ? '전체 법인' : (corpId ? `서버 ${selCount}대` : '법인을 고르세요')}</span>
+            <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={busy || (scope === 'corp' && !corpId)} onClick={start}>{busy ? '보내는 중…' : '점검 시작'}</button>
+          </div>
+          {msg && <div className="muted" style={{ fontSize: 12 }}>{msg}</div>}
+        </div>
+      )}
+      <div className="card" style={{ padding: 14, flex: '999 1 560px', maxWidth: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <b style={{ fontSize: 14 }}>점검 작업 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>최근 10개 · 법인마다 따로 돕니다 · 포탈을 다시 시작하면 진행 표시는 사라지고 결과는 남습니다</span></b>
+        {!jobs.length && <div className="muted" style={{ fontSize: 12.5 }}>아직 점검한 적이 없습니다.</div>}
+        {jobs.map((j) => (
+          <div key={j.id} style={box}>
+            <div className="flex between" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 12.5 }}><b>{scopeLabel(j)}</b> · {j.mode === 'full' ? '처음부터' : '새 로그만'} · {j.auto ? '자동' : (j.by || '수동')} · {fmtDateTime(j.at)}{j.finishedAt ? ` ~ ${fmtDateTime(j.finishedAt)}` : ''}<div className="muted" style={{ fontSize: 12 }}>서버 {num(j.done)} / {j.total == null ? '?' : num(j.total)} · 실패 {num(j.failed)} · 새 기록 {num(j.newRecords)}</div></div>
+              {canScan && j.running && data.canScanAll && <button className="tab" style={{ flex: 'none' }} onClick={() => act(j, 'stop', {})}>전체 중단</button>}
+            </div>
+            <STable className="data-table" minWidth={640} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
+              <thead><tr><th>엣지(법인)</th><th>상태</th><th>서버 진행</th><th>실패</th><th>새 기록</th>{canScan && <th data-nosort>이 법인만</th>}</tr></thead>
+              <tbody>{j.units.map((u) => {
+                const pr = unitProgress(u);
+                return (
+                  <tr key={u.agent || '_local'}>
+                    <td>{u.label}</td>
+                    <td><span className={`badge ${jobStateTone(u.state)}`}>{JOB_STATE_LABEL[u.state] || u.state}</span>{u.error && <div className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{u.error}</div>}</td>
+                    <td data-sort={pr.done}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(pr.pct || 0)}<span style={{ fontFamily: 'var(--mono)' }}>{pr.text}</span></div></td>
+                    <td style={{ fontFamily: 'var(--mono)' }}>{num(u.failed)}</td>
+                    <td style={{ fontFamily: 'var(--mono)' }}><b>{num(u.newRecords)}</b></td>
+                    {canScan && <td>{(u.state === 'queued' || u.state === 'running')
+                      ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => act(j, 'stop', { agent: u.agent })}>중단</button>
+                      : ['not-started', 'no-response', 'failed', 'stopped', 'done', 'busy'].includes(u.state)
+                        ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => act(j, 'retry', { agent: u.agent })}>{u.state === 'done' ? '다시 점검' : '다시 보내기'}</button> : '—'}</td>}
+                  </tr>
+                );
+              })}</tbody>
+            </STable>
+          </div>
+        ))}
+      </div>
+      {st && (
+        <div className="card" style={{ padding: 14, flex: '1 1 100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5 }}>
+          <b style={{ fontSize: 14 }}>설정 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>관리자 · 전체 범위</span></b>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.autoEnabled} disabled={!editable || saveLocked} onChange={(e) => saveSettings({ autoEnabled: e.target.checked })} /> {st.intervalHours}시간마다 자동 점검(새 로그만) — 기본 꺼짐. 켜면 전 법인 iDRAC 에 Lifecycle 로그 읽기가 나갑니다(서버마다 첫 회는 전량).</label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.mailEnabled} disabled={!editable || saveLocked} onChange={(e) => saveSettings({ mailEnabled: e.target.checked })} /> 새 기록이 나오면 법인별 한 통 메일(받는 사람: 설정 › 메일 발송의 ‘디스크 배드 섹터 새 기록’ 수신자 + 아래 법인 담당자)</label>
+          {/* 서버가 이미 내려 주던 마지막 메일 결과를 보인다(개선 I-1 — 못 보낸 이유를 화면에서 알 길이 없었다). */}
+          {mailLine && <div className={mailLine.ok ? 'muted' : undefined} style={{ fontSize: 12, ...(mailLine.ok ? {} : { color: 'var(--red)', fontWeight: 600 }) }}>{mailLine.text}</div>}
+          <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>
+          <textarea id="dbad-corpto" className="input" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
+          <div><button className="tab" style={{ flex: 'none' }} disabled={saveLocked || !editable} onClick={() => saveSettings({}, { withCorpTo: true })}>담당자 저장</button></div>
+          {settingsMsg?.text && <div className={settingsMsg.bad ? undefined : 'muted'} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', ...(settingsMsg.bad ? { color: 'var(--red)', fontWeight: 600 } : {}) }}>{settingsMsg.text}</div>}
+          {/* 123회차(112회차 반증): 이 화면은 주기 조회가 없다 — ‘다시 확인’ 이 없으면 다시 읽힌 뒤에도 페이지를 새로 열 때까지 잠긴 채였다(다시 읽으면 key 가 바뀌어 설정 칸을 저장된 값으로 다시 만든다). */}
+          <SettingsUnreadBanner le={unread} what="디스크 배드 섹터 점검 설정" save="자동 점검 · 메일 · 담당자 저장" onRecheck={reload} style={{ marginBottom: 0 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default DiskBadTool;

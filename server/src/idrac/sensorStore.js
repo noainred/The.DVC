@@ -5,8 +5,9 @@
  *
  * 샘플 형태: { t, cpu, temps: { [sensorName]: celsius }, fans: { [fanName]: rpm } }
  */
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
-const MAX_SAMPLES = Number(process.env.IDRAC_SENSOR_SAMPLES) || 1440; // 1분 간격 × 1440 = 24시간
+const MAX_SAMPLES = envPositive(process.env.IDRAC_SENSOR_SAMPLES, 1440); // 1분 간격 × 1440 = 24시간
 const MAX_SENSORS = 64; // 서버당 추적할 온도센서 상한
 
 const byServer = new Map(); // serverId -> { samples: [...], sensors: Set<string> }

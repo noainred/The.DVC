@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 수집 부하</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.btn.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.ok{background:rgba(34,197,94,.14);color:#86efac}
+.badge.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.badge.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.badge.est{background:rgba(125,211,252,.12);color:#7dd3fc}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:32px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
+.sc{padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.big{font-size:26px;font-weight:700;line-height:1.15}
+.unit{font-size:13px;color:#8b9bb4}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.tw{overflow-x:auto}
+.tg{display:grid;grid-template-columns:150px 92px 64px 74px 80px 64px minmax(170px,1fr) 80px 92px 96px 92px 82px;column-gap:12px;align-items:center;padding:0 16px;min-width:1300px;box-sizing:border-box}
+.th{height:36px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{width:100%;height:40px;border:0;border-bottom:1px solid #1a2236;background:transparent;color:#e6edf6;font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
+.tr:hover{background:#18213a}
+.tr.sel{background:rgba(59,130,246,.14)}
+.r{text-align:right}
+.meter{display:flex;align-items:center;gap:8px;min-width:0}
+.meter .t{flex:1;height:6px;border-radius:3px;background:#1b2a48;overflow:hidden;min-width:40px}
+.meter .f{display:block;height:6px;border-radius:3px}
+.panel{background:#0f1626;border-top:1px solid #2b3a59;border-bottom:1px solid #2b3a59;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(520px,100%),1fr));gap:14px;min-width:0}
+.pc{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pc h4{margin:0;font-size:13.5px;font-weight:600}
+.stack{display:flex;height:16px;border-radius:4px;overflow:hidden;background:#1b2a48;gap:2px}
+.stack span{display:block;height:16px}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:3px}
+.tip{padding:8px 10px;border-radius:8px;border:1px solid rgba(125,211,252,.28);background:rgba(125,211,252,.06);color:#c3e6fb;font-size:12.5px;line-height:1.5;overflow-wrap:anywhere}
+.warnbox{padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.07);color:#fcd34d;font-size:12.5px;line-height:1.5;overflow-wrap:anywhere}
+.ng{display:grid;grid-template-columns:110px 70px 70px minmax(170px,1fr) 150px 96px 100px 110px 110px;column-gap:12px;align-items:center;padding:0 16px;min-width:1100px;box-sizing:border-box}
+.nr{height:44px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(620px,100%),1fr));gap:14px}
+.bar{display:grid;grid-template-columns:120px minmax(0,1fr) 92px;column-gap:10px;align-items:center;min-height:28px;font-size:12.5px}
+.bar .t{height:14px;border-radius:3px;background:#1b2a48;overflow:hidden;display:flex;gap:2px}
+.bar .t span{display:block;height:14px}
+.cg{display:grid;grid-template-columns:150px 70px 120px 120px 30px 120px 120px minmax(0,1fr);column-gap:12px;align-items:center;padding:0 16px;min-width:960px;box-sizing:border-box}
+.cr{height:34px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.how{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr));gap:12px}
+.how ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#c3cede}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 새 탭 ‘수집 부하’ — 이 기능이 대상 서버와 노드(중앙 · 엣지)에 주는 부하를 수집이 스스로 재서 보여 줍니다</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 수치입니다. 수치 모형은 이 개발 환경에서 잰 구획별 비용(프로세스 84개 · 4코어: 기본 지표 11.3 ms · 프로세스 11.6 ms · 구성 15.6 ms)에 맞췄습니다. 줄을 눌러 보고, 아래 ‘주기를 바꾸면’ 단추도 눌러 보세요.</div>
+  </div>
+
+  <div class="row" style="justify-content:space-between">
+    <div class="row"><h2 style="margin:0;font-size:18px">수집 부하</h2><span class="dim">최근 10분 · 계속 수집 7대 · 잠깐 보기 5대 · 노드 3곳</span></div>
+    <div class="row"><span class="dim" style="font-size:12px">합계는 늘 잽니다 · 구획별 비용은 ‘부하 측정’ 을 누른 1분 동안만 잽니다</span><button type="button" class="btn">부하 측정(1분)</button></div>
+  </div>
+
+  <div class="sum">
+    <sc-for list="{{ sums }}" as="s" hint-placeholder-count="4">
+      <div class="card sc">
+        <span class="dim" style="font-size:12.5px">{{ s.title }}</span>
+        <div class="row" style="align-items:baseline;gap:8px"><span class="big num">{{ s.big }}</span><span class="unit">{{ s.unit }}</span></div>
+        <span style="font-size:12.5px">{{ s.sub }}</span>
+        <span class="cap">{{ s.note }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <h3 class="h3">대상 서버 — 수집이 그 서버에서 쓴 것</h3>
+      <div class="row"><span class="lg"><span class="badge ok">가벼움</span> 1% 미만</span><span class="lg"><span class="badge warn">보통</span> 1~3%</span><span class="lg"><span class="badge bad">큼</span> 3% 이상(코어 1개 기준)</span></div>
+    </div>
+    <div class="tw">
+      <div class="tg th"><span>서버</span><span>노드</span><span class="r">주기</span><span>방식</span><span class="r">프로세스</span><span class="r">디스크</span><span>수집 CPU(스크립트 + 자식 · 코어 1개 = 100%)</span><span class="r">sshd</span><span class="r">서버 전체 대비</span><span class="r">보내는 양</span><span class="r">메모리(bash)</span><span>판정</span></div>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12">
+        <button type="button" class="{{ r.cls }}" onClick="{{ r.pick }}">
+          <div class="tg"><span class="mono" style="font-weight:600">{{ r.name }}</span><span class="dim">{{ r.node }}</span><span class="r num">{{ r.iv }}</span><span class="dim">{{ r.mode }}</span><span class="r num">{{ r.procs }}</span><span class="r num">{{ r.disks }}</span>
+            <span class="meter"><span class="t"><span class="f" style="{{ r.fill }}"></span></span><span class="num" style="width:54px;text-align:right">{{ r.cpu }}</span></span>
+            <span class="r num dim">{{ r.sshd }}</span><span class="r num">{{ r.share }}</span><span class="r num">{{ r.kbs }}</span><span class="r num dim">{{ r.mem }}</span><span><span class="{{ r.badgeCls }}">{{ r.badge }}</span></span></div>
+        </button>
+        <sc-if value="{{ r.open }}" hint-placeholder-val="{{ false }}">
+          <div class="panel">
+            <div class="pc">
+              <div class="row" style="justify-content:space-between"><h4>{{ r.dd.name }} — CPU 를 어디에 쓰나(구획별)</h4><span class="badge est">부하 측정 1분</span></div>
+              <div class="stack"><sc-for list="{{ r.dd.cpuParts }}" as="p" hint-placeholder-count="5"><span style="{{ p.style }}"></span></sc-for></div>
+              <div class="row" style="gap:14px"><sc-for list="{{ r.dd.cpuParts }}" as="p" hint-placeholder-count="5"><span class="lg"><i style="{{ p.dot }}"></i>{{ p.label }} <b class="num" style="color:#e6edf6">{{ p.val }}</b></span></sc-for></div>
+              <div class="cap">{{ r.dd.cpuNote }}</div>
+            </div>
+            <div class="pc">
+              <div class="row" style="justify-content:space-between"><h4>{{ r.dd.name }} — 보내는 양(구획별)</h4><span class="badge est">부하 측정 1분</span></div>
+              <div class="stack"><sc-for list="{{ r.dd.netParts }}" as="p" hint-placeholder-count="3"><span style="{{ p.style }}"></span></sc-for></div>
+              <div class="row" style="gap:14px"><sc-for list="{{ r.dd.netParts }}" as="p" hint-placeholder-count="3"><span class="lg"><i style="{{ p.dot }}"></i>{{ p.label }} <b class="num" style="color:#e6edf6">{{ p.val }}</b></span></sc-for></div>
+              <div class="cap">{{ r.dd.netNote }}</div>
+            </div>
+            <div class="pc">
+              <h4>줄이는 방법(이 서버 · 추정)</h4>
+              <sc-for list="{{ r.dd.tips }}" as="t" hint-placeholder-count="3"><div class="tip">{{ t.text }}</div></sc-for>
+            </div>
+            <div class="pc">
+              <h4>어떻게 쟀나</h4>
+              <sc-for list="{{ r.dd.how }}" as="t" hint-placeholder-count="3"><div class="cap" style="color:#c3cede">{{ t.text }}</div></sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </sc-for>
+    </div>
+  </div>
+
+  <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px"><h3 class="h3">노드 — 수집을 맡은 포탈(중앙 · 엣지)</h3><span class="dim" style="font-size:12px">포탈 CPU 는 다른 기능을 포함한 프로세스 전체 · 그중 집중 모니터링 몫(해석 · 기록)은 따로 잽니다</span></div>
+    <div class="tw">
+      <div class="ng th"><span>노드</span><span class="r">맡은 서버</span><span class="r">SSH 세션</span><span>포탈 CPU(전체) · 그중 집중 모니터링</span><span class="r">메모리(포탈 · 집중 모니터링)</span><span class="r">지연 p99</span><span class="r">받는 양</span><span class="r">중앙으로</span><span class="r">DB 쓰기</span></div>
+      <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="3">
+        <div class="ng nr"><span style="font-weight:600">{{ n.name }}</span><span class="r num">{{ n.servers }}</span><span class="r num">{{ n.ssh }}</span>
+          <span class="meter"><span class="t" style="display:flex;gap:2px"><span class="f" style="{{ n.fmFill }}"></span><span class="f" style="{{ n.restFill }}"></span></span><span class="num" style="width:118px;text-align:right">{{ n.cpu }}</span></span>
+          <span class="r num">{{ n.mem }}</span><span class="r num">{{ n.lag }}</span><span class="r num">{{ n.rx }}</span><span class="r num">{{ n.up }}</span><span class="r num">{{ n.db }}</span></div>
+      </sc-for>
+    </div>
+    <div class="cap" style="padding:0 16px">지연 p99 = Node 이벤트 루프 지연(다른 요청이 기다린 시간) · 받는 양 = 대상 서버에서 SSH 로 받은 원문 · 중앙으로 = 엣지가 동기화로 보낸 양(요약 · 압축 뒤) · DB 쓰기 = 기록 DB 1분 묶음.</div>
+  </div>
+
+  <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div class="row" style="justify-content:space-between">
+      <h3 class="h3">수집 방법별 분석</h3>
+      <div class="row"><span class="dim" style="font-size:12.5px">모든 서버를 이 주기로 바꾸면</span>
+        <div class="seg"><sc-for list="{{ ivBtns }}" as="b" hint-placeholder-count="5"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div>
+        <span class="badge est">추정 — 잰 구획 비용 × 횟수</span></div>
+    </div>
+    <div class="two">
+      <div class="pc">
+        <h4>대상 서버 CPU 합계 — 주기별(12대 · 코어 1개 = 100%)</h4>
+        <sc-for list="{{ ivBars }}" as="b" hint-placeholder-count="5">
+          <div class="bar"><span class="{{ b.lcls }}">{{ b.label }}</span><span class="t"><sc-for list="{{ b.parts }}" as="p" hint-placeholder-count="3"><span style="{{ p.style }}"></span></sc-for></span><span class="r num">{{ b.val }}</span></div>
+        </sc-for>
+        <div class="row" style="gap:14px"><span class="lg"><i style="background:#3987e5"></i>기본 지표(매 주기)</span><span class="lg"><i style="background:#d95926"></i>프로세스(5초 · 주기가 더 길면 그 주기)</span><span class="lg"><i style="background:#199e70"></i>구성(30초)</span></div>
+        <div class="cap">주기를 5초까지 늘려도 프로세스 구획은 5초마다라 그대로입니다(10초면 10초마다) — 프로세스가 많은 서버는 주기보다 프로세스 구획이 부하를 정합니다.</div>
+      </div>
+      <div class="pc">
+        <h4>보내는 양 — 경로별(대상 → 노드 · 노드 → 중앙)</h4>
+        <sc-for list="{{ pathBars }}" as="b" hint-placeholder-count="4">
+          <div class="bar"><span>{{ b.label }}</span><span class="t"><span style="{{ b.style }}"></span></span><span class="r num">{{ b.val }}</span></div>
+        </sc-for>
+        <div class="warnbox">{{ pathNote }}</div>
+      </div>
+    </div>
+    <div class="tw">
+      <div class="cg th" style="padding-top:0"><span>서버</span><span class="r">지금 주기</span><span class="r">지금 CPU</span><span class="r">지금 보내는 양</span><span></span><span class="r">{{ ivHead1 }}</span><span class="r">{{ ivHead2 }}</span><span>바뀌는 것</span></div>
+      <sc-for list="{{ whatIf }}" as="w" hint-placeholder-count="12">
+        <div class="cg cr"><span class="mono">{{ w.name }}</span><span class="r num dim">{{ w.iv }}</span><span class="r num">{{ w.cpu0 }}</span><span class="r num">{{ w.kb0 }}</span><span class="dim">→</span><span class="r num" style="font-weight:600">{{ w.cpu1 }}</span><span class="r num" style="font-weight:600">{{ w.kb1 }}</span><span class="cap">{{ w.note }}</span></div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div class="how">
+    <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+      <h3 class="h3">어떻게 재나(구현 계획)</h3>
+      <ul>
+        <li>대상 서버: 수집 반복문(bash)이 30초마다 자기 /proc/$$/stat 의 utime · stime · cutime · cstime(끝난 자식 cat · grep · awk 포함)과 부모 sshd 세션의 utime · stime 을 함께 보냅니다 — 앞 값과의 차이 ÷ 경과 시간 = CPU %. 원격 명령은 그대로 상수입니다(한 줄 추가 · 사용자 입력 없음).</li>
+        <li>보내는 양: 노드가 서버별로 받은 바이트를 셉니다(원격에서 따로 재지 않습니다).</li>
+        <li>노드: 포탈 프로세스 CPU(process.cpuUsage) · 메모리 · 이벤트 루프 지연 · 열린 SSH 세션 수 · 서버별 해석 시간 · 기록 DB 쓰기량. 엣지는 동기화 때 이 값을 함께 보냅니다(정제 · 상한).</li>
+        <li>구획별 비용: ‘부하 측정’ 을 누르면 1분 동안만 구획마다 bash 내장 times 로 앞뒤 CPU 를 재는 측정용 상수 스크립트로 바꿨다가 돌아옵니다(평소에는 재지 않습니다 — 재는 일도 비용이라).</li>
+      </ul>
+    </div>
+    <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+      <h3 class="h3">정직하게 밝힐 것</h3>
+      <ul>
+        <li>CPU % 는 코어 1개 기준입니다. 서버 전체 대비는 코어 수로 나눈 값입니다.</li>
+        <li>‘주기를 바꾸면’ 은 잰 구획 비용에 횟수를 곱한 추정입니다. 실제는 캐시 · 다른 부하에 따라 다릅니다.</li>
+        <li>sshd 몫(암호화)은 보내는 양 · 암호 방식에 따라 다릅니다. 같은 계정의 다른 SSH 세션과는 PID 로 가려 섞이지 않습니다.</li>
+        <li>측정 자체도 비용입니다 — 30초마다 /proc 파일 두 개를 더 읽습니다(구획별 측정은 누른 1분만).</li>
+        <li>이 시안의 서버 · 수치는 가상입니다. 모형의 기준값만 이 개발 환경(실 RHEL 아님)에서 잰 것입니다.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2150}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sel: 'pl-db-01', iv: 5 }; }
+  renderVals() {
+    const S = this.state;
+    const BLUE = '#3987e5'; const ORANGE = '#d95926'; const GREEN = '#199e70'; const AMBER = '#c98500'; const GREY = '#5b6b86';
+    // [이름, 노드, 주기, 방식, 프로세스, 디스크(diskstats 줄), 코어, 메모리 GB]
+    const SV = [
+      ['kr-was-01', '중앙', 2, '계속 수집', 412, 6, 16, 64], ['kr-was-02', '중앙', 2, '계속 수집', 398, 6, 16, 64],
+      ['kr-db-01', '중앙', 2, '계속 수집', 1240, 48, 32, 256], ['kr-db-02', '중앙', 1, '잠깐 보기', 1180, 48, 32, 256],
+      ['pl-was-01', '엣지 PL', 2, '계속 수집', 356, 4, 8, 32], ['pl-db-01', '엣지 PL', 2, '계속 수집', 2140, 86, 32, 384],
+      ['pl-bak-01', '엣지 PL', 5, '계속 수집', 640, 24, 16, 64], ['us-web-01', '엣지 NJ', 2, '잠깐 보기', 220, 4, 8, 16],
+      ['us-web-02', '엣지 NJ', 2, '잠깐 보기', 214, 4, 8, 16], ['us-app-01', '엣지 NJ', 1, '잠깐 보기', 780, 8, 16, 64],
+      ['us-nfs-01', '엣지 NJ', 10, '계속 수집', 310, 120, 16, 64], ['us-mon-01', '엣지 NJ', 5, '계속 수집', 180, 4, 4, 8],
+    ];
+    // 구획 비용 모형(ms CPU · 1회) — 이 개발 환경 실측(프로세스 84 · diskstats 15줄: 기본 11.3 · 프로세스 11.6 · 구성 15.6)에 맞춤
+    const baseMs = (d) => 9.5 + 0.12 * d; const loopMs = 3.5;
+    const procMs = (p) => 4 + 0.09 * p; const topoMs = (p, d) => 12 + 0.03 * p + 0.1 * d;
+    const procPer = (iv) => Math.max(5, iv);
+    const cost = (s, iv) => {
+      const p = s[4]; const d = s[5]; const c = s[6];
+      const cBase = ((baseMs(d) + loopMs) / (iv * 1000)) * 100; const cProc = (procMs(p) / (procPer(iv) * 1000)) * 100; const cTopo = (topoMs(p, d) / 30000) * 100;
+      const bBase = (600 + 75 * d + 40 * c) / iv; const bProc = (62 * p + 120) / procPer(iv); const bTopo = (14 * p + 20 * p + 90 * d) / 30;
+      const bytes = bBase + bProc + bTopo; const sshd = 0.02 + (bytes / 1024) * 0.012;
+      return { cBase, cProc, cTopo, sshd, cpu: cBase + cProc + cTopo, bBase, bProc, bTopo, bytes };
+    };
+    const pct = (v) => (v >= 10 ? v.toFixed(1) : v.toFixed(2)) + '%';
+    const kb = (b) => { const k = b / 1024; return (k >= 100 ? Math.round(k) : k >= 10 ? k.toFixed(1) : k.toFixed(2)) + ' KB/s'; };
+    const judge = (v) => (v < 1 ? ['badge ok', '가벼움'] : v < 3 ? ['badge warn', '보통'] : ['badge bad', '큼']);
+    const C = SV.map((s) => ({ s, c: cost(s, s[2]) }));
+    const maxCpu = Math.max(...C.map((x) => x.c.cpu + x.c.sshd));
+
+    const mkRows = (dd) => C.map(({ s, c }) => {
+      const tot = c.cpu + c.sshd; const j = judge(tot);
+      return { dd,
+        cls: 'tr' + (S.sel === s[0] ? ' sel' : ''), open: S.sel === s[0], pick: () => this.setState({ sel: S.sel === s[0] ? null : s[0] }),
+        name: s[0], node: s[1], iv: s[2] + '초', mode: s[3], procs: s[4].toLocaleString('en-US'), disks: String(s[5]),
+        fill: 'width:' + ((c.cpu / maxCpu) * 100).toFixed(1) + '%;background:' + (tot >= 3 ? '#ef4444' : tot >= 1 ? AMBER : BLUE), cpu: pct(c.cpu),
+        sshd: pct(c.sshd), share: pct(tot / s[6]), kbs: kb(c.bytes), mem: '3.4 MB', badgeCls: j[0], badge: j[1],
+      };
+    });
+
+    const sel = C.find((x) => x.s[0] === S.sel) || C[5];
+    const s = sel.s; const c = sel.c; const tot = c.cpu + c.sshd;
+    const parts = [['기본 지표', c.cBase, BLUE], ['프로세스', c.cProc, ORANGE], ['구성(30초)', c.cTopo, GREEN], ['sshd 암호화', c.sshd, AMBER]];
+    const nparts = [['기본 지표', c.bBase, BLUE], ['프로세스', c.bProc, ORANGE], ['구성(30초)', c.bTopo, GREEN]];
+    const big = parts.slice().sort((a, b) => b[1] - a[1])[0];
+    const after5 = cost(s, Math.max(5, s[2])); const after10 = cost(s, 10);
+    const tips = [];
+    if (c.cProc >= c.cBase) tips.push({ text: '프로세스 구획이 가장 큽니다(' + pct(c.cProc) + ') — 프로세스 ' + s[4].toLocaleString('en-US') + '개의 stat 줄을 5초마다 전부 읽어 보냅니다. 주기를 늘려도 이 몫은 그대로이고, 줄이려면 프로세스 표본 주기를 늘리는 설정(새 설정 · 예 15초)이 필요합니다(구현 때 결정).' });
+    if (s[2] < 5) tips.push({ text: '주기 ' + s[2] + '초 → 5초: 기본 지표 몫 ' + pct(c.cBase) + ' → ' + pct(after5.cBase) + ' · 합계 ' + pct(c.cpu) + ' → ' + pct(after5.cpu) + '(추정).' });
+    if (s[2] < 10) tips.push({ text: '주기 10초(보는 화면이 없는 계속 수집은 지금도 10초로 낮춥니다): 합계 ' + pct(after10.cpu) + ' · 보내는 양 ' + kb(after10.bytes) + '(추정).' });
+    if (s[1] === '중앙') tips.push({ text: '중앙이 직접 수집하는 서버입니다 — 원문 ' + kb(c.bytes) + ' 가 WAN 을 건넙니다. 법인 엣지가 맡으면 원문은 법인 안에서 받고 중앙에는 요약만 갑니다.' });
+    const d = {
+      name: s[0],
+      cpuParts: parts.map((p) => ({ style: 'width:' + ((p[1] / tot) * 100).toFixed(1) + '%;background:' + p[2], dot: 'background:' + p[2], label: p[0], val: pct(p[1]) })),
+      cpuNote: '합계 ' + pct(tot) + '(코어 1개 기준) = 서버 ' + s[6] + '코어 전체의 ' + pct(tot / s[6]) + ' · 가장 큰 몫: ' + big[0] + '. 메모리는 반복문 bash 약 3.4 MB + 순간 자식(cat · grep · awk) 몇 MB.',
+      netParts: nparts.map((p) => ({ style: 'width:' + ((p[1] / c.bytes) * 100).toFixed(1) + '%;background:' + p[2], dot: 'background:' + p[2], label: p[0], val: kb(p[1]) })),
+      netNote: '합계 ' + kb(c.bytes) + ' — 프로세스 구획이 ' + Math.round((c.bProc / c.bytes) * 100) + '%. 원격은 모든 프로세스 줄을 보내고 상위 30 은 노드가 고릅니다(원격이 상태를 들고 있지 않게 — 명령은 상수).',
+      tips: tips.slice(0, 4),
+      how: [
+        { text: '수집 CPU = 반복문 bash 의 (utime + stime + cutime + cstime) 차이 ÷ 경과 시간 — 끝난 자식까지 들어갑니다. sshd = 그 부모(세션) 프로세스의 utime + stime.' },
+        { text: '구획별 비용은 ‘부하 측정’ 1분 동안만 구획 앞뒤로 bash 내장 times 를 읽어 냅니다(포크 없음).' },
+        { text: '보내는 양은 노드가 받은 바이트를 서버 · 구획별로 셉니다.' },
+      ],
+    };
+
+    const rows = mkRows(d);
+    const sums = (() => {
+      const tots = C.map((x) => x.c.cpu + x.c.sshd); const mx = C[tots.indexOf(Math.max(...tots))];
+      const rx = C.reduce((a, x) => a + x.c.bytes, 0);
+      return [
+        { title: '대상 서버 — 수집 CPU', big: pct(tots.reduce((a, b) => a + b, 0) / tots.length), unit: '평균 · 코어 1개 기준', sub: '최고 ' + mx.s[0] + ' ' + pct(Math.max(...tots)) + '(프로세스 ' + mx.s[4].toLocaleString('en-US') + '개)', note: '스크립트 + 자식 + sshd 세션 · 서버 전체(코어 수로 나눔) 대비 평균 ' + pct(C.reduce((a, x) => a + (x.c.cpu + x.c.sshd) / x.s[6], 0) / C.length) },
+        { title: '노드 — 집중 모니터링 몫', big: '0.9%', unit: '중앙 · 코어 1개 기준', sub: '엣지 PL 0.6% · 엣지 NJ 0.5%', note: '해석 · 기록 시간만 · 포탈 전체 CPU 는 아래 노드 표' },
+        { title: '보내는 양 — 대상 → 노드', big: Math.round(rx / 1024), unit: 'KB/s 합계', sub: '그중 중앙 직접 ' + Math.round(C.filter((x) => x.s[1] === '중앙').reduce((a, x) => a + x.c.bytes, 0) / 1024) + ' KB/s 가 WAN 을 건넘', note: '엣지 → 중앙 동기화는 요약 · 압축 뒤 약 9 KB/s' },
+        { title: '기록 DB 쓰기', big: '0.24', unit: 'MB/분', sub: '30일이면 약 10 GB(추정)', note: '상한 20 GB 의 52% · 넘으면 오래된 기록부터 지웁니다' },
+      ];
+    })();
+
+    const nodes = [
+      { name: '중앙', servers: '4', ssh: '4', fm: 0.9, rest: 5.3, mem: '612 MB · 58 MB', lag: '14 ms', rx: '', up: '—', db: '0.24 MB/분', key: '중앙' },
+      { name: '엣지 PL', servers: '3', ssh: '3', fm: 0.6, rest: 1.6, mem: '288 MB · 31 MB', lag: '9 ms', rx: '', up: '4.1 KB/s', db: '—', key: '엣지 PL' },
+      { name: '엣지 NJ', servers: '5', ssh: '5', fm: 0.5, rest: 1.4, mem: '301 MB · 36 MB', lag: '8 ms', rx: '', up: '4.6 KB/s', db: '—', key: '엣지 NJ' },
+    ].map((n) => {
+      const rx = C.filter((x) => x.s[1] === n.key).reduce((a, x) => a + x.c.bytes, 0);
+      return { name: n.name, servers: n.servers, ssh: n.ssh, fmFill: 'width:' + (n.fm * 8).toFixed(1) + '%;background:' + ORANGE, restFill: 'width:' + (n.rest * 8).toFixed(1) + '%;background:' + GREY,
+        cpu: (n.fm + n.rest).toFixed(1) + '% · ' + n.fm.toFixed(1) + '%', mem: n.mem, lag: n.lag, rx: kb(rx), up: n.up, db: n.db };
+    });
+
+    const IVS = [0, 1, 2, 5, 10];
+    const ivBtns = IVS.map((v) => ({ label: v === 0 ? '지금 그대로' : v + '초', cls: S.iv === v ? 'on' : '', pick: () => this.setState({ iv: v }) }));
+    const totFor = (v) => C.map((x) => cost(x.s, v === 0 ? x.s[2] : v)).reduce((a, k) => ({ b: a.b + k.cBase, p: a.p + k.cProc, t: a.t + k.cTopo }), { b: 0, p: 0, t: 0 });
+    const tAll = IVS.map(totFor); const tMax = Math.max(...tAll.map((x) => x.b + x.p + x.t));
+    const ivBars = IVS.map((v, i) => { const x = tAll[i]; const sum = x.b + x.p + x.t; return {
+      label: v === 0 ? '지금 그대로' : '모두 ' + v + '초', lcls: S.iv === v ? '' : 'dim', val: sum.toFixed(1) + '%',
+      parts: [[x.b, BLUE], [x.p, ORANGE], [x.t, GREEN]].map((q) => ({ style: 'width:' + ((q[0] / tMax) * 100).toFixed(1) + '%;background:' + q[1] })) }; });
+
+    const cen = C.filter((x) => x.s[1] === '중앙').reduce((a, x) => a + x.c.bytes, 0);
+    const pl = C.filter((x) => x.s[1] === '엣지 PL').reduce((a, x) => a + x.c.bytes, 0);
+    const nj = C.filter((x) => x.s[1] === '엣지 NJ').reduce((a, x) => a + x.c.bytes, 0);
+    const pMax = Math.max(cen, pl, nj);
+    const pathBars = [
+      { label: '중앙 직접(WAN)', v: cen, color: '#ef4444' }, { label: '엣지 PL(법인 안)', v: pl, color: BLUE }, { label: '엣지 NJ(법인 안)', v: nj, color: BLUE },
+      { label: '엣지 → 중앙(WAN)', v: 8.7 * 1024, color: GREEN },
+    ].map((b) => ({ label: b.label, style: 'width:' + ((b.v / pMax) * 100).toFixed(1) + '%;background:' + b.color, val: kb(b.v) }));
+    const pathNote = '중앙이 직접 수집하는 4대의 원문 ' + kb(cen) + ' 가 WAN 을 건넙니다 — 엣지가 맡은 8대는 원문을 법인 안에서 받고 중앙에는 요약(표본 · 상위 30)만 약 8.7 KB/s 보냅니다. 고RTT 법인 서버는 그 법인 엣지가 맡는 편이 WAN 을 덜 씁니다.';
+
+    const iv = S.iv;
+    const whatIf = C.map(({ s: x, c: k }) => {
+      const n = cost(x, iv === 0 ? x[2] : iv);
+      const note = iv === 0 ? '—' : (iv > x[2] ? '기본 지표 몫이 ' + (x[2] / iv * 100).toFixed(0) + '% 로' : iv < x[2] ? '기본 지표 몫이 ' + (x[2] / iv).toFixed(1) + '배로' : '그대로') + (x[4] > 1000 ? ' · 프로세스 몫(' + pct(n.cProc) + ')은 ' + (iv <= 5 ? '그대로' : '줄어듦') : '');
+      return { name: x[0], iv: x[2] + '초', cpu0: pct(k.cpu), kb0: kb(k.bytes), cpu1: pct(n.cpu), kb1: kb(n.bytes), note };
+    });
+
+    return {
+      sums, rows, d, nodes, ivBtns, ivBars, pathBars, pathNote, whatIf,
+      ivHead1: iv === 0 ? '바꾼 뒤 CPU' : iv + '초면 CPU', ivHead2: iv === 0 ? '바꾼 뒤 보내는 양' : iv + '초면 보내는 양',
+    };
+  }
+}
+</script>
+</body>
+</html>

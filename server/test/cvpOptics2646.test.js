@@ -46,11 +46,12 @@ test('② judgeOptics — 링크 올라온 포트만 · 장비 임계 먼저 · 
     mk('all › Ethernet50', { rxPower: -11 }),
     mk('all › Ethernet51', { rxPower: -3 }),
     mk('all › Ethernet52', { rxPower: -40 }),              // 링크 없음 — 바닥이 정상
-    mk('all › Ethernet53', { rxPower: -12 }, { otherState: null, rxDevice: 'ok' }), // 장비 임계가 정상이라 함
+    mk('all › Ethernet53', { rxPower: -12 }, { otherState: null, rxDevice: 'ok', rxLow: { warnDbm: -16, faultDbm: -20 } }), // 장비 임계(낮은 쪽 포함)가 정상이라 함
+    mk('all › Ethernet55', { rxPower: -12 }, { otherState: null, rxDevice: 'ok' }), // v3.47(5회차 A1-6): 장비가 높은 쪽 임계만 줌 — 낮은 쪽은 포탈 기준
     { kind: 'xcvr', name: 'all › Ethernet54', state: 'absent', detail: '' },
     { kind: 'psu', name: 'PowerSupply1', state: 'ok', detail: '' },
   ];
-  const ports = ['Ethernet49', 'Ethernet50', 'Ethernet51', 'Ethernet53'].map((name) => ({ name, oper: 'up' })).concat([{ name: 'Ethernet52', oper: 'down' }]);
+  const ports = ['Ethernet49', 'Ethernet50', 'Ethernet51', 'Ethernet53', 'Ethernet55'].map((name) => ({ name, oper: 'up' })).concat([{ name: 'Ethernet52', oper: 'down' }]);
   const out = P.judgeOptics(parts, ports, { warnDbm: -10, faultDbm: -14 });
   const by = Object.fromEntries(out.map((p) => [p.name, p]));
   assert.equal(by['all › Ethernet49'].state, 'fault'); assert.match(by['all › Ethernet49'].detail, /약함/);
@@ -60,6 +61,7 @@ test('② judgeOptics — 링크 올라온 포트만 · 장비 임계 먼저 · 
   assert.equal(by['all › Ethernet52'].state, 'unknown', '링크 없는 포트의 낮은 광량을 장애로 세지 않는다');
   assert.equal(by['all › Ethernet52'].optic.judged, false); assert.match(by['all › Ethernet52'].detail, /판정 안 함/);
   assert.equal(by['all › Ethernet53'].state, 'ok'); assert.equal(by['all › Ethernet53'].optic.basis, 'device');
+  assert.deepEqual([by['all › Ethernet55'].state, by['all › Ethernet55'].optic.basis], ['warn', 'portal'], '높은 쪽 장비 임계만 있으면 낮은 Rx 는 포탈 기준(추세 · 링크 품질과 같다)');
   assert.equal(by['all › Ethernet54'].state, 'absent');
   assert.equal(by.PowerSupply1.state, 'ok');
   assert.ok(out.every((p) => !Object.hasOwn(p, 'domJudge')), '판정 재료는 저장하지 않는다');

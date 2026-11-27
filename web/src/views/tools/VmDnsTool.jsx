@@ -618,6 +618,12 @@ export function PolicyPanel({ vcList, servers, byIp, policy, policyErr, canWrite
         />
         {policyErr && !policy ? <div style={{ padding: 14 }}><ErrorBox error={policyErr} /></div> : !policy ? <Loading /> : (
           <>
+            {policy?.loadError && (
+              <div style={{ padding: '10px 18px', fontSize: 12.5, color: 'var(--red)' }}>
+                {/* 결정(56~75 남긴 것) 60: 정책 파일을 못 읽어 기본값(공인 DNS 비승인 · 법인 목록 없음)으로 판정 중 — '설정 없음' 과 다르다. 저장은 거절된다. */}
+                정책 파일을 읽지 못해 기본값(공인 DNS 비승인 · 법인 목록 없음)으로 판정하고 있습니다 — {policy.loadError.reason || '사유 미상'}. {policy.loadError.readError ? '읽기 오류라 원본은 그대로 있고 다시 읽히면 풀립니다' : '서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요'}. 그동안 저장은 거절합니다.
+              </div>
+            )}
             {savedInvalid.length > 0 && (
               <div style={{ padding: '10px 18px', fontSize: 12, color: 'var(--amber)' }}>
                 저장된 항목 중 형식이 틀린 {savedInvalid.length}개는 판정에 쓰지 않습니다: {savedInvalid.slice(0, 6).map((x) => invalidText(x, vcName)).join(' · ')}{savedInvalid.length > 6 ? ' …' : ''}

@@ -48,6 +48,14 @@ const num = (v, d) => { const n = Math.floor(Number(v)); return Number.isFinite(
 
 // v2.621(감사 RECENT-06): 범위 계정도 통과하는 svcmon 큰 본문 경로(canEdit 뿐 — 저장하지 않는 변환).
 const SVCMON_HOSTMAP_PARSE = '/api/svcmon/targets/hostmap/parse';
+const ONBOARD_UPLOAD = new Set(['/api/tools/bm-usage/onboard/analyze', '/api/tools/bm-usage/onboard/apply']);
+/*
+ * 108회차 A4(재현 — 실제 express): 7b 서버 등록 업로드는 **한 번도 큰 파서를 타지 못했다**. index.js 가 두 경로에 이 게이트를 달았지만
+ *   ① classify 가 /api/central · /api/svcmon · /api/admin/log-analysis 만 세션 · 엣지 계열로 알아 이 경로는 next() 로 넘겼고
+ *   ② `app.use(경로, 게이트)` 로 달리면 full(baseUrl + path)이 끝 '/' 로 끝나 ONBOARD_UPLOAD.has(full) 도 빗나갔다
+ *   → 전역 1MB 파서가 413(2MB 본문 실측 — 머리말 '파일 4MB → base64 약 5.4MB' 는 닿을 수 없었다). 끝 '/' 하나를 떼고 본다.
+ */
+const isOnboardUpload = (full) => { const f = String(full || ''); return ONBOARD_UPLOAD.has(f.endsWith('/') ? f.slice(0, -1) : f); };
 
 /**
  * v2.620(RECENT2620-03·SEC2620-06): 세션 계열 큰 본문은 **그 라우트를 통과할 수 있는 사용자만** 슬롯을 잡는다.
@@ -79,7 +87,9 @@ export function sessionBigBodyAllowed(user, full, deps = {}) {
   const role = String(user.role || '');
   const scoped = () => { try { return !!deps.scoped?.(user); } catch { return true; } }; // 판정 실패는 '범위 계정' 으로(파싱 안 함)
   const f = String(full || '');
-  if (f.startsWith('/api/admin/log-analysis/')) return role === 'admin' && !demo && !scoped();
+  // 7b 서버 등록 업로드(ONBOARD_UPLOAD) — 관리자 · 데모 계정 제외 · 범위 계정 포함(행 단위로 자기 법인만 적용된다). 로그 분석 붙여넣기와 한 판정.
+  const onboard = isOnboardUpload(f);
+  if (onboard || f.startsWith('/api/admin/log-analysis/')) return role === 'admin' && !demo && (onboard || !scoped());
   if (f.startsWith('/api/svcmon/')) {
     if (role !== 'admin' && role !== 'operator') return false;
     if (role !== 'admin') { let set = null; try { set = deps.permsOf?.(role); } catch { set = null; } if (!set || !set.has?.('svcmon')) return false; }
@@ -123,7 +133,7 @@ export function bigJsonGate(parser, resolvers, opts = {}) {
     try {
       if (full.startsWith('/api/central/')) { const w = ident(central && central(req)); return w == null ? null : { cls: 'central', who: w }; }
       // v2.590: 로그 분석 붙여넣기(adminOnly, 라우트가 8MB 를 재검사)도 세션 계열이다.
-      if (full.startsWith('/api/svcmon/') || full.startsWith('/api/admin/log-analysis/')) {
+      if (full.startsWith('/api/svcmon/') || full.startsWith('/api/admin/log-analysis/') || isOnboardUpload(full)) {   // 108회차 A4: 서버 등록 업로드도 세션 계열
         const u = session && session(req);
         const w = ident(u); if (w == null) return null;
         // v2.620(RECENT2620-03): 라우트를 통과하지 못할 사용자는 슬롯을 잡지 않는다(판정기가 주어졌을 때만 — 없으면 예전 동작).

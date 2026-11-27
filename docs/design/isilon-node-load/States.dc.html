@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>상태 6종 — 노드 부하 추이</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #0a0e17; color: #e6edf6; font-family: Inter, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+a { color: #8b9bb4; } a:hover { color: #e6edf6; }
+</style>
+</helmet>
+<div style="width: 1440px; height: 820px; box-sizing: border-box; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+  <div style="font-size: 12.5px; color: #8b9bb4">같은 구역이 데이터 상태에 따라 어떻게 말하는가 — 값이 없는 이유를 단정하지 않고, 아는 것과 모르는 것을 나눠 적습니다.</div>
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 12px; flex: 1; min-height: 0">
+
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b9bb4">①</span><b style="font-size: 13.5px">이력 없음 — 수집 누적 전</b></div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; height: 150px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 14px; font-size: 12.5px; color: #8b9bb4; line-height: 1.6">아직 이 장비의 노드 부하 추이가 없습니다.<br>다음 수집부터 쌓입니다(수집 주기 1시간 — 설정값).<br>최신값은 아래 노드 표에 그대로 있습니다.</div>
+      <div style="font-size: 12px; color: #8b9bb4; line-height: 1.55">업그레이드 직후 모든 장비가 이 상태입니다. 차트 틀을 빈 채로 그리지 않고 문장 하나로 대신합니다 — 1점짜리 차트를 지어내지 않습니다.</div>
+    </div>
+
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b9bb4">②</span><b style="font-size: 13.5px">DB 비활성</b></div>
+      <div style="padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(245,158,11,.35); background: rgba(245,158,11,.07); color: #fcd34d; font-size: 12.5px; line-height: 1.55">이 포탈 노드에서 저장소 DB(SQLite)를 열 수 없어 노드 부하를 저장하지 못합니다. 최신값만 봅니다 — 기존 ‘용량 추이’ 와 같은 사유 표시.</div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; font-size: 12px; color: #8b9bb4; line-height: 1.55">응답의 <span style="font-family: 'JetBrains Mono', monospace; color: #e6edf6">db:false</span> 를 그대로 보여 줍니다. ‘수집 실패’ 와 섞지 않습니다(수집은 됐고 저장만 못 한 것).</div>
+    </div>
+
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b9bb4">③</span><b style="font-size: 13.5px">부분 결측 — 노드 하나가 몇 주기 비었을 때</b></div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+        <div style="display: grid; grid-template-columns: 54px repeat(12, minmax(0, 1fr)); gap: 2px; align-items: center; font-size: 11.5px">
+          <div>노드 6</div><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #86b6ef"></i><i style="height: 20px; border-radius: 3px; background: #86b6ef"></i><i style="height: 20px; border-radius: 3px; background: #b7d3f6"></i><i style="height: 20px; border-radius: 3px; background: #86b6ef"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i>
+        </div>
+        <div style="display: grid; grid-template-columns: 54px repeat(12, minmax(0, 1fr)); gap: 2px; align-items: center; font-size: 11.5px">
+          <div>노드 7</div><i style="height: 20px; border-radius: 3px; background: #184f95"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)"></i><i style="height: 20px; border-radius: 3px; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)"></i><i style="height: 20px; border-radius: 3px; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #184f95"></i><i style="height: 20px; border-radius: 3px; background: #184f95"></i>
+        </div>
+        <div style="display: grid; grid-template-columns: 54px repeat(12, minmax(0, 1fr)); gap: 2px; align-items: center; font-size: 11.5px">
+          <div style="color: #8b9bb4">합계</div><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)"></i><i style="height: 20px; border-radius: 3px; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)"></i><i style="height: 20px; border-radius: 3px; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)"></i><i style="height: 20px; border-radius: 3px; background: #86b6ef"></i><i style="height: 20px; border-radius: 3px; background: #86b6ef"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #5598e7"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i><i style="height: 20px; border-radius: 3px; background: #2a78d6"></i>
+        </div>
+      </div>
+      <div style="font-size: 12px; color: #8b9bb4; line-height: 1.55">읽지 못한 값은 저장도 NULL, 화면도 빗금입니다(0 이 아님). 그 주기의 <b style="color: #e6edf6">클러스터 합계도 비웁니다</b> — 7 노드 합을 8 노드 합처럼 그리지 않습니다. 평균·순위는 읽은 표본만으로 냅니다.</div>
+    </div>
+
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b9bb4">④</span><b style="font-size: 13.5px">엣지 위임 장비</b></div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.6"><span style="display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid #243049; color: #8b9bb4; margin-right: 6px">엣지 fra-edge-01</span>중앙 이력은 <b>이 기능이 들어간 뒤 push 로 받은 분부터</b>입니다. 그 전 값은 중앙에 없습니다 — 엣지가 가진 옛 값을 소급해 올리지 않습니다.</div>
+      <div style="font-size: 12px; color: #8b9bb4; line-height: 1.55">엣지가 올리는 노드 목록은 이미 inBps · outBps 를 싣고 중앙 정제(아는 필드만 · 64개)가 받고 있습니다 — WAN 전송량은 늘지 않습니다. 중앙은 용량 점을 적재하는 그 자리에서 노드 점도 적재합니다(같은 중복 제거).</div>
+    </div>
+
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b9bb4">⑤</span><b style="font-size: 13.5px">노드 목록 상한(64) 밖</b></div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.6">노드 <b>66</b>대 중 <b>64</b>대만 목록에 올라옵니다 — <b>노드 65 · 66 은 이력이 없습니다</b>(상한 밖). 합계 추이도 ‘64 노드 합’ 이라고 적습니다.</div>
+      <div style="font-size: 12px; color: #8b9bb4; line-height: 1.55">상한은 스냅샷 계약(목록 ≤ 64)에서 옵니다. 66 노드 클러스터가 실재하므로 숨기지 않고 밝힙니다. 상한을 올리는 것은 push 크기·중앙 정제와 함께 보는 별건입니다.</div>
+    </div>
+
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b9bb4">⑥</span><b style="font-size: 13.5px">디스크 키를 장비가 주지 않을 때 · 데모 장비</b></div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.6">디스크 쓰기/읽기 키(REST <span style="font-family: 'JetBrains Mono', monospace">node.disk.bytes.*.rate.sum</span> · SSH ‘isi statistics system’)는 <b style="color: #fcd34d">실장비 미확인</b>입니다. 장비가 값을 주지 않으면 <b>디스크 버튼·열을 그리지 않고</b> 노드 수집 상태에 ‘디스크 키 없음(받은 키 …)’ 를 적습니다 — ‘—’ 열을 늘어놓지도, 0 으로 채우지도 않습니다. 네트워크 추이는 그대로 됩니다.</div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8b9bb4"><span style="display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; background: rgba(168,85,247,.18); color: #d8b4fe; border: 1px solid rgba(168,85,247,.4)">MOCK</span>데모(mock) 장비는 합성값이고 배지가 그대로 붙습니다. 데모는 7일치 시간별 점을 백필해 화면이 비지 않게 합니다(장비 접속 0).</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

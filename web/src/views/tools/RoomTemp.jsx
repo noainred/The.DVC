@@ -551,7 +551,7 @@ export function RoomTemp() {
           <div className="muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
             표시할 데이터가 없습니다.<br />
             iDRAC 온도 수집이 1회 이상 완료되어야 표시됩니다.<br />
-            같은 데이터를 <b>특수 기능 › 서버 분석 › 법인별 온도</b>에서도 확인할 수 있습니다(동일 소스).
+            같은 데이터를 <b>특수 기능 › Physical Server › 법인별 온도</b>에서도 확인할 수 있습니다(동일 소스).
           </div>
         </div>
       ) : view === 'range' ? <RangePlot groups={sorted} onPick={pick} />
@@ -566,7 +566,7 @@ export function RoomTemp() {
       )}
 
       <div className="muted" style={{ fontSize: 11.5, marginTop: 12, lineHeight: 1.7 }}>
-        · 데이터 출처는 <b>서버 분석 › 법인별 온도와 동일한 iDRAC 센서 수집</b>입니다(중앙 로컬 + 위임 엣지 병합, 추가 조회 없음).<br />
+        · 데이터 출처는 <b>Physical Server › 법인별 온도와 동일한 iDRAC 센서 수집</b>입니다(중앙 로컬 + 위임 엣지 병합, 추가 조회 없음).<br />
         · 센서 분류는 이름 기준입니다 — 흡기(Inlet/Intake/Ambient/Front) · 배기(Exhaust/Outlet/Exit/Rear) · CPU(CPU/CPU1/Proc/Package/Die).
         그 외 센서(메모리·PSU·보드 등)는 성격이 달라 집계에서 제외합니다.<br />
         · 한 서버에 같은 종류 센서가 여러 개면(CPU1·CPU2 등) <b>가장 높은 값</b>을 그 서버의 대표값으로 씁니다.<br />

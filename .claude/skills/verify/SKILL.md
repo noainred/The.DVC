@@ -22,6 +22,11 @@ npm run verify
 처리: `/sandbox` 로 `localhost`/`127.0.0.1` 을 허용하거나, **이 검증 명령에 한해 샌드박스를 해제**해
 실행한다. 해제로 통과하면 실패는 환경 아티팩트이지 코드 결함이 아니다.
 
+**git worktree 는 `/tmp` 아래에 만들지 말 것 — `/home/user/<이름>` 아래에 만든다**(2026-11-11 v2.969 verify 실측).
+`/tmp/claude-0/…`(스크래치패드)는 root 전용 700 이라, 비 root 계정으로 스크립트를 읽는 테스트
+(`server/test/audit2744vb.test.js` VERIFY-04 ⑧ — `release-verify-lib.sh: Permission denied` · rc=127)가 그 경로에서만 실패한다.
+저장소 폴더에서는 통과한다(코드 결함 아님). worktree 의 node_modules 는 원본을 symlink 로 잇고, 끝나면 symlink · worktree 를 지운다.
+
 ## 진단 요령
 verify 가 오래 걸리면 단계를 분리해 어디서 멈추는지 본다(파일로 스트리밍 — `| tail` 은 버퍼링돼
 타임아웃 시 아무것도 안 보인다):
@@ -39,7 +44,7 @@ vitest 파일/케이스 수, 빌드 성공)를 요약한다. exit 0 이 아니�
 ## 시간이 어디서 나가는지 (추정 기준값)
 - 실측(v2.513): `npm test` 전량 115초(당시 1,910건). 지금은 서버 테스트 파일 799개·웹 363개로 늘어 더 길다(미측정).
   CI 한 번(서버 테스트 + 웹 빌드)은 약 10.5분(2026-10-20 실측 3회).
-- 개발 중에는 바꾼 모듈의 테스트만 돌린다(`node --test server/test/<파일>` ≈ 2초). 전량은 커밋 직전 1회이거나 CI 에 맡긴다 — 맡겼으면 보고에 적는다.
+- 개발 중에는 바꾼 모듈의 테스트만 돌린다(`cd server && node --test --import ./test/_isolateConfig.js --experimental-sqlite test/<파일>` ≈ 2초 — `--import` 를 빼면 실제 설정 폴더 `server/config` 에 시험 데이터를 남긴다 · `docs/rules/common.md`). 전량은 커밋 직전 1회이거나 CI 에 맡긴다 — 맡겼으면 보고에 적는다.
 - `npm run build`(vite) 약 20초. Chromium 검증은 `web/dist` 를 서빙하므로 웹 코드를 고칠 때마다 다시 빌드해야 한다.
 - Chromium 1라운드 1~2분. 라운드를 나누지 말고 한 번에 몰아서 본다. 변경 전 커밋으로 되돌린 A/B 재빌드는 약 2분(넘침·깨짐을 발견했을 때만).
 - 시한(60초)을 기다려야 하는 실제 연결 확인은 진행 표시까지만 보고 끊는다.

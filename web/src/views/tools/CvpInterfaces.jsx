@@ -7,6 +7,7 @@ import {
   intfRows, statusBuckets, speedBuckets, xcvrBuckets, donutArcs, filterRows, descCell, deviceOptions, INTF_NOTE,
 } from './cvpIntfText.js';
 import Select from '../../components/Select.jsx';
+import { devListText } from './cvpNetText.js';
 
 /**
  * CVP › 인터페이스 세부 정보(v2.649 — 사용자 요청 'CVP 의 Interfaces › Ethernet 화면을 똑같이').
@@ -52,7 +53,7 @@ const COLS = [
 ];
 const STATUS_COLOR = { connected: 'var(--green)', down: 'var(--red)', notconnect: 'var(--amber)', unknown: 'var(--text-dim)' };
 
-export default function CvpInterfacesView({ devices = [], initial = null }) {
+export default function CvpInterfacesView({ devices = [], initial = null, listState = 'ok' }) {
   const opts = useMemo(() => deviceOptions(devices), [devices]);
   const [sel, setSel] = useState(initial || '');
   const [q, setQ] = useState('');
@@ -96,7 +97,7 @@ export default function CvpInterfacesView({ devices = [], initial = null }) {
         <div style={{ ...NOTE, marginTop: 6 }}><BoldText text={INTF_NOTE} /></div>
       </div>
 
-      {!opts.length && <div className="banner">수집된 CVP 장비가 없습니다.</div>}
+      {!opts.length && (listState === 'loading' ? <Loading /> : <div className="banner">{devListText(listState)}</div>)}
       {err && <ErrorBox error={err} />}
       {cur && !r && !err && <Loading />}
       {r && rows == null && <div className="banner">이 장비의 포트 목록을 아직 읽지 못했습니다(텔레메트리 스트리밍·수집 경로를 ‘읽은 경로’ 에서 확인하세요).</div>}

@@ -80,7 +80,7 @@ export async function roomTempHistory(db, { kind = 'inlet', group = '', range = 
   // 여기서 ''(전체)로 해석되는 것이 의도다 — 미지정 그룹은 예약키를 명시해야 조회된다.
   const key = String(group || '');
   void UNASSIGNED_KEY;   // 키 규약이 이 모듈에 있음을 명시(적재/조회가 같은 상수를 공유)
-  const r = ROOMTEMP_RANGES[range] ? range : '7d';
+  const r = Object.hasOwn(ROOMTEMP_RANGES, range) ? range : '7d';   // 162회차(158 N158-3 의 같은 꼴): 자기 키만 — 상속 키는 since 가 NaN 인 조회가 됐다
   const { spanMs, bucketMs } = ROOMTEMP_RANGES[r];
   const since = Date.now() - spanMs;
   const limit = bucketMs <= 3_600_000 ? 3000 : 1500;

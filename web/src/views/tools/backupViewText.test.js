@@ -155,7 +155,7 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
     for (const f of ['./BackupSummaryTool.jsx', './BackupDetailTool.jsx']) {
       const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
       expect(src, f).toMatch(/scopeQuery\(opts\)/);
-      expect(src, f).toMatch(/opts\.power, opts\.excl\]/);
+      expect(src, f).toMatch(/opts\.power, opts\.excl(, region)?\]/);   // v3.10.17: Summary 는 리전도 조회 조건
       expect(src, f).toMatch(/\{canCsv\(\) && <button/);
       expect(src, f).toMatch(/<BackupOptions opts=\{opts\}/);
       expect(src, f).toMatch(/loadOpts\(\)/);

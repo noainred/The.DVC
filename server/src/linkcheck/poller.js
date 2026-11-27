@@ -21,7 +21,7 @@ import { listRegistry as listVcenters } from '../vcenter/registry.js';
 import { buildLinks, CENTRAL_KINDS } from './links.js';
 import { buildSettingsTargets } from './settingsLinks.js';
 import { runSettingsTarget } from './settingsRun.js';
-import { loadLinkCheckSettings, linkCheckEnabled, onLinkCheckSettingsChange } from './settings.js';
+import { loadLinkCheckSettings, linkCheckEnabled, onLinkCheckSettingsChange, linkCheckSettingsLoadError } from './settings.js';
 import { runLink } from './run.js';
 import { insertResults, pruneLinkCheck, latestAll } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
@@ -41,6 +41,9 @@ let running = false;          // 재진입 가드 — 수동 실행과 공유한
 let _last = null;             // 마지막 주기 요약(화면이 '언제 점검했나' 를 말한다)
 let timer = null;
 let tick = 0;
+// 162회차(159 L1 반증): 정리를 건너뛴 사실이 **그 정리 틱의 last 에만** 실려 다음 주기에 사라졌다(12주기 가운데 1주기만 보임 · 콘솔 기록 없음).
+//   설정을 못 읽는 상태가 이어지면 정리는 계속 건너뛴다 — 상태에 계속 싣고(설정이 읽히면 곧바로 내린다) 콘솔에 한 번 남긴다.
+let _pruneSkipped = '';
 
 export function linkCheckPollerStatus() {
   const s = loadLinkCheckSettings();
@@ -48,6 +51,7 @@ export function linkCheckPollerStatus() {
     enabled: linkCheckEnabled(), running,
     ...(isMockMode() ? { demo: true } : {}),
     intervalMs: s.intervalMs, concurrency: s.concurrency,
+    ...(_pruneSkipped && linkCheckSettingsLoadError() ? { pruneSkipped: _pruneSkipped } : {}),
     last: _last,
   };
 }
@@ -109,8 +113,13 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
   try {
     const s = loadLinkCheckSettings();
     const { mine, counts, problems, collectors } = centralLinks();
+    // 전체 점검 16회차(T-2 — 재현): 수집 서버는 **id 로** 찾는다 — 표시 이름 키 Map 은 같은 이름 항목 중 마지막만 남아, 다른 수집 서버의 토큰을
+    //   엉뚱한 엣지 URL 로 보냈다(등록부는 id 만 유일). 이름 찾기는 그 이름이 하나뿐일 때만(옛 링크 · 화면 호환).
+    const nameCount = new Map();
+    for (const c of collectors) { const n = String(c.name || c.id); nameCount.set(n, (nameCount.get(n) || 0) + 1); }
     const ctx = {
-      collectors: new Map(collectors.map((c) => [String(c.name || c.id), c])),
+      collectors: new Map(collectors.map((c) => [String(c.id || ''), c])),
+      collectorsByName: new Map(collectors.filter((c) => nameCount.get(String(c.name || c.id)) === 1).map((c) => [String(c.name || c.id), c])),
       collectorIds: collectors.map((c) => String(c.id || '')),
     };
     const timeouts = { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs, sshMs: s.sshTimeoutMs, smtpMs: s.smtpTimeoutMs };
@@ -152,8 +161,17 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
     const skippedLinks = [...results, ...setResults].filter((r) => r && r.skipped);
 
     const saved = await insertResults(measured, { byNode: node });
+    // 159회차(재현 — audits.md 가 추정으로 남긴 것): 설정을 **못 읽은** 주기의 `s` 는 기본값이다(보존 90 · 30일 · 5년). env 로 강제 켜진 폴러(LINKCHECK_ENABLED=true)는
+    //   그 주기에도 돌고, 정리 틱이 걸리면 사용자가 늘려 둔 보존일(예 365일) 대신 기본값으로 지웠다(200일 전 표본 삭제 실측 — 원본 설정 파일은 그 자리에 그대로).
+    //   보존일을 모르는 주기에는 지우지 않는다(틱은 그대로 센다 — 다음 정리 틱에 읽히면 그때 지운다) · 건너뛴 사실은 고정 낱말로 남긴다.
+    let pruneSkipped = '';
     // ⚠ 스로틀은 `(++tick % N) === 0` — 기동 첫 틱 즉발 금지(v2.453).
-    if ((++tick % 12) === 0) {
+    if ((++tick % 12) === 0 && linkCheckSettingsLoadError()) {
+      pruneSkipped = 'settings-unreadable';
+      if (!_pruneSkipped) console.warn('[linkcheck] 설정 파일을 읽지 못한 상태라 보존 정리를 건너뜁니다 — 보존일을 모른 채 기본값으로 지우지 않습니다(설정이 읽히거나 저장되면 다시 정리합니다).');
+      _pruneSkipped = pruneSkipped;
+    } else if ((tick % 12) === 0) {
+      _pruneSkipped = '';
       /*
        * v2.607(감사 LEFT2607-01): 고아 최신값 정리에 **현재 링크 집합**을 넘긴다 — 예전에는 currentIds 없이 불러
        *   pruneOrphanLatest 가 한 번도 돌지 않았다(엣지 삭제·vCenter 이관으로 사라진 링크가 보존일까지 남았다).
@@ -179,6 +197,7 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
       problems: problems.length,
       dbOk: saved.ok !== false, dbError: saved.error || '',
       events: saved.events || 0,
+      ...(pruneSkipped ? { pruneSkipped } : {}),
     };
     return { ok: true, checked: measured.length, failed, skippedLinks: skippedLinks.length };
   } catch (e) {
@@ -233,4 +252,4 @@ export function startLinkCheckPoller() {
 
 export function stopLinkCheckPoller() { timer?.stop?.(); timer = null; }
 
-export function _resetPollerForTest() { running = false; _last = null; tick = 0; }
+export function _resetPollerForTest() { running = false; _last = null; tick = 0; _pruneSkipped = ''; }

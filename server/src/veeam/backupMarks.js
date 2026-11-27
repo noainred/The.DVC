@@ -15,7 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상(결정 G2 공용 판정 — 88 · 92회차와 같은 꼴)
 
 const FILE = () => path.join(config.configDir, 'backup-marks.json');
 export const CRIT_VALUES = Object.freeze(['high', 'mid', 'low']);
@@ -41,17 +42,26 @@ export function marksCorruptKept() {
   try { return fs.readdirSync(config.configDir).some((f) => f.startsWith('backup-marks.json.corrupt.')); } catch { return false; }
 }
 
+/*
+ * 94회차 F2(재현): 예전에는 읽기 · 파싱을 catch 하나로 받아 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 표시 파일(VM 최대 5만 대의
+ *   정책 · 중요도 · 메모)을 `.corrupt.*` 로 옮겼다 — 재시작하면 '파일 없음' 이라 저장이 열리고, 다음 표시 한 번이 한 건만 든 새 파일을 만들었다(원본은 보존본에만).
+ *   이제 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고(30초마다 다시 읽음 — 읽히면 재시작 없이 풀림) · 그동안은 손상과 같이 '모름'(unreadable — 저장 거절 · 수는 null).
+ *   손상(파싱 실패 · 객체가 아닌 JSON)은 예전과 같다(보존본으로 옮기고 이 프로세스 동안 unreadable).
+ */
+const _reader = makeJsonFileReader(() => FILE(), { tag: 'backup-marks' });
+let readErr = false;
 function load() {
   if (cache) return cache;
-  cache = {};
-  const f = FILE();
-  try {
-    if (fs.existsSync(f)) {
-      const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('not an object');
-      cache = d;
-    }
-  } catch (e) { preserveCorrupt(f, e.message); cache = {}; unreadable = true; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    if (!readErr) rev++;   // 상태가 바뀌었다 — 응답 캐시 키(marksRev)가 바뀌게
+    readErr = true; unreadable = true;
+    return {};             // 캐시하지 않는다(다음 load 가 간격 뒤 다시 읽는다)
+  }
+  if (readErr) { readErr = false; unreadable = false; rev++; }   // 읽기 오류가 풀렸다
+  if (r.kind === 'ok') cache = r.value;
+  else if (r.kind === 'corrupt') { cache = {}; unreadable = true; }   // reader 가 원본을 보존본으로 옮겼다(예전과 같다)
+  else cache = {};   // missing
   return cache;
 }
 
@@ -80,7 +90,7 @@ export function setMarks(vms, patch = {}, user) {
   if (has('memo') && list.length > 1) return { ok: false, status: 400, reason: '메모는 한 대씩 씁니다.' };
   if (has('memo') && patch.memo != null && typeof patch.memo !== 'string') return { ok: false, status: 400, reason: '메모 값이 올바르지 않습니다.' };
   const data = load();
-  if (unreadable) return { ok: false, status: 503, reason: '백업 표시 파일을 읽지 못해 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).', code: 'marksUnreadable' };
+  if (unreadable) return { ok: false, status: 503, reason: readErr ? '백업 표시 파일을 읽지 못해(읽기 오류 — 원본은 그대로 있습니다) 저장하지 않습니다 — 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).' : '백업 표시 파일을 읽지 못해 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).', code: 'marksUnreadable', ...(readErr ? { readError: true } : {}) };
   const now = new Date().toISOString();
   const by = String(user?.username || 'unknown').slice(0, 64);
   let changed = 0; let removed = 0; let added = 0;
@@ -105,7 +115,7 @@ export function setMarks(vms, patch = {}, user) {
     const f = FILE();
     fs.mkdirSync(path.dirname(f), { recursive: true });
     atomicWriteFileSync(f, JSON.stringify(next));
-    cache = next; rev++;
+    cache = next; rev++; _reader.reset();
   }
   return { ok: true, changed, removed };
 }
@@ -140,4 +150,4 @@ export function markView(m) {
 }
 
 /** 테스트 전용 — 메모리 캐시를 버린다(다음 load 가 파일을 다시 읽는다). */
-export function _resetMarksForTest() { cache = null; unreadable = false; }
+export function _resetMarksForTest() { cache = null; unreadable = false; readErr = false; _reader.reset(); }

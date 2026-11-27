@@ -157,7 +157,8 @@ export function siteNote(r) {
   const out = [];
   if (r?.veeamState === 'unlinked') out.push('Veeam 연동 없음');
   else if (r?.veeamState && r.veeamState !== 'ok') out.push('Veeam 일부·모름');
-  if (r?.bareosUnknown) out.push('Bareos 원장 못 읽음');
+  if (r?.bareosDirFail) out.push('Bareos Director 조회 실패 — 결과 모름');   // 53회차 S1: 원장은 읽었지만 Director 조회가 인증 정지 · 실패(결과가 옛 값)
+  else if (r?.bareosUnknown) out.push('Bareos 원장 못 읽음');
   if (r?.pa && !r.pa.pol) out.push('정책 모름');
   return out.join(' · ');
 }
@@ -174,6 +175,7 @@ export function staleQuery(o, scope = {}) {
     src: STALE_SOURCES.includes(o.src) ? o.src : 'all',
     excludeNone: o.excludeNone === false ? '0' : '1', onlyOn: o.onlyOn === false ? '0' : '1', includeNever: o.includeNever === false ? '0' : '1',
     power: scope.power || 'all', excl: scope.excl === false ? '0' : '1',
+    ...(scope.region ? { region: String(scope.region) } : {}),   // v3.10.17 Summary 의 리전 Select(법인 하나를 고르면 서버가 그 법인만 — 리전은 그 안)
     ...(o.vc ? { vc: String(o.vc) } : {}),   // v2.837 법인 하나(빈 값 = 전체)
   };
 }

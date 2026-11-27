@@ -4,11 +4,21 @@
  * `node --check` 를 통과하고 모듈 로드에서야 ReferenceError 로 죽었다 — 그래서 이 테스트는 소스를
  * 훑는 것에 더해 **실제로 import** 한다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { stripComments } from './_stripComments.js';
+
+// 2026-11-26: 프로젝트 모듈을 불러오기 **전에** 설정 폴더를 임시 폴더로 잡는다. 아래 시험이 라우트 모듈을 전부 실제로 불러오는데
+//   잡지 않아 설정이 실제 `server/config` 로 풀려 auth-secret 을 남겼다(같은 체크아웃의 다음 실행 · 다른 시험이 그것을 읽는다).
+//   src 모듈은 시험 안에서 동적 import 로만 부른다(v3.41.1 arch2582 와 같은 꼴 · 고정: test/configDirPerFile.test.js).
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+process.env.CONFIG_DIR = tmpDir('dvc-arch2583-cfg-');
 
 const SRC = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src');
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));

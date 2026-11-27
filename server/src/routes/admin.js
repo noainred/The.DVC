@@ -11,6 +11,7 @@ import { registerOpsSettings } from './admin/opsSettings.js';
 import { registerNsxImport } from './admin/nsxImport.js';
 import { registerIdracCore } from './admin/idracCore.js';
 import { registerIdracTrend } from './admin/idracTrend.js'; // v2.660: 특수 기능 › iDRAC 통합 추이
+import { registerBmAssets } from './admin/bmAssets.js'; // v3.45: 물리서버 자산 원장 · 펌웨어 기준
 import { registerIdracScan } from './admin/idracScan.js';
 import { registerCollectorsDc } from './admin/collectorsDc.js';
 import { registerHorizonAssign } from './admin/horizonAssign.js';
@@ -28,6 +29,7 @@ import { registerPeerTrust } from './admin/peerTrust.js'; // 2026-10-09 S-01·S-
 import { registerVeeam } from './admin/veeam.js'; // v2.751: 설정 › 백업 › Veeam 백업 서버
 import { registerVeeamEm } from './admin/veeamEm.js'; // v2.788: 설정 › Veeam 백업 서버 › Enterprise Manager
 import { registerUsageAdmin } from './admin/usage.js'; // v2.913: 설정 › 사용자 › 기능 사용 현황
+import { registerSettingsStatus } from './admin/settingsStatus.js'; // v2.916: 설정 메뉴 상태 배지(미설정 · 꺼짐 · 주의 · 새 버전)
 
 // 관리자 API 집계 라우터 — v2.285.0 대형 파일 분할.
 // 도메인 구현은 ./admin/*.js 로 이동. ⚠️ register 호출 순서 = 라우트 등록 순서(Express 매칭 순서).
@@ -66,3 +68,5 @@ registerPeerTrust(adminRouter);     // 2026-10-09 S-01·S-02: 장비 신뢰 지�
 registerVeeam(adminRouter);         // v2.751: Veeam 백업 서버 등록·연결 시험·지금 읽기
 registerVeeamEm(adminRouter);       // v2.788: Veeam Enterprise Manager 등록·연결 시험·지금 수집
 registerUsageAdmin(adminRouter);   // v2.913: 기능 사용 현황(조회 · 설정 · 지우기 — 설정 소유자)
+registerSettingsStatus(adminRouter); // v2.916: 설정 메뉴 상태 배지(설정 소유자 · 파일·메모리 값만)
+registerBmAssets(adminRouter);     // v3.45: 물리서버 자산 원장(보증 · 계약) CSV · 펌웨어 기준 지정(관리자 · 전체 범위)

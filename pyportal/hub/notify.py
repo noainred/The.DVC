@@ -32,6 +32,11 @@ UP = "healthy"
 DOWN_LABEL = {"warning": "확인 필요", "unreachable": "응답 없음", "blocked": "차단됨"}
 
 
+def _latency_measured(event) -> bool:
+    """31회차 F8: 지연은 응답을 받은 점검(정상 · 확인 필요)에서만 뜻이 있다 — 차단 · 응답 없음의 값은 0(재지 않음)이거나 실패까지 걸린 시간이다."""
+    return event.get("latencyMs") is not None and event.get("status") in ("healthy", "warning")
+
+
 class Notifier:
     def __init__(self, settings, audit=None, sender=None):
         self._settings = settings
@@ -119,7 +124,7 @@ class Notifier:
                 f"{event['url']}\n"
                 f"상태: {DOWN_LABEL.get(event['status'], event['status'])}"
                 f"{' · HTTP ' + str(event['statusCode']) if event['statusCode'] else ''}"
-                f"{' · ' + str(event['latencyMs']) + 'ms' if event.get('latencyMs') is not None else ''}\n"
+                f"{' · ' + str(event['latencyMs']) + 'ms' if _latency_measured(event) else ''}\n"
                 f"{event['message']}")
         payload = {
             "text": text,               # Slack/Mattermost 호환 필드

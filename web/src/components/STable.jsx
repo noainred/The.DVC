@@ -24,12 +24,14 @@
  * 정렬은 화면(엘리먼트) 재배열이라 서버·상태를 건드리지 않고, 데이터가 갱신돼도 마지막 정렬이 유지된다.
  * 셀에 컴포넌트가 있으면 텍스트 자식 → value/pct/label 순으로 값을 찾고, 정확한 값을 원하면 td 에 `data-sort` 를 준다.
  */
-import React, { useMemo, useState } from 'react';
-import { headerSortable, sortChildren, nextSortState } from './sortableText.js';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { headerSortable, sortChildren, nextSortState, rowIdsOf, managesSort } from './sortableText.js';
+import { onPressKey } from './pressable.js';   // v3.13.2 정렬 머리 키보드(Enter/Space) — 역할(columnheader)은 그대로
 
 const ARROW = { asc: '▲', desc: '▼' };
 
-export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, children, ...rest }) {
+
+export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, onOrder, children, ...rest }) {
   const [sort, setSort] = useState(null); // { col, dir } | null
   // ⚠ Children.toArray 는 호출마다 새 엘리먼트(키 접두)를 만들므로 **한 번만** 호출해 그 배열 안에서 동일성 비교한다.
   const kids = React.Children.toArray(children);
@@ -58,6 +60,27 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, childre
   // 상한은 정렬 결과에 적용한다. 정렬 전(초기 렌더)이면 원래 순서의 앞 N — 호출부가 먼저
   // 자르던 예전 동작과 같고, 열을 누른 순간부터 '전체를 정렬한 상위 N' 이 된다.
   const cap = Number(limit) > 0 ? Math.floor(Number(limit)) : 0;
+
+  /**
+   * v3.44 `onOrder`(선택): **지금 보이는 행의 순서**를 알린다 — 행(`<tr>`)의 `data-rowid` 를 위에서부터(정렬 · 상한을 거친 뒤).
+   * 쓰는 곳: 표 옆 드로어의 ‹ › · ↑↓ 가 '표에 보이는 순서' 로 넘어가게(물리서버 상세 드로어 — 정렬은 이 컴포넌트 안에서 일어나
+   * 호출부는 순서를 모른다). 순서가 실제로 바뀔 때만 부른다(같은 순서의 리렌더에는 부르지 않는다 — 호출부가 setState 해도 돌지 않게).
+   * `onOrder` 를 주지 않으면 아무 계산도 하지 않는다(다른 표의 비용 0). ⚠ 훅이라 조기 return 위에 둔다(위 주석과 같은 이유).
+   * 이 컴포넌트가 정렬 · 상한을 **맡지 않는** 표(`sortable={false}` · 자체 정렬 th · thead 가 없는 표)는 children 을 그대로 그리므로
+   *   (아래 조기 return 들 — `limit` 도 걸리지 않는다) 받은 순서를 상한 없이 알린다 — 화면과 다른 순서를 알리지 않게(반증 B4).
+   */
+  const anyTbody = onOrder ? kids.find((c) => React.isValidElement(c) && c.type === 'tbody') : null;
+  const hasBody = !!anyTbody;
+  const rawKids = anyTbody?.props?.children;   // ⚠ 의존성은 이 참조로(anyTbody 는 Children.toArray 가 렌더마다 새로 만든다 — 그대로 넣으면 매 렌더 다시 계산한다)
+  const managed = !!thead && !!tbody && managesSort(thead);
+  const orderKey = useMemo(() => {
+    if (!onOrder || !hasBody) return null;
+    const ids = managed ? rowIdsOf(sort ? sortedKids : tbodyKids, cap) : rowIdsOf(rawKids, 0);
+    return ids.join('\u0000');
+  }, [onOrder, hasBody, rawKids, managed, sort, sortedKids, tbodyKids, cap]);
+  const onOrderRef = useRef(onOrder);
+  onOrderRef.current = onOrder;
+  useEffect(() => { if (orderKey != null) onOrderRef.current?.(orderKey === '' ? [] : orderKey.split('\u0000')); }, [orderKey]);
   const capKids = (kids2) => (cap > 0 ? React.Children.toArray(kids2).slice(0, cap) : kids2);
 
   // minWidth 를 주면 표에 최소폭을 걸고 **가로 스크롤 래퍼까지 함께** 만든다(짝을 놓칠 수 없게).
@@ -69,16 +92,14 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, childre
     return doWrap ? <div style={{ overflowX: 'auto', maxWidth: '100%' }}>{t}</div> : t;
   };
 
-  if (!thead || !tbody) return render(children);
+  // 이 표의 정렬을 맡지 않으면(thead · tbody 없음 · 머리글 줄 없음 · 자체 정렬 표 = 컴포넌트 th 또는 onClick th) 손대지 않는다.
+  //   판정은 한 곳(sortableText.js managesSort) — 위의 순서 알림(onOrder)이 같은 판정으로 '받은 순서 그대로' 를 알린다.
+  if (!managed) return render(children);
 
   const headKids = React.Children.toArray(thead.props.children);
   const headRows = headKids.filter((r) => React.isValidElement(r) && r.type === 'tr');
   const lastRow = headRows[headRows.length - 1];
-  if (!lastRow) return render(children);
   const ths = React.Children.toArray(lastRow.props.children);
-  // 자체 정렬 표(컴포넌트 th 또는 onClick th)는 손대지 않는다.
-  const selfSorted = ths.some((t) => React.isValidElement(t) && (typeof t.type !== 'string' || t.props?.onClick));
-  if (selfSorted) return render(children);
 
   let col = 0;
   const newThs = ths.map((th, idx) => {
@@ -89,8 +110,11 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, childre
     return React.cloneElement(th, {
       key: th.key ?? `h${idx}`,
       onClick: (e) => { th.props.onClick?.(e); setSort((c) => nextSortState(c, myCol)); },
+      // v3.13.2(2차 루프 3회차): 마우스로만 정렬됐다 — Tab 으로 닿고 Enter/Space 로 같은 순서(오름 → 내림 → 해제). 포커스 테두리는 styles.css th[aria-sort]:focus-visible.
+      tabIndex: th.props.tabIndex ?? 0,
+      onKeyDown: (e) => { th.props.onKeyDown?.(e); if (!e.defaultPrevented) onPressKey(() => setSort((c) => nextSortState(c, myCol)))(e); },
       style: { cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(th.props.style || {}) },
-      title: th.props.title || '클릭하면 이 열로 정렬합니다(오름차순 → 내림차순 → 해제).',
+      title: th.props.title || '클릭하면 이 열로 정렬합니다(오름차순 → 내림차순 → 해제 · 키보드는 Enter · Space).',
       'aria-sort': active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none',
     }, th.props.children, <span aria-hidden="true" style={{ opacity: active ? 1 : 0.28, marginLeft: 3, fontSize: '0.85em' }}>{active ? ARROW[sort.dir] : '↕'}</span>);
   });

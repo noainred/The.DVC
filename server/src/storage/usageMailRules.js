@@ -178,7 +178,7 @@ export function renderUsageMail(m, o = {}) {
     + `<div style="font-size:12px;${MUTED}">${esc(label)}</div><div style="font-size:20px;font-weight:700;color:${color};margin-top:2px">${esc(value)}</div>`
     + `<div style="font-size:12px;${MUTED}margin-top:2px">${esc(sub)}</div></td>`;
   const deltaSub = m.total.delta == null
-    ? (m.total.deltaWhy === 'partial' ? '부분 합이라 내지 않음' : '값 없음')
+    ? (m.total.deltaWhy === 'partial' ? '부분 합이라 내지 않음' : m.total.deltaWhy === 'changed' ? `장비 구성이 바뀌어 내지 않음(한쪽 주에만 있는 장비 ${m.total.changed}대)` : '값 없음')   // 57회차 F2
     : (m.total.avg != null ? `${rule.avgWeeks}주 평균 ${deltaText(m.total.avg)}/주` : `${rule.avgWeeks}주 평균은 이력 부족`);
   const kpis = `<table class="su-kpi" role="presentation" cellspacing="8" cellpadding="0" style="width:100%;margin:6px -8px 0"><tr>`
     + kpi('전체 사용률', pctText(t?.pct), t ? `${usedOf(t)}${t.partial ? ` · 값 있음 ${t.counted}/${t.expected}대` : ''}` : '값 없음')
@@ -232,7 +232,7 @@ export function renderUsageMail(m, o = {}) {
     + table(`<tr><th style="${TH}">법인</th><th style="${TH}${NUM}">장비</th><th style="${TH}${NUM}">사용 / 전체</th><th style="${TH}${NUM}">사용률</th><th style="${TH}${NUM}">직전 주 대비</th></tr>`,
       m.byCorp.map((x) => `<tr><td style="${TD}font-weight:600">${esc(x.key)}</td><td style="${TD}${NUM}">${x.devices}대</td>`
         + `<td style="${TD}${NUM}">${esc(usedOf(x.cur))}${x.cur?.partial ? ` <span style="color:#b45309">(값 있음 ${x.cur.counted}/${x.cur.expected}대)</span>` : ''}</td>`
-        + `<td style="${TD}${NUM}">${pctBadge(x.cur?.pct, rule)}</td><td style="${TD}${NUM}">${x.delta == null && x.deltaWhy === 'partial' ? '— (부분 합)' : esc(deltaText(x.delta))}</td></tr>`).join(''))
+        + `<td style="${TD}${NUM}">${pctBadge(x.cur?.pct, rule)}</td><td style="${TD}${NUM}">${x.delta == null && x.deltaWhy === 'partial' ? '— (부분 합)' : x.delta == null && x.deltaWhy === 'changed' ? '— (장비 구성 바뀜)' : esc(deltaText(x.delta))}</td></tr>`).join(''))
     + (partials.length ? note(`${partials.map((x) => esc(x.key)).join(', ')} 는 이번 주에 값을 읽지 못한 장비가 있어 부분 합입니다 — 직전 주 대비를 내지 않았습니다.`, '#92400e') : '');
 
   const missing = m.missing.length

@@ -61,7 +61,7 @@ export default function NetworkCheck() {
   // v2.596(감사 WS-4): 기간을 빠르게 바꾸면 늦게 온 이전 기간 응답이 현재 것을 덮었다 — 마지막 요청만 반영한다.
   const loadGen = useRef(0);
   const load = () => { const g = ++loadGen.current; setError(null); fetchJson('/ping/edge/overview', { range }).then((d) => { if (g === loadGen.current) setData(d); }).catch((e) => { if (g === loadGen.current) setError(e.message); }); };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [range]);
+  useEffect(() => { load(); }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
   const sync = async () => { setBusy(true); const r = await postJson('/ping/edge/sync').catch((e) => ({ ok: false, reason: e.message })); setBusy(false); flash(r.ok, r.ok ? (r.added ? `엣지 노드 ${r.added}개를 추가했습니다.` : '추가할 새 엣지 노드가 없습니다.') : (r.reason || '동기화 실패')); if (r.ok && r.added) load(); };
 

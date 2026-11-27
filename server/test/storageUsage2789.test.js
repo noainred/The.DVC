@@ -13,6 +13,7 @@
  *  ⑥ 메일 — 형식 오류 400(field) · since · 가짜 SMTP 로 지금 보내기 · 예약 회차 한 번만 · 상태에 주소 없음 · 본문 이스케이프
  */
 import { test, after } from 'node:test';
+import { decodeSubject } from './_mailDecode.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,7 +22,14 @@ import net from 'node:net';
 import http from 'node:http';
 import express from 'express';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'storageusage2789-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('storageusage2789-');
 Object.assign(process.env, { CONFIG_DIR: TMP, DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
 delete process.env.CENTRAL_URL;
 delete process.env.CENTRAL_TOKEN;
@@ -194,8 +202,7 @@ test('⑤ 라우터 — 일간 보고표 · 하위 항목 · 비관리자 주소
 
 /* ── ⑥ 메일 ─────────────────────────────────────────────────────────── */
 function decodeMail(raw) {
-  const m = /^Subject: (.*)$/mi.exec(raw);
-  const subject = m ? m[1].replace(/=\?UTF-8\?B\?([^?]*)\?=/gi, (_x, x) => Buffer.from(x, 'base64').toString('utf8')) : '';
+  const subject = decodeSubject(raw);   // v3.10.4: 접힌 긴 제목까지(test/_mailDecode.js)
   const out = []; let mode = 'hdr'; let buf = '';
   for (const line of raw.split('\n')) {
     if (/^Content-Transfer-Encoding:\s*base64/i.test(line)) { mode = 'wait'; continue; }

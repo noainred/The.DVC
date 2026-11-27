@@ -14,10 +14,17 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const ROOT = path.resolve(HERE, '../..');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2613h-'));
+const tmp = tmpDir('audit2613h-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 delete process.env.STORAGE_INTERVALS_LOCAL;
@@ -181,6 +188,7 @@ test('TESTDOC2613-08: 2줄 정규식 주석 제거기 사본이 server/test 에 
   const needle = 'replace(/' + '\\/\\*[\\s\\S]*?\\*\\/' + '/g';
   const ALLOW = new Map([
     ['audit2575.test.js', 'CSS 파일(줄 주석 없음)에서 블록 주석만 지운다 — 2줄 판본이 아니고 CSS 에는 상태 기계가 맞지 않는다(url(http://…) 의 // 를 주석으로 읽는다)'],
+    ['rebut96.test.js', 'audit2575 와 같은 사유 — .css 파일만 블록 주석을 지우고 .js/.jsx 는 _stripComments.js 를 쓴다(96회차 uppercase 스윕)'],
   ]);
   const hits = [];
   for (const f of fs.readdirSync(HERE)) {

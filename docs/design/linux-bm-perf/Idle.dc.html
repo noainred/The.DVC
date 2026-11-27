@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>저활용 서버 찾기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.tile{border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px}
+.tile .h{font-size:11.5px;color:#8b9bb4;font-weight:600}.tile .v{font-size:20px;font-weight:800;line-height:1.1}.tile .s{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+</style>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">함대 보드</a> › <b style="color:#e6edf6">저활용 서버</b> · 법인 KR-SEL · 추천 6</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">저활용 서버 찾기 — 30일 평균과 피크가 모두 낮은 서버를 점수로 골라 통합·반납 후보 목록을 만든다</h1>
+    <div class="dim" style="font-size:12px;margin-top:4px">새 수집 없음 — usage_daily(30일 평균 · 일 최대) + iDRAC 전력 롤업 + 용도 프로파일 태그 · 점수는 후보 표시일 뿐 판정이 아니다(사람이 확인하고 메모를 남긴다) · 수치는 가상</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px"><h2>법인 KR-SEL · 1,000대</h2><span class="chip warn">후보(≥70) 23</span><span class="chip">관찰(40~69) 61</span><span class="chip ok">사용 중 862</span><span class="chip">제외 54</span><span class="dim" style="font-size:12px;margin-left:auto">창 30일 · 매일 01:20 재계산(엣지) · 90일 창은 옵션</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:10px">
+      <div class="tile"><div class="h">후보 23대의 측정 전력 합</div><div class="v warn">4.1 kW</div><div class="s">30일 평균 W 의 합 — ‘절감 추정’ 이 아니라 지금 쓰는 전력의 합(측정 20 · 미측정 3 은 제외)</div></div>
+      <div class="tile"><div class="h">제외 사유</div><div class="v">54</div><div class="s">데이터 부족(&lt;21일) 41 · 용도 태그 ‘대기·DR’ 12 · 정비 창 중 1 — 제외는 수를 적고 숨기지 않는다</div></div>
+      <div class="tile"><div class="h">검토 상태</div><div class="v">8 / 23</div><div class="s">검토 중 5 · 반납 예정 2 · 유지(사유) 1 — 상태는 주석 ⑬ 에 저장 · 감사</div></div>
+      <div class="tile"><div class="h">지난달 대비</div><div class="v">+4</div><div class="s">후보가 는 서버 4 · 빠진 서버 1(사용 시작) — 변경 이벤트 띠에 ‘저활용 후보 진입/이탈’ 전이로 기록</div></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">점수 규칙 — 0~100 (설정값 · 법인별 조정 가능)</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>지표</th><th>창</th><th>‘낮다’ 기준</th><th>가중</th><th>출처</th></tr></thead>
+        <tbody>
+          <tr><td>CPU</td><td>30일 평균 · 일 최대</td><td>평균 &lt; 5% 그리고 일 최대 &lt; 20%</td><td>30</td><td>usage_daily cpu_sum/cpu_n · cpu_max</td></tr>
+          <tr><td>메모리</td><td>30일 평균</td><td>&lt; 20%</td><td>15</td><td>mem_sum/mem_n</td></tr>
+          <tr><td>디스크 I/O</td><td>일 최대</td><td>busy &lt; 5%</td><td>15</td><td>disk_busy_max · io_max</td></tr>
+          <tr><td>네트워크</td><td>일 최대</td><td>링크 대비 &lt; 2%</td><td>15</td><td>net_max</td></tr>
+          <tr><td>전력</td><td>30일 평균 vs 30일 최소</td><td>평균 ≤ 최소 × 1.10 (유휴 전력 근처)</td><td>15</td><td>power_hourly(iDRAC) · 없으면 0점 · ‘미측정’</td></tr>
+          <tr><td>활동 흔적(선택)</td><td>30일</td><td>SSH 로그인 0 · 집중/스냅샷 실행 0 · 프로세스 Top 에 사용자 프로세스 없음</td><td>10</td><td>⑮ 보안 집계 · 감사 · ⑳</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">기준마다 ‘낮다’ 면 가중치 전부, 2배 안이면 절반, 넘으면 0. 지표가 없으면(‘—’) 그 가중은 분모에서 빼고 점수를 100 으로 환산 — 전력 없는 서버가 불리하지 않게. ≥70 후보 · 40~69 관찰 · &lt;40 사용 중. 주 1회만 쓰는 서버(일 최대가 주 1회 높음)는 ‘주기 사용’ 으로 따로 표시하고 후보에서 뺀다.</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">후보 표 — 점수 순</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>서버</th><th>용도/역할</th><th>점수</th><th>CPU 평균/최대</th><th>메모리</th><th>디스크</th><th>네트</th><th>전력 W</th><th>30일</th><th>검토</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">bm-kr1-old17</td><td class="dim">미지정</td><td class="warn"><b>92</b></td><td>1.2% / 6%</td><td>9%</td><td>0.4%</td><td>0.1%</td><td>148</td><td><svg width="90" height="18"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,14 10,13 20,14 30,13 40,14 50,13 60,14 70,13 80,14 90,13"/></svg></td><td><span class="chip warn">반납 예정</span></td></tr>
+          <tr><td class="mono">bm-kr1-test04</td><td class="dim">role:test</td><td class="warn"><b>88</b></td><td>2.0% / 11%</td><td>14%</td><td>1%</td><td>0.3%</td><td>162</td><td><svg width="90" height="18"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,14 10,12 20,14 30,14 40,8 50,14 60,13 70,14 80,12 90,14"/></svg></td><td><span class="chip">검토 중</span></td></tr>
+          <tr><td class="mono">bm-kr1-air05</td><td>Airflow worker</td><td class="warn"><b>74</b></td><td>3.1% / 18%</td><td>22%</td><td>2%</td><td>0.8%</td><td>171</td><td><svg width="90" height="18"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,14 10,13 20,11 30,14 40,13 50,12 60,14 70,10 80,14 90,13"/></svg></td><td><span class="chip ok">유지 · “큐 여유분”</span></td></tr>
+          <tr><td class="mono">bm-kr1-hd11</td><td>Hadoop DN</td><td>61</td><td>4.8% / 71%</td><td>31%</td><td>44%</td><td>9%</td><td>240</td><td><svg width="90" height="18"><polyline fill="none" stroke="#fbbf24" stroke-width="1.5" points="0,14 10,14 20,14 30,2 40,14 50,14 60,14 70,3 80,14 90,14"/></svg></td><td><span class="chip">주기 사용(주 1회)</span></td></tr>
+          <tr><td class="mono">bm-kr1-dr02</td><td class="dim">대기·DR</td><td class="dim">—</td><td>0.9% / 3%</td><td>12%</td><td>0%</td><td>0%</td><td>151</td><td><svg width="90" height="18"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,14 90,14"/></svg></td><td><span class="chip">제외(태그)</span></td></tr>
+          <tr><td class="mono">bm-kr1-new03</td><td class="dim">—</td><td class="dim">—</td><td class="dim">4일</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td class="dim">데이터 부족</td><td class="dim">—</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">행 선택 → ‘비교 ⑪ 로 보내기’(2~5대) · ‘검토 상태’ 는 주석으로 저장(누가 · 언제 · 사유) · 내보내기(CSV · 보드 캡처) · 범위 계정은 자기 법인만, 법인 간 목록은 12차 규칙(허용된 계정만).</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">정직하게 적어 둘 것</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:10px">
+      <div class="tile"><div class="h">저활용 ≠ 불필요</div><div class="s">DR · 대기 · 분기 배치 · 라이선스 때문에 켜 둔 서버가 있다. 용도 태그 ‘대기·DR’ 은 자동 제외, 분기 배치는 30일 창으로 못 보니 90일 창을 옵션으로 둔다. 최종 판단은 사람 · ‘유지’ 에는 사유를 남긴다.</div></div>
+      <div class="tile"><div class="h">전력 ‘유휴’ 는 서버별 상대값</div><div class="s">절대 유휴 W 표가 없으므로 그 서버의 30일 최소 전력을 기준으로 본다(○). 모델별 유휴값은 쓰지 않는다. ‘회수 가능 전력’ 은 측정 평균의 합이지 절감 추정이 아니다.</div></div>
+      <div class="tile"><div class="h">기준은 설정값</div><div class="s">5% · 20% · 1.10 같은 값은 공식 권고가 없는 관행(○). 법인마다 설정에서 바꾸고, 바꾼 값은 감사에 남는다.</div></div>
+      <div class="tile"><div class="h">비용</div><div class="s">하루 1회 엣지 계산(1,000대 × 일 집계 30행) · 결과 표 1행/서버 · 추가 수집 없음.</div></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

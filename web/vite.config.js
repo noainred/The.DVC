@@ -1,8 +1,16 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
+
+// v2.999(설계 docs/design/upgrade-reload): 이 번들의 판을 빌드에 새긴다 — 열어 둔 창이 업그레이드된 서버(/api/health version)와
+//   판이 다른지 판정한다(web/src/upgradeNotice.js). release.sh 가 루트 · 서버 · 웹 package.json 을 같은 버전으로 올린다.
+const WEB_VERSION = (() => {
+  try { return String(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || ''); } catch { return ''; }
+})();
 
 export default defineConfig({
   plugins: [react()],
+  define: { 'import.meta.env.VITE_APP_VERSION': JSON.stringify(WEB_VERSION) },
   server: {
     port: 5173,
     proxy: {
@@ -15,6 +23,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.{js,jsx}'],
+    // 웹 시험이 불러온 서버 모듈이 실제 server/config 에 쓰지 않게 — 임시 설정 폴더(vitest.globalSetup.js · 2026-11-26)
+    globalSetup: ['./vitest.globalSetup.js'],
   },
   build: {
     // 번들 청크 분리(v2.289 #8) — index(앱 진입) 청크에 뭉쳐 있던 공용 벤더(react·recharts)를

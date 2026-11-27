@@ -9,6 +9,7 @@ import { createYielder } from '../util/timeSlice.js';
 import { getStoredFails } from './loginStore.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { eventNotCollectedMap, notCollectedList, eventLagForView } from '../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter · v2.772(Z4-2): 뒤처진 vCenter
+import { scopeSig } from '../util/scopeSig.js';
 
 const DAY = 86_400_000;
 const IPV4 = /(?:\d{1,3}\.){3}\d{1,3}/;
@@ -120,7 +121,7 @@ export async function analyzeLoginFails(opts = {}, deps = {}) {
   else if (vcSkipped) scan.source = 'not-collected';
   const read = vcSkipped ? null : read0;
   // 증분 키에 '수집하지 않는 vCenter' 집합을 넣는다 — 그 집합이 바뀌면(위임 해제 등) 직전 결과에 빠진 실패가 있으므로 처음부터 다시 훑는다.
-  const key = `${vcenterId || ''}|${Math.max(1, days)}|${exclude ? [...exclude].sort().join(',') : ''}`;
+  const key = `${vcenterId || ''}|${Math.max(1, days)}|${exclude ? scopeSig(exclude) : ''}`;
   const canInc = !!deps.incremental && read && inc.key === key && inc.upTo > since && now - inc.fullAt < LOGIN_FAIL_FULL_EVERY_MS;
   let vcFails;
   if (canInc) {

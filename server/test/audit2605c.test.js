@@ -4,7 +4,7 @@
 //   TIM2605-04 시한 env 정규화 · RECENT2605-03 Isilon 정확/반올림 혼재 · RECENT2605-04 PowerMax 빈 SRP ·
 //   LEFT2605-03 parseJsonLoose O(n) + 옛 구현과 결과 동일성(결정적 난수 대조).
 //   ⚠ 픽스처는 전부 합성값이다(공개 저장소 — v2.513 규약). 기준 시각에 Date.now() 를 쓰지 않는다.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,7 +12,14 @@ import path from 'node:path';
 import net from 'node:net';
 import { stripComments } from './_stripComments.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2605c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2605c-');
 process.env.CONFIG_DIR = TMP;
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 process.env.DATA_SOURCE = 'live';

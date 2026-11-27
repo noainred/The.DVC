@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>값 없음 사유 — 400px 눌러서 보기</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./why.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.n-card{display:flex;gap:10px;padding:10px 12px;border-radius:10px;background:#141b2d;border:1px solid #243049;min-width:0}
+.n-card .col{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.n-card .l1{display:flex;align-items:center;gap:7px;font-weight:600;font-size:13.5px;min-width:0}
+.n-card .l2{font-size:12px;color:#aebbd0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.why44{display:flex;align-items:center;gap:8px;min-height:44px;width:100%;padding:0 10px;border-radius:9px;border:1px solid #243049;background:#0f1626;color:#c7d2e4;font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
+.why44.open{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.18)}
+.why44 b{color:#e6edf6}
+.b44{height:44px}
+</style>
+</helmet>
+<div class="root" style="width:400px;height:900px">
+  <div class="tb" style="padding:0 12px;gap:10px">
+    <button class="btn" type="button" aria-label="메뉴 열기" style="width:44px;height:36px;padding:0">≡</button>
+    <span class="logo"><span class="v">V</span><span>Monitoring Portal</span></span>
+    <span class="pill" style="margin-left:auto">admin</span>
+  </div>
+  <div class="main" style="padding:12px;gap:10px">
+    <div class="crumb">특수 기능 › 물리서버 폴더</div>
+    <button class="sel b44" type="button" style="width:100%" aria-label="폴더 고르기">
+      <span style="display:inline-flex;align-items:center;gap:7px;min-width:0;overflow:hidden"><span class="fo"></span><span style="overflow:hidden;text-overflow:ellipsis">KR-HQ 본사 › DB › <b>Oracle RAC</b></span></span><span class="dim">▾</span>
+    </button>
+    <div class="row" style="gap:6px">
+      <span class="bdg n">서버 5대</span><span class="bdg r">부품 장애 1대</span><span class="bdg n">CPU 36% · 메모리 60% (2대)</span><span class="bdg w">사용률 값 없음 3</span>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="n-card"><div class="col"><span class="l1"><span class="sd ok"></span><span>kr-ora-rac01</span></span><span class="l2">PowerEdge R750 · 7XK2M03</span><span class="l2">CPU 38% · 메모리 64% · 486 W</span></div></div>
+      <div class="n-card"><div class="col"><span class="l1"><span class="sd ok"></span><span>kr-ora-rac02</span></span><span class="l2">PowerEdge R750 · 7XK2N03 · 492 W</span>
+        <button class="why44" type="button"><span class="nd w"></span><span>사용률 — · <b>오래됨</b> 2시간 14분 전</span><span class="dim sp">이유 ›</span></button></div></div>
+      <div class="n-card"><div class="col"><span class="l1"><span class="sd bad"></span><span>kr-ora-rac03</span><span class="bdg r sp">전원 장치 1건</span></span><span class="l2">PowerEdge R750 · 7XK2P03 · 465 W</span>
+        <button class="why44 open" type="button" aria-expanded="true"><span class="nd"></span><span>사용률 — · <b>OS 계정 없음</b></span><span class="dim sp">이유 ›</span></button></div></div>
+      <div class="n-card"><div class="col"><span class="l1"><span class="sd na"></span><span>kr-ora-rac04</span><span class="bdg e sp">엣지</span></span><span class="l2">PowerEdge R750xa · 9HT4Q13</span>
+        <button class="why44" type="button"><span class="nd"></span><span>사용률 · 전력 — · <b>엣지 기록 없음</b> 외 1</span><span class="dim sp">이유 ›</span></button></div></div>
+    </div>
+  </div>
+
+  <div class="scrim"></div>
+  <div class="sheet" role="dialog" aria-label="값이 없는 이유">
+    <span class="grab"></span>
+    <div style="display:flex;align-items:center;gap:8px"><b style="color:#e6edf6;font-size:14px">CPU · 메모리 값이 없습니다</b><span class="tn g sp">수집 대상 아님</span></div>
+    <div class="dim" style="font-size:12px">kr-ora-rac03</div>
+    <div style="display:flex;gap:8px;align-items:flex-start;color:#e6edf6"><span class="nd" style="margin-top:7px"></span><span><b>OS 계정이 등록되지 않았습니다.</b> 이 서버는 iDRAC 으로 CPU · 메모리를 읽지 못했고, OS(SSH)로 읽을 계정도 없습니다.</span></div>
+    <div class="tip s" style="padding:0;border:0;background:transparent">
+      <div class="fx" style="font-size:12.5px">
+        <span class="k">마지막 값</span><span class="v">없음 — 수집한 적이 없습니다</span>
+        <span class="k">읽고 있는 것</span><span class="v">전력 · 부품 장애(iDRAC)</span>
+        <span class="k">판정한 시각</span><span class="v">06:38</span>
+      </div>
+      <div class="ac" style="font-size:12.5px"><b>이렇게 하면 보입니다</b> — OS 계정을 등록하면 다음 수집 주기부터 값이 나옵니다.</div>
+    </div>
+    <a class="btn b44" href="#" style="width:100%">베어메탈 사용률 › 누락 점검</a>
+    <button class="btn b44" type="button" style="width:100%">닫기</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

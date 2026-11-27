@@ -15,7 +15,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { stripComments } from './_stripComments.js';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosotp2842-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('bareosotp2842-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -37,6 +44,12 @@ const SSH_PW = 'ssh-Secret-2842';
 const DIR_BODY = { host: '10.20.30.40', username: 'root', password: SSH_PW, restoreClient: 'kr-fd', restoreStorage: 'File', restorePool: 'Full' };
 const SEC_FILE = path.join(tmp, 'security-session.json');
 const writeSec = (o) => fs.writeFileSync(SEC_FILE, typeof o === 'string' ? o : JSON.stringify(o));
+// 98회차(의도 변경 — securityResidual98): 본 파일을 지워도 이 프로세스의 직전 값 · 신뢰 사본이 남는다(손상 · 유실에 약해지지 않게).
+//   '파일 없음 = 기본값(신규 설치)' 상태는 두 파일을 지우고 모듈의 읽은 값을 비워야 만들어진다.
+const resetSec = () => {
+  fs.rmSync(SEC_FILE, { force: true }); fs.rmSync(path.join(tmp, 'security-session.trusted.json'), { force: true });
+  SEC._resetSessionSecurityReadForTest(); SEC.invalidateLoginPolicyCache();
+};
 
 /** 30초 경계에서 떨어뜨린 TOTP(검증 창 ±1 안) — 경계 15초 안이면 다음 단계까지 기다린다. */
 async function freshCounter() {
@@ -46,17 +59,20 @@ async function freshCounter() {
 }
 
 test('① 설정 값 — 기본 켬 · 불리언 false 만 끔 · 손상은 켬 · 저장은 불리언일 때만', () => {
-  fs.rmSync(SEC_FILE, { force: true });
+  resetSec();
   assert.equal(SEC.bareosSetupOtpRequired(), true, '파일 없음 = 켬');
   assert.equal(SEC.loadConfiguredSecurity().bareosSetupOtp, true);
   for (const v of ['false', 0, null, 'off', '']) { writeSec({ bareosSetupOtp: v }); assert.equal(SEC.bareosSetupOtpRequired(), true, `${JSON.stringify(v)} 은 끔이 아니다`); }
   writeSec({ bareosSetupOtp: false });
   assert.equal(SEC.bareosSetupOtpRequired(), false);
   writeSec('{ bad json');
-  assert.equal(SEC.bareosSetupOtpRequired(), true, '손상 = 켬(약하게 읽지 않는다)');
+  // 98회차(91회차 남긴 것 ① 권장안 — 의도 변경): 손상은 직전 값(→ 신뢰 사본) — 소유자가 본인 OTP 로 끈 값 그대로다. 직전 값 · 사본이 없는 손상만 켬(엄격).
+  assert.equal(SEC.bareosSetupOtpRequired(), false, '손상 = 직전 값');
   assert.ok(fs.readdirSync(tmp).some((f) => f.startsWith('security-session.json.corrupt')), '손상본은 보존');
+  resetSec(); writeSec('{ bad json');
+  assert.equal(SEC.bareosSetupOtpRequired(), true, '직전 값 · 사본 없는 손상 = 켬(약하게 읽지 않는다)');
 
-  fs.rmSync(SEC_FILE, { force: true });
+  resetSec();
   assert.equal(SEC.saveSessionSecurity({ bareosSetupOtp: 'false' }).bareosSetupOtp, true, '글자 false 로는 끄지 않는다');
   assert.equal(SEC.saveSessionSecurity({ bareosSetupOtp: false }).bareosSetupOtp, false);
   assert.equal(SEC.saveSessionSecurity({ idleLogoutMin: 20 }).bareosSetupOtp, false, '무관한 저장은 그대로 둔다');
@@ -95,7 +111,7 @@ const auditRows = () => auditMod.listAudit({ limit: 500 }).items || auditMod.lis
 const lastAudit = (action) => [].concat(auditRows()).filter((x) => x.action === action)[0];
 
 test('② 라우트 게이트 — 켬: OTP 없이 403 · 끔: OTP 없이 지나가고 감사 표시 · 다시 켜면 바로 403 · 조회 응답 setupOtp', async () => {
-  fs.rmSync(SEC_FILE, { force: true });
+  resetSec();
   const srv = fakeServer();
   A._setDepsForTest({ ssh: srv.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
 
@@ -143,7 +159,7 @@ test('② 라우트 게이트 — 켬: OTP 없이 403 · 끔: OTP 없이 지나�
 });
 
 test('③ 세션 보안 PUT — 소유자 + 본인 OTP · 틀리면 바뀌지 않음 · 감사에 켬 → 끔', async () => {
-  fs.rmSync(SEC_FILE, { force: true });
+  resetSec();
   const notOwner = await call('other', 'PUT', '/admin/security/session', { bareosSetupOtp: false, otp: '000000' });
   assert.equal(notOwner.s, 403); assert.equal(notOwner.j.requiredOwner, true);
   const badOtp = await call('adm', 'PUT', '/admin/security/session', { bareosSetupOtp: false, otp: '000000' });
@@ -219,5 +235,5 @@ test('⑤ 복원 — 백업의 끔은 지금도 끔일 때만 · 아니면 켬�
   assert.match(rc.warning.reason, /복원으로는 끄지 않습니다/);
   fs.writeFileSync(SEC_FILE, JSON.stringify({ bareosSetupOtp: false }));
   assert.equal(R.reconcileForApply('security-session.json', off, tmp).content, off);
-  fs.rmSync(SEC_FILE, { force: true });
+  resetSec();
 });

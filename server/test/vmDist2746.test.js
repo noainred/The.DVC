@@ -11,14 +11,21 @@
 //   ⑦ 선택을 바꾸면 옛 커서는 400 cursor-query-mismatch · 순서 기억을 다시 만들 때도 같은 집합(누락·유령 0)
 //   ⑧ 범위 계정은 자기 vCenter 만 센다 · dist 없으면 응답에 없다
 //   ⑨ 성능 — 운영 규모(VM 6,000) 한 번 계산이 수 ms(넉넉한 상한 + 선형 비율)
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vmDist2746-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('vmDist2746-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'false';
@@ -170,6 +177,8 @@ function oracleMatchVms(snap, q, user) {
   }
   return { vms: out, gpuCounts };
 }
+/** v3.28.1 오라클 — VM 이 있는데 그 칸을 하나도 못 읽었으면 null, 아니면 읽은 값의 합. */
+const allReadOr = (vms, k, sum) => (vms.length > 0 && vms.every((v) => numOrNull(v[k]) == null) ? null : sum);
 function oracleVms(snap, q, user, pins) {
   const paged = isPagedRequest(q);
   const matched = oracleMatchVms(snap, q, user);
@@ -191,8 +200,11 @@ function oracleVms(snap, q, user, pins) {
     count: vms.length,
     poweredOn: on.length,
     poweredOff: vms.length - on.length,
-    vcpu: sm((v) => v.cpuCount),
-    ramGB: Math.round(sm((v) => v.memMB) / 1024),
+    // v3.28.1: 못 읽은 cpuCount · memMB 는 0 으로 더하지 않고 센다 — 전부 못 읽었으면 null(오라클은 vmSums.js 를 import 하지 않고 따로 계산한다).
+    vcpu: allReadOr(vms, 'cpuCount', sm((v) => v.cpuCount)),
+    ramGB: allReadOr(vms, 'memMB', Math.round(sm((v) => v.memMB) / 1024)),
+    vcpuUnknown: vms.filter((v) => numOrNull(v.cpuCount) == null).length,
+    ramUnknown: vms.filter((v) => numOrNull(v.memMB) == null).length,
     diskGB: sm((v) => v.storageGB),
     diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
     avgCpuUsagePct: cpuAvg.value,

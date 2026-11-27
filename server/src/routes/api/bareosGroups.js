@@ -23,6 +23,7 @@ import { isSystemVm } from '../../veeam/backupStatus.js';
 import { poolPolicyOf, jobPolicyResolver } from '../../bareos/policy.js';
 import { pollerStatus } from '../../bareos/poller.js';
 import { directorInfo } from './bareosViews.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 /**
@@ -222,7 +223,7 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
   // v2.846 버그 점검(U-9): Director 상태(인증 정지 · 조회 실패 · 미설정)면 원장의 결과는 마지막으로 읽은 값이다 — 통합·법인별 현황과 같은 판정
   //   (bareosViews.directorInfo → vmView.directorState)으로 resultsKnown 을 실어 화면이 '성공 n/n'(초록) 대신 '모름' 으로 그리게 한다.
   let dirSt = null;
-  try { const di = directorInfo(vcenterId, settings, pollerStatus(), isDemoActive()); dirSt = { state: di.state, resultsKnown: di.resultsKnown }; } catch { dirSt = { state: 'error', resultsKnown: false }; }
+  try { const di = directorInfo(vcenterId, settings, pollerStatus(), isDemoActive()); dirSt = { state: di.state, resultsKnown: di.resultsKnown, ...(di.partial ? { partial: true } : {}) }; } catch { dirSt = { state: 'error', resultsKnown: false }; }   // 반증 G1: 잘린 조회 표지
   res.json({
     ok: true, vcenterId, vcName: vc?.name || vcenterId, now, tz: serverTz(), clocks: clockInfo(now), catchupMs: CATCHUP_MS,
     director: si.view ? { ...si.view, ...dirSt } : null, directorState: dirSt, mapped: !!si.site && !si.mappingMissing?.length, mappingMissing: si.mappingMissing, siteDefaults: si.site ? { storage: si.site.storage, pool: si.site.pool, schedule: si.site.schedule || '' } : null,
@@ -268,7 +269,7 @@ api.get('/tools/bareos-backup/groups/options', adminOnly, async (req, res) => {
 });
 
 /** 새 그룹 — body { vcenterId, name, vmIds, schedule, storage?, pool?, keep? }(keep: 보관 개수 · 비우면 제한 없음). 잡 없는 VM 은 먼저 등록(Director 스케줄 없이)하고, 등록된 VM 만 그룹에 넣는다. */
-api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
+api.post('/tools/bareos-backup/groups', adminOnly, textFields('vcenterId', 'name'), async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '');
   const v = precheck(req, res, vcenterId); if (!v) return;
   const si = siteInfo(vcenterId, effectiveSettings());

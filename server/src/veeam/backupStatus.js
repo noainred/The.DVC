@@ -73,7 +73,11 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
   // v2.782(점검 K4 B-B3): 서버가 여러 대일 때 한 대라도 첫 수집 전(waiting)이거나 한 번도 성공하지 못했으면(failedNoLast) 그 서버가 맡은 VM 은
   //   대조 결과에 없다 — 대조에 없는 VM 의 '없음' 은 확정이 아니라 모름이다(나눔도 모름). 맞은 VM 의 수·결과는 사실(하한)이라 그대로 둔다.
   //   ⚠ 오래된(stale) 서버·실패했지만 마지막 성공이 있는 서버는 넣지 않는다 — 마지막 결과의 VM 목록이 있다.
-  const absentUnknown = veeamKnown && ((Number(vcnt.failedNoLast) || 0) > 0 || (Number(vcnt.waiting) || 0) > 0);
+  //   결정(76~105 남긴 것 · 2026-11-20) A9: 수집 목록이 상한에서 잘린 결과로 대조했으면(veeamCount truncated) 잘린 쪽의 VM 도 대조에 없다 — 같은 '모름'
+  //   (백업 실행 계획 runStatusOf 와 같은 판단 · '없음' 을 미백업 · 백업 필요 공백(needGap) 같은 장애 쪽 판정에 넣지 않는다).
+  const truncated = veeamKnown && vcnt.truncated === true;
+  const serversMissing = veeamKnown && ((Number(vcnt.failedNoLast) || 0) > 0 || (Number(vcnt.waiting) || 0) > 0);
+  const absentUnknown = serversMissing || truncated;
   const snapKnown = !!(sc && isFin(sc.n));
   const known = new Set(list.map((v) => v.id));
   // v2.780: 매칭은 vCenter 전체로 한 결과를 받는다(캐시·별칭 학습을 범위와 무관하게) — 여기서 지금 범위의 VM 만 센다.
@@ -123,6 +127,8 @@ export function backupRow({ vms, linked, vcnt = null, match = null, sc = null, e
     pending: veeamKnown ? pending : null,
     ...(veeamKnown && runningStale ? { runningStale: true } : {}),
     ...(absentUnknown ? { veeamAbsentUnknown: true } : {}),   // v2.782 B-B3: 대조에 없는 VM 은 '없음' 이 아니라 모름(세부내용 vmBackupView absentKnown:false)
+    // 결정 A9: 웹 '부분(목록 잘림)' · 모름 안내 문구의 사유 — 잘림과 서버 미수집이 겹치면 둘 다 말하도록 veeamAbsentServers 를 같이 싣는다.
+    ...(truncated ? { veeamTruncated: true, ...(serversMissing ? { veeamAbsentServers: true } : {}) } : {}),
     lastBackup,
     rpo: veeamKnown ? rpo : null,
     results: veeamKnown ? results : null,

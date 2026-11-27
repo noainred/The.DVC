@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리 서버 — 현재 화면</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button{font-family:inherit}
+.cur-tab{height:34px;padding:0 16px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font-size:13px;cursor:pointer;white-space:nowrap}
+.cur-tab[data-on="1"]{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600}
+.cur-sel{height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:13px}
+</style>
+</helmet>
+
+<div style="font-family: Inter, 'Noto Sans KR', -apple-system, 'Segoe UI', sans-serif; color: #e6edf6; background: #0a0e17; min-height: 100vh; box-sizing: border-box; padding: 18px 24px 40px; display: flex; flex-direction: column; gap: 12px; max-width: 1680px; margin: 0 auto">
+
+  <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px">
+    <div style="display: flex; flex-wrap: wrap; gap: 6px">
+      <button class="cur-tab" type="button" data-on="1">법인별 서버 정보</button>
+      <button class="cur-tab" type="button">하드웨어 집계</button>
+      <button class="cur-tab" type="button">파트 인벤토리</button>
+      <button class="cur-tab" type="button">법인별 온도</button>
+      <button class="cur-tab" type="button">GPU 정보</button>
+      <button class="cur-tab" type="button">BIOS/iDRAC 버전 정보</button>
+      <button class="cur-tab" type="button">미지원 서버</button>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px">
+      <label style="display: flex; gap: 8px; align-items: center"><span style="color: #8b9bb4">법인(DataCenter)</span><select class="cur-sel" aria-label="법인"><option>전체</option></select></label>
+      <label style="display: flex; gap: 8px; align-items: center"><span style="color: #8b9bb4">구분</span><select class="cur-sel" aria-label="구분" disabled><option>Baremetal (미가상화 물리)</option></select></label>
+    </div>
+  </div>
+
+  <div style="font-size: 12px; color: #8b9bb4">물리 서버 — 서버 분석의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.</div>
+
+  <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px">
+    <div style="font-size: 13px; color: #8b9bb4">등록 서버 <b style="color: #3b82f6">214</b>대 · 법인 <b style="color: #e6edf6">13</b>개 · <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(245,158,11,.18); color: #fcd34d; font-size: 11px; font-weight: 600">미지정 6</span> <span style="margin-left: 8px">· 서버 행을 클릭하면 서버 상세(버전·온도·CPU)를 봅니다.</span></div>
+    <div style="display: flex; gap: 8px; align-items: center">
+      <input class="cur-sel" type="search" placeholder="이름/서비스태그/주소 검색" aria-label="검색" style="min-width: 220px">
+      <button class="cur-tab" type="button">새로고침</button>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; align-items: start">
+    <sc-for list="{{cards}}" as="c" hint-placeholder-count="6">
+      <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+        <div style="font-weight: 700; font-size: 15px; color: #93c5fd">{{c.name}} <span style="font-weight: 400; font-size: 12px; color: #8b9bb4">▼</span></div>
+        <div style="font-size: 12px; color: #8b9bb4">서버 모델 종류 · <b style="color: #e6edf6">{{c.kinds}}</b>종 · 총 <b style="color: #3b82f6">{{c.n}}</b>대</div>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <sc-for list="{{c.models}}" as="m" hint-placeholder-count="4">
+            <div style="display: grid; grid-template-columns: 1fr 120px 36px; gap: 8px; align-items: center; font-size: 12px">
+              <a href="#model" style="color: #e6edf6; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{m.name}}</a>
+              <span style="height: 8px; background: #0f1626; border-radius: 999px; overflow: hidden; display: block"><span style="display: block; height: 100%; width: {{m.pct}}%; background: #3b82f6"></span></span>
+              <span style="text-align: right; color: #8b9bb4">{{m.n}}대</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mk = (name, n, models) => ({ name, n, kinds: models.length, models: models.map(([m, k]) => ({ name: m, n: k, pct: Math.round(k / models[0][1] * 100) })) });
+    return { cards: [
+      mk('DaVinci KR', 38, [['PowerEdge R760', 14], ['PowerEdge R750', 9], ['PowerEdge R650', 6], ['PowerEdge R740xd', 5], ['PowerEdge R7625', 4]]),
+      mk('IRS Poland', 26, [['PowerEdge R750', 11], ['PowerEdge R760', 8], ['PowerEdge R650', 4], ['PowerEdge R940', 3]]),
+      mk('DaVinci US-East', 22, [['PowerEdge R760', 9], ['PowerEdge XE9680', 5], ['PowerEdge R7625', 5], ['PowerEdge R250', 3]]),
+      mk('IRS Germany', 19, [['PowerEdge R650', 8], ['PowerEdge R750', 6], ['PowerEdge MX750c', 5]]),
+      mk('DaVinci Japan', 17, [['PowerEdge R7625', 7], ['PowerEdge R760', 6], ['PowerEdge T560', 4]]),
+      mk('IRS Vietnam', 15, [['PowerEdge R750', 7], ['PowerEdge R6525', 5], ['PowerEdge R650', 3]]),
+    ] };
+  }
+}
+</script>
+</body>
+</html>

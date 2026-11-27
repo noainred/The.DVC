@@ -13,6 +13,7 @@
  * ⚠ store·DB·등록부를 import 하지 않는다(라우트가 읽어 넘긴다 — 테스트가 순수 함수로 부른다).
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { vmSumsOf, vmAllocOf } from './vmSums.js';   // v3.19.1 VM 할당 합 판정 코어(요약 · 법인별과 같은 함수)
 import { hostCfgFindings, clusterDrift, HOST_CFG_CODES } from '../hostcfg/parse.js';
 import { hostCfgTableRows, HOST_CFG_TITLE, DRIFT_LABEL, SEV_LABEL, REBOOT_LABEL } from '../hostcfg/text.js';
 import { recentBackupYn } from '../veeam/backupStatus.js';
@@ -82,18 +83,7 @@ export function clusterChoices(hosts, vcId) {
   return [...m.values()].sort((a, b) => (a.key === 'standalone') - (b.key === 'standalone') || a.name.localeCompare(b.name, 'en', { numeric: true }));
 }
 
-/** 호스트 VM 들의 vCPU·메모리(GB) 합 — 못 읽은 VM 은 unknown 으로 따로. 템플릿은 세지 않는다(켤 수 없는 VM — 표에는 '템플릿' 으로 싣는다). */
-function vmSums(vms) {
-  let vcpu = 0; let mem = 0; let vcpuUnknown = 0; let memUnknown = 0; let on = 0; let n = 0;
-  for (const v of vms) {
-    if (v.template === true) continue;
-    n++;
-    const c = numOrNull(v.cpuCount); if (c == null) vcpuUnknown++; else vcpu += c;
-    const m = numOrNull(v.memMB); if (m == null) memUnknown++; else mem += m / 1024;
-    if (v.powerState === 'POWERED_ON') on++;
-  }
-  return { n, vcpu, mem: r1(mem), vcpuUnknown, memUnknown, on };
-}
+// 호스트 VM 들의 vCPU · 메모리 합은 vcenter/vmSums.js 하나(v3.19.1 — 여기 있던 사본 vmSums 를 지웠다. /hosts 요약 · 법인별 보기와 같은 함수).
 const ratio = (a, b) => (fin(a) && fin(b) && b > 0 ? r1(a / b) : null);
 
 /** iDRAC 인벤토리(inventoryView 결과) → 묶음별 상태 셈. partState: ok|warn|fault|unknown|absent. */
@@ -162,7 +152,8 @@ export function buildHostExport(src, o = {}) {
   const outHosts = [];
   for (const h of hosts) {
     const vms = (vmsByHost.get(h.name) || []).slice().sort((a, b) => (a.template === true) - (b.template === true) || String(a.name).localeCompare(String(b.name), 'en', { numeric: true }));
-    const s = vmSums(vms);
+    const s = vmSumsOf(vms); const alloc = vmAllocOf(s);
+    const vmMemSumGB = r1(s.memMB / 1024);   // 읽은 VM 만의 합(GB)
     const cores = numOrNull(h.cpuCores); const memGB = fin(h.memTotalMB) && h.memTotalMB > 0 ? r1(h.memTotalMB / 1024) : null;
     const connected = h.connectionState !== 'DISCONNECTED';
     const ccfg = cfgOf(h);
@@ -260,8 +251,8 @@ export function buildHostExport(src, o = {}) {
       cpuPct: connected ? numOrNull(h.cpuUsagePct) : null, memPct: connected ? numOrNull(h.memUsagePct) : null,
       cpuUsedMhz: connected ? numOrNull(h.cpuUsageMhz) : null, cpuTotalMhz: numOrNull(h.cpuTotalMhz),
       memUsedGB: connected && fin(h.memUsageMB) ? r1(h.memUsageMB / 1024) : null,
-      vms: s.n, vmOn: s.on, templates: vms.length - s.n, vcpu: s.vcpuUnknown === s.n && s.n ? null : s.vcpu, vcpuUnknown: s.vcpuUnknown, vmMemGB: s.memUnknown === s.n && s.n ? null : s.mem, vmMemUnknown: s.memUnknown,
-      cpuRatio: s.vcpuUnknown ? null : ratio(s.vcpu, cores), memRatio: s.memUnknown ? null : ratio(s.mem, memGB),
+      vms: s.n, vmOn: s.on, templates: s.templates, vcpu: alloc.vcpu, vcpuUnknown: s.vcpuUnknown, vmMemGB: alloc.memMB == null ? null : vmMemSumGB, vmMemUnknown: s.memUnknown,
+      cpuRatio: s.vcpuUnknown ? null : ratio(s.vcpu, cores), memRatio: s.memUnknown ? null : ratio(vmMemSumGB, memGB),
       bootTime: fin(h.bootTime) ? h.bootTime : null, uptimeDays: fin(h.bootTime) && connected ? Math.max(0, Math.floor((now - h.bootTime) / DAY)) : null,
       tempC: numOrNull(h.tempC), tempMaxC: numOrNull(h.tempMaxC), temps: (Array.isArray(h.temps) ? h.temps : []).slice(0, 12).map((t) => ({ name: t.name, c: t.c })),
       powerW: numOrNull(h.powerWatts ?? h.vcPowerWatts),

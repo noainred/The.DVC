@@ -22,7 +22,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 92회차 F4: 읽기 오류 ≠ 손상(결정 G2 공용 판정 — 손상만 preserveCorrupt)
 
 const FILE = path.join(config.configDir, 'nfs-mounts.json');
 const BASE = process.env.NFS_MOUNT_BASE || '/mnt/portal-nfs';
@@ -38,15 +39,33 @@ let _db = null;
 const _log = []; // { at, mountId, action, ok, detail(stderr 요약) }
 function addLog(entry) { _log.push({ at: Date.now(), ...entry }); if (_log.length > 200) _log.shift(); }
 
+/*
+ * 92회차 F4(낮음 — 재현): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 nfs-mounts.json 을 `.corrupt` 로 옮긴 뒤
+ *   빈 목록을 캐시했다 — 다음 등록이 그 한 건만 든 파일을 썼다. 또 `{"mounts":"x"}`(배열 아님)는 목록 조회마다 TypeError(500)였다.
+ *   이제 손상(형식 · 객체 아님 · mounts 배열 아님)만 옮기고, 읽기 오류는 원본을 두고 · 캐시하지 않고(30초마다 다시 읽음) · 등록 · 삭제를 거절한다.
+ */
+const _reader = makeJsonFileReader(() => FILE, {
+  tag: 'nfs-mounts',
+  parse: (t) => {
+    const j = JSON.parse(t);
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아님');
+    if (j.mounts != null && !Array.isArray(j.mounts)) throw new Error('mounts 가 배열이 아님');
+    return { mounts: (j.mounts || []).filter((m) => m && typeof m === 'object' && typeof m.id === 'string') };
+  },
+});
+let _readError = false;
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE)) { _db = { mounts: JSON.parse(fs.readFileSync(FILE, 'utf8')).mounts || [] }; return _db; }
-  } catch { preserveCorrupt(FILE); }
-  _db = { mounts: [] };
+  if (_db && !_readError) return _db;
+  const r = _reader.read();
+  _readError = r.kind === 'read-error';
+  _db = r.kind === 'ok' ? r.value : { mounts: [] };   // 읽기 오류의 빈 목록은 자리 표시 — 다음 load() 가 다시 판정한다
   return _db;
 }
-function persist() { atomicWriteFileSync(FILE, JSON.stringify({ version: 1, mounts: load().mounts }, null, 2), { mode: 0o600 }); }
+const READ_ERROR_REASON = () => `NFS 마운트 정의 파일(${path.basename(FILE)})을 읽지 못해 바꾸지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`;
+function assertWritable() { load(); if (_readError) throw new Error(READ_ERROR_REASON()); }
+/** 92회차 F4: 정의 파일 읽기 오류 중인가(목록이 빈 것은 '없음' 이 아니다). */
+export function nfsMountsReadError() { load(); return _readError; }
+function persist() { assertWritable(); atomicWriteFileSync(FILE, JSON.stringify({ version: 1, mounts: load().mounts }, null, 2), { mode: 0o600 }); }
 
 /** 마운트 스펙 검증(순수 — nfsMounts.test.js 로 고정). 통과 시 정규화 값, 실패 시 throw. */
 export function validateMountSpec({ server, exportPath, options } = {}) {
@@ -70,6 +89,7 @@ export function getMount(id) { return listMounts().find((m) => m.id === id) || n
 
 export function addMount(spec) {
   const v = validateMountSpec(spec);
+  assertWritable();   // 92회차 F4: 읽기 오류 중에는 빈 자리 표시에 넣지 않는다(라우트 400 + 사유)
   const db = load();
   if (db.mounts.length >= MAX_MOUNTS) throw new Error(`NFS 마운트는 최대 ${MAX_MOUNTS}개까지 등록할 수 있습니다.`);
   if (db.mounts.some((m) => m.server === v.server && m.exportPath === v.exportPath)) throw new Error('같은 서버:경로 마운트가 이미 있습니다.');
@@ -79,6 +99,7 @@ export function addMount(spec) {
 }
 
 export function deleteMount(id) {
+  assertWritable();   // 92회차 F4: 라우트 409 + 사유('항목이 없습니다' 보다 먼저)
   const db = load();
   const i = db.mounts.findIndex((m) => m.id === id);
   if (i < 0) return false;
@@ -147,4 +168,4 @@ export function troubleshooting() {
   ];
 }
 
-export function _resetForTest() { _db = null; _log.length = 0; }
+export function _resetForTest() { _db = null; _readError = false; _reader.reset(); _log.length = 0; }

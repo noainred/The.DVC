@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F15: 읽기 오류 ≠ 손상
 
 const FILE = path.join(config.configDir, 'ping-targets.json');
 const norm = (s) => String(s || '').trim();
@@ -25,11 +26,27 @@ let cache = null;
 let cacheTok = '';
 function fileTok() { try { const st = fs.statSync(FILE); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } }
 
+/*
+ * 103회차 F15(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(Ping 대상 · 자동 시드 tombstone · vCenter 포트)을 `.corrupt.*` 로 옮겼다 —
+ *   기동 시 자동 시드가 빈 목록 위에 vCenter 대상만 든 파일을 써서 수동 대상과 '지운 자동 대상' 기록이 보존본에만 남았다(지운 대상이 되살아남).
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · save()(모든 쓰기 · 시드의 길목)가 거절한다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'ping' });
+let _readErr = null;   // { at, code }
+/** 103회차 F15: ping-targets 파일 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function pingTargetsReadError() { loadRaw(); return _readErr ? { ..._readErr } : null; }
 function loadRaw() {
   const t = fileTok();
-  if (cache && t === cacheTok) return cache;
+  if (cache && t === cacheTok) { _readErr = null; return cache; }   // 읽어 둔 판과 같은 파일이다(원본을 되돌린 경우 포함) — 쓰기가 안전하다
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return { targets: [], seededVc: [], seededEdge: [], vcPorts: [] };   // 캐시하지 않는다 — save() 가 거절한다
+  }
+  _readErr = null;
   try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const p = JSON.parse(rr.value);
     cache = {
       targets: Array.isArray(p.targets) ? p.targets : [],
       // 이미 자동 시드한 vCenter id 목록(tombstone). 사용자가 자동 대상을 삭제해도
@@ -44,7 +61,7 @@ function loadRaw() {
     // v2.580(BUG-B): 부재는 정상이지만 **손상**은 다르다 — 조용히 빈 값을 돌려주면 다음 save() 가
     // 대상 0개짜리 파일로 덮어써 Ping 대상·자동시드 tombstone·vCenter 포트 목록이 **영구 유실**된다
     // (v2.447 alarm-mutes B4 와 같은 유형). 원본을 `.corrupt.<ts>` 로 보존하고 경고를 남긴다.
-    if (fs.existsSync(FILE)) {
+    if (e?.code !== 'ENOENT') {
       preserveCorrupt(FILE, e?.message);
       console.warn(`[ping] 대상 파일이 손상돼 읽지 못했습니다 — 원본을 보존했습니다: ${safeLoadText(e) || '사유 미상'}`);
     }
@@ -63,6 +80,8 @@ function hostFromUrl(h) {
 }
 
 function save(next) {
+  // 103회차 F15: 읽기 오류 중에는 쓰지 않는다 — next 는 캐시하지 않은 빈 목록에서 만든 것이다(호출부가 사유를 응답에 싣는다).
+  if (_readErr) throw Object.assign(new Error(`Ping 대상 파일(${path.basename(FILE)})을 읽지 못한 상태입니다 — 읽기 오류(${_readErr.code})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다)`), { status: 409, code: 'settings-unreadable', readError: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2));
   cache = next;
   cacheTok = fileTok();
@@ -251,6 +270,6 @@ export function syncVcPortTargets(vcenters = []) {
 
 /** 테스트/관리용 초기화. */
 export function resetTargets() {
-  cache = null; cacheTok = '';
+  cache = null; cacheTok = ''; _readErr = null; _reader.reset();
   try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* */ }
 }

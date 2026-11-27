@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>The Davinci — 데이터 대응표 · 지금 있는 값 / 새 수집 / 계산</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:14px 16px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}.badge.red{background:rgba(239,68,68,.15);color:#f87171}.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.table-wrap{overflow:auto;border-radius:12px;border:1px solid #243049}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12px;line-height:1.45}
+tbody tr:last-child td{border-bottom:none}
+td .mono{font-size:11px}
+.node{box-sizing:border-box;padding:9px 11px;border:1px solid #243049;border-radius:8px;background:#0f1626;display:flex;flex-direction:column;gap:3px;min-width:0;font-size:12px;line-height:1.4}
+.node b{font-size:12.5px}
+.node.eng{border-color:#3b82f6;background:rgba(59,130,246,.08)}
+.node.ui{border-color:rgba(52,224,180,.5)}
+.arrow{flex:1 1 26px;min-width:22px;display:flex;align-items:center;padding:0 4px}
+.arrow i{flex:1;height:2px;background:#3b5a8a;display:block}
+.banner{padding:8px 12px;border-radius:8px;border:1px solid #243049;border-left:4px solid #3b82f6;background:#141b2d;color:#e6edf6;font-size:12.5px;line-height:1.55}
+.banner.warn{border-color:rgba(245,158,11,.35);border-left-color:#f59e0b}
+</style>
+</helmet>
+<div style="min-height: 1100px; background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; box-sizing: border-box; padding: 24px 28px 32px; display: flex; flex-direction: column; gap: 14px">
+
+  <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px">
+    <div style="display: flex; flex-direction: column; gap: 4px">
+      <b style="font-size: 20px; letter-spacing: -0.01em">데이터 대응표 — 지금 있는 값 / 새 수집 / 계산</b>
+      <span class="muted" style="font-size: 12.5px">The.DVC v2.914.0 · 코드 확인 2026-11-07 00:40~00:55 KST · 시안 D-①~③ 의 모든 칸이 어디서 오는지 · 아트보드의 수치는 전부 가상값</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 6px"><span class="badge green">지금 있음</span><span class="badge amber">새 수집</span><span class="badge blue">새 계산</span><span class="badge gray">경로 추정 · 실장비 미확인</span></div>
+  </div>
+
+  <section class="card" aria-label="흐름" style="display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; flex-wrap: wrap; align-items: stretch">
+      <div class="node" style="flex: 0 0 230px"><b>vCenter 수집 · 있음</b><span class="muted">hbas[].wwn · nics[].mac · dev.nics[].mac · mgmtIp · hcfg.mp(개수)</span><span class="mono muted">vcenter/soapClient.js · hostcfg/parse.js</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node" style="flex: 0 0 250px"><b>SAN 스위치 수집 · 있음</b><span class="muted">zoning(cfgshow) · nsRoles(nsshow FC4) · ports.list attached/wwn/카운터 · perfDb 15분·1시간 집계</span><span class="mono muted">sanswitch/{zoning,poller,rates,perfDb}.js</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node" style="flex: 0 0 190px"><b>등록 스토리지 · 있음</b><span class="muted">시리얼 일치 → ‘확실한 어레이’</span><span class="mono muted">perfDb.endpointKind(matched)</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node eng" style="flex: 0 0 230px"><b>귀속 엔진 · 새 계산</b><span class="muted">WWN 매칭 → Zone 안 스토리지 수 → 확정/추정(타깃 포트 비율 · IPF) → 24h 합</span><span class="mono muted">sanswitch/attribution.js(순수) + 라우트</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node ui" style="flex: 1 1 200px"><b>화면</b><span class="muted">D-① #/hosts/&lt;id&gt; ‘SAN 경로·트래픽’ 묶음 · D-③ #/tools/san-switch ‘호스트 귀속’ 보기</span></div>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; align-items: stretch">
+      <div class="node" style="flex: 0 0 230px"><b>vCenter 수집 · 있음</b><span class="muted">nics[].mac · dev.nics[].mac(VM) · net.switches[].uplinks · mgmtIp</span><span class="mono muted">soapClient.js:805 · parsePnics</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node" style="flex: 0 0 250px"><b>CVP 수집 · 있음 + 새</b><span class="muted">있음: port_latest(descr·mac·speed·oper·lag·bps·util·err) · port_sample · events(title·type)</span><span style="color: #fbbf24">새: MAC 테이블 · LLDP · discards · EndpointLocation</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node" style="flex: 0 0 190px"><b>호스트 MAC 집합 · 계산</b><span class="muted">pnic ∪ vmk ∪ VM vNIC — 그 포트가 학습하는 MAC 은 대부분 VM 것</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node eng" style="flex: 0 0 230px"><b>업링크 매칭 엔진 · 새 계산</b><span class="muted">근거 우선순위: LLDP → MAC 테이블 → 포트 설명 → 없음 · 신뢰도 확정/높음/보통/미매칭</span><span class="mono muted">cvp/hostMatch.js(순수) + 라우트</span></div>
+      <div class="arrow"><i></i></div>
+      <div class="node ui" style="flex: 1 1 200px"><b>화면</b><span class="muted">D-② #/hosts/&lt;id&gt; ‘네트워크’ 묶음(열 3개 + 업링크 포트 블록)</span></div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="화면 요소와 데이터" style="display: flex; flex-direction: column; gap: 8px">
+    <b style="font-size: 14px">화면 요소 ↔ 데이터</b>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>화면 요소</th><th>지금 있는 값 · 코드</th><th>새 수집</th><th>계산</th><th>비고</th></tr></thead>
+        <tbody>
+          <tr><td>HBA 어댑터 · WWN · 속도</td><td><span class="badge green">있음</span> <span class="mono">config.storageDevice.hostBusAdapter</span> → hbas[].{name,type,model,speedGbps,wwn}</td><td class="muted">—</td><td class="muted">—</td><td>WWN 은 10진 → 16진 콜론형으로 이미 정규화(soapClient.js:940)</td></tr>
+          <tr><td>스위치 · 포트 · 로그인</td><td><span class="badge green">있음</span> PortRow.attached[] · wwn · state · speed · <span class="mono">nsRoles[wwn]</span></td><td class="muted">—</td><td><span class="badge blue">조인</span> hbas.wwn = attached WWN</td><td>nsRoles 가 빈 패브릭은 역할 추정(◐)으로 떨어진다 — 기본값 initiator 금지(sanswitch.md)</td></tr>
+          <tr><td>Zone · 멤버 · 별칭</td><td><span class="badge green">있음</span> zoning.zones[].{name,members,aliasOf} · effectiveConfig · source</td><td class="muted">—</td><td><span class="badge blue">조인</span> WWN 이 멤버인 활성 Zone</td><td>Domain,Port 멤버는 포트 로그인으로 해석 · peer zone 속성 멤버(00:02:…)는 끝점 아님(zoning.js)</td></tr>
+          <tr><td>스토리지 이름 · 식별 근거</td><td><span class="badge green">있음</span> 등록 스토리지 시리얼 일치 = <span class="mono">endpointKind(matched)</span> · 미일치는 ‘::’ 키</td><td class="muted">—</td><td class="muted">—</td><td>미등록 타깃은 이름을 지어내지 않고 ‘미등록 타깃’ 으로</td></tr>
+          <tr><td>포트 지금 처리량 · 에러</td><td><span class="badge green">있음</span> PortRow.inBps/outBps(델타 · 첫 수집 null) · errCrc · errEncOut · errLinkFail · discC3</td><td class="muted">—</td><td class="muted">—</td><td>읽기 = 호스트 F_Port 의 스위치 Tx(outBytes) · 쓰기 = Rx(inBytes)</td></tr>
+          <tr><td>24h 읽기/쓰기 합 · 추이</td><td><span class="badge green">있음</span> perfDb 15분·1시간 집계(storageSeriesMulti) · 부분 합 버킷 null</td><td class="muted">—</td><td><span class="badge blue">합</span> 호스트 F_Port 시리즈 합</td><td>트래픽 카드(v2.669)와 같은 이월 한계(carryMs) · 값 없으면 ‘—’</td></tr>
+          <tr><td>스토리지별 확정/추정 분배</td><td class="muted">—</td><td class="muted">—</td><td><span class="badge blue">새 계산</span> Zone 안 스토리지 1 → 확정 · 2+ → 타깃 포트 비율 · IPF</td><td>순수 모듈 + 단위 테스트(행합=호스트 포트 Δ · 열합=타깃 포트 Δ) · 결과에 근거 문자열</td></tr>
+          <tr><td>LUN · 경로 · 죽은 경로 · PSP</td><td><span class="badge green">있음</span> hcfg.mp {luns,shared,paths,dead,singlePath,policies}</td><td class="muted">—</td><td class="muted">—</td><td>개수만 — 어느 타깃으로 가는 경로인지는 모른다</td></tr>
+          <tr><td>경로별 타깃 WWN · working</td><td class="muted">—</td><td><span class="badge amber">새 수집</span> <span class="mono">multipathInfo.lun[].path[].transport.portWorldWideName</span> · state · isWorkingPath</td><td><span class="badge blue">확정 승격</span> working 경로가 1 스토리지면 확정</td><td>같은 SOAP 경로(HOST_MP_PATH)를 이미 읽는다 — 파서가 개수만 세고 버리는 값</td></tr>
+          <tr><td>물리 NIC · MAC · 링크 · vSwitch</td><td><span class="badge green">있음</span> nics[].{device,mac,speedMb,link,driver} · net.switches[].uplinks</td><td class="muted">—</td><td class="muted">—</td><td>HostDetail ‘네트워크’ 카드 그대로</td></tr>
+          <tr><td>VM vNIC MAC</td><td><span class="badge green">있음</span> VM 장치 캐시 dev.nics[].mac(soapClient.js:805)</td><td class="muted">—</td><td><span class="badge blue">집합</span> 호스트 MAC 집합</td><td>장치를 못 읽은 VM 은 개수로 밝힌다(dsUse.noDev 와 같은 방식)</td></tr>
+          <tr><td>CVP 포트 설명 · 속도 · 상태 · LAG · MTU</td><td><span class="badge green">있음</span> port_latest(descr · speed_bps · oper · admin · lag · mtu · mac)</td><td class="muted">—</td><td><span class="badge blue">매칭 근거 ‘보통’</span> 설명에 호스트명/vmnic</td><td>설명 null(못 읽음)과 ''(없음)을 구분(cvp.md v2.649)</td></tr>
+          <tr><td>CVP 포트 송신/수신 bps · 사용률 · 에러</td><td><span class="badge green">있음</span> port_latest in_bps/out_bps/in_util/out_util/in_err/out_err · port_sample · port_daily</td><td class="muted">—</td><td class="muted">—</td><td>In = 서버 송신 · Out = 서버 수신(스위치 기준) — 화면이 말한다</td></tr>
+          <tr><td>CVP 포트 드롭(discards)</td><td class="muted">—</td><td><span class="badge amber">새 수집</span> counters 후보에 inDiscards/outDiscards 추가 <span class="badge gray">경로 추정</span></td><td class="muted">—</td><td>parse.js 카운터 파서는 octets/errors 만 읽는다(parse.js:840)</td></tr>
+          <tr><td>MAC 테이블 · LLDP · EndpointLocation</td><td class="muted">—</td><td><span class="badge amber">새 수집</span> <span class="mono">/Smash/bridging/status/smashFdbStatus</span> · <span class="mono">/Sysdb/l2discovery/lldp/status/…</span> · <span class="mono">/api/resources/endpointlocation/v1/EndpointLocation</span> <span class="badge gray">경로 추정</span></td><td><span class="badge blue">매칭 근거 ‘높음’ · ‘확정’</span></td><td>후보 체인 + 원문 표본 + 파서 시험(v2.640 규약) · 비-MLAG 두 포트 동일 MAC 은 ‘충돌’</td></tr>
+          <tr><td>CVP 이벤트</td><td><span class="badge green">있음</span> events(title · description · eventType · 시각)</td><td class="muted">심각도는 응답에 있으면</td><td><span class="badge blue">필터</span> 매칭 포트의 장비·포트</td><td>제목·type 원문 그대로 · 한글 이벤트 카탈로그를 만들지 않는다</td></tr>
+          <tr><td>ESXi vmnic 드롭·에러</td><td class="muted">—</td><td><span class="badge amber">새 수집</span> vCenter perf net.droppedRx/Tx · errorsRx/Tx(레벨 3) 또는 esxcli</td><td><span class="badge blue">판정</span> 스위치 out 드롭 + vmnic Rx 드롭 → 서버 수신 방향 혼잡</td><td>양쪽 카운터가 모두 있을 때만 ‘어느 쪽’ 을 말한다</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-label="새 수집 항목의 규약" style="display: flex; flex-direction: column; gap: 8px">
+    <b style="font-size: 14px">새 수집·계산 항목이 지켜야 할 포탈 규약</b>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>항목</th><th>어디에</th><th>규약(루트 CLAUDE.md · docs/rules)</th><th>위험 · 확인 상태</th></tr></thead>
+        <tbody>
+          <tr><td><b>경로별 타깃 WWN</b></td><td class="mono">hostcfg/parse.js parseMultipath · hcfg.mp.paths[]</td><td>엣지 push 화이트리스트에 새 필드 추가 · 상한(MP_LUNS_MAX) · 못 읽음은 null</td><td><span class="badge green">같은 SOAP 경로</span> 응답 크기가 늘어난다 — 경로 수 상한 필요</td></tr>
+          <tr><td><b>귀속 엔진</b></td><td class="mono">sanswitch/attribution.js + routes /tools/sanswitch/attribution</td><td>판정 코어는 하나(웹에서 다시 세지 않음) · 요청 경로 큰 집계는 조각 + 양보 · memoJson + scopeKey · 범위 계정은 자기 법인만</td><td><span class="badge blue">순수 모듈 + 테스트</span> 행합·열합 불변 · 부분 합 버킷 제외</td></tr>
+          <tr><td><b>CVP 드롭 카운터</b></td><td class="mono">cvp/client.js counters 후보 · parse.js parseCounters</td><td>후보 체인(2xx 가 아니라 ‘읽었다’ 가 성공) · 원문 표본 · usedPaths/missing 화면 표시</td><td><span class="badge gray">실장비 미확인</span> 플랫폼별 필드명 다를 수 있음</td></tr>
+          <tr><td><b>MAC 테이블 · LLDP · EndpointLocation</b></td><td class="mono">cvp/client.js 새 종류(fdb · lldp · endpoint) · db.js 새 표(mac_latest)</td><td>엣지 DB → 변경분 gzip push · 중앙 정제 화이트리스트 · MAC 은 소문자 콜론형 정규화 · EndpointLocation 은 MAC 당 1회 → 호출 상한</td><td><span class="badge gray">경로 전부 추정</span> 첫 실수집에서 표본으로 후보 좁히기 · 표준 vSwitch 는 LLDP 없음(정상)</td></tr>
+          <tr><td><b>업링크 매칭 엔진</b></td><td class="mono">cvp/hostMatch.js + routes · 웹 hostNetText.js</td><td>근거 없는 매칭 금지(‘미매칭’) · MLAG peer 중복 제거 · 비-MLAG 충돌 표시 · aging 뒤 ‘미학습’ 은 0 트래픽이 아님</td><td><span class="badge blue">순수 모듈 + 테스트</span> 매칭 이력을 저장(이동·vMotion)</td></tr>
+          <tr><td><b>ESXi vmnic 드롭·에러</b></td><td class="mono">vcenter perf(QueryPerf net.*) 또는 hostcfg</td><td>통계 레벨에 따라 없을 수 있다 → ‘—’ · 주기·상한 숫자를 화면에 박지 않는다</td><td><span class="badge amber">선택</span> 없어도 D-② 는 CVP 측만으로 동작</td></tr>
+          <tr><td><b>화면 3곳</b></td><td class="mono">HostDetail.jsx 카드 2 · SanSwitchTool.jsx 보기 1 · 문구 모듈(순수)</td><td>STable · BoldText 백틱 금지 · uppercase 금지 · min-width:0 · 1440/400 Chromium · 도구 키 불변(#/tools/san-switch 에 보기만 추가)</td><td><span class="badge green">새 셸 없음</span> 기본 셸의 카드·탭 그대로</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="banner warn" style="font-size: 12px">정직 기록 — 이 대응표의 ‘있음’ 은 2026-11-07 00:40~00:55 KST 에 저장소 코드(main 작업본)를 읽어 확인한 것입니다. ‘새 수집’ 의 CVP 경로는 포탈의 기존 CVP 수집과 같은 처지(실장비로 확인하지 못한 추정 경로)이며, 구현 때 원문 표본으로 확인해야 합니다. 아트보드의 호스트·스위치·스토리지 이름과 수치는 전부 가상값입니다.</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

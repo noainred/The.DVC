@@ -20,6 +20,8 @@
  *   ② 한 종류가 처음 3대에서 연속 실패하면 그 주기의 나머지 장비는 그 종류를 시도하지 않는다(`missing` 이 사유를 말한다)
  *   ③ 성공한 후보를 CVP 별로 기억해 다음 주기 첫 시도로 쓴다(`prefer`).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
+import { lookupEndpoints } from './endpoint.js';   // v2.935(C-③) EndpointLocation
 import { Agent } from 'undici';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { deviceTlsConnect, tlsPeerErrorOf } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
@@ -31,6 +33,7 @@ import { poolSettled } from '../util/pool.js';
 import { pushAll } from '../util/pushAll.js';
 import { baseUrlOf } from './registry.js';
 import * as P from './parse.js';
+import { PARTS_EVERY_MS } from './faults.js';   // v3.41 반증 F5: VLAN · 채널 · MLAG 기억 시간 = 부품 주기 × 3
 
 // 2026-10-09 S-02: 서버별 `verifyTls`(등록 폼 체크박스)가 true 면 CA 체인만(엄격), 아니면(기본) CA 체인 또는 장비별 승인 지문
 // (security/tlsTrust.js). 예전 기본(verifyTls=false)은 어떤 인증서든 받아 CVP 계정·토큰을 상대 확인 없이 보냈다 — CVP 에는
@@ -38,7 +41,7 @@ import * as P from './parse.js';
 const dispVerify = new Agent({ connect: deviceTlsConnect({ subsystem: 'cvp', mode: 'strict', strictHint: 'CVP 등록의 ‘TLS 인증서 검증’ 을 끄면 승인 지문을 허용합니다', tls: withSsrfLookup({}) }) });
 const dispNoVerify = new Agent({ connect: deviceTlsConnect({ subsystem: 'cvp', mode: 'verify', tls: withSsrfLookup({}) }) });
 const REQ_TIMEOUT_MS = reqTimeoutMs(process.env.CVP_HTTP_TIMEOUT_MS, 30_000);
-export const BODY_MAX_BYTES = Math.max(1_048_576, Number(process.env.CVP_BODY_MAX_BYTES) || 8 * 1_048_576);
+export const BODY_MAX_BYTES = Math.max(1_048_576, envPositive(process.env.CVP_BODY_MAX_BYTES, 8 * 1_048_576));
 const DEVICE_CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.CVP_DEVICE_CONCURRENCY) || 6));
 const FAIL_STREAK_STOP = 3;
 /**
@@ -60,7 +63,12 @@ const FOLLOW_DEPTH = 3;
  */
 // v2.644: counters 2(`…/current` 아래에 `statistics` 같은 포인터가 한 단계 더 있을 수 있다) · bgp 3(실장비: 표 → VRF(default·Private) →
 //   피어 → 그 피어의 값 — 캡처에서 VRF 아래 피어가 또 포인터였다. 깊이 2 에서는 이름·VRF 만 남아 '형식을 읽지 못했습니다' 였다).
-export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, intfConfig: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3 });
+/**
+ * v2.924(반증 M-2): LLDP 는 포트 → remoteSystem → 이웃 세 단계라 포트마다 요청이 2~3회다 — 공용 상한(FOLLOW_REQ_MAX)이면 포트 56개 장비에서 일부 포트 이웃을
+ *   잃었다(재현). LLDP 만 상한을 3배로(예산·시한 안에서). 그래도 잘리면 부분 읽기로 표시하고 저장소가 읽은 포트만 바꾼다(db.saveL2 lldpPartial).
+ */
+export const FOLLOW_REQ_MAX_BY_KIND = Object.freeze({ lldp: FOLLOW_REQ_MAX * 3 });
+export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ switchport: 1, lagMember: 1, mlag: 1, interfaces: 1, intfConfig: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3, lldp: 3, fdb: 1 });
 /*
  * v2.646(사용자 신고 'xcvr 이 여전히 나오지 않는다' — 캡처: `all › Ethernet1` 등 전부 '상태 미확인'): 트랜시버 노드는 **장착 여부만** 주고
  *   건강 상태 필드가 없다. `show interfaces transceiver` 가 보여 주는 DOM(온도·전압·바이어스·Tx/Rx 광량)은 그 노드 **한 단계 아래**
@@ -132,7 +140,30 @@ export const CANDIDATES = Object.freeze({
   //   후보에서 뺐다(따라가면 PID 수백 개를 조회한다).
   cpu: ['/api/v1/rest/{serial}/Kernel/proc/cpu/utilization/total', '/api/v1/rest/{serial}/Kernel/proc/cpu'],
   memory: ['/api/v1/rest/{serial}/Kernel/proc/meminfo'],
+  /*
+   * v2.924(SAN·CVP 설계 B-②) — 호스트 업링크 매칭의 근거. ⚠ 두 경로 모두 EOS Sysdb/Smash 관용으로 **추정**했다(실장비 미확인 — 경로 탐색 표본이 확인한다).
+   *   LLDP: 포트 상태 컬렉션 → 포트 → remoteSystem → 이웃(포인터 추종 깊이 3 · 링크가 올라온 포트만). MAC 테이블: Smash FDB 상태 표 한 번.
+   *   둘 다 부품 주기(partsDue — 기본 30분)에만 읽는다 — 자주 바뀌지 않고, MAC 테이블은 응답이 크다. CVP_L2=false 면 읽지 않는다.
+   */
+  lldp: ['/api/v1/rest/{serial}/Sysdb/l2discovery/lldp/status/local/1/portStatus', '/api/v1/rest/{serial}/Sysdb/l2discovery/lldp/status/local/1/portStatus/all'],
+  fdb: ['/api/v1/rest/{serial}/Smash/bridging/status/smashFdbStatus', '/api/v1/rest/{serial}/Smash/bridging/status/smashFdbStatus/all'],
+  /*
+   * v3.41(사용자 실장비 캡처 — 포트 표의 VLAN · LAG 칸이 전부 비어 있었다): 인터페이스 상태 노드에는 VLAN · 채널 소속이 없다(추정) — 따로 읽는다.
+   *   ⚠ 경로 · 필드 이름은 EOS Sysdb 관용으로 **추정**했다(실장비 미확인 — 경로 탐색 표본(PROBE_PATHS)과 '읽은 경로' 탭이 확인한다). 부품 주기에만 읽는다.
+   *   MLAG 는 장비마다 상태 노드 하나(⑧ 이중화 — docs/design/cvp-network-features §3).
+   */
+  switchport: ['/api/v1/rest/{serial}/Sysdb/bridging/switchIntfConfig/switchIntfConfig', '/api/v1/rest/{serial}/Sysdb/bridging/switchIntfConfig/switchIntfConfig/all'],
+  lagMember: ['/api/v1/rest/{serial}/Sysdb/lag/input/config/cli/phyIntf', '/api/v1/rest/{serial}/Sysdb/lag/input/config/cli/phyIntf/all',
+    '/api/v1/rest/{serial}/Sysdb/lag/config/phyIntf'],
+  mlag: ['/api/v1/rest/{serial}/Sysdb/mlag/status'],
 });
+/** v3.41: 부품 주기에 읽은 VLAN · 채널 소속 · MLAG 의 기억(장비별 · 프로세스 메모리). 부품 주기의 3배가 지나면 쓰지 않는다(오래된 값을 지금 값처럼 두지 않게). */
+const _l2cfg = new Map();
+const L2CFG_MAX = 20_000;
+export const L2CFG_TTL_MS = 3 * PARTS_EVERY_MS;   // 반증 F5: 예전 90분 고정 — 부품 주기를 늘린 설치에서 주기 끝마다 '못 읽음' 으로 깜빡였다
+export function _resetL2CfgForTest() { _l2cfg.clear(); }
+/** v2.924(B-②): LLDP·MAC 테이블 수집 스위치 — 기본 켜짐. 요청 수(LLDP 는 링크가 올라온 포트당 1~2회 · 30분마다)가 부담이면 CVP_L2=false. */
+export const L2_COLLECT = String(process.env.CVP_L2 ?? '').trim().toLowerCase() !== 'false';
 /** v2.641: CVP 단위(장비별이 아닌) 추가 항목 — 한 주기에 CVP 당 요청 1회씩. */
 export const CVP_WIDE_KINDS = Object.freeze(['enrich', 'lifecycle', 'bugs', 'events']);
 /**
@@ -161,9 +192,14 @@ export const PROBE_PATHS = Object.freeze([
   '/Sysdb/routing/bgp/export/vrfBgpPeerAfiSafiStateTable/default',
   // v2.648: 모듈형 섀시 — 카드 슬롯별 인터페이스 슬라이스 목록 · 카드 인벤토리 후보(entmib, 추정).
   '/Sysdb/interface/status/eth/phy/slice', '/Sysdb/hardware/entmib',
+  // v2.924(B-②): LLDP · MAC 테이블 후보 경로의 모양(추정 경로 확인용).
+  '/Sysdb/l2discovery/lldp/status/local/1/portStatus', '/Smash/bridging/status/smashFdbStatus',
+  // v3.41: VLAN(스위치포트) · 포트 채널 소속 · MLAG · Smash 카운터 디렉터리(속도 · 처리량 빈 칸 점검 — 사용자 실장비 캡처) 후보의 모양.
+  '/Sysdb/bridging/switchIntfConfig/switchIntfConfig', '/Sysdb/lag', '/Sysdb/lag/input/config/cli/phyIntf', '/Sysdb/mlag/status',
+  '/Sysdb/interface/status/eth/phy/slice/1/intfStatus/Ethernet1/speedEntry',
 ]);
 export const PROBE_HEAD_CHARS = 1536;
-export const PROBE_MAX = 34;
+export const PROBE_MAX = 40;
 /** v2.648: 슬롯 전원 확인 루틴에서 링크 상태를 볼 표본 포트 수(슬롯당). */
 export const SLOT_SAMPLE = 8;
 /**
@@ -181,7 +217,7 @@ export function xcvrProbePaths(parts) {
   return out;
 }
 /** v2.641: 이벤트 응답은 앞부분만 읽는다(전량이 수십 MB 일 수 있다 — 1,900건/일 실측 화면). */
-export const EVENTS_BODY_MAX = Math.max(262_144, Number(process.env.CVP_EVENTS_BODY_MAX) || 4 * 1_048_576);
+export const EVENTS_BODY_MAX = Math.max(262_144, envPositive(process.env.CVP_EVENTS_BODY_MAX, 4 * 1_048_576));
 /** 부품 종류 → 표시 kind. */
 export const PART_KINDS = Object.freeze({ power: 'psu', cooling: 'fan', temperature: 'temp', xcvr: 'xcvr' });
 /** v2.643: 부품 이름의 포인터 경로 구분자(부품 이름에 '/' 가 있어 — Fan1/1 — 다른 기호를 쓴다). */
@@ -354,7 +390,7 @@ export function expandWildcard(tpl, keys, max = WILDCARD_MAX) {
 }
 const fill = (tpl, serial) => tpl.replaceAll('{serial}', encodeURIComponent(serial));
 /** v2.641: 포인터를 따라갈 종류(부품·인터페이스·카운터·BGP·CPU·메모리). */
-const FOLLOW_KINDS = new Set(['interfaces', 'intfConfig', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr', 'cpu', 'memory']);
+const FOLLOW_KINDS = new Set(['switchport', 'lagMember', 'mlag', 'interfaces', 'intfConfig', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr', 'cpu', 'memory', 'lldp', 'fdb']);
 /**
  * v2.641: 하위 개체 URL. 포인터가 '부모 경로 + / + 키' 모양이면 부모 URL 뒤에 **키를 인코딩해** 붙인다('Ethernet3/1' 의 '/' 를 지키려고).
  *   그렇지 않으면 포인터 경로를 조각마다 인코딩해 장비 텔레메트리 루트에 붙인다. 포인터 원문은 장비가 준 값이라 `..` 조각은 버린다.
@@ -378,7 +414,7 @@ function decodeSafe(x) { try { return x.split('/').map((y) => decodeURIComponent
  * @param {{ signal?:AbortSignal, budgetMs?:number, partsDue?:boolean, prefer?:Map, now?:()=>number }} opts
  * @returns {Promise<object>} 결과(아래 머리말) — 자격증명 거부는 CvpAuthError 로 던진다.
  */
-export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue = true, prefer = new Map(), now = Date.now, optics = {} } = {}) {
+export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue = true, prefer = new Map(), now = Date.now, optics = {}, epMacs = null, epBudgetMs = 20_000 } = {}) {
   const t0 = now();
   const left = () => budgetMs - (now() - t0);
   const usedPaths = {}; const missing = {}; const seenFields = {};
@@ -484,7 +520,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     }
 
     // ③ 장비별 텔레메트리 — 종류마다 후보 체인 + 연속 실패 차단.
-    const kinds = ['interfaces', 'counters', 'bgp', 'cpu', 'memory', ...(partsDue ? ['intfConfig', ...Object.keys(PART_KINDS)] : [])];
+    const kinds = ['interfaces', 'counters', 'bgp', 'cpu', 'memory', ...(partsDue ? ['intfConfig', 'switchport', 'lagMember', 'mlag', ...Object.keys(PART_KINDS), ...(L2_COLLECT ? ['lldp', 'fdb'] : [])] : [])];
     const ks = Object.fromEntries(kinds.map((k) => [k, { ok: 0, fail: 0, streak: 0, stopped: false, last: '', empty: 0, followed: 0, followTruncated: 0 }]));
     /*
      * v2.641: 종류 하나를 읽는다. 응답이 ① 빈 응답(`{"notifications":[]}`)이면 **읽은 것이 아니다** — 다음 후보로 넘어가고 사유는
@@ -555,7 +591,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       prefer.set(kind, tpl);
       noteSample(kind, tpl, r, serial);
       if (!seenFields[kind] && out.keys) seenFields[kind] = out.keys.slice(0, 40);
-      return { value: out.value, extra: out };
+      return { value: out.value, extra: out, followTruncated };   // v2.924(반증 M-2): 포인터 추종이 잘렸는가(부분 읽기)
     }
     /**
      * 포인터를 따라가 하위 개체 응답을 모은다(깊이 FOLLOW_DEPTH · 요청 FOLLOW_REQ_MAX · 장비 안 동시 FOLLOW_CONCURRENCY).
@@ -569,7 +605,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       const maxDepth = FOLLOW_DEPTH_BY_KIND[kind] || FOLLOW_DEPTH;
       for (let depth = 0; depth < maxDepth && level.length; depth++) {
         const next = [];
-        const room = Math.max(0, FOLLOW_REQ_MAX - requests);
+        const room = Math.max(0, (FOLLOW_REQ_MAX_BY_KIND[kind] || FOLLOW_REQ_MAX) - requests);
         if (level.length > room) { truncated += level.length - room; level = level.slice(0, room); }
         await poolSettled(level, FOLLOW_CONCURRENCY, async (x) => {
           if (left() < MIN_SLICE_MS || signal?.aborted) { truncated++; return; }
@@ -586,7 +622,8 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
           //   powerSupply → PowerSupply1·PowerSupply2 가 'powerSupply' 한 개체로 **합쳐져** 뒤 값이 앞 값을 덮었다(화면에 psu
           //   'powerSupply'·'currentSensor' 같은 컨테이너 이름만 보이고 실제 PSU 가 안 보였다 — 장애가 나도 잡을 수 없다).
           //   상태 필드가 없는 컨테이너는 parseParts 가 건너뛴다. 포트(첫 키)·BGP(둘째 키)는 그대로다.
-          const name = bgpLike ? x.keys[1] : Object.hasOwn(PART_KINDS, kind) ? x.keys.join(PART_PATH_SEP) : x.keys[0];
+          // v2.924(B-②): LLDP 도 경로 전체로 짓는다 — 첫 키(로컬 포트)로만 지으면 포트에 이웃이 둘(MLAG·허브)일 때 한 개체로 합쳐진다. parse.parseLldp 가 첫 조각을 포트로 읽는다.
+          const name = bgpLike ? x.keys[1] : (Object.hasOwn(PART_KINDS, kind) || kind === 'lldp') ? x.keys.join(PART_PATH_SEP) : x.keys[0];
           for (const v of vals) {
             if (!v || typeof v !== 'object' || !Array.isArray(v.notifications)) continue;
             for (const n of v.notifications) {
@@ -634,6 +671,48 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       }
       return ev;
     }
+    /** v3.41: VLAN · 채널 소속 · MLAG(부품 주기) + 직전 값 기억(주기 사이 · 재시작 뒤 첫 부품 주기 전은 비어 있다 — 모름). */
+    async function readL2Cfg(dev, serial, cvpId, { read = true } = {}) {
+      const ck = `${cvpId}\u0000${serial}`;
+      let c = _l2cfg.get(ck);
+      if (read && partsDue && ks.switchport && ks.lagMember && ks.mlag) {
+        const nx = { vlans: c?.vlans ?? null, members: c?.members ?? null, mlag: c?.mlag ?? null, vlanAt: c?.vlanAt ?? null, lagAt: c?.lagAt ?? null, mlagAt: c?.mlagAt ?? null,
+          vlanPartial: c?.vlanPartial ?? false, lagPartial: c?.lagPartial ?? false };
+        /*
+         * 반증 F1: 포인터 추종이 상한 · 예산에 잘리면(followTruncated) 맵은 **일부**다 — 맵에 없는 포트를 '채널 없음 · VLAN 없음' 으로 비우면
+         *   이중화 상실 채널이 통째로 사라졌다(재현). 직전 완전한 맵이 있으면 그것을 지키고, 없으면 부분 맵을 '일부만 읽음' 표지와 함께 쓴다(읽은 시각은 세우지 않는다).
+         */
+        const take = (r, mapKey, atKey, partKey) => {
+          if (!r.value) return;
+          const partial = (r.followTruncated || 0) > 0;
+          if (partial && nx[mapKey] && !nx[partKey]) return;   // 직전 완전한 맵 유지
+          nx[mapKey] = r.value; nx[atKey] = now(); nx[partKey] = partial;
+        };
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('switchport', serial, (t) => { const x = P.parseSwitchport(t); return { value: x.vlans, keys: x.keys }; });
+          take(r, 'vlans', 'vlanAt', 'vlanPartial');
+        }
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('lagMember', serial, (t) => { const x = P.parseLagMembers(t); return { value: x.members, keys: x.keys }; });
+          take(r, 'members', 'lagAt', 'lagPartial');
+        }
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('mlag', serial, (t) => { const x = P.parseMlag(t); return { value: x.status, keys: x.keys }; });
+          if (r.value) { nx.mlag = r.value; nx.mlagAt = now(); }
+        }
+        c = nx;
+        _l2cfg.set(ck, c);
+        if (_l2cfg.size > L2CFG_MAX) _l2cfg.delete(_l2cfg.keys().next().value);
+      }
+      if (!c) return;
+      const fresh = (at) => at != null && now() - at <= L2CFG_TTL_MS;
+      const vl = fresh(c.vlanAt) ? c.vlans : null; const lg = fresh(c.lagAt) ? c.members : null;
+      // 반증 F7: MLAG 는 포트 목록과 관계가 없다 — 인터페이스를 못 읽은 주기에도 싣는다(VLAN · 채널만 포트에 얹는다).
+      if (Array.isArray(dev.ports) && (vl || lg)) dev.ports = P.mergeL2Cfg(dev.ports, { vlans: vl, members: lg, partial: { vlan: !!c.vlanPartial, lag: !!c.lagPartial } });
+      // 읽은 시각(화면이 '채널 없음' 과 '소속을 못 읽음' 을 가른다 — 둘 다 lag '' 라 시각이 없으면 구분할 수 없다). 일부만 읽었으면 시각 대신 partial.
+      dev.cfgReadAt = { vlan: vl && !c.vlanPartial ? c.vlanAt : null, lag: lg && !c.lagPartial ? c.lagAt : null, ...(c.lagPartial && lg ? { lagPartial: true } : {}), ...(c.vlanPartial && vl ? { vlanPartial: true } : {}) };
+      if (fresh(c.mlagAt) && c.mlag) dev.mlagStatus = { ...c.mlag, at: c.mlagAt };
+    }
     const followNote = {};
     const devices = inv.devices.map((d) => ({ ...d, parts: undefined, partsAt: null, bgp: null, ports: null, counters: null, countersAt: null, telemetry: 'pending' }));
     await poolSettled(devices, DEVICE_CONCURRENCY, async (dev) => {
@@ -642,18 +721,22 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       if (dev.streaming === false) { dev.telemetry = 'not-streaming'; return; }
       const serial = dev.serial || dev.key;
       const intf = await readKind('interfaces', serial, (t) => { const x = P.parseInterfaces(t); return { value: x.ports, keys: x.keys, truncated: x.truncated }; });
-      if (intf.value) { dev.ports = intf.value; truncated.ports += intf.extra.truncated || 0; }
+      if (intf.value) {
+        dev.ports = intf.value; truncated.ports += intf.extra.truncated || 0;
+        // v3.42(반증 A2-P1): 포인터 추종 · 파서 상한에 잘린 목록이면 일부다 — 저장소가 '목록에 없는 포트' 를 지우지 않게(예전에는 지웠다 — 고갈 예측 used>total 의 근원).
+        if ((intf.followTruncated || 0) > 0 || (intf.extra.truncated || 0) > 0) dev.portsPartial = true;
+      }
       // v2.649: 설명 — 부품 주기에만(설정 노드). 못 읽으면 포트 desc 는 null 로 남고 저장소가 직전 값을 유지한다(COALESCE).
       if (partsDue && Array.isArray(dev.ports) && left() >= MIN_SLICE_MS) {
         const cfg = await readKind('intfConfig', serial, (t) => { const x = P.parseIntfConfig(t); return { value: x.descs, keys: x.keys }; });
         if (cfg.value) { dev.ports = P.mergeIntfConfig(dev.ports, cfg.value); dev.descsAt = now(); }
       }
-      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value); return; } // v2.743(DEV-04): 인터페이스를 못 읽었으면 'budget'
+      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value); await readL2Cfg(dev, serial, server.id, { read: false }); return; } // v2.743(DEV-04): 인터페이스를 못 읽었으면 'budget'
       const upSet = Array.isArray(dev.ports) ? new Set(dev.ports.filter((p) => p.oper === 'up').map((p) => p.name)) : null;
       const cnt = await readKind('counters', serial, (t) => { const x = P.parseCounters(t); return { value: x.counters, keys: x.keys }; }, upSet ? (k) => upSet.has(k) : null);
       if (cnt.value) { dev.counters = cnt.value; dev.countersAt = now(); }
       // v2.611(TIM2611-01): counters·bgp 앞에도 예산을 본다 — 시작해 놓고 잘리면 결과가 버려진다.
-      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value || cnt.value); return; }
+      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value || cnt.value); await readL2Cfg(dev, serial, server.id, { read: false }); return; }
       const bgp = await readKind('bgp', serial, (t) => { const x = P.parseBgp(t); return { value: x.peers, keys: x.keys, truncated: x.truncated }; });
       if (bgp.value) { dev.bgp = bgp.value; truncated.peers += bgp.extra.truncated || 0; }
       else if (bgp.empty) dev.bgpEmpty = true; // v2.641: 빈 응답 — '피어 없음' 도 '못 읽음' 도 아닌 '이 경로에 값 없음'(BGP 미설정일 수 있다)
@@ -690,6 +773,32 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         dev.partsAttempted = attempted;
         if (failedKinds.length && anyRead) dev.partsMissingKinds = failedKinds;
       }
+      /*
+       * v2.924(B-②): LLDP 이웃 · MAC 테이블 — 부품 주기에만. 순서: 부품 → LLDP · MAC 테이블 → VLAN · 채널 · MLAG(v3.47 D-9). 값: 배열 = 읽음(빈 배열 = 이웃/학습 없음) · null = 시도했지만 못 읽음 · undefined = 이번에 안 읽음.
+       *   저장소는 배열일 때만 그 장비의 이전 목록을 바꾸고, null·undefined 면 이전 목록을 그대로 둔다(시각으로 오래됨을 말한다).
+       *   LLDP 는 링크가 올라온 포트만 따라간다(counters 와 같은 keep).
+       */
+      if (partsDue && L2_COLLECT) {
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('lldp', serial, (t) => { const x = P.parseLldp(t); return { value: x.neighbors, keys: x.keys, truncated: x.truncated }; }, upSet ? (k) => upSet.has(k) : null);
+          if (r.value) { dev.lldp = r.value; dev.lldpTruncated = (r.extra.truncated || 0) + (r.followTruncated || 0); dev.lldpPartial = (r.followTruncated || 0) > 0; } else if (!r.skipped) dev.lldp = null;
+        }
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('fdb', serial, (t) => { const x = P.parseFdb(t); return { value: x.entries, keys: x.keys, truncated: x.truncated, portsOverCap: x.portsOverCap, total: x.total }; });
+          if (r.value) { dev.fdb = r.value; dev.fdbMeta = { truncated: r.extra.truncated || 0, portsOverCap: r.extra.portsOverCap || [], total: r.extra.total ?? r.value.length }; } else if (!r.skipped) dev.fdb = null;
+        }
+        if (dev.lldp !== undefined || dev.fdb !== undefined) dev.l2At = now();
+      }
+      /*
+       * v3.41: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
+       *   반증 E2: 카운터 · BGP 뒤에 둔다(포인터 컬렉션이면 요청이 많아 앞에 두면 고RTT 직접 수집에서 처리량이 예산에 밀릴 수 있다).
+       *   v3.42(버그 점검 1회차 A4-F5 · 2회차 A2-E1): 부품(전원 · 팬 · 온도 · 광 — 장애 판정) **뒤** — 앞에 있으면 경로 추정이 틀린 CVP 에서
+       *   후보 6개 빈 응답이 부품 읽기 예산을 먹었다. 예산이 모자라 앞에서 돌아가는 경로도 직전 값은 얹는다(read:false).
+       *   v3.47(결정 D-9 — 사용자 선택): LLDP · MAC 테이블 **뒤**로 옮겼다 — 예산이 모자라면 VLAN · 채널 · MLAG(직전 값을 부품 주기 3배 동안 쓴다)가 먼저 굶고,
+       *   위치 찾기 · 토폴로지 · 호스트 업링크가 쓰는 LLDP · MAC 테이블(직전 값은 시각으로 오래됨만 말한다)을 먼저 읽는다.
+       *   '빈 응답 N대면 멈춤' 은 넣지 않았다 — 채널 · MLAG 를 안 쓰는 장비가 앞에 몰리면 쓰는 장비를 영영 못 읽는다(BGP 와 같은 이유).
+       */
+      await readL2Cfg(dev, serial, server.id);
       // v2.641: 전부 빈 응답이면 'failed' 가 아니라 'empty'(경로는 열려 있고 값이 없다 — 조치가 다르다: 경로 후보를 봐야 한다).
       dev.telemetry = intf.value || cnt.value || bgp.value ? 'ok' : (intf.empty && bgp.empty) ? 'empty' : 'failed';
     });
@@ -697,6 +806,12 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
      * v2.641: 경로 탐색 표본 — 부품 주기(partsDue)에만, 스트리밍 중인 장비 1대에 대해 PROBE_PATHS 를 차례로 GET 한다(예산 안에서).
      *   '어디에 값이 있는가' 를 실장비에서 보여 주는 근거다(추정 경로를 고칠 때 이것을 본다).
      */
+    // v3.41 반증(부수): 인벤토리에서 사라진 장비의 VLAN · 채널 · MLAG 기억을 지운다(poller TIM2611-05 '사라진 장비 인메모리 정리' 선례).
+    if (inv.devices.length) {
+      const pre = `${server.id}\u0000`;
+      const live = new Set(inv.devices.map((d) => `${pre}${d.serial || d.key}`));
+      for (const k of [..._l2cfg.keys()]) if (k.startsWith(pre) && !live.has(k)) _l2cfg.delete(k);
+    }
     const probes = [];
     const probeDev = partsDue ? devices.find((d) => d.streaming !== false && (d.serial || d.key)) : null;
     if (probeDev) {
@@ -712,6 +827,14 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
           ...(sh ? { empty: sh.empty, updates: sh.updates, ptrs: sh.ptrs.length, ptrKeys: sh.ptrs.slice(0, 12).map((x) => x.key) } : {}),
         });
       }
+    }
+    // v2.935(C-③): EndpointLocation — 폴러가 고른 MAC 들(부품 주기 · 같은 세션). 남은 예산 안에서만, 미지원(501 · 가를 수 없는 404 연속)이면 멈춘다(endpoint.js).
+    let endpoints = null;
+    if (Array.isArray(epMacs) && epMacs.length && left() >= MIN_SLICE_MS && !signal?.aborted) {
+      endpoints = await lookupEndpoints(sess, epMacs, { budgetMs: Math.max(1_000, Math.min(epBudgetMs, left() - MIN_SLICE_MS)), now, signal });
+    } else if (Array.isArray(epMacs) && epMacs.length) {
+      // v2.935 반증 L-8: 부품 단계가 예산을 다 써서 위치 조회를 건너뛴 사실도 남긴다(무음 금지 — 상태의 endpoints.cut · skipped).
+      endpoints = { results: [], unsupported: false, cut: epMacs.length, stopped: 'budget' };
     }
     // v2.611(TIM2611-01): 시한(외부 신호)에 걸려 끝나지 못한 장비는 'pending' 으로 남는다 — '조회 중단' 으로 바꾸고 개수를 밝힌다.
     for (const dev of devices) if (dev.telemetry === 'pending') { dev.telemetry = 'aborted'; truncated.aborted++; }
@@ -731,7 +854,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     for (const [k, v] of Object.entries(followNote)) if (!missing[k]) missing[`${k}`] = v;
     if (truncated.notTried) missing.budget = `시간 예산이 모자라 ${truncated.notTried}대는 이번 주기에 조회하지 않았습니다`;
     return {
-      ok: true, error: null, devices, usedPaths, missing, seenFields, truncated, samples, cvpVersion, events, ...(probes.length ? { probes } : {}),
+      ok: true, error: null, devices, usedPaths, missing, seenFields, truncated, samples, cvpVersion, events, ...(probes.length ? { probes } : {}), ...(endpoints ? { endpoints } : {}),
       inventoryComplete: inv.truncated === 0,
     };
   } finally { await sess.logout(); }

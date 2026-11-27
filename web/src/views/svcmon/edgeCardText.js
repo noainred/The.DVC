@@ -43,5 +43,7 @@ export function edgeCardMeta(e) {
 export function edgeNoReportTotal(totals, edges) {
   const t = num(totals?.assignedNoReport);
   const n = t != null ? t : (Array.isArray(edges) ? edges.filter((e) => edgeCardKind(e) === 'no-report').length : 0);
-  return n > 0 ? ` · 배정만 있고 보고 없음 ${n}` : '';
+  // 28회차 N-7: 서버가 기동 유예 중(첫 보고 대기)인 엣지를 따로 센다 — '보고 없음' 에 섞지 않고 밝힌다
+  const w = num(totals?.awaitingFirstReport);
+  return `${n > 0 ? ` · 배정만 있고 보고 없음 ${n}` : ''}${w > 0 ? ` · 첫 보고 대기 ${w}` : ''}`;
 }

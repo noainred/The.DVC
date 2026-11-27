@@ -1,6 +1,6 @@
 // v2.606 그룹 g — 보안(ReDoS·응답 상한·감사 크기) 회귀. 감사 입력: scratchpad/audit2606/security.json
 // 성능 단언은 입력을 16,000자 이하로 두고, '옛 정규식은 느리고 새 것은 빠르다' 를 병렬 부하에서도 갈리는 상한으로 본다.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -8,8 +8,15 @@ import path from 'node:path';
 import http from 'node:http';
 import zlib from 'node:zlib';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2606g-'));
+const TMP = tmpDir('audit2606g-');
 process.env.CONFIG_DIR = TMP;
 process.env.AUDIT_MAX = '5000';
 
@@ -95,8 +102,11 @@ test('SEC2606-02: patterns 는 최대 32개·64자, 버린 개수를 밝힌다',
 
 test('SEC2606-02: 라우트는 패턴을 computeUnprotected 상한으로 넘긴다(무상한 split 금지)', () => {
   const src = read('routes/api/reports.js');
-  const body = src.slice(src.indexOf("api.get('/tools/report/unprotected'"), src.indexOf("api.get('/tools/report/unprotected'") + 6000);   // v2.763: 라우트 머리(검색어 2개 병합)가 길어져 넉넉히
-  assert.ok(!/patterns\s*=\s*String\(req\.query\.patterns[^)]*\)\.split/.test(body), '라우트가 patterns 를 무상한으로 split 하면 안 된다');
+  // v3.32: 계산을 unprotectedData(req, snap, q) 로 뽑았다(라우트 · 정기 점검 보고 공급자가 같이 쓴다) — 같은 불변식을 그 함수에서 본다.
+  const at = src.indexOf('export async function unprotectedData');
+  assert.ok(at >= 0 && /unprotectedData\(req, snap, req\.query\)/.test(src), '라우트는 unprotectedData 를 쓴다');
+  const body = src.slice(at, at + 6000);
+  assert.ok(!/patterns\s*=\s*String\((req\.query|q)\.patterns[^)]*\)\.split/.test(body), '라우트가 patterns 를 무상한으로 split 하면 안 된다');
   assert.match(body, /computeUnprotected\(scoped\.vms, rows, \{ patterns,/);
 });
 

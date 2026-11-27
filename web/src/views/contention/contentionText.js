@@ -44,10 +44,12 @@ export function avgMaxText(am, unit) {
   return `${am.avg}${unit}${am.max != null && am.max !== am.avg ? ` (최대 ${am.max}${unit})` : ''}`;
 }
 
+/** 측정 꺼짐 안내 — 도구 화면과 분석 화면 요약 패널(VmToolPanels · HostToolPanels)이 같은 문구를 쓴다(dbg3221 9회차). */
+export const SCAN_OFF_NOTE = 'CPU 경합·디스크 지연 수집이 꺼져 있습니다(CONTENTION_SCAN=false) — 이 화면은 판정하지 않습니다.';
 /** 수집 범위 — 측정하지 못한 VM 을 '경합 없음' 이라 말하지 않는다. */
 export function coverageNote(data) {
   if (!data) return null;
-  if (data.scan && data.scan.enabled === false) return 'CPU 경합·디스크 지연 수집이 꺼져 있습니다(CONTENTION_SCAN=false) — 이 화면은 판정하지 않습니다.';
+  if (data.scan && data.scan.enabled === false) return SCAN_OFF_NOTE;
   const c = data.coverage || {};
   const parts = [];
   if (c.poweredOn > 0 && c.measured === 0 && !c.stale) return '아직 측정한 VM 이 없습니다 — 수집 서버가 켜진 VM 을 주기마다 나눠 읽습니다(재시작 직후면 몇 주기 뒤에 채워집니다).';

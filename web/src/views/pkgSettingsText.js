@@ -7,8 +7,21 @@
  *   · 폼은 **웹 지정값만** 채운다(지정 안 됨 = 빈 칸). 기본값은 placeholder 로 보인다.
  *   · 서버가 지정 여부(`settings.overridden`)를 주지 않으면 유효값으로 채우되 **바뀐 칸만** 보낸다(모르는 것을 굳히지 않는다).
  */
+import { unreadMarkOf } from './settingsUnread.js';
 
 const FIELDS = ['baseUrl', 'dir'];
+
+/**
+ * 133회차(128회차 F5 반증 — 잠금이 풀리는 길): 저장 잠금이 볼 표지 — 지금 조회(pkg)의 표지, 조회가 없으면(다시 조회가 실패해 화면이 pkg 를 비웠다)
+ *   **폼을 채운 조회**의 표지(seedLe). 128회차는 지금 조회만 봤다 — 못 읽은 동안의 빈 칸으로 채운 폼이 떠 있는 채로 ‘다시 확인 · 새로고침’ 이 한 번 실패하면
+ *   (이 조회는 원격 저장소를 최대 60초 기다린다) 표지가 사라져 ‘저장’ 이 열렸고, 그 빈 폼(빈 칸 = 지정 해제)이 다시 읽힌 뒤 웹 지정 주소 · 경로를 지웠다.
+ *   조회가 성공하면 폼을 그 응답으로 다시 채우므로 seedLe 도 그 응답의 표지(없으면 null)다.
+ * @param {object|null} pkg     지금 조회 응답(실패하면 null)
+ * @param {object|null} seedLe  폼을 채운 조회의 표지(unreadMarkOf — 없으면 null)
+ */
+export function pkgFormUnread(pkg, seedLe) {
+  return unreadMarkOf(pkg) || (pkg == null && seedLe && typeof seedLe === 'object' ? seedLe : null);
+}
 
 /** GET /admin/packages 응답 → 폼 { baseUrl, dir, _init, _known }. */
 export function pkgFormFromResponse(p) {

@@ -4,9 +4,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.818 Backup 현황 › 백업 실행(Veeam B&R REST) — 쓰기 클라이언트·후보 체인·결과 모름(F2)·시한(F3)·판정(F6)·엣지 대행(비밀 없음·바인딩·정제 — F1)·
 // 인증 정지(모니터링과 같은 기록)·실행 기록·라우트 범위(조회 밖 404 → 쓰기 밖 403). 실제 VBR 은 없다 — 가짜 응답(fetchImpl)으로 계약을 고정한다.
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-veeamrun-'));
+const CFG = tmpDir('portal-veeamrun-');
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = 'shared-token-for-veeamrun-test-1234567890';
 

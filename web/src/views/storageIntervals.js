@@ -25,6 +25,31 @@ export const PRESETS = [
 /** 그 항목의 하한(spec.min) 미만 선택지는 고를 수 없다 — 서버가 어차피 올림하므로 미리 숨긴다. */
 export const presetsFor = (minMs) => PRESETS.filter((p) => p.ms >= (Number(minMs) || 0));
 
+/**
+ * 그 항목의 선택지(v3.39.0). 사양에 `presets`(ms 배열)가 있으면 **그것만** 쓴다 — 시한 항목(PowerScale SSH 명령 대기)은
+ * 주기 선택지(…24시간)가 맞지 않는다. 없으면 공용 선택지에서 하한 미만·상한 초과를 뺀다. 숫자는 서버 사양에서 온다(화면에 박지 않는다).
+ */
+export function presetsForSpec(spec = {}) {
+  const min = Number(spec.min) || 0;
+  const max = Number.isFinite(Number(spec.max)) && Number(spec.max) > 0 ? Number(spec.max) : Infinity;
+  if (Array.isArray(spec.presets) && spec.presets.length) {
+    return spec.presets.map(Number).filter((ms) => Number.isFinite(ms) && ms >= min && ms <= max)
+      .map((ms) => ({ ms, label: msLabel(ms) }));
+  }
+  return PRESETS.filter((p) => p.ms >= min && p.ms <= max);
+}
+
+/** 선택 칸 툴팁의 범위 줄 — 상한이 있는 항목만 상한을 말한다. */
+export function rangeText(spec = {}) {
+  const max = Number(spec.max);
+  return `하한 ${msLabel(spec.min)}${Number.isFinite(max) && max > 0 ? ` · 상한 ${msLabel(max)}` : ''} · 기본 ${msLabel(spec.def)}`;
+}
+
+/** 주기가 아닌 항목(시한 — 사양의 `timer: false`). 화면이 '주기' 설명과 따로 안내한다. */
+export const timeoutSpecs = (spec = []) => (Array.isArray(spec) ? spec.filter((s) => s && s.timer === false) : []);
+/** 주기(타이머) 항목 — 시한이 아닌 나머지. 두 함수가 사양을 빠짐없이 · 겹치지 않게 나눈다. */
+export const timerSpecs = (spec = []) => (Array.isArray(spec) ? spec.filter((s) => s && s.timer !== false) : []);
+
 /** ms → 사람이 읽는 짧은 표기. 프리셋에 없는 값(직접 편집한 파일 등)도 근사 없이 정확히 표시. */
 export function msLabel(ms) {
   const n = Number(ms);
@@ -53,6 +78,22 @@ export function sourceOf(key, global = {}, perTarget = {}) {
   if (perTarget?.[key]) return 'target';
   if (global?.[key]) return 'global';
   return 'inherit';
+}
+
+/**
+ * 선택 칸 아래 한 줄(v3.41.1) — 그 칸에 **실제로 무엇이 적용되는가**. 첫 선택지를 ‘미지정’ · ‘상속’ 으로 줄였으므로(열 폭) 이 줄이 뜻을 말한다.
+ *   지정함            → ‘→ 30분’
+ *   전역에서 물려받음  → ‘→ 30분(전역 기본)’
+ *   어디에도 없음      → 전역 행 ‘엣지 로컬 값 유지’ · 중앙 행 ‘중앙 기본(env)’ · 엣지 행 ‘엣지 로컬’
+ * @param {string} key 항목 키
+ * @param {string} target '__global__' | ''(중앙 직접 수집) | 엣지 이름
+ */
+export function unsetNote(key, target, global = {}, perTarget = {}) {
+  if (target === '__global__') return global?.[key] ? `→ ${msLabel(Number(global[key]))}` : '엣지 로컬 값 유지';
+  const src = sourceOf(key, global, perTarget);
+  if (src === 'target') return `→ ${msLabel(Number(perTarget[key]))}`;
+  if (src === 'global') return `→ ${msLabel(Number(global[key]))}(전역 기본)`;
+  return target === '' ? '중앙 기본(env)' : '엣지 로컬';
 }
 
 /**

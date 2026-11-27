@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Monitoring 개요 — 감시 범위 카드 · 법인별 추천 등록 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:12.5px;line-height:1.4}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.seg{display:inline-flex;border:1px solid #1e3350;border-radius:999px;overflow:hidden;background:#0f1a2b}
+.seg button{padding:7px 16px;border:0;background:transparent;color:#9fb4cc;font:inherit;font-size:13px}
+.seg button.on{background:#1668d8;color:#fff;font-weight:700}
+.tv{display:inline-flex;align-items:center;height:26px;border:1px solid #1e3350;border-radius:6px;background:#0a141f;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#9fcaff;overflow:hidden}
+.tv span{padding:0 8px;color:#8ea4bd;background:#0f1a2b;border-right:1px solid #1e3350;height:100%;display:inline-flex;align-items:center}
+.tv b{padding:0 9px;font-weight:500}
+.pc-btn{padding:6px 12px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12.5px;white-space:nowrap}
+.pc-btn.accent{border-color:#2b6fc0;background:#153357;color:#9fcaff}
+.pc-btn.primary{border-color:#1668d8;background:#1668d8;color:#fff;font-weight:600}
+.pc-chip{padding:4px 11px;border-radius:14px;border:1px solid #1e3350;background:transparent;color:#9fb4cc;font:inherit;font-size:11.5px;font-family:"JetBrains Mono",monospace;white-space:nowrap}
+.w{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.wh{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-bottom:1px solid #131f30;font-size:11px;letter-spacing:.06em;color:#8ea4bd;font-family:"JetBrains Mono",monospace;box-sizing:border-box}
+.wh em{font-style:normal;margin-left:auto;color:#8ea4bd;letter-spacing:0;font-size:10.5px}
+.ms{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.ms .t{background:#0f1a2b;border:1px solid #1c2c42;border-left:4px solid #1e3350;border-radius:8px;padding:9px 12px;display:flex;flex-direction:column;gap:2px;min-width:0;height:80px;box-sizing:border-box}
+.ms .t span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.08em;color:#8ea4bd}
+.ms .t b{font-family:"JetBrains Mono",monospace;font-size:24px;font-weight:600;color:#dbe7f5;line-height:1.1}
+.ms .t small{font-size:11px;color:#8ea4bd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms .ok{border-left-color:#3ddc84}.ms .ok b{color:#3ddc84}.ms .warn{border-left-color:#f0a92e}.ms .warn b{color:#f0a92e}.ms .bad{border-left-color:#ff5c5c}.ms .bad b{color:#ff5c5c}.ms .stale{border-left-color:#64748b}.ms .pend{border-left-color:#4b9bff}.ms .off{border-left-color:#7b8fa8}.ms .tot{border-left-color:#4b9bff}
+.cov{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;padding:14px 16px;align-items:center}
+.cov .nums{display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap}
+.cov .n{display:flex;flex-direction:column;gap:1px}
+.cov .n span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd}
+.cov .n b{font-family:"JetBrains Mono",monospace;font-size:24px;font-weight:600;line-height:1.1;color:#dbe7f5}
+.cov .op{font-family:"JetBrains Mono",monospace;font-size:16px;color:#8ea4bd;padding-bottom:3px}
+.cbar{display:flex;height:12px;border-radius:3px;overflow:hidden;background:#131f30;margin-top:10px}
+.cbar i{display:block;height:100%}
+.pk-top{display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;border-top:1px solid #1c2c42;background:#0c1626;box-sizing:border-box}
+.pth,.ptr{display:grid;grid-template-columns:28px 180px 250px minmax(0,1fr) 220px;column-gap:12px;align-items:center;padding:0 16px}
+.pth{height:30px;background:#132132;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd}
+.ptr{height:36px;border-bottom:1px solid #131f30;font-size:12.5px;box-sizing:border-box}
+.ptr.on{background:#0f2440}
+.ptr input,.sub input{margin:0;width:14px;height:14px;accent-color:#4b9bff}
+.ptr .corp{color:#e8f1fb;font-weight:600;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.ptr .corp .tg{width:13px;height:13px;flex:none;display:grid;place-items:center;font-size:10px;color:#8ea4bd;border:1px solid #24405f;border-radius:3px;font-weight:400}
+.ptr .edge{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#cfe0f2;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.ptr .edge.none{color:#8ea4bd}
+.ptr .edge i{width:8px;height:8px;border-radius:50%;background:#3ddc84;flex:none;display:inline-block}
+.ptr .edge.none i{background:transparent;border:1px solid #5f7388}
+.kinds{display:flex;gap:6px;flex-wrap:nowrap;overflow:hidden;min-width:0}
+.kd{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:4px;border:1px solid #24405f;background:#0b1727;font-size:11px;color:#b8c7d9;white-space:nowrap}
+.kd b{font-family:"JetBrains Mono",monospace;font-weight:600;color:#e8f1fb}
+.kd.lk{border-color:#3a4c63;color:#9fb4cc}
+.gap{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+.gap .v{font-family:"JetBrains Mono",monospace;font-size:12px;color:#e8f1fb;white-space:nowrap}
+.gap .v em{font-style:normal;color:#8ea4bd}
+.gap .mb{display:flex;width:96px;height:8px;border-radius:2px;overflow:hidden;background:#131f30;flex:none}
+.gap .mb i{display:block;height:100%}
+.sub{background:#0b1727;border-bottom:1px solid #131f30;padding:8px 16px 10px 56px;display:flex;flex-direction:column;gap:0}
+.sub .ln{display:grid;grid-template-columns:22px 200px 44px minmax(0,1fr) 250px;column-gap:10px;align-items:center;height:26px;font-size:12px}
+.sub .ln .c{font-family:"JetBrains Mono",monospace;color:#e8f1fb;text-align:right}
+.sub .ln .ck{font-family:"JetBrains Mono",monospace;font-size:11px;color:#9fb4cc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub .ln .st{font-size:11.5px;color:#9fb4cc;text-align:right;white-space:nowrap}
+.sub .ln .st b{color:#f6d28a;font-weight:500}
+.pk-foot{display:flex;align-items:center;gap:14px;padding:12px 16px;background:#0f2440;border-top:1px solid #2b6fc0;flex-wrap:wrap}
+.rad{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border:1px solid #2b4a6f;border-radius:6px;background:#0b1727;color:#c8d6e8;font-size:12.5px;white-space:nowrap}
+.rad input{margin:0;accent-color:#4b9bff}
+.rad.on{border-color:#4b9bff;background:#153357;color:#fff}
+.rad em{font-style:normal;font-family:"JetBrains Mono",monospace;font-size:10px;color:#9fcaff;border:1px solid #2b6fc0;border-radius:3px;padding:0 4px}
+.cs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:10px 12px}
+.cs div{border-radius:6px;padding:7px 8px;display:flex;flex-direction:column;gap:2px;min-width:0;border:1px solid #1c2c42;background:#0a141f}
+.cs div b{font-family:"JetBrains Mono",monospace;font-size:15px;color:#dbe7f5}
+.cs div span{font-size:10.5px;color:#8ea4bd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cs div i{font-style:normal;font-family:"JetBrains Mono",monospace;font-size:10px;color:#8ea4bd}
+.cs .bad{border-color:#5f1d1d;background:#1d0a0a}.cs .bad b{color:#ff5c5c}
+.cs .ok{border-color:#1f5a3a;background:#07180e}.cs .ok b{color:#3ddc84}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.05em;font-weight:500;color:#8ea4bd;text-align:left;padding:7px 12px;background:#132132;white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid #131f30;font-size:12px}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:10.5px;font-weight:600;background:#0f3d24;color:#5eeaa0}
+.legend{display:flex;gap:12px;font-size:11px;color:#8ea4bd;padding:0 12px 10px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+svg text{font-family:"JetBrains Mono",monospace;font-size:9.5px;fill:#8ea4bd}
+</style>
+</helmet>
+<div style="width:1440px;height:1340px;box-sizing:border-box;padding:16px;display:flex;flex-direction:column;gap:10px;background:#0a111c;overflow:hidden">
+
+  <div style="display:flex;justify-content:flex-end;height:36px"><span class="seg"><button type="button">트리</button><button type="button" class="on">개요</button></span></div>
+
+  <div class="w" style="flex-direction:row;align-items:center;gap:10px;height:52px;padding:0 16px;box-sizing:border-box">
+    <b style="font-size:14.5px;color:#e8f1fb">Monitoring · 개요</b>
+    <span class="tv" style="margin-left:6px"><span>time</span><b>최근 24시간(재시작 이후)</b></span>
+    <span class="tv"><span>live</span><b style="color:#3ddc84">60s</b></span>
+    <span class="tv"><span>alerts</span><b>off</b></span>
+    <button class="pc-btn" type="button" style="margin-left:auto">새로고침</button>
+  </div>
+
+  <div class="ms">
+    <div class="t tot"><span>TOTAL TESTS</span><b>158</b><small>65 대상</small></div>
+    <div class="t ok"><span>OK</span><b>108</b><small>68.4%</small></div>
+    <div class="t warn"><span>WARN</span><b>6</b><small>인증서 임박 · 응답 지연</small></div>
+    <div class="t bad"><span>ALERT</span><b>8</b><small>no answer · error</small></div>
+    <div class="t stale"><span>NO DATA</span><b>0</b><small>주기 3배 초과</small></div>
+    <div class="t pend"><span>PENDING</span><b>0</b><small>아직 실행 안 됨</small></div>
+    <div class="t off"><span>DISABLED</span><b>36</b><small>중지 · 설정 연동 대상 20</small></div>
+  </div>
+
+  <div class="w" style="border-color:#2b6fc0">
+    <div class="wh">감시 범위 · 설정된 시스템 대비<em>설정 연동 카탈로그 · 관리자(전체 범위) 계정에만 보입니다</em></div>
+    <div class="cov">
+      <div>
+        <div class="nums">
+          <div class="n"><span>설정된 시스템</span><b>277</b></div>
+          <span class="op">=</span>
+          <div class="n"><span>감시 중</span><b style="color:#3ddc84">1</b></div>
+          <span class="op">+</span>
+          <div class="n"><span>등록됐지만 중지</span><b style="color:#b8c7d9">20</b></div>
+          <span class="op">+</span>
+          <div class="n"><span>미등록</span><b style="color:#f0a92e">256</b></div>
+          <span style="font-size:11.5px;color:#8ea4bd;padding-bottom:4px">제외 4 — 웹훅 · 외부 주소처럼 등록하지 않는 종류</span>
+        </div>
+        <div class="cbar" role="img" aria-label="설정된 시스템 277 가운데 감시 중 1, 중지 20, 미등록 256">
+          <i style="width:5px;background:#3ddc84"></i><i style="width:7.2%;background:#7b8fa8"></i><i style="flex:1;background:#8a5a12"></i>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:9px;align-items:flex-start">
+        <span style="font-size:12.5px;color:#dbe7f5">미감시 <b style="color:#fff">276</b>건 — 법인 단위로 한 번에 등록할 수 있습니다.</span>
+        <span style="display:inline-flex;gap:8px;flex-wrap:wrap">
+          <button class="pc-btn accent" type="button" aria-expanded="true">법인별 추천 등록 접기</button>
+          <a href="Main.dc.html" class="pc-btn" style="text-decoration:none">설정 연동에서 직접 고르기</a>
+        </span>
+      </div>
+    </div>
+
+    <div class="pk-top">
+      <span style="font-size:12.5px;color:#c8d6e8">법인을 고르면 그 법인의 설정된 시스템을 한 번에 등록합니다. 자격증명 없이 재는 종류별 기본 점검만 넣습니다.</span>
+      <span style="margin-left:auto;display:inline-flex;gap:6px">
+        <button class="pc-chip" type="button">모두 선택</button><button class="pc-chip" type="button">엣지 있는 법인만</button><button class="pc-chip" type="button">선택 해제</button>
+      </span>
+    </div>
+
+    <div class="pth"><span></span><span>법인</span><span>점검 위치(담당 엣지)</span><span>설정된 시스템 · 종류별</span><span style="text-align:right">미감시 / 전체</span></div>
+
+    <div class="ptr on"><input type="checkbox" checked aria-label="Frankfurt 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">−</span>Frankfurt 법인</span><span class="edge"><i></i>mock-Edge-Frankfurt</span><span class="kinds"><span class="kd">iDRAC <b>14</b></span><span class="kd">SAN 스위치 <b>10</b></span><span class="kd">PDU <b>6</b></span><span class="kd">스토리지 <b>3</b></span><span class="kd lk">CVP <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span><span class="gap"><span class="v">35 <em>/ 35</em></span><span class="mb"><i style="width:94%;background:#8a5a12"></i><i style="width:6%;background:#7b8fa8"></i></span></span></div>
+    <div class="sub">
+      <div class="ln"><input type="checkbox" checked aria-label="Frankfurt iDRAC 선택"><span>iDRAC</span><span class="c">14</span><span class="ck">TCP 443 · 인증서 만료(443) · HTTP /redfish/v1/</span><span class="st">미등록 14 · 엣지가 점검</span></div>
+      <div class="ln"><input type="checkbox" checked aria-label="Frankfurt SAN 스위치 선택"><span>SAN 스위치(SSH)</span><span class="c">10</span><span class="ck">SSH 배너(22)</span><span class="st">미등록 10 · 엣지가 점검</span></div>
+      <div class="ln"><input type="checkbox" checked aria-label="Frankfurt PDU 선택"><span>PDU</span><span class="c">6</span><span class="ck">SSH 배너(22)</span><span class="st">미등록 6 · 엣지가 점검</span></div>
+      <div class="ln"><input type="checkbox" checked aria-label="Frankfurt 스토리지 선택"><span>스토리지(API)</span><span class="c">3</span><span class="ck">TCP 443 · 인증서 만료(443) · HTTP /</span><span class="st">미등록 3 · 엣지가 점검</span></div>
+      <div class="ln"><input type="checkbox" checked aria-label="Frankfurt CVP 선택"><span>Arista CVP</span><span class="c">1</span><span class="ck">TCP 443 · 인증서 만료(443)</span><span class="st"><b>등록됨 · 중지 1</b> → 켜기</span></div>
+      <div class="ln"><input type="checkbox" checked aria-label="Frankfurt 엣지 포탈 선택"><span>수집 서버(엣지 포탈)</span><span class="c">1</span><span class="ck">TCP 4000 · 인증서 만료(4000) · HTTP /api/health</span><span class="st"><b>등록됨 · 중지 1</b> → 켜기 · 중앙이 점검</span></div>
+    </div>
+    <div class="ptr on"><input type="checkbox" checked aria-label="Seoul 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Seoul 법인</span><span class="edge"><i></i>mock-Edge-Seoul</span><span class="kinds"><span class="kd">iDRAC <b>10</b></span><span class="kd">PDU <b>8</b></span><span class="kd">SAN 스위치 <b>6</b></span><span class="kd">스토리지 <b>4</b></span><span class="kd lk">CVP <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span><span class="gap"><span class="v">29 <em>/ 30</em></span><span class="mb"><i style="width:93%;background:#8a5a12"></i><i style="width:4%;background:#7b8fa8"></i><i style="width:3%;background:#3ddc84"></i></span></span></div>
+    <div class="ptr on"><input type="checkbox" checked aria-label="Ashburn 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Ashburn 법인</span><span class="edge"><i></i>mock-Edge-Virginia</span><span class="kinds"><span class="kd">iDRAC <b>11</b></span><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">PDU <b>5</b></span><span class="kd">스토리지 <b>2</b></span><span class="kd lk">CVP <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span><span class="gap"><span class="v">28 <em>/ 28</em></span><span class="mb"><i style="width:93%;background:#8a5a12"></i><i style="width:7%;background:#7b8fa8"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="Shanghai 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Shanghai 법인</span><span class="edge"><i></i>mock-Edge-Shanghai</span><span class="kinds"><span class="kd">iDRAC <b>8</b></span><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">PDU <b>7</b></span><span class="kd">스토리지 <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span><span class="gap"><span class="v">25 <em>/ 25</em></span><span class="mb"><i style="width:96%;background:#8a5a12"></i><i style="width:4%;background:#7b8fa8"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="Singapore 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Singapore 법인</span><span class="edge"><i></i>mock-Edge-Singapore</span><span class="kinds"><span class="kd">SAN 스위치 <b>10</b></span><span class="kd">iDRAC <b>7</b></span><span class="kd">PDU <b>6</b></span><span class="kd">스토리지 <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span><span class="gap"><span class="v">25 <em>/ 25</em></span><span class="mb"><i style="width:96%;background:#8a5a12"></i><i style="width:4%;background:#7b8fa8"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="Beijing 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Beijing 법인</span><span class="edge none"><i></i>엣지 없음 · 이 포탈이 직접</span><span class="kinds"><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">iDRAC <b>7</b></span><span class="kd">PDU <b>6</b></span><span class="kd">스토리지 <b>1</b></span></span><span class="gap"><span class="v">22 <em>/ 22</em></span><span class="mb"><i style="width:100%;background:#8a5a12"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="San Jose 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>San Jose 법인</span><span class="edge none"><i></i>엣지 없음 · 이 포탈이 직접</span><span class="kinds"><span class="kd">iDRAC <b>9</b></span><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">PDU <b>4</b></span><span class="kd">스토리지 <b>1</b></span></span><span class="gap"><span class="v">22 <em>/ 22</em></span><span class="mb"><i style="width:100%;background:#8a5a12"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="Dublin 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Dublin 법인</span><span class="edge none"><i></i>엣지 없음 · 이 포탈이 직접</span><span class="kinds"><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">iDRAC <b>7</b></span><span class="kd">PDU <b>4</b></span><span class="kd">스토리지 <b>1</b></span></span><span class="gap"><span class="v">20 <em>/ 20</em></span><span class="mb"><i style="width:100%;background:#8a5a12"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="Dubai 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Dubai 법인</span><span class="edge none"><i></i>엣지 없음 · 이 포탈이 직접</span><span class="kinds"><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">PDU <b>8</b></span><span class="kd">iDRAC <b>3</b></span><span class="kd">스토리지 <b>1</b></span></span><span class="gap"><span class="v">20 <em>/ 20</em></span><span class="mb"><i style="width:100%;background:#8a5a12"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="Mumbai 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>Mumbai 법인</span><span class="edge none"><i></i>엣지 없음 · 이 포탈이 직접</span><span class="kinds"><span class="kd">PDU <b>7</b></span><span class="kd">SAN 스위치 <b>6</b></span><span class="kd">iDRAC <b>4</b></span><span class="kd">스토리지 <b>1</b></span></span><span class="gap"><span class="v">18 <em>/ 18</em></span><span class="mb"><i style="width:100%;background:#8a5a12"></i></span></span></div>
+    <div class="ptr"><input type="checkbox" aria-label="São Paulo 법인 선택"><span class="corp"><span class="tg" aria-hidden="true">+</span>São Paulo 법인</span><span class="edge none"><i></i>엣지 없음 · 이 포탈이 직접</span><span class="kinds"><span class="kd">SAN 스위치 <b>6</b></span><span class="kd">iDRAC <b>5</b></span><span class="kd">PDU <b>5</b></span><span class="kd">스토리지 <b>1</b></span></span><span class="gap"><span class="v">17 <em>/ 17</em></span><span class="mb"><i style="width:100%;background:#8a5a12"></i></span></span></div>
+    <div class="ptr" style="border-bottom:0"><input type="checkbox" aria-label="법인 미상 항목 선택"><span class="corp" style="color:#b8c7d9;font-weight:500"><span class="tg" aria-hidden="true">+</span>법인 미상</span><span class="edge none"><i></i>설정에 법인 정보가 없음</span><span class="kinds"><span class="kd lk">베어메탈 스토리지 <b>11</b></span><span class="kd lk">Horizon <b>2</b></span><span class="kd">iDRAC <b>2</b></span><span style="font-size:11.5px;color:#8ea4bd;white-space:nowrap;align-self:center">법인을 정할 수 없어 따로 모았습니다</span></span><span class="gap"><span class="v">15 <em>/ 15</em></span><span class="mb"><i style="width:13%;background:#8a5a12"></i><i style="width:87%;background:#7b8fa8"></i></span></span></div>
+
+    <div class="pk-foot">
+      <span style="font-size:12px;color:#9fb4cc">등록 방식</span>
+      <label class="rad on"><input type="radio" name="qmode" checked>시험 점검 후 사용<em>권장</em></label>
+      <label class="rad"><input type="radio" name="qmode">중지로 등록</label>
+      <label class="rad"><input type="radio" name="qmode">바로 사용</label>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#c8d6e8;white-space:nowrap"><input type="checkbox" checked style="margin:0;accent-color:#4b9bff">법인 엣지에 배정</label>
+      <span style="margin-left:auto;display:inline-flex;align-items:center;gap:12px">
+        <span class="mono" style="font-size:12px;color:#dceaff">3개 법인 · 새로 등록 87 · 중지된 것 켜기 5</span>
+        <button class="pc-btn primary" type="button" style="padding:8px 16px;font-size:13px">시험 점검 후 등록 · 92건</button>
+      </span>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:420px minmax(0,1fr) 360px;gap:10px">
+    <div class="w">
+      <div class="wh">체크 상태 · 출처(종류)별<em>대상 묶음의 최악 상태</em></div>
+      <div class="cs">
+        <div class="bad"><span>수동 등록</span><b>120</b><i>ALERT 8 · WARN 6</i></div>
+        <div><span>수집 서버(엣지 포탈)</span><b>15</b><i>OFF 15</i></div>
+        <div><span>베어메탈 스토리지(SSH)</span><b>11</b><i>OFF 11</i></div>
+        <div class="ok"><span>Arista CVP</span><b>6</b><i>OK 2 · OFF 4</i></div>
+        <div><span>Horizon 커넥션 서버</span><b>6</b><i>OFF 6</i></div>
+      </div>
+    </div>
+    <div class="w">
+      <div class="wh">ALERT · WARN 결과 수 + 평균 응답 · 1시간<em>since 01:15</em></div>
+      <svg viewBox="0 0 600 116" width="100%" height="116" role="img" aria-label="시간별 실패·경고 결과 수 막대와 평균 응답 선">
+        <line x1="40" y1="92" x2="560" y2="92" stroke="#1c2c42"/><line x1="40" y1="52" x2="560" y2="52" stroke="#131f30"/>
+        <text x="14" y="96">0</text><text x="10" y="56">20</text><text x="566" y="56">40 ms</text>
+        <text x="40" y="110">02:00</text><text x="290" y="110">14:00</text><text x="520" y="110">01:00</text>
+        <rect x="528" y="60" width="14" height="32" fill="#ff5c5c"/><rect x="528" y="36" width="14" height="24" fill="#f0a92e"/>
+        <polyline fill="none" stroke="#4b9bff" stroke-width="1.5" points="60,80 535,44"/>
+      </svg>
+      <div class="legend"><span><i style="background:#ff5c5c"></i>ALERT</span><span><i style="background:#f0a92e"></i>WARN</span><span><i style="background:#4b9bff"></i>평균 응답(우축)</span></div>
+    </div>
+    <div class="w">
+      <div class="wh">엣지 보고 · 지연<em>edge-state</em></div>
+      <table>
+        <colgroup><col><col style="width:64px"><col style="width:64px"><col style="width:76px"></colgroup>
+        <thead><tr><th>EDGE</th><th>ROWS</th><th>AGE</th><th>STATE</th></tr></thead>
+        <tbody><tr><td>이 포탈(직접)</td><td class="mono">—</td><td class="mono">live</td><td><span class="pill">OK</span></td></tr></tbody>
+      </table>
+      <div style="font-size:11.5px;color:#8ea4bd;padding:8px 12px 10px;line-height:1.5">법인 엣지에 배정하면 여기에 그 엣지의 보고가 나타납니다.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1340}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

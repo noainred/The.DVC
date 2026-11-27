@@ -71,6 +71,8 @@ export function coverageText(c, notReadVcenters) {
   if (c.notCollected) parts.push(`아직 안 읽음 ${c.notCollected.toLocaleString()}`);
   if (c.templates) parts.push(`템플릿 ${c.templates.toLocaleString()} 제외`);
   if (c.excepted) parts.push(`스냅샷 정책 예외 ${c.excepted.toLocaleString()}`);
+  // 153회차: 스냅샷 보류(기한 있는 예외 — 스냅샷 화면에서 건다)로 스냅샷 정책 판정에서 뺀 VM 수(서버 coverage.held — 옛 서버는 칸이 없다).
+  if (c.held) parts.push(`스냅샷 보류 ${c.held.toLocaleString()}`);
   const nr = notReadKpiSub(notReadVcenters);
   if (nr) parts.push(nr);
   return parts.join(' · ');
@@ -109,6 +111,10 @@ export const NOTIFY_NOW_TEXT = Object.freeze({
   demo: '데모(목업) 데이터라 실제 알림 채널로 보내지 않았습니다.',
   'first-collect': '첫 수집이 끝나지 않아 판정할 VM 이 없습니다 — 잠시 뒤 다시 누르세요.',
   busy: '다른 발송이 진행 중입니다 — 잠시 뒤 다시 누르세요.',
+  // 46회차 V1: 읽은 vCenter 에는 위반이 없지만 읽지 못한 vCenter 가 있다 — '위반 없음' 이라고 말하지 않는다(다음 확인에서 다시 본다)
+  partial: '읽은 vCenter 에는 위반이 없지만, 읽지 못한 vCenter 가 있어 보내지 않았습니다 — 문제가 없다는 뜻이 아닙니다(다 읽히면 다시 판정).',
+  // 69회차 F4: 설정 파일을 읽지 못했다(파일은 그대로 — 기본값으로 판정하지 않는다)
+  'settings-unreadable': '설정 파일을 읽지 못해 보내지 않았습니다 — 서버의 설정 파일(vm-hygiene.json)을 확인하세요(파일은 그대로 두었습니다).',
 });
 export function notifyNowMsg(r) {
   const mx = Number(r?.mockExcluded);
@@ -131,6 +137,11 @@ export function settingsPatch(form) {
     if (Number.isFinite(n)) out[k] = n;
   }
   if (typeof form?.exceptionsText === 'string') out.exceptions = form.exceptionsText.split('\n').map((s) => s.trim()).filter(Boolean);
+  // v3.30.4: 가린 판본(creatorExcludeText 가 없음)은 보내지 않는다 — 빈 목록이 저장값을 지우지 않게(서버도 버린다)
+  if (typeof form?.creatorExcludeText === 'string') out.creatorExclude = form.creatorExcludeText.split('\n').map((s) => s.trim()).filter(Boolean);
   if (form?.notify) out.notify = { enabled: !!form.notify.enabled, hour: Number(form.notify.hour) };
   return out;
 }
+
+/** 71회차(69회차 F4 반증): 설정 파일을 읽지 못했으면(서버 settingsUnreadable) 판정은 기본 기준 · 예외 없음으로 한 것이다 — 그 사실을 배너로. */
+export const SETTINGS_UNREADABLE_NOTE = '설정 파일(vm-hygiene.json)을 읽지 못해 기본 기준 · 예외 없음으로 판정했습니다 — 설정한 기준과 다를 수 있습니다(파일은 그대로 두었고 저장 · 알림은 멈춰 있습니다).';

@@ -45,6 +45,7 @@ import { normalizeResourceList, resourceProbe } from '../resources.js';
 import { pushAll } from '../../util/pushAll.js';
 import { versionFromUemcli, versionFromSvcDiag, mergeVersionInfo } from './unityVersion.js';
 import { parseSpinfo } from './svcDiag.js'; // v2.664 전원(입력 전력 W)
+import { buildIfaces, ifaceProbe, parseUemcliFcPorts, parseUemcliEthPorts, parseUemcliIfs } from '../ifaces.js'; // v3.35.0 인터페이스 구성
 
 /** 이 수집기가 실행하는 명령 전부. **늘리기 전에 시간 예산을 함께 볼 것**(v2.528 회귀의 원인). */
 export const SPECS = [
@@ -126,6 +127,20 @@ export const SPECS = [
     cmds: ['uemcli /stor/prov/luns/lun show -detail'] },
   { key: 'filesystems', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 25_000,
     cmds: ['uemcli /stor/prov/fs show -detail'] },
+  /*
+   * v3.35.0 — SAN · NAS 인터페이스 구성(포트 링크 속도 · 상태 · iSCSI/NAS 인터페이스). 사용자 요청 "유니티 스토리지의 SAN/NAS 인터페이스의
+   * 속도 사용량 모니터링/트래킹" + 컨펌 '구성은 SSH 도 읽고 사용량은 REST 장비만'(설계 docs/design/unity-iface §6-3 ⓐ).
+   * ⚠ **맨 뒤 · lowPriority**(LUN · 파일시스템 뒤) — 세션 예산이 남을 때만 돈다. 앞 항목(용량 · 상태 · 버전 · 전원 · 하위 항목)을 밀어내지 않고
+   *   예산 산수 테스트의 '비-lowPriority 최악 합' 에 들지 않는다. 건너뛰면 `extra.ifaces.probe` 가 사유를 말한다.
+   * ⚠ **이 장비의 세 출력은 본 적이 없다** — 키(Speed · Requested speed · Available speeds · Health details · Type · Port)는 Unisphere CLI 가이드
+   *   예시가 근거다(storage/ifaces.js 머리말). 첫 실수집의 CLI 원문으로 좁힐 것.
+   */
+  { key: 'ifFc', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 20_000,
+    cmds: ['uemcli /net/port/fc show -detail'] },
+  { key: 'ifEth', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 20_000,
+    cmds: ['uemcli /net/port/eth show -detail'] },
+  { key: 'ifList', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 20_000,
+    cmds: ['uemcli /net/if show -detail'] },
 ];
 
 /**
@@ -407,6 +422,37 @@ export function applyUnitySshResources(extra, r) {
   extra.resourcesProbe = probe;
 }
 
+/**
+ * v3.35.0 — 인터페이스 구성 → `extra.ifaces`(순수 — extra 변경). r = runCliSession 결과. LUN 처리(applyUnitySshResources)와 같은 규칙:
+ * '0개' 와 '못 읽음' 을 가른다 — 성공했는데 인식한 항목이 없고 레코드가 있으면 'unparsed', 실패는 'failed', 예산으로 시작하지 않았으면 'skipped'.
+ * 세 명령이 모두 시작조차 안 됐으면(예산) probe 만 싣는다 — 이전 값을 지어내지 않는다(화면은 '언제 값' 과 함께 지난 상태 표를 쓴다).
+ */
+export const IFACE_SSH_SPECS = Object.freeze([
+  ['fc', 'ifFc', parseUemcliFcPorts, 'uemcli /net/port/fc show -detail'],
+  ['eth', 'ifEth', parseUemcliEthPorts, 'uemcli /net/port/eth show -detail'],
+  ['ifs', 'ifList', parseUemcliIfs, 'uemcli /net/if show -detail'],
+]);
+export function applyUnitySshIfaces(extra, r, at = Date.now()) {
+  const probe = {}; const ports = []; const ifs = [];
+  for (const [pk, key, parse, source] of IFACE_SSH_SPECS) {
+    const text = r?.out?.[key];
+    if (text == null) {
+      if ((r?.skipped || []).includes(key)) probe[pk] = ifaceProbe('skipped', { source, detail: '수집 시간 예산이 모자라 이번 주기에는 실행하지 않았습니다' });
+      else probe[pk] = ifaceProbe('failed', { source, detail: r?.errors?.[key] || '명령을 실행하지 못했습니다' });
+      continue;
+    }
+    let list = [];
+    try { list = parse(text); } catch (e) { probe[pk] = ifaceProbe('unparsed', { source, detail: String(e?.message || e) }); continue; }
+    if (!list.length && parseUemcli(text).length) {
+      probe[pk] = ifaceProbe('unparsed', { source, detail: `레코드 ${parseUemcli(text).length}건에서 ID · Port 를 읽지 못했습니다 — CLI 원문 확인` });
+      continue;
+    }
+    probe[pk] = ifaceProbe('ok', { source, count: list.length });
+    pushAll(pk === 'ifs' ? ifs : ports, list);
+  }
+  extra.ifaces = buildIfaces({ ports, interfaces: ifs, probe, at, source: 'uemcli' });
+}
+
 export async function collectViaSsh(device) {
   let raw = [];
   try {
@@ -434,6 +480,7 @@ export async function collectViaSsh(device) {
     //   전체 소비 전력 화면이 '못 읽음 N' 을 사유별로 말한다. 요약 구획이 없으면 FRU 상태줄(`ps0: OK 330`)의 숫자로 대신한다.
     applyUnitySshPower(snap.extra, r);
     applyUnitySshResources(snap.extra, r);   // v2.789 — LUN·파일시스템(하위 항목). 못 읽은 사유는 resourcesProbe
+    applyUnitySshIfaces(snap.extra, r, snap.collectedAt);   // v3.35.0 — 인터페이스 구성(속도 · 상태). 사용량은 REST 장비만(5분 표본)
     // v2.586 — 버전은 못 읽었지만 어느 후보가 모델을 줬다면 버리지 않는다(accept 가 버전만 성공으로 본다).
     if (!snap.extra.model) {
       for (const x of raw) {

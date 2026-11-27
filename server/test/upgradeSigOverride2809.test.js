@@ -13,7 +13,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'upg-sigov-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('upg-sigov-');
 Object.assign(process.env, { CONFIG_DIR: CFG, DATA_SOURCE: 'mock', AUTH_ENABLED: 'true', AUTH_SECRET: 'x'.repeat(40), OTP_ROLE_ENFORCE: 'false', SETTINGS_OWNERS: 'own,sown' });
 for (const k of ['UPGRADE_SIGNATURE_POLICY', 'UPGRADE_ENABLED', 'UPGRADE_WATCH_DIR', 'UPGRADE_REMOTE_BASE', 'CENTRAL_URL', 'EDGE_MODE']) delete process.env[k];
 after(() => { try { fs.rmSync(CFG, { recursive: true, force: true }); } catch { /* */ } });

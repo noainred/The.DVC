@@ -166,7 +166,9 @@ test('C2628-03·04·06 · R2628-02·04: 법인별 사용량 판정', async () =>
 
 test('EDGE2628-01: 엣지 보관분 가져오기 기본 limit 은 상한(2,000)이다', () => {
   const src = fs.readFileSync(new URL('../src/routes/api/bmUsage.js', import.meta.url), 'utf8');
-  assert.match(src, /pullBmUsage\(a, \{ limit: Number\(req\.body\?\.limit\) \|\| 2_000 \}\)/);
+  // 점검 반복 5회차 D1: 숫자 대신 같은 상수(EDGE_PULL_LIMIT = 2,000 — 정비 창 자동 인출과 하나) — 값은 bmUsageLoop5 D1 이 엣지 MAX_LIMIT 와 대조
+  assert.match(src, /pullBmUsage\(a, \{ limit: Number\(req\.body\?\.limit\) \|\| EDGE_PULL_LIMIT \}\)/);
+  assert.match(fs.readFileSync(new URL('../src/central/bmUsageEdgePull.js', import.meta.url), 'utf8'), /export const EDGE_PULL_LIMIT = 2_000;/);
   const cu = fs.readFileSync(new URL('../src/routes/api/corpUsage.js', import.meta.url), 'utf8');
   assert.match(cu, /edgeTruncated/);
   assert.match(cu, /unreadVcenters/);

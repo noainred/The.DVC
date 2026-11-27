@@ -1,0 +1,26 @@
+/* 서버 명령 실행(v3.30) — 그리드 · 플렉스 자식 min-width:0 · 버튼 여러 개 행은 flex-wrap · 400px 은 카드가 세로로 쌓이고 표는 상자 안에서 가로로 · 글자 대문자 변환 금지 */
+.scm-split { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; min-width: 0; }
+.scm-card { display: grid; gap: 10px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+.scm-presets { flex: 1 1 380px; max-width: 480px; }
+.scm-targets { flex: 999 1 560px; }
+@media (max-width: 900px) { .scm-presets { max-width: none; } }
+.scm-step { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.scm-step h4 { margin: 0; font-size: 13.5px; }
+.scm-num { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent); font-size: 11.5px; font-weight: 700; flex: none; }
+.scm-list { display: grid; gap: 2px; min-width: 0; }
+.scm-pi { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 34px; padding: 4px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; min-width: 0; }
+.scm-pi:hover { background: var(--hover); }
+.scm-pi.on { background: var(--hover); border-color: var(--accent); font-weight: 700; }
+.scm-pi-l { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.scm-field { display: grid; gap: 4px; min-width: 0; }
+.scm-field label { font-size: 12px; color: var(--text-dim); }
+.scm-field input, .scm-field select { min-height: 32px; max-width: 100%; box-sizing: border-box; }
+.scm-field .input, .scm-field .select { min-width: 0; width: 100%; }   /* 공용 .input 의 min-width 220px 이 400px 카드에서 넘치지 않게 */
+.scm-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; min-width: 0; }
+.scm-filters .scm-field { flex: 0 1 170px; }
+.scm-filters .scm-field.grow { flex: 1 1 180px; }
+.scm-pre { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-deep); color: var(--text); font-family: var(--mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 520px; overflow: auto; min-width: 0; }
+.scm-pre.cmd { max-height: 160px; }
+.scm-out { display: grid; gap: 6px; min-width: 0; padding: 10px 0 2px; border-top: 1px solid var(--border-soft, var(--border)); }
+.scm-first { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.scm-t tbody td { white-space: normal; }

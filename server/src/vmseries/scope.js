@@ -18,6 +18,7 @@
  * moref 는 `id.slice(vcenterId.length + 1)` 로 자른다 — vc.id 에 콜론이 있을 수 있어 split 금지
  * (toolsCapacity.js morefOf 와 같은 규약).
  */
+import { numOrNull } from '../util/numOrNull.js';   // v3.28.1: 못 읽은 vCPU · 메모리는 0 이 아니라 null(스파이크 판정은 ctx.vcpu > 0 일 때만)
 
 /** 폴더 경로 정규화 — 앞뒤 슬래시·'vm' 루트 제거. 스냅샷 vm.folder 와 같은 형태로 맞춘다. */
 export function normFolder(p) {
@@ -44,7 +45,7 @@ export function resolveTargets(snap, settings, vcenterId) {
   if (!snap || !vcId) return out;
   const allVms = (snap.vms || []).filter((v) => v.vcenterId === vcId && v.powerState === 'POWERED_ON' && !v.template);
   const allHosts = (snap.hosts || []).filter((h) => h.vcenterId === vcId && h.connectionState !== 'DISCONNECTED');
-  const pickVm = (v) => ({ id: v.id, ref: morefOf(v.id, vcId), name: v.name, vcpu: Number(v.cpuCount) || 0, memMB: Number(v.memMB) || 0, host: v.host || '', cluster: v.cluster || '', folder: v.folder || '' });
+  const pickVm = (v) => ({ id: v.id, ref: morefOf(v.id, vcId), name: v.name, vcpu: numOrNull(v.cpuCount), memMB: numOrNull(v.memMB), host: v.host || '', cluster: v.cluster || '', folder: v.folder || '' });
   const pickHost = (h) => ({ id: h.id, ref: morefOf(h.id, vcId), name: h.name, cluster: h.cluster || '' });
 
   const scope = settings?.scope === 'selected' ? 'selected' : 'all';

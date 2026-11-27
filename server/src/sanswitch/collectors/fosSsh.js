@@ -31,6 +31,7 @@ import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates, skipRates } from '../rates.js';
 import * as P from './fosParse.js';
 import { zoningFromText } from '../zoningCollect.js';
+import { envPositive } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 
 /** porterrshow 열 이름 → 포트 행 필드(축약 표시용, v2.590 F3). */
@@ -43,7 +44,7 @@ function approxFields(approx) {
   return { ...(errApprox.length ? { errApprox } : {}), ...(framesApprox ? { framesApprox: true } : {}) };
 }
 
-const RAW_LIMIT = Number(process.env.SANSW_CLI_RAW_LIMIT) || 4000;
+const RAW_LIMIT = envPositive(process.env.SANSW_CLI_RAW_LIMIT, 4000);
 export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_000, { max: 1_800_000 });   // v2.606 TIM2606-03
 
 /*
@@ -60,8 +61,8 @@ export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_
  *    그래서 장비 시한 env 를 함께 읽어 `min(예산, 장비 시한 − 여유)` 로 묶는다(`test/audit2741f.test.js` 가 산수를 고정한다).
  */
 /**
- * 폴러의 장비 시한 — `sanswitch/poller.js` 와 **같은 env·같은 결과**(빈 값·0·숫자 아님 → 120초, 그 밖은 하한 30초)여야 한다.
- * 예산을 그보다 작게 묶는 데만 쓴다. 폴러를 import 하면 순환이라(폴러가 이 파일을 import 한다) 식을 옮겨 둔다.
+ * 장비 시한 — **여기가 하나뿐인 원천**이다(58회차 F3: 폴러 `sanswitch/poller.js` · 재수집 큐 `collectRequests.js` 가 이 값을 가져다 쓴다).
+ * 빈 값·0·숫자 아님·무한대 → 120초, 그 밖은 하한 30초. 예전에는 폴러가 식을 따로 들고 있어 'Infinity' · '-Infinity' 에서 갈렸다.
  */
 const envMsOrNull = (v) => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? n : null; };
 export const DEVICE_TIMEOUT_MS = Math.max(30_000, envMsOrNull(process.env.SANSW_DEVICE_TIMEOUT_MS) ?? 120_000);
@@ -104,7 +105,7 @@ export const BUDGET_SKIP_REASON = '수집 시간 예산 초과로 이번 주기�
  * ⚠ root 계정은 raw 셸을 받지만 admin 계정의 로그인 셸은 FOS CLI 라, **계정에 따라 쓸 수 있는
  *   명령이 다르다**. 그래서 캐시 키에 계정을 포함한다.
  */
-const CAPS_TTL_MS = Math.max(60_000, Number(process.env.SANSW_CAPS_TTL_MS) || 6 * 3600_000);
+const CAPS_TTL_MS = Math.max(60_000, envPositive(process.env.SANSW_CAPS_TTL_MS, 6 * 3600_000));
 const _caps = new Map(); // `${host}|${user}` → { at, has:Set<string>, path:string[] }
 /** 명령 조사 캐시 키 — probeCommands 호출부와 pruneCaps 가 같은 규칙을 쓴다. */
 export function capsKeyOf(device) { return `${device?.host}|${device?.username}`; }

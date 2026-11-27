@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 포트 회수 · 고갈 예측</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP › 포트 구성도</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">회수 · 예측</h1>
+<div style="display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden; font-size: 12.5px;">
+<span style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; color: #a9b6cc;">전 스위치 여유</span>
+<span style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; color: #a9b6cc; border-left: 1px solid #243049;">스위치 1대</span>
+<span aria-current="page" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; background: #2563eb; color: #ffffff; font-weight: 600;">회수 · 예측</span>
+</div>
+<span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #16432a; border: 1px solid #22c55e; color: #eafff1;">⑤ 지금 있는 데이터</span>
+<span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;">⑨ 사용 포트 수 일별 기록을 새로 쌓음</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">오래 쓰지 않은 포트와 GBIC 을 찾아 돌려쓰고, 지금 추세라면 예비 포트와 업링크가 언제 바닥나는지 봅니다.</div>
+</div>
+
+<div style="{{k.card}}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;">
+<b style="font-size: 14px;">회수 후보 — 오래 링크가 없는 포트</b>
+<span style="font-size: 12px; color: #a9b6cc;">미사용 기간</span>
+<div style="{{k.seg}}">
+<sc-for list="{{thresholds}}" as="m" hint-placeholder-count="3"><button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}">{{m.label}}</button></sc-for>
+</div>
+<button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12.5px; cursor: pointer;">CSV</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 12px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+<div style="font-size: 12px; color: #a9b6cc;">{{t.label}}</div>
+<div style="{{t.val}}">{{t.n}}</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{t.meta}}</div>
+</div>
+</sc-for>
+</div>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="회수 후보 포트" style="min-width: 1040px; font-size: 12.5px;">
+<div role="row" style="{{k.head1}}">
+<div role="columnheader" style="{{k.th}}">법인</div>
+<div role="columnheader" style="{{k.th}}">스위치 · 포트</div>
+<div role="columnheader" style="{{k.th}}">설명(주석)</div>
+<div role="columnheader" style="{{k.th}}">마지막 링크</div>
+<div role="columnheader" style="{{k.thr}}">미사용</div>
+<div role="columnheader" style="{{k.th}}">GBIC</div>
+<div role="columnheader" style="{{k.th}}">권고</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<div role="row" style="{{k.row1}}">
+<div role="cell" style="{{k.td}}">{{r.corp}}</div>
+<div role="cell" style="{{k.tdLink}}">{{r.sw}} {{r.port}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.desc}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.last}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.days}}</div>
+<div role="cell" style="{{k.td}}">{{r.xc}}</div>
+<div role="cell" style="{{k.td}}">{{r.todo}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{rowsNote}}</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr)); gap: 14px;">
+
+<div style="{{k.card}}">
+<b style="font-size: 14px;">예비 포트 고갈 예측 — 스위치별</b>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="예비 포트 고갈 예측" style="min-width: 600px; font-size: 12.5px;">
+<div role="row" style="{{k.head2}}">
+<div role="columnheader" style="{{k.th}}">스위치</div>
+<div role="columnheader" style="{{k.th}}">사용 포트 12개월</div>
+<div role="columnheader" style="{{k.thr}}">예비</div>
+<div role="columnheader" style="{{k.thr}}">월 증가</div>
+<div role="columnheader" style="{{k.th}}">예비 0 예상</div>
+</div>
+<sc-for list="{{fore}}" as="r" hint-placeholder-count="6">
+<div role="row" style="{{k.row2}}">
+<div role="cell" style="{{k.tdLink}}">{{r.sw}}</div>
+<div role="cell" style="{{k.td}}"><div role="img" aria-label="{{r.sparkLabel}}" style="{{r.spark}}"></div></div>
+<div role="cell" style="{{k.tdr}}">{{r.spare}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.rate}}</div>
+<div role="cell" style="{{k.td}}"><span style="{{r.whenStyle}}">{{r.when}}</span></div>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="{{k.card}}">
+<b style="font-size: 14px;">업링크 포화 예측 — 95백분위 사용률</b>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="업링크 포화 예측" style="min-width: 600px; font-size: 12.5px;">
+<div role="row" style="{{k.head3}}">
+<div role="columnheader" style="{{k.th}}">업링크</div>
+<div role="columnheader" style="{{k.th}}">95백분위 6개월</div>
+<div role="columnheader" style="{{k.thr}}">6개월 전</div>
+<div role="columnheader" style="{{k.thr}}">지금</div>
+<div role="columnheader" style="{{k.th}}">80% 도달 예상</div>
+</div>
+<sc-for list="{{upl}}" as="r" hint-placeholder-count="5">
+<div role="row" style="{{k.row3}}">
+<div role="cell" style="{{k.tdLink}}">{{r.name}}</div>
+<div role="cell" style="{{k.td}}"><div role="img" aria-label="{{r.sparkLabel}}" style="{{r.spark}}"></div></div>
+<div role="cell" style="{{k.tdr}}">{{r.was}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.now}}</div>
+<div role="cell" style="{{k.td}}"><span style="{{r.whenStyle}}">{{r.when}}</span></div>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+
+</div>
+
+<div style="{{k.card}}">
+<div style="font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">· ‘미사용’ 은 포탈이 기록을 시작한 뒤의 값입니다. 기록 시작 전부터 꺼져 있던 포트는 ‘기록 없음’ 이고 일수로 세지 않습니다.</div>
+<div style="font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">· 예측은 최근 6개월의 직선 추세입니다. 기록이 90일보다 짧으면 예측하지 않고 ‘기록 부족’ 으로 둡니다 — 사용 포트 수는 이 기능을 켠 날부터 쌓이므로 처음 석 달은 전부 ‘기록 부족’ 입니다.</div>
+<div style="font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">· 회수는 포탈이 하지 않습니다(읽기 전용). 권고만 보여 주고, 설명 정리 · 포트 끄기는 CVP 나 장비에서 합니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1170}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const th = st.th || 90;
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const C1 = 'display: grid; grid-template-columns: 84px 200px minmax(170px, 1fr) 130px 84px 150px minmax(170px, 1fr); align-items: center;';
+const C2 = 'display: grid; grid-template-columns: minmax(130px, 1fr) 150px 60px 80px 150px; align-items: center;';
+const C3 = 'display: grid; grid-template-columns: minmax(200px, 1fr) 150px 80px 70px 150px; align-items: center;';
+const k = {
+card: 'background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 12px;',
+seg: 'display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;',
+head1: C1 + ' background: #0f1626; color: #a9b6cc;', row1: C1 + ' border-top: 1px solid #1f2a40; min-height: 38px;',
+head2: C2 + ' background: #0f1626; color: #a9b6cc;', row2: C2 + ' border-top: 1px solid #1f2a40; min-height: 40px;',
+head3: C3 + ' background: #0f1626; color: #a9b6cc;', row3: C3 + ' border-top: 1px solid #1f2a40; min-height: 40px;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+thr: 'padding: 8px 10px; font-weight: 600; white-space: nowrap; text-align: right;',
+td: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;',
+tdm: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6; ' + MONO,
+tdr: 'padding: 6px 10px; min-width: 0; text-align: right; white-space: nowrap; ' + MONO,
+tdLink: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: #7dd3fc; ' + MONO
+};
+const segBtn = (on) => 'height: 32px; padding: 0 12px; border: 0; border-right: 1px solid #243049; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'background: #2563eb; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #a9b6cc;');
+const thresholds = [30, 90, 180].map((d) => ({ label: d + '일 넘게', on: th === d, style: segBtn(th === d), pick: () => this.setState({ th: d }) }));
+const D = [
+['KR1', 'kr1-leaf-b01', 'Ethernet41', 'esx-kr1-old-03 vmnic0', '2026-04-23', 214, '25GBASE-SR', '설명 지우고 예비로 · GBIC 회수 가능'],
+['PL-WRO', 'pl-leaf-01', 'Ethernet19', 'TEMP migration', '2026-05-20', 187, '25GBASE-SR', '임시 설명 — 지우고 예비로 · GBIC 회수 가능'],
+['KR1', 'kr1-leaf-a04', 'Ethernet36', '(설명 없음)', '2026-06-13', 163, '25GBASE-SR', '이미 예비 · GBIC 회수 가능'],
+['US-EAST', 'use-leaf-01', 'Ethernet44', 'backup-use-02 p2', '2026-07-25', 121, '빈 케이지', '설명 지우고 예비로'],
+['KR1', 'kr1-spine-01', 'Ethernet5/27', 'kr1-leaf-c01 Et49/1', '2026-08-17', 98, '100GBASE-SR4', '연결 예정인지 확인 · 100G GBIC 회수 가능'],
+['KR1', 'kr1-mgmt-01', 'Ethernet39', 'idrac-kr1-old-11', '2026-08-19', 96, '구리 포트', '설명 지우고 예비로'],
+['PL-WRO', 'pl-leaf-02', 'Ethernet22', 'esx-pl-07 vmnic2', '2026-09-20', 64, '25GBASE-SR', '상대 장비 확인(서버가 내려가 있을 수 있음)'],
+['KR1', 'kr1-leaf-a03', 'Ethernet33', '(설명 없음)', '2026-10-08', 46, '25GBASE-SR', '이미 예비 · GBIC 회수 가능'],
+['KR1', 'kr1-bleaf-01', 'Ethernet14', 'fw-kr1-01 p3', '2026-10-13', 41, '25GBASE-CR', '상대 장비 확인'],
+['US-EAST', 'use-leaf-01', 'Ethernet30', 'esx-use-11 vmnic0', '2026-10-21', 33, '25GBASE-SR', '상대 장비 확인']
+].map((r) => ({ corp: r[0], sw: r[1], port: r[2], desc: r[3], last: r[4], d: r[5], xc: r[6], todo: r[7] }));
+const shown = D.filter((r) => r.d > th);
+const rows = shown.map((r) => Object.assign({}, r, { days: r.d + '일' }));
+const gbic = shown.filter((r) => /BASE-S/.test(r.xc));
+const big = (c) => MONO + ' font-size: 24px; font-weight: 600; color: ' + c + ';';
+const tiles = [
+{ label: '회수 후보 포트', n: shown.length, meta: th + '일 넘게 링크 없음 · 전 법인', val: big('#e6edf6') },
+{ label: '회수 가능한 GBIC', n: gbic.length, meta: '25G ' + gbic.filter((r) => /^25/.test(r.xc)).length + ' · 100G ' + gbic.filter((r) => /^100/.test(r.xc)).length + ' — 꽂힌 채 쓰지 않음', val: big('#93c5fd') },
+{ label: '설명 정리 필요', n: shown.filter((r) => r.desc !== '(설명 없음)').length, meta: '설명은 남아 있는데 오래 미사용', val: big('#fbbf24') },
+{ label: '기록 없음', n: 31, meta: '기록 시작 전부터 꺼져 있어 일수를 모름', val: big('#a9b6cc') }
+];
+const band = (vals, w, h, t) => { const n = vals.length; const X = (i) => (i * (w / (n - 1))).toFixed(1); const up = vals.map((v, i) => X(i) + 'px ' + ((1 - v) * (h - t)).toFixed(1) + 'px'); const dn = vals.map((v, i) => X(i) + 'px ' + ((1 - v) * (h - t) + t).toFixed(1) + 'px').reverse(); return 'clip-path: polygon(' + up.concat(dn).join(', ') + ');'; };
+const ramp = (a, b, seed, n) => { const out = []; for (let i = 0; i < n; i++) out.push(Math.max(0.03, Math.min(0.97, a + (b - a) * (i / (n - 1)) + (((seed * 7 + i * 13) % 9) - 4) / 120))); return out; };
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const W = { soon: pill + 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;', mid: pill + 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;', far: 'color: #c9d5e6;', none: 'color: #a9b6cc;' };
+const spark = (vals, color) => 'width: 130px; height: 26px; background: ' + color + '; ' + band(vals, 130, 26, 2);
+const fore = [
+['use-leaf-01', 0.82, 0.97, 1, '+0.8', '2027-01 (약 2개월)', 'soon', '#f87171'],
+['kr1-leaf-b01', 0.70, 0.93, 3, '+1.1', '2027-02 (약 3개월)', 'soon', '#f87171'],
+['kr1-leaf-b02', 0.66, 0.90, 4, '+0.9', '2027-04 (약 5개월)', 'mid', '#fbbf24'],
+['pl-leaf-01', 0.60, 0.80, 9, '+0.6', '2028-02', 'far', '#60a5fa'],
+['kr1-leaf-a03', 0.60, 0.61, 16, '+0.0', '늘지 않음 — 예측 없음', 'none', '#60a5fa'],
+['pl-spine-01', 0.5, 0.5, 14, '—', '기록 부족(41일)', 'none', '#64748b']
+].map((r, i) => ({ sw: r[0], spark: r[7] === '#64748b' ? 'display: none;' : spark(ramp(r[1], r[2], i + 2, 12), r[7]), sparkLabel: r[0] + ' 사용 포트 12개월 추이', spare: r[3], rate: r[4] === '—' ? '—' : r[4] + '/월', when: r[5], whenStyle: W[r[6]] }));
+const upl = [
+['kr1-leaf-b01 Et49/1 → kr1-spine-01', 0.52, 0.76, '52%', '74%', '2027-01 (약 2개월)', 'soon', '#f87171'],
+['kr1-leaf-a04 Et50/1 → kr1-spine-02', 0.40, 0.61, '40%', '61%', '2027-05', 'mid', '#fbbf24'],
+['pl-leaf-01 Et49/1 → pl-spine-01', 0.30, 0.44, '30%', '44%', '2028-01', 'far', '#60a5fa'],
+['kr1-leaf-a03 Et49/1 → kr1-spine-01', 0.42, 0.41, '42%', '41%', '늘지 않음 — 예측 없음', 'none', '#60a5fa'],
+['use-leaf-01 Et49/1 → use-spine-01', 0.5, 0.5, '—', '—', '측정 없음(속도 모름)', 'none', '#64748b']
+].map((r, i) => ({ name: r[0], spark: r[7] === '#64748b' ? 'display: none;' : spark(ramp(r[1], r[2], i + 5, 12), r[7]), sparkLabel: r[0] + ' 95백분위 사용률 6개월 추이', was: r[3], now: r[4], when: r[5], whenStyle: W[r[6]] }));
+return { k: k, thresholds: thresholds, tiles: tiles, rows: rows, fore: fore, upl: upl, rowsNote: shown.length + '개 표시 · 미사용이 긴 순 · 실제 화면에서는 머리글을 눌러 정렬합니다' };
+}
+}
+</script>
+</body>
+</html>

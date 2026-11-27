@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>추이 확대 팝업</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 12px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.sel{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+</style>
+</helmet>
+<div style="position:relative;width:1440px;height:900px;overflow:hidden;background:#0a0e17">
+  <!-- 뒤: 서버 상세 추이 탭(흐림) -->
+  <div style="position:absolute;inset:0;padding:18px 24px;opacity:.35;filter:blur(1px)">
+    <div style="font-size:12px;color:#8b9bb4">리눅스 베어메탈 통합 성능 › KR-SEL › bm-kr1-db01</div>
+    <div style="font-size:20px;font-weight:700;margin-top:4px">bm-kr1-db01 — 추이 (평균 · 피크)</div>
+    <div style="margin-top:14px;height:120px;border:1px solid #243049;border-radius:12px;background:#141b2d"></div>
+    <div style="margin-top:14px;height:320px;border:1px solid #243049;border-radius:12px;background:#141b2d"></div>
+    <div style="margin-top:14px;height:320px;border:1px solid #243049;border-radius:12px;background:#141b2d"></div>
+  </div>
+  <div style="position:absolute;inset:0;background:rgba(10,14,23,.6)"></div>
+
+  <!-- 모달 -->
+  <div role="dialog" aria-modal="true" aria-label="디스크 await 추이 확대" style="position:absolute;left:100px;top:50px;width:1240px;height:800px;box-sizing:border-box;background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.6);padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+      <div style="min-width:0">
+        <div style="font-size:16px;font-weight:700">nvme1n1 · await — 평균 · 피크 <span class="chip bad">피크 포화</span></div>
+        <div class="dim" style="font-size:12px">bm-kr1-db01 · 디스크별 › nvme1n1 · 5분 평균 288점 · 피크 = 1초 샘플 300개/주기(옵션 B) · 결측 3점(선 끊김) · 수치는 가상</div>
+      </div>
+      <div style="flex:1 1 20px"></div>
+      <select class="sel" aria-label="장치"><option>nvme1n1</option><option>nvme0n1</option><option>sda</option></select>
+      <select class="sel" aria-label="지표"><option>await</option><option>busy %</option><option>IOPS</option><option>대기열 깊이</option><option>처리량</option></select>
+      <div class="seg" role="group" aria-label="기간"><button type="button">6시간</button><button class="on" type="button">24시간</button><button type="button">7일</button><button type="button">30일</button></div>
+      <div class="seg" role="group" aria-label="표시"><button class="on" type="button">평균+피크</button><button type="button">평균</button><button type="button">피크</button></div>
+      <button class="btn" type="button">CSV</button>
+      <button class="btn" type="button" aria-label="전체 화면">⤢ 전체 화면</button>
+      <button class="btn" type="button" aria-label="닫기">✕ 닫기 (Esc)</button>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;align-items:center">
+      <span><b style="font-size:18px">18ms</b> <span class="dim">평균</span></span>
+      <span><b style="font-size:18px;color:#f87171">212ms</b> <span class="dim">피크 · 02:48</span></span>
+      <span><b style="font-size:18px">11.8×</b> <span class="dim">피크/평균</span></span>
+      <span><b style="font-size:18px">31%</b> <span class="dim">구간 중 기준(20ms) 초과 비율 — 피크 기준</span></span>
+      <span class="chip info">커서 13:35 · 선택 02:00~05:10</span>
+      <span class="dim">같은 시간축의 다른 지표를 겹쳐 보기: <a href="#">busy %</a> · <a href="#">대기열</a> · <a href="#">Dirty 페이지</a></span>
+    </div>
+
+    <svg viewBox="0 0 1200 520" role="img" aria-label="nvme1n1 await 24시간: 평균선은 0.4~18ms, 피크선은 새벽 2시에서 5시 사이 212ms 까지, 12시 이후 다시 상승. 선택 구간 02:00~05:10 에 음영, 기준선 20ms" style="width:100%;height:auto;display:block;flex:1 1 auto">
+      <rect x="400" y="20" width="200" height="440" fill="rgba(34,211,238,.08)" stroke="rgba(34,211,238,.35)" stroke-dasharray="4 4"></rect>
+      <line x1="70" y1="20" x2="70" y2="460" stroke="#243049"></line><line x1="70" y1="460" x2="1180" y2="460" stroke="#243049"></line>
+      <line x1="70" y1="350" x2="1180" y2="350" stroke="#1f2a40"></line><line x1="70" y1="240" x2="1180" y2="240" stroke="#1f2a40"></line><line x1="70" y1="130" x2="1180" y2="130" stroke="#1f2a40"></line>
+      <text x="62" y="464" fill="#8b9bb4" font-size="12" text-anchor="end">0</text><text x="62" y="354" fill="#8b9bb4" font-size="12" text-anchor="end">60</text><text x="62" y="244" fill="#8b9bb4" font-size="12" text-anchor="end">120</text><text x="62" y="134" fill="#8b9bb4" font-size="12" text-anchor="end">180</text><text x="62" y="30" fill="#8b9bb4" font-size="12" text-anchor="end">ms</text>
+      <line x1="70" y1="423" x2="1180" y2="423" stroke="#f87171" stroke-dasharray="4 5" opacity=".7"></line><text x="1176" y="418" fill="#f87171" font-size="11" text-anchor="end">기준 20ms (설정값)</text>
+      <polyline fill="none" stroke="#8b9bb4" stroke-width="2" points="70,458 150,458 230,457 310,458 400,452 450,440 500,436 560,438 600,444 650,452 730,457 810,456 900,455 980,448 1060,436 1140,430 1180,427"></polyline>
+      <polyline fill="none" stroke="#f87171" stroke-width="2.5" points="70,440 150,436 230,442 310,430 400,330 440,120 470,72 500,90 540,110 600,180 650,300 730,420 810,430 900,425 980,360 1060,250 1140,210 1180,190"></polyline>
+      <circle cx="470" cy="72" r="5" fill="#f87171" stroke="#0a0e17" stroke-width="2"></circle>
+      <rect x="486" y="40" width="250" height="62" rx="6" fill="#0f1626" stroke="#243049"></rect>
+      <text x="498" y="60" fill="#e6edf6" font-size="12" font-weight="700">02:48 (5분 주기 02:45~02:50)</text>
+      <text x="498" y="78" fill="#f87171" font-size="12">피크 212ms · 02:48:17 (1초 샘플)</text>
+      <text x="498" y="94" fill="#8b9bb4" font-size="12">평균 41ms · 대기열 63 · Dirty 4.0GB</text>
+      <line x1="1150" y1="20" x2="1150" y2="460" stroke="#e6edf6" stroke-dasharray="3 3"></line><text x="1146" y="34" fill="#e6edf6" font-size="12" text-anchor="end">13:35</text>
+      <text x="70" y="486" fill="#8b9bb4" font-size="12">13:40 어제</text><text x="500" y="486" fill="#67e8f9" font-size="12" text-anchor="middle">02:00 ~ 05:10 (선택)</text><text x="1180" y="486" fill="#8b9bb4" font-size="12" text-anchor="end">13:35</text>
+      <rect x="70" y="496" width="1110" height="14" rx="3" fill="#0f1626" stroke="#243049"></rect><rect x="400" y="496" width="200" height="14" rx="3" fill="rgba(34,211,238,.35)"></rect>
+      <text x="625" y="507" fill="#8b9bb4" font-size="11">◀ 이전 24시간 · 슬라이더 · 다음 ▶ · 최신 · 날짜로 이동</text>
+    </svg>
+
+    <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;align-items:center">
+      <span><span style="display:inline-block;width:14px;height:3px;background:#8b9bb4;vertical-align:middle"></span> 평균(5분)</span>
+      <span><span style="display:inline-block;width:14px;height:3px;background:#f87171;vertical-align:middle"></span> 피크(5분 내 최대 · 점을 누르면 그 5분의 1초 샘플 펼침)</span>
+      <span class="dim">· 휠 = 확대/축소 · 드래그 = 구간 선택 · 더블클릭 = 초기화 · Esc = 닫기</span>
+      <span style="margin-left:auto"><a href="AvgPeak.dc.html">추이 탭으로 (두 화면 동기화 보기)</a></span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

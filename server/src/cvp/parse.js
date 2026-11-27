@@ -11,8 +11,10 @@
  * 상태 판정: 부품은 partfault 와 같은 다섯 이름(ok/warn/fault/unknown/absent). 상태 단어는 storage/healthWord.js 하나.
  */
 import { healthWord } from '../storage/healthWord.js';
+import { rxLimitsOf } from './opticstrend.js';   // v3.47 수정 검토 V6 — Rx 낮은 쪽 기준은 추세 · 링크 품질과 같은 함수
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
+import { pushAll } from '../util/pushAll.js';   // v2.924(반증 L-4)
 
 export const DEVICE_MAX = 2000;
 export const PORT_MAX = 1024;
@@ -406,7 +408,11 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
       }
       if (x.text) detailBits.push(x.text);
       // 최종 판정(광량 포함)은 judgeOptics 가 포트 링크 상태를 보고 한다 — 여기서는 재료만 싣는다.
-      if (dom) domJudge = { otherState: x.otherState, envState: x.envState, rxDevice: x.rxDevice };
+      // v3.47(결정 D-7): Rx **낮은 쪽** 장비 임계(LowWarn · LowAlarm)도 싣는다 — GBIC 추세 · 링크 품질이 실시간 판정과 같은 기준을 쓰게(opticstrend.rxLimitsOf).
+      // 수정 검토 V6: 추세 · 엣지 정제와 같은 dBm 범위(-60 ~ +15) — 범위 밖 임계는 실시간도 쓰지 않는다(예전: 실시간만 -61 을 장비 임계로 써서 추세와 어긋났다)
+      const dbm = (v) => { const n = numOrNull(v); return n != null && n >= -60 && n <= 15 ? n : null; };
+      const lw = x.rxThresholds ? dbm(x.rxThresholds.loW) : null; const la = x.rxThresholds ? dbm(x.rxThresholds.loA) : null;
+      if (dom) domJudge = { otherState: x.otherState, envState: x.envState, rxDevice: x.rxDevice, rxHigh: x.rxHigh ?? null, ...(lw != null || la != null ? { rxLow: { warnDbm: lw, faultDbm: la } } : {}) };
       media = xcvrTypeText(unwrap(pick(f, ['mediaTypeString', 'mediaType', 'xcvrMediaType', 'media', 'xcvrType', 'transceiverType'])));
     }
     parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}), ...(pw ? { power: pw } : {}), ...(media ? { media } : {}) });
@@ -459,7 +465,7 @@ function judgeVal(v, { hiA, loA, hiW, loW }) {
  * rxDevice = Rx 를 장비 임계로 판정한 결과(null 이면 장비 임계 없음). Rx 는 링크 상태를 알아야 판정할 수 있어 judgeOptics 가 마무리한다.
  */
 export function xcvrDom(flat) {
-  const values = {}; const bits = []; let otherState = null; let envState = null; let rxDevice = null; const rxTh = {};
+  const values = {}; const bits = []; let otherState = null; let envState = null; let rxDevice = null; let rxHigh = null; const rxTh = {};
   for (const { key, label } of DOM_FIELDS) {
     const v = numOrNull(unwrap(pick(flat, [key, `${key}Dbm`, `${key}Value`])));
     if (v == null) continue;
@@ -468,13 +474,13 @@ export function xcvrDom(flat) {
     const th = (suf) => numOrNull(unwrap(pick(flat, [`${key}${suf}`])));
     const t = { hiA: th('HighAlarm'), loA: th('LowAlarm'), hiW: th('HighWarn'), loW: th('LowWarn') };
     const has = Object.values(t).some((x) => x != null);
-    if (key === 'rxPower') { if (has) { rxDevice = judgeVal(v, t); Object.assign(rxTh, t); } continue; }
+    if (key === 'rxPower') { if (has) { rxDevice = judgeVal(v, t); rxHigh = judgeVal(v, { hiA: t.hiA, hiW: t.hiW }); Object.assign(rxTh, t); } continue; }
     if (has) {
       otherState = worse(otherState, judgeVal(v, t));
       if (ENV_KEYS.has(key)) envState = worse(envState, judgeVal(v, t));
     }
   }
-  return { values: bits.length ? values : null, text: bits.join(' · '), otherState, envState, rxDevice, rxThresholds: Object.keys(rxTh).length ? rxTh : null };
+  return { values: bits.length ? values : null, text: bits.join(' · '), otherState, envState, rxDevice, rxHigh, rxThresholds: Object.keys(rxTh).length ? rxTh : null };
 }
 
 /** 부품 이름(`all › Ethernet49 › domInfo` 등)에서 인터페이스 이름을 뽑는다. */
@@ -493,29 +499,59 @@ export function xcvrIntfOf(name) {
  */
 export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}) {
   if (!Array.isArray(parts)) return parts;
-  const byName = new Map((Array.isArray(ports) ? ports : []).filter((p) => p && typeof p === 'object').map((p) => [String(p.name), p]));
+  const list = (Array.isArray(ports) ? ports : []).filter((p) => p && typeof p === 'object');
+  const byName = new Map(list.map((p) => [String(p.name), p]));
+  // v3.42(버그 점검 1회차 A1-03): QSFP 는 트랜시버 이름이 칸(Ethernet49)이고 포트는 레인(Ethernet49/1 · /2 …)이다 — 칸 이름으로만 찾아
+  //   100G 업링크 광모듈이 늘 '링크 없음' 이 되어 광량 판정 · 일 최저 기록 · 재고(예비로 셈)가 모두 틀렸다. 칸 이름 포트가 없으면 레인으로 본다(하나라도 up 이면 링크 있음).
+  const lanesOf = new Map();
+  for (const p of list) { const m = /^(.{1,60})\/\d{1,3}$/.exec(String(p.name)); if (m) { if (!lanesOf.has(m[1])) lanesOf.set(m[1], []); lanesOf.get(m[1]).push(p); } }
   const portsKnown = Array.isArray(ports);
   return parts.map((p) => {
     if (!p || p.kind !== 'xcvr' || !p.dom) return p;
     const intf = xcvrIntfOf(p.name);
-    const port = intf ? byName.get(intf) : null;
+    const port = intf ? byName.get(intf) || null : null;
+    const lanes = intf && !port ? (lanesOf.get(intf) || []) : [];
+    const known = !!port || lanes.length > 0;
     const rx = numOrNull(p.dom.rxPower);
-    const linked = !!port && port.oper === 'up';
+    /*
+     * 레인으로 링크를 보는 규칙(v3.42 — 2회차 A1-E1 → 3회차 A1-F2 로 고침):
+     *  · 레인 행이 하나거나 모두 올라옴 → 링크 있음.
+     *  · **첫 레인(/1)만 올라왔고 그 속도가 40G 이상이거나 모름** → 단일 포트 모드(40G/100G — /2~/4 는 비활성 레인) → 링크 있음.
+     *    2회차는 '모든 레인이 올라와야 링크' 라서 이 흔한 구성이 전부 '레인 일부' 가 되어 Rx 판정 · 일 기록이 사라졌다(1회차 C3 무효).
+     *  · 그 밖에 일부만 올라옴(브레이크아웃 — 첫 레인 속도 25G 이하 · 다른 레인이 올라옴) → lanesPartial: 칸 단위 DOM 값이 어두운 레인의 값일 수 있어
+     *    Rx 를 판정하지 않는다(실장비 미확인 — 안전한 쪽). 링크 없음도 아니다(재고는 '링크 있음').
+     */
+    const upLanes = lanes.filter((l) => l.oper === 'up');
+    const first = lanes.find((l) => /\/1$/.test(String(l.name))) || null;
+    const firstSpeed = first ? numOrNull(first.speedBps) : null;
+    const singleMode = upLanes.length === 1 && upLanes[0] === first && (firstSpeed == null || firstSpeed >= 40e9);
+    const linked = port ? port.oper === 'up' : lanes.length > 0 && (upLanes.length === lanes.length || singleMode);
+    const lanesPartial = !port && lanes.length > 1 && !linked && upLanes.length > 0;
     // v2.656: 링크가 내려간 것을 '확인한' 포트 — Rx 에 더해 Tx·바이어스도 판정하지 않는다(온도·전압만). 포트 상태를 모르면 예전 판정 그대로.
-    const linkDown = portsKnown && !!port && !linked;
+    const linkDown = portsKnown && known && !linked && !lanesPartial;
     const other = linkDown ? (p.domJudge?.envState ?? null) : (p.domJudge?.otherState ?? null);
-    const basis = p.domJudge?.rxDevice ? 'device' : 'portal';
+    // 5회차 A1-6: 장비가 Rx **높은 쪽** 임계만 주면 낮은 쪽은 포탈 임계로 본다(예전: basis 'device' 로 낮은 Rx 를 '정상' 이라 했다 — 추세 · 링크 품질은 포탈 기준으로 장애였다).
+    //   낮은 쪽 장비 임계(rxLow)가 있으면 예전 그대로 장비 판정. 기준은 opticstrend.rxLimitsOf 와 같은 순서.
+    //   수정 검토 V6: 낮은 쪽은 **추세 · 링크 품질과 같은 함수**(opticstrend.rxLimitsOf — dBm 범위 · 뒤집힘 처리까지 같다), 높은 쪽은 장비 임계(rxHigh)로 — 판정 코어 하나.
+    const lim = rxLimitsOf(p.domJudge?.rxLow ? { devWarnDbm: p.domJudge.rxLow.warnDbm, devFaultDbm: p.domJudge.rxLow.faultDbm } : null, { warnDbm, faultDbm });
+    const basis = lim.basis;
     let rxState = null;
-    if (rx != null && linked) rxState = p.domJudge?.rxDevice || (rx <= faultDbm ? 'fault' : rx <= warnDbm ? 'warn' : 'ok');
+    if (rx != null && linked) {
+      const low = lim.faultDbm != null && rx <= lim.faultDbm ? 'fault' : lim.warnDbm != null && rx <= lim.warnDbm ? 'warn' : 'ok';
+      rxState = worse(p.domJudge?.rxHigh ?? null, low) || low;
+    }
     const judged = rxState != null || other != null;
     let state = p.state;
     if (p.state !== 'absent' && judged) state = worse(other, rxState) || p.state;
     const optic = {
-      intf, rx, tx: numOrNull(p.dom.txPower), linked, portKnown: portsKnown && !!port, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
+      intf, rx, tx: numOrNull(p.dom.txPower), linked, ...(lanesPartial ? { lanesPartial: true } : {}), portKnown: portsKnown && known, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
       ...(basis === 'portal' && rxState != null ? { warnDbm, faultDbm } : {}),
+      // v3.47(D-7): 장비가 준 Rx 낮은 쪽 임계(링크 상태와 무관 — 추세는 링크가 내려간 날에도 그 광모듈의 기준을 안다). 엣지 정제 화이트리스트에도.
+      ...(p.domJudge?.rxLow?.warnDbm != null ? { devWarnDbm: p.domJudge.rxLow.warnDbm } : {}), ...(p.domJudge?.rxLow?.faultDbm != null ? { devFaultDbm: p.domJudge.rxLow.faultDbm } : {}),
     };
     let detail = p.detail || '';
     if (linkDown) detail = `${detail}${detail ? ' · ' : ''}링크 없음 — 광량·Tx·바이어스 판정 안 함`;
+    else if (lanesPartial) detail = `${detail}${detail ? ' · ' : ''}브레이크아웃 레인 일부만 링크 — 광량 판정 안 함(칸 단위 값이 어느 레인 것인지 모름)`;
     else if (rx != null && !linked) detail = `${detail}${detail ? ' · ' : ''}포트 상태 모름 — 광량 판정 안 함`;
     if (rxState === 'fault' || rxState === 'warn') detail = `${detail}${detail ? ' · ' : ''}수신 광량 ${rxState === 'fault' ? '약함(장애)' : '낮음(주의)'}`;
     const { domJudge, ...rest } = p; // 내부 판정 재료는 저장하지 않는다
@@ -703,6 +739,28 @@ export function firstSpeed(flat) {
     const r = speedBps(unwrap(pick(flat, [k])));
     if (r != null) return r;
   }
+  return speedFromAnyField(flat);
+}
+/*
+ * v3.41(사용자 실장비 캡처 — DCS-7280SR-48C6 · EOS 4.27.4M 의 포트 표 '속도' 칸이 전부 '—'): 위 세 이름에 값이 없으면 이름에 'speed' 또는
+ *   'linkmode' 가 든 다른 필드에서 단위가 붙은 값('speed100Gbps' · 'linkModeForced100GbpsFull' · '100G')만 찾는다. 단위 없는 숫자는 여기서 쓰지 않는다
+ *   (어떤 단위인지 모르는 수를 bps 로 단정하지 않게 — 'speed' 이름의 정확한 필드만 위에서 수를 받는다). ⚠ 실장비 필드 이름은 아직 미확인(추정).
+ */
+const SPEED_IN_TEXT = /(\d{1,4})(?:p(\d{1,2}))?\s?(g|m)(?:bps|bit)/i;
+const SPEED_FIELD_RE = /speed|linkmode/i;
+const SPEED_FIELD_SKIP = /autoneg|duplex|advert|capab|supported|config|desired|lanes|max|min|default/i;   // 반증 E7: 최대 · 기본 속도는 지금 속도가 아니다
+function speedFromAnyField(flat) {
+  if (!isObj(flat)) return null;
+  for (const [k, v0] of Object.entries(flat)) {
+    const last = k.split('.').pop();
+    if (!SPEED_FIELD_RE.test(last) || SPEED_FIELD_SKIP.test(k)) continue;
+    const v = unwrap(v0);
+    if (typeof v !== 'string') continue;
+    const m = SPEED_IN_TEXT.exec(v.slice(0, 64));
+    if (!m) continue;
+    const n = Number(m[2] != null ? `${m[1]}.${m[2]}` : m[1]) * (m[3].toLowerCase() === 'g' ? 1e9 : 1e6);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
   return null;
 }
 
@@ -755,6 +813,138 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
   }
   if (!ports.length && unrecognized) return { ports: null, keys, truncated: 0 };
   return { ports, keys, truncated, droppedFields };
+}
+
+/* ── v3.41 VLAN(스위치포트) · 포트 채널 소속 · MLAG 상태 — 부품 주기에 읽는 별도 경로(⚠ 경로 · 필드 이름은 EOS Sysdb 관용 추정, 실장비 미확인) ──
+ * 사용자 실장비 캡처에서 포트 표의 VLAN · LAG 칸이 전부 비어 있었다. 인터페이스 상태 노드(intfStatus)에는 VLAN · 채널 소속 필드가 없어서
+ *   parseInterfaces 의 pick(vlan · lag)은 실장비에서 늘 비었던 것으로 본다(추정 — 데모만 값을 채웠다). 그래서 따로 읽는다.
+ */
+/**
+ * v3.41: 포트 목록에 VLAN · 채널 소속을 얹는다(순수). 읽은 맵에 그 포트가 있으면 그 값, 채널 맵을 읽었는데 없으면 ''(소속 없음),
+ *   맵을 못 읽었으면(null) 포트 값을 그대로 둔다(intfStatus 에서 읽은 값 — 대개 ''). 새 배열을 돌려준다.
+ */
+export function mergeL2Cfg(ports, { vlans = null, members = null, partial = {} } = {}) {
+  if (!Array.isArray(ports)) return ports;
+  return ports.map((p) => {
+    if (!p || typeof p !== 'object') return p;
+    const out = { ...p };
+    if (vlans instanceof Map && vlans.has(p.name)) out.vlan = vlans.get(p.name);
+    if (members instanceof Map) {
+      if (members.has(p.name)) out.lag = members.get(p.name);
+      // 반증 F1: 일부만 읽은 맵이면 맵에 없는 포트를 '소속 없음' 으로 비우지 않는다(모른다).
+      else if (!partial.lag) out.lag = p.lag && /port-?channel/i.test(p.lag) ? p.lag : '';
+    }
+    return out;
+  });
+}
+/** 스위치포트 설정(…/bridging/switchIntfConfig/switchIntfConfig) → { vlans: Map(포트 → 'routed' | '100' | 'trunk' | 'trunk · native 10') | null, keys }. */
+export function parseSwitchport(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { vlans: null, keys };
+  const vlans = new Map();
+  for (const [name, f] of entities) {
+    const mode = String(unwrap(pick(f, ['switchportMode', 'mode', 'portMode'])) ?? '').toLowerCase();
+    const enabled = unwrap(pick(f, ['enabled', 'switchportEnabled']));
+    const access = numOrNull(unwrap(pick(f, ['accessVlan', 'accessVlanId'])));
+    const native = numOrNull(unwrap(pick(f, ['trunkNativeVlan', 'nativeVlan'])));
+    if (!mode && enabled === undefined && access == null) continue;   // 스위치포트 필드가 없는 개체
+    let v;
+    if (enabled === false || /routed/.test(mode)) v = 'routed';
+    else if (/trunk/.test(mode)) v = native != null && native > 0 && native <= 4094 ? `trunk · native ${native}` : 'trunk';
+    else if (/dot1q|tunnel/.test(mode)) v = mode.replace(/^switchportmode/, '').slice(0, 24) || 'tunnel';
+    else v = access != null && access > 0 && access <= 4094 ? String(access) : (mode ? mode.replace(/^switchportmode/, '').slice(0, 24) : '');
+    if (v) vlans.set(str(name, 64), v);
+  }
+  if (!vlans.size && entities.size) return { vlans: null, keys };
+  return { vlans, keys };
+}
+const PO_RE = /port-?channel\s?(\d{1,5})/i;
+/** 값(문자열 · 포인터 배열 · 객체)에서 'Port-ChannelN' 을 찾는다(길이를 먼저 자른다 — 선형). */
+function poNameOf(v) {
+  const x = unwrap(v);
+  let t = '';
+  if (typeof x === 'string') t = x;
+  else if (Array.isArray(x)) t = x.slice(0, 16).map((y) => (typeof y === 'string' ? y : '')).join('/');
+  else if (isObj(x)) { try { t = JSON.stringify(x); } catch { t = ''; } }
+  const m = PO_RE.exec(String(t).slice(0, 512));
+  return m ? `Port-Channel${m[1]}` : null;
+}
+/** 포트 채널 소속(…/lag/input/config/cli/phyIntf 등) → { members: Map(물리 포트 → 'Port-ChannelN') | null, keys }. 소속 없는 포트는 넣지 않는다. */
+export function parseLagMembers(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  // 포인터만 든 응답(포트 노드 하나 — `lag: {ptr}`)은 entitiesOf 가 개체로 세지 않는다 — 그때도 아래 훑기로 본다.
+  if (notRead(format, entities)) { const raw = rawLagScan(text); return raw.seen ? { members: raw.members, keys } : { members: null, keys }; }
+  const members = new Map(); let seen = 0;
+  for (const [name, f] of entities) {
+    if (!/^(ethernet|et)\d/i.test(String(name))) continue;
+    // 반증 E1: 채널 소속 표(lag/…/phyIntf)에 포트 개체가 있으면 그 표는 읽은 것이다 — 소속 칸이 없는 포트는 '채널 없음'(null 로 두면 연속 실패 차단이 그 CVP 의 소속 읽기를 멈췄다).
+    seen++;
+    let po = null; let hasField = false;
+    // 평면화된 키(포인터는 'lag.ptr.3' 처럼 펼쳐진다)의 **어느 조각이든** lag · channel 이면 그 값을 본다.
+    for (const [k, v] of Object.entries(isObj(f) ? f : {})) {
+      if (!/(^|\.)(lag|lagintf|lagid|portchannel|channelgroup|channel)(\.|$)/i.test(k.slice(0, 128))) continue;
+      hasField = true;
+      po = poNameOf(v);
+      if (po) break;
+    }
+    if (po) members.set(str(name, 64), po);
+  }
+  // entitiesOf 는 포인터 값을 필드로 세지 않는다(없는 개체를 지어내지 않게) — 소속이 포인터(`{ptr:[…,'Port-Channel10']}`)로 오면 위에서 못 본다.
+  //   그래서 알림을 한 번 더 훑어 '포트 이름 개체의 lag·channel 갱신' 값만 본다(값은 512자로 잘라 정규식 — 선형).
+  const raw = rawLagScan(text);
+  for (const [port, po] of raw.members) if (!members.has(port)) members.set(port, po);
+  if (!seen && !raw.seen) return { members: null, keys };
+  return { members, keys };
+}
+const PORT_NAME_RE = /^(ethernet|et)\d[\d/]*$/i;
+const LAG_FIELD_RE = /^(lag|lagintf|lagid|portchannel|channelgroup|channel)$/i;   // 반증 E6: 칸 이름 전체 일치('flags' 가 'lag' 에 맞지 않게)
+function rawLagScan(text) {
+  const members = new Map(); let seen = 0;
+  let values = [];
+  try { values = splitJsonStream(text).values; } catch { return { members, seen }; }
+  for (const v of values) {
+    if (!isObj(v) || !Array.isArray(v.notifications)) continue;
+    for (const n of v.notifications.slice(0, 20_000)) {
+      if (!isObj(n) || !isObj(n.updates)) continue;
+      const segs = typeof n.path === 'string' ? n.path.split('/').filter(Boolean) : Array.isArray(n.path_elements) ? n.path_elements.filter((x) => typeof x === 'string') : [];
+      const tail = segs.length ? decodeSeg(segs[segs.length - 1]) : '';
+      for (const [k, u] of Object.entries(n.updates)) {
+        const val = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
+        let port = null; let po = null;
+        if (PORT_NAME_RE.test(tail) && LAG_FIELD_RE.test(String(k))) { port = tail; po = poNameOf(isObj(val) && val.ptr ? val.ptr : val); }
+        // 컬렉션의 포트별 포인터(`Ethernet1: {ptr:[…/phyIntf/Ethernet1]}`)는 소속 값이 아니다 — 세지 않는다(세면 빈 맵으로 '읽음' 이 되어 포인터를 따라가지 않는다).
+        else if (PORT_NAME_RE.test(String(k)) && isObj(val) && ptrSegs(val) == null) {
+          let t = ''; try { t = JSON.stringify(val).slice(0, 512); } catch { t = ''; }
+          if (/"(lag|lagIntf|lagId|portChannel|channelGroup|channel)"/i.test(t)) { port = String(k); po = poNameOf(t); }
+        }
+        if (port) { seen++; if (po && members.size < 4096) members.set(str(port, 64), po); }
+      }
+    }
+  }
+  return { members, seen };
+}
+const MLAG_PREFIX = /^(mlagstate|mlagnegotiationstatus|negotiationstatus|negstatus|linkstate|mlaglinkstatus|peerlinkstatus|intfoper|link)/i;
+const mlagWord = (v) => { const x = unwrap(v); if (x == null || x === '' || (typeof x !== 'string' && typeof x !== 'boolean')) return null; const s0 = String(x).trim(); const c = s0.replace(MLAG_PREFIX, '').replace(/^[\s_:-]+/, ''); return (c || s0).slice(0, 32).toLowerCase(); };
+/**
+ * MLAG 상태(…/Sysdb/mlag/status) → { status: { state, negotiation, peerLink, peerLinkState, domain, localIntf } | null, keys }.
+ *   필드가 하나도 없으면 null('못 읽음'). 'disabled' 는 MLAG 를 쓰지 않는 장비다(문제가 아니다 — 판정은 cvp/redundancy.js).
+ */
+export function parseMlag(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { status: null, keys };
+  const f = {};
+  for (const [, x] of entities) Object.assign(f, isObj(x) ? x : {});
+  const out = {
+    state: mlagWord(pick(f, ['mlagState', 'state', 'operState'])),
+    negotiation: mlagWord(pick(f, ['negotiationStatus', 'negStatus', 'mlagNegotiationStatus'])),
+    peerLink: (() => { const v = unwrap(pick(f, ['peerLink', 'peerLinkIntf', 'peerLinkName'])); return typeof v === 'string' ? str(v, 64) : poNameOf(v); })(),
+    peerLinkState: mlagWord(pick(f, ['peerLinkStatus', 'peerLinkState', 'mlagLinkStatus'])),
+    domain: (() => { const v = unwrap(pick(f, ['domainId', 'domain'])); return typeof v === 'string' || typeof v === 'number' ? str(String(v), 64) : null; })(),
+    localIntf: (() => { const v = unwrap(pick(f, ['localInterface', 'localIntf', 'localIntfId'])); return typeof v === 'string' ? str(v, 64) : null; })(),
+  };
+  // v3.42(A2-F9): 엣지 정제(cvpEdge.cleanInfo)와 같은 조건 — 상태 · 협상 · 피어 링크 중 하나도 없으면 '못 읽음'(도메인만 있는 응답이 로컬에서는 '확인 불가', 중앙에서는 '못 읽음' 으로 갈렸다).
+  if (!out.state && !out.negotiation && !out.peerLinkState && !out.peerLink) return { status: null, keys };
+  return { status: out, keys };
 }
 
 /*
@@ -841,6 +1031,9 @@ export function parseCounters(text) {
       outOctets: numOrNull(pick(f, ['outOctets', 'outBytes', 'ifOutOctets', 'ifHCOutOctets'])),
       inErrors: numOrNull(pick(f, ['inErrors', 'inErrorsTotal', 'ifInErrors', 'inTotalErrors'])),
       outErrors: numOrNull(pick(f, ['outErrors', 'outErrorsTotal', 'ifOutErrors', 'outTotalErrors'])),
+      // v2.922(3a): 포트 드롭(discards) — 필드 이름은 **추정**(Arista 공식 경로 미확인 · 설계 PROFILES §10 정직 기록). 못 읽으면 null(0 아님).
+      inDiscards: numOrNull(pick(f, ['inDiscards', 'inDiscardsTotal', 'ifInDiscards', 'inTotalDiscards', 'inDroppedPkts'])),
+      outDiscards: numOrNull(pick(f, ['outDiscards', 'outDiscardsTotal', 'ifOutDiscards', 'outTotalDiscards', 'outDroppedPkts'])),
     };
     if (Object.values(c).every((x) => x == null)) continue; // 카운터 필드가 없는 개체는 세지 않는다
     counters.set(str(name, 64), c);
@@ -874,7 +1067,7 @@ export function counterGapOk(prevAt, curAt, intervalMs, slackMs = 0) {
  * @param {number} [slackMs]    간격 한계에 더할 직전 실행 소요(v2.611 COL2611-08 — 표본 간격 = 주기 + 실행 시간)
  */
 export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
-  const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, reason: null };
+  const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDrop: null, outDrop: null, reason: null };
   if (!prev || !prev.c) { out.reason = 'first'; return out; }
   if (!counterGapOk(prev.at, cur?.at, intervalMs, slackMs)) { out.reason = 'gap'; return out; }
   const gapMs = Number(cur.at) - Number(prev.at);
@@ -887,6 +1080,8 @@ export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
   out.outBps = outO == null ? null : Math.round((outO * 8) / sec);
   out.inErr = d(prev.c.inErrors, cur.c.inErrors);
   out.outErr = d(prev.c.outErrors, cur.c.outErrors);
+  out.inDrop = d(prev.c.inDiscards, cur.c.inDiscards);   // v2.922 — 못 읽은 카운터는 null(드롭 0 이 아니다)
+  out.outDrop = d(prev.c.outDiscards, cur.c.outDiscards);
   const sp = Number(speed);
   const util = (bps) => {
     if (bps == null || !Number.isFinite(sp) || sp <= 0) return null;
@@ -1197,4 +1392,103 @@ export function parseEvents(text, { max = EVENT_MAX } = {}) {
   const bySeverity = Object.fromEntries(EVENT_SEVERITIES.map((k) => [k, 0]));
   for (const e of all) bySeverity[e.severity]++;
   return { events: all.slice(0, max), bySeverity, total: all.length, truncated: Math.max(0, all.length - max), keys: [...keys] };
+}
+
+/* ── v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블(FDB) ─────────────────────────────────────────────────────────────
+ * 호스트 업링크 매칭의 근거를 '포트 설명 일치(보통)' 에서 'LLDP 이웃(확정)' · 'MAC 테이블 학습(높음)' 으로 올린다(cvp/hostMatch.js).
+ * ⚠ 경로(`/Sysdb/l2discovery/lldp/status/local/1/portStatus` · `/Smash/bridging/status/smashFdbStatus`)와 필드 이름은 EOS Sysdb/Smash 관용으로
+ *   **추정**했다 — 실장비로 확인하지 못했다(다른 텔레메트리와 같은 처지 — 후보 체인 · 원문 표본 · 경로 탐색 표본으로 확인한다).
+ *   못 읽으면 null 이고 화면은 '수집 전/못 읽음' 으로 말한다(매칭을 지어내지 않는다).
+ */
+/** 개체 경로 구분자 — client.js PART_PATH_SEP 와 같은 글자(followPtrs 가 포인터 키를 이 글자로 이어 개체 이름을 짓는다 — 테스트가 대조). */
+export const ENTITY_PATH_SEP = ' › ';
+export const LLDP_MAX = 512;        // 장비당 이웃 상한
+export const FDB_MAX = 4096;        // 장비당 MAC 항목 상한(엣지 push · 중앙 정제가 같은 값)
+export const FDB_PORT_MAX = 512;    // 포트당 MAC 상한 — 넘는 포트는 스위치 사이 트렁크로 보고 버린다(개수는 portsOverCap 으로 밝힌다)
+/** MAC 정규화 — 콜론·하이픈·점·붙임 어느 표기든 12자 소문자 16진. 아니면 null. */
+export const normMac = (v) => { const h = String(v ?? '').slice(0, 64).toLowerCase().replace(/[^0-9a-f]/g, ''); return h.length === 12 ? h : null; };
+const MAC_IN_TEXT = /(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}|(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}/i;
+const INTF_NAME = /^(ethernet|management|port-channel|vlan|loopback|et|ma|po)[\d/.:]*/i;
+
+/**
+ * LLDP 이웃 → { neighbors:[{port, idx, sysName, portId, portDesc, chassisId}] | null, keys, truncated }.
+ * 개체 이름은 followPtrs 가 '포트 › remoteSystem › 번호' 로 짓는다 — 첫 조각이 로컬 포트다. 이름에서 포트를 못 찾으면 필드(localPort·intf)를 본다.
+ * 이웃 식별 필드(sysName·portId·chassisId)가 하나도 없는 개체는 세지 않는다(컨테이너 · 빈 슬롯).
+ */
+export function parseLldp(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { neighbors: null, keys };
+  const out = [];
+  for (const [name, f] of entities) {
+    const sysName = str(pick(f, ['sysName', 'systemName']) ?? '', 255);
+    const portId = str(pick(f, ['portId']) ?? '', 128);
+    const chassisId = str(pick(f, ['chassisId']) ?? '', 128);
+    if (!sysName && !portId && !chassisId) continue;
+    const segs = String(name).split(ENTITY_PATH_SEP);
+    let port = INTF_NAME.test(segs[0]) ? segs[0] : '';
+    if (!port) { const p = pick(f, ['localPort', 'localIntf', 'intf', 'interface', 'portName']); port = p == null ? '' : str(p, 64); }
+    if (!port) continue;
+    out.push({ port: str(port, 64), idx: str(segs.slice(1).join('/') || '0', 64), sysName, portId, portDesc: str(pick(f, ['portDescription', 'portDesc']) ?? '', 200), chassisId });
+  }
+  if (!out.length && entities.size) return { neighbors: null, keys };
+  return { neighbors: out.slice(0, LLDP_MAX), keys, truncated: Math.max(0, out.length - LLDP_MAX) };
+}
+
+/**
+ * MAC 테이블(FDB) → { entries:[{mac, vlan, port}] | null, keys, truncated, portsOverCap:[{port, macs}], total }.
+ * ⚠ entitiesOf 를 쓰지 않는다 — FDB 항목의 키는 `{fid, addr}` 같은 **복합 객체**라 updKey(첫 스칼라 = VLAN)로 이름을 지으면 같은 VLAN 의 MAC 이
+ *   전부 한 개체로 합쳐진다. update 마다 값 + 키 객체를 함께 펼쳐 읽는다. 알림 형식이 아니면 entitiesOf 로 떨어진다.
+ * 포트당 MAC 이 FDB_PORT_MAX 를 넘는 포트(스위치 사이 트렁크)는 버리고 portsOverCap 으로 밝힌다 — 그 포트는 모든 호스트의 MAC 을 배워 매칭 근거가 아니다.
+ */
+export function parseFdb(text) {
+  const all = [];
+  const keysSeen = new Set();
+  const take = (name, f) => {
+    for (const k of Object.keys(f)) if (keysSeen.size < 40) keysSeen.add(k.split('.').pop());
+    let mac = normMac(pick(f, ['addr', 'macAddr', 'macAddress', 'mac', 'address', 'ethAddr']));
+    if (!mac) { const m = MAC_IN_TEXT.exec(String(name).slice(0, 128)); mac = m ? normMac(m[0]) : null; }
+    const pv = pick(f, ['intf', 'interface', 'intfId', 'port']);
+    const port = pv == null ? '' : str(pv, 64);
+    if (!mac || !port) return;
+    const vl = numOrNull(pick(f, ['fid', 'vlanId', 'vlan', 'vid']));
+    all.push({ mac, vlan: vl != null && vl >= 0 && vl <= 4095 ? Math.trunc(vl) : null, port });
+  };
+  const { values } = splitJsonStream(text);
+  let format = null; let updates = 0;
+  // v2.924(반증 L-4): 알림을 시각 순으로 적용하고 같은 update 키는 **마지막 값**으로, deletes 는 지운다(entitiesOf 와 같은 규칙) —
+  //   예전에는 첫 값을 남겨 다른 포트로 옮긴 MAC 이 옛 포트에, 지워진 MAC 이 그대로 남았다(재현).
+  const latest = new Map();   // update 키 → [name, fields]
+  const notes = [];
+  for (const v of values) if (isObj(v) && Array.isArray(v.notifications)) { format = 'notifications'; pushAll(notes, v.notifications); }
+  for (const n of byTimestamp(notes)) {
+    if (!isObj(n)) continue;
+    // deletes 는 키 배열 또는 updates 와 같은 모양의 맵(키 → {key}) 둘 다 받는다(판본마다 다를 수 있다 — 추정).
+    const dels = Array.isArray(n.deletes) ? n.deletes : isObj(n.deletes) ? Object.keys(n.deletes) : [];
+    for (const d of dels) if (typeof d === 'string' || typeof d === 'number') latest.delete(String(d));
+    if (!isObj(n.updates)) continue;
+    for (const [k, u] of Object.entries(n.updates)) {
+      updates++;
+      const raw = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
+      if (ptrSegs(raw) != null) continue;
+      const val = unwrap(raw);
+      if (!isObj(val)) continue;
+      const kf = isObj(u) && isObj(u.key) ? flatten(u.key, 'key') : {};
+      if (!latest.has(k) && latest.size > FDB_MAX * 4) continue;   // 상한의 4배를 넘으면 새 키는 더 받지 않는다(포트당 상한 판정에 충분)
+      latest.set(k, [k, { ...kf, ...flatten(val) }]);
+    }
+  }
+  for (const [name, f] of latest.values()) take(name, f);
+  if (!format) {
+    const r = entitiesOf(text);
+    if (notRead(r.format, r.entities)) return { entries: null, keys: r.keys };
+    format = r.format;
+    for (const [name, f] of r.entities) take(name, f);
+  } else if (!updates) return { entries: null, keys: [] };
+  if (!all.length) return { entries: null, keys: [...keysSeen] };
+  const perPort = new Map();
+  for (const e of all) perPort.set(e.port, (perPort.get(e.port) || 0) + 1);
+  const overCap = [...perPort].filter(([, n]) => n > FDB_PORT_MAX).map(([port, macs]) => ({ port, macs }));
+  const over = new Set(overCap.map((x) => x.port));
+  const kept = all.filter((e) => !over.has(e.port));
+  return { entries: kept.slice(0, FDB_MAX), keys: [...keysSeen], truncated: Math.max(0, kept.length - FDB_MAX), portsOverCap: overCap.slice(0, 64), total: all.length };
 }

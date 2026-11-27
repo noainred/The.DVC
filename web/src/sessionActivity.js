@@ -20,19 +20,24 @@ export const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart
  */
 export function createActivityPinger({ send, now = () => Date.now(), minIntervalMs = ACTIVITY_MIN_INTERVAL_MS } = {}) {
   let last = -Infinity;
-  let inflight = false;
+  // v3.10.8(공통 기능 점검 6회차): '전송 중' 보류에 시한이 없었다 — fetch 는 기본 시한이 없어 끊긴 연결에서 끝나지 않으면
+  //   inflight 가 영원히 참이고, 그 뒤로 활동 신호가 하나도 안 나가 **사용자가 일하는 중에 서버 유휴 만료로 로그아웃**됐다.
+  //   보류는 한 간격(minIntervalMs)까지만 — 그보다 오래 걸린 전송은 잊고 새로 보낸다(늦게 끝난 옛 전송이 새 전송의 표시를 지우지 않게 세대로 가린다).
+  let inflightAt = null;
+  let gen = 0;
   return {
     /** 보냈으면 true. force 면 간격을 무시한다(화면을 연 직후). */
     ping(force = false) {
       const t = now();
-      if (inflight) return false;
-      if (!force && t - last < minIntervalMs) return false;
+      if (inflightAt != null && t >= inflightAt && t - inflightAt < minIntervalMs) return false;
+      if (!force && t >= last && t - last < minIntervalMs) return false;
       last = t;
-      inflight = true;
+      inflightAt = t;
+      const g = ++gen;
       Promise.resolve()
         .then(() => send())
         .catch(() => { /* 다음 활동에서 다시 보낸다 */ })
-        .finally(() => { inflight = false; });
+        .finally(() => { if (g === gen) inflightAt = null; });
       return true;
     },
   };

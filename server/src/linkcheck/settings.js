@@ -6,13 +6,13 @@
  * ⚠ 주기·보존 **숫자를 화면 문구에 박지 말 것** — 이 모듈이 주는 값만 쓴다(CLAUDE.md 규약).
  */
 import { demoOn } from '../mock/demo/flags.js';
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { KIND_KEYS } from './links.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 105회차 A5: 읽기 오류 ≠ 손상
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
 const FILE = () => path.join(config.configDir, 'linkcheck-settings.json');
@@ -87,9 +87,23 @@ const _loadErr = makeSettingsLoadError(() => FILE(), { label: '통신 점검 설
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function linkCheckSettingsLoadError() { loadLinkCheckSettings(); return _loadErr.get(); }
 
+/*
+ * 105회차 A5(103 남긴 것 — cvp/settings F20 과 같은 최소 수정): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 원본을 `.corrupt.*` 로 옮겼다 —
+ *   재시작 뒤 '보존본만 있음' 이 되고, 관리자 저장(기본값 + 바꾼 칸)이 표지를 지워 늘려 둔 짝 · 종류 설정이 보존본에만 남았다.
+ *   이제 원본을 두고(30초 간격 재읽기 — 읽히면 재시작 없이 풀림) · 표지 readError(엣지 배포 503 은 그대로 · 확정 불가) · 저장은 409. parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'link-check' });
+/** 105회차 A5: 읽기 오류 중 저장 거절 사유(라우트 409), 아니면 null. */
+export function linkCheckSettingsWriteRefusal() {
+  const le = linkCheckSettingsLoadError();
+  return le?.readError ? { ok: false, status: 409, code: 'settings-unreadable', readError: true, reason: `통신 점검 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadLinkCheckSettings() {
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return { ...DEFAULTS, kinds: {}, pairs: [] }; }
   try {
-    const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const j = JSON.parse(rr.value);
     if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
     const out = normalizeSettings(j);
     _loadErr.ok();
@@ -116,6 +130,7 @@ export function onLinkCheckSettingsChange(fn) {
 const NUMERIC_KEYS = Object.keys(DEFAULTS).filter((k) => typeof DEFAULTS[k] === 'number');
 export function saveLinkCheckSettings(body = {}) {
   const cur = loadLinkCheckSettings();
+  { const ref = linkCheckSettingsWriteRefusal(); if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true }); }   // 105회차 A5: 원본이 그 자리에 있어 rename 이 보존본도 없이 덮는다
   // 숫자 필드가 비었으면(빈 문자열·null·숫자 아님) 이전 값을 유지한다 — 병합 전에 버린다.
   body = { ...(body || {}) };
   for (const k of NUMERIC_KEYS) if (k in body && numOrNull(body[k]) == null) delete body[k];

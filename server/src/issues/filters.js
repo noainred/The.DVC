@@ -7,11 +7,11 @@
  *  · 고치기는 만든 사람만. 지우기는 만든 사람 또는 전체 범위 관리자(isMod — 공유 필터 정리).
  *  · 저장 전에 검색식을 해석해 본다 — 틀린 식은 저장하지 않는다(오류 위치를 그대로 돌려준다).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';
 import { parseQuery, QUERY_LIMITS } from './query.js';
 
 export const FILTER_LIMITS = Object.freeze({ perOwner: 50, total: 3000, name: 60, subscribers: 100 });
@@ -19,16 +19,27 @@ export const filtersFile = () => path.join(config.configDir, 'issue-filters.json
 
 let cache = null;
 let loadError = null;
+const _reader = makeJsonFileReader(() => filtersFile(), { parse: (t) => t, preserve: false, tag: 'issue-filters' });   // 97회차 F8: 읽기 오류 ≠ 손상
+let _readErr = null;   // 마지막 읽기가 읽기 오류였으면 그 코드
 export function filtersLoadError() { return loadError; }
-export function _resetFiltersCache() { cache = null; loadError = null; }
+export function _resetFiltersCache() { cache = null; loadError = null; _readErr = null; _reader.reset(); }
 
 function load() {
   if (cache) return cache;
   const file = filtersFile();
   let filters = [];
+  // 97회차 F8: 읽기 단계는 공용 읽기(util/jsonFileRead.js) — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 · 캐시하지 않고(30초 간격 재읽기) ·
+  //   저장을 거절한다(409). 예전 catch 하나는 권한만 틀린 원본을 보존본으로 옮긴 뒤 빈 목록을 캐시했고, 다음 저장이 그 한 건만 든 파일을 썼다. parse 실패는 아래 catch(예전과 같다).
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    loadError = { message: `공유 필터 파일(issue-filters.json)을 읽지 못했습니다(읽기 오류 ${_readErr} — 원본은 그대로 · 저장 거절 중)`, at: Date.now(), readError: true };
+    return { filters: [] };   // 캐시하지 않는다
+  }
+  _readErr = null;
   try {
-    if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!j || typeof j !== 'object' || !Array.isArray(j.filters)) throw new Error('filters 배열이 없습니다');
       filters = j.filters.filter((f) => f && typeof f === 'object' && typeof f.id === 'string' && typeof f.owner === 'string' && typeof f.query === 'string');
     }
@@ -43,6 +54,7 @@ function load() {
   return cache;
 }
 function save(filters) {
+  if (_readErr) throw Object.assign(new Error(`공유 필터 파일(issue-filters.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable' });   // 97회차 F8
   atomicWriteFileSync(filtersFile(), JSON.stringify({ v: 1, filters }, null, 1), { mode: 0o600 });
   cache = { filters };
 }

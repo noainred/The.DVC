@@ -259,6 +259,10 @@ test('⑤-b 승인은 confirmVerified 필수 · 형식 검사 · 감사 로그(�
 });
 
 test('⑤-c 정책 변경은 설정 소유자만 · 관찰 일괄 승인은 확인 필수', async () => {
+  // 91회차(88회차 결정 ④ — 의도된 변경): observe(약화)는 소유자 + **본인 OTP**. 예전 기대값(OTP 없이 200)은 결정 전 동작이다.
+  const { generateSecret, generateToken } = await import('../src/auth/totp.js');
+  const sec = generateSecret();
+  fs.writeFileSync(path.join(DIR, 'users.json'), JSON.stringify({ users: [{ username: 'noainred', role: 'admin', superuser: true, totpEnabled: true, totpSecret: sec }] }));
   await withApp(ADMIN, async (call) => {
     const r = await call('/policy', 'PUT', { kind: 'ssh', mode: 'observe' });
     assert.equal(r.status, 403); assert.equal(r.body.requiredOwner, true);
@@ -267,7 +271,11 @@ test('⑤-c 정책 변경은 설정 소유자만 · 관찰 일괄 승인은 확�
     let r = await call('/policy', 'PUT', { kind: 'ssh', mode: 'bogus' });
     assert.equal(r.status, 400);
     r = await call('/policy', 'PUT', { kind: 'ssh', mode: 'observe' });
-    assert.equal(r.status, 200); assert.equal(r.body.policy.mode, 'observe');
+    assert.equal(r.status, 403); assert.equal(r.body.code, 'otp-required');
+    const left = 30_000 - (Date.now() % 30_000);
+    if (left < 15_000) await new Promise((res) => setTimeout(res, left + 50));
+    r = await call('/policy', 'PUT', { kind: 'ssh', mode: 'observe', otp: generateToken(sec, { counter: Math.floor(Date.now() / 30_000) }) });
+    assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.policy.mode, 'observe');
     assert.ok(auditLines().some((a) => a.action === '장비 신뢰 정책 변경' && a.detail === 'observe'));
     pt.checkPeer('ssh', 'o1', 22, FP_A);
     r = await call('/approve-observed', 'POST', { kind: 'ssh' });

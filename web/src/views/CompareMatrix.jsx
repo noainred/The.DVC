@@ -10,6 +10,7 @@ import {
 } from './compareMatrixText.js';
 import Select from '../components/Select.jsx';
 import { hostCapShort, hostCapFootnote, hostCapTotal, HOST_CAP_METRICS } from './hostCapacityText.js'; // v2.742(LEFT-06)
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 /**
  * CompareMatrix.jsx — 비교 매트릭스 모달(v2.499).
@@ -139,7 +140,7 @@ export default function CompareMatrix({ onClose, initialAxis = 'cluster' }) {
   const capFoot = axis === 'vcenter' ? hostCapFootnote(hostCapTotal(vcList)) : null;
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 1440, width: '96vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div className="flex between wrap" style={{ marginBottom: 10, alignItems: 'center', gap: 8 }}>

@@ -10,7 +10,7 @@
  *  · 일부러 넣은 이상: 뱅크 전류 경고(12A 초과)·온도 경고(27℃ 초과) 장비 몇 대, 수집 실패 장비 1대(값을 지어내지 않는다 —
  *    실패 스냅샷은 수치가 비어 있다).
  *
- * 법인 목록(`demoCorps`)은 CVP 데모도 쓴다 — DataCenter 가 등록돼 있으면 그것을, 없으면 mock vCenter 마다 `dc-<도시>` 를 만든다.
+ * 법인 목록(`demoCorps`)은 CVP 데모도 쓴다 — DataCenter 가 등록돼 있으면 그것을, 없으면 mock vCenter 마다 `dc-<도시>`(그 vCenter 의 데모 엣지 라벨이 도시와 같으면 라벨 id — v2.985 demoCorpId)를 만든다.
  */
 import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 
@@ -26,26 +26,50 @@ export const isDemoId = (id) => String(id || '').startsWith('mock-');
 export const pduDemoActive = (devices) => isMockMode() && (Array.isArray(devices) ? devices : []).some((x) => isDemoId(x?.id));
 
 /**
- * 데모 법인 목록 [{id, name, code}] — DataCenter 가 있으면 그것(앞 12곳), 없으면 mock vCenter 의 도시로 `dc-<도시>` 를 만든다.
- * ⚠ DataCenter 를 만드는 것은 mock 모드·목록이 비어 있을 때뿐이다. vCenter 할당은 할당이 없는 vCenter 만 데모 법인으로 채운다(v2.709 assignDemoCorps).
+ * 데모 법인 목록 [{id, name, code}] — DataCenter 가 있으면 그것, 없으면 mock vCenter 의 도시로 `dc-<도시>`(엣지 라벨 = 도시면 라벨 id — demoCorpId)를 만든다.
+ * ⚠ vCenter 법인을 만드는 것은 mock 모드·목록이 비어 있을 때뿐이다. vCenter 할당은 할당이 없는 vCenter 만 데모 법인으로 채운다(v2.709 assignDemoCorps).
+ * v3.26.0(시연 규모): vCenter 가 없는 데모 법인 10곳(generator `BM_ONLY_SITES` — 베어메탈·스토리지·PDU 만)을 mock 모드에서 늘 보장한다
+ *   (관리자가 지운 법인은 `ensureDatacenter` 의 삭제 표시가 되살리지 않는다). 예전 상한 12곳을 없앴다(60곳까지).
+ *   법인 코드(PDU·CVP 이름)는 겹치지 않게 고른다 — 예전에는 Dubai·Dublin 이 둘 다 'DUB' 였다.
  */
 export async function demoCorps(snapshot) {
   if (!isMockMode()) return [];
   const dcs = await import('../../datacenter/store.js');
   let list = dcs.listDatacenters();
+  const vcs = Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : [];
   if (!list.length) {
-    const vcs = Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : [];
     if (!vcs.length) return [];
+    const { demoEdgeOfVcenter } = await import('./edge.js');
     for (const vc of vcs) {
       const city = vc.location?.city || vc.name || vc.id;
-      const id = `dc-${slug(city) || slug(vc.id)}`;
+      const id = demoCorpId(vc, city, demoEdgeOfVcenter(vc.id));
       dcs.ensureDatacenter({ id, name: `${city} 법인`, region: vc.location?.region || vc.region || '', note: '데모(mock) 법인' });
     }
-    list = dcs.listDatacenters();
   }
+  if (vcs.length) await ensureBareMetalOnlyCorps(dcs);
   await assignDemoCorps(dcs, snapshot).catch((e) => console.warn(`[mock] 데모 법인 할당 실패: ${e?.message || e}`));
   list = dcs.listDatacenters();
-  return list.slice(0, 12).map((d) => ({ id: String(d.id), name: String(d.name || d.id), code: (slug(d.name || d.id).replace(/^dc-/, '').slice(0, 3) || 'dc').toUpperCase() }));
+  return withCodes(list.slice(0, 60));
+}
+
+/** vCenter 없는 데모 법인 10곳 — 이미 있거나 지운 것은 그대로(ensureDatacenter). */
+async function ensureBareMetalOnlyCorps(dcs) {
+  const { BM_ONLY_SITES } = await import('../generator.js');
+  for (const s of BM_ONLY_SITES) {
+    dcs.ensureDatacenter({ id: `dc-${s.slug}`, name: `${s.city} 법인`, region: s.region, note: `데모(mock) 법인 — ${s.role} · vCenter 없음` });
+  }
+}
+
+/** 법인마다 겹치지 않는 3글자 코드 — 앞 세 글자, 겹치면 앞 두 글자 + 끝 글자, 그래도 겹치면 앞 두 글자 + 순번. */
+export function withCodes(list) {
+  const used = new Set();
+  return list.map((d) => {
+    const letters = slug(d.name || d.id).replace(/^dc-/, '').replace(/[^a-z0-9]/g, '') || 'dc';
+    const tries = [letters.slice(0, 3), letters.slice(0, 2) + letters.slice(-1), ...Array.from({ length: 9 }, (_, i) => letters.slice(0, 2) + (i + 1))];
+    const code = (tries.find((c) => c.length === 3 && !used.has(c.toUpperCase())) || letters.slice(0, 3)).toUpperCase();
+    used.add(code);
+    return { id: String(d.id), name: String(d.name || d.id), code };
+  });
 }
 
 /**
@@ -54,6 +78,16 @@ export async function demoCorps(snapshot) {
  * 데모 엣지 등록이 'Seoul' 같은 DataCenter 를 자동으로 만든다) ② 없으면 도시 이름의 데모 법인 `dc-<도시>`(없으면 만든다 · note '데모(mock) 법인').
  * 사람이 등록한 vCenter(목 vCenter 가 아님)와 이미 할당된 vCenter 는 건드리지 않는다.
  */
+/**
+ * P6(v2.985 — 목 데이터 재현): 데모 법인 id. 그 vCenter 를 수집하는 데모 엣지의 라벨이 도시와 같으면 **라벨 id**(예 'seoul')를 쓴다 —
+ * 예전 'dc-seoul' 이면 엣지 자동 등록(analysisServers.ensureCollectorDatacenter · 라벨 'Seoul')이 id 가 다르다며 'Seoul' 법인을 하나 더 만들어
+ * 법인 목록에 'Seoul 법인' 과 'Seoul' 이 나란히 보였다. 라벨이 다른 도시(더블린 ← 프랑크푸르트 엣지)는 예전대로 'dc-<도시>'.
+ */
+export function demoCorpId(vc, city, edge) {
+  const c = slug(city) || slug(vc?.id);
+  return edge && slug(edge.datacenter) === c ? c : `dc-${c}`;
+}
+
 async function assignDemoCorps(dcs, snapshot) {
   const vcs = Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : [];
   if (!vcs.length) return;
@@ -63,11 +97,14 @@ async function assignDemoCorps(dcs, snapshot) {
   const fresh = [];
   for (const vc of vcs) {
     if (!vc?.id || assigned[vc.id] || !isMockVcenter(vc)) continue;
-    const edgeDc = String(demoEdgeOfVcenter(vc.id)?.datacenter || '').toLowerCase();
-    let dc = edgeDc ? byName.get(edgeDc) : null;
+    const edge = demoEdgeOfVcenter(vc.id);
+    const edgeDc = String(edge?.datacenter || '').toLowerCase();
+    const city = vc.location?.city || vc.name || vc.id;
+    const cityId = demoCorpId(vc, city, edge);
+    // P6(v2.985): 그 도시의 데모 법인이 있으면 그것 먼저(예전 배치 그대로 — 더블린은 프랑크푸르트 엣지가 수집해도 더블린 법인), 없으면 엣지 법인.
+    let dc = byName.get(cityId) || (edgeDc ? byName.get(edgeDc) : null);
     if (!dc) {
-      const city = vc.location?.city || vc.name || vc.id;
-      dc = `dc-${slug(city) || slug(vc.id)}`;
+      dc = cityId;
       if (!byName.has(dc)) { dcs.ensureDatacenter({ id: dc, name: `${city} 법인`, region: vc.location?.region || vc.region || '', note: '데모(mock) 법인' }); byName.set(dc, dc); }
     }
     fresh.push({ vcenterId: String(vc.id), datacenterId: dc });
@@ -165,7 +202,7 @@ export function ensurePduDemo() {
 
 async function seedInner() {
   const reg = await import('../../pdu/registry.js');
-  if (reg.listDevices().length) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  if (reg.listDevices().length) return topUpInner(reg);
   const { store } = await import('../../store.js');
   const snap = store.get();
   // 메인 mock 스냅샷이 생긴 뒤에만 시드한다(테스트처럼 스냅샷 없이 폴러만 부르는 경우에는 시드하지 않는다).
@@ -179,6 +216,30 @@ async function seedInner() {
   console.log(`[mock] PDU 데모 시드: 법인 ${corps.length}곳 · PDU ${devices.length}대 + 30일 시계열 ${backfilled}건`);
   _seeded = true;
   return { seeded: true, devices: devices.length, backfilled };
+}
+
+/**
+ * v3.26.0: 보충 — 등록부가 데모 장비뿐이고 PDU 가 있는 법인이 데모 법인의 절반 미만이면(v2.914 이전 규모 — 앞 12곳만 시드)
+ * PDU 가 없는 법인의 장비를 덧붙이고 그 장비만 백필한다. 사람이 등록한 장비가 있거나 절반 이상 덮였으면 하지 않는다.
+ */
+async function topUpInner(reg) {
+  const cur = reg.listDevices();
+  if (cur.some((d) => !isDemoId(d.id))) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  const { store } = await import('../../store.js');
+  const snap = store.get();
+  if (!Array.isArray(snap?.vcenters) || !snap.vcenters.length) return { seeded: false, reason: 'snapshot-not-ready' };
+  const corps = await demoCorps(snap);
+  if (!corps.length) return { seeded: false, reason: 'snapshot-not-ready' };
+  const covered = new Set(cur.map((d) => String(d.datacenterId || '')));
+  const missing = corps.filter((c) => !covered.has(c.id));
+  if (!missing.length || covered.size >= Math.ceil(corps.length / 2)) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  const devices = missing.flatMap(demoPduDevicesFor);
+  const r = reg.topUpDemoDevices(devices);
+  if (!r.ok || !r.count) { _seeded = true; return { seeded: false, reason: r.reason || 'nothing-to-add' }; }
+  const backfilled = await backfillPdu(devices);
+  console.log(`[mock] PDU 데모 보충: 법인 ${missing.length}곳 · PDU ${devices.length}대 + 30일 시계열 ${backfilled}건`);
+  _seeded = true;
+  return { seeded: true, devices: devices.length, backfilled, topUp: true };
 }
 
 /** 과거 이력 백필 시각 목록(오래된 것부터): 30일 전 ~ 48시간 전은 2시간, 최근 48시간은 10분. */

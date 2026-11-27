@@ -13,7 +13,7 @@
  *   LEFT2611-06 수집 서버 URL 끝 '/' 제거 선형 + 길이 상한
  *   LEFT2611-08 중앙→엣지 호출에 수집 서버 id 태그
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,11 +22,18 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function runChild(body, { env = {}, setup = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611b-'));
+  const dir = tmpDir('audit2611b-');
   if (setup) setup(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
@@ -274,7 +281,7 @@ test('LEFT2611-03: GPU 게스트 설정 범위 병합 + 계정명이 바뀌면 �
 });
 
 test('LEFT2611-05: FinOps 숫자 칸 — 빈 값은 이전 값, 명시적 0 은 값', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611b-fin-'));
+  const dir = tmpDir('audit2611b-fin-');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const { saveFinopsConfig } = await import(${JSON.stringify(SRC + '/insights/finops.js')});
     const out = {};
@@ -323,7 +330,7 @@ test('LEFT2611-08: 중앙→엣지 호출은 수집 서버 id 태그로 감싼�
 });
 
 test('AUTHZ2611-05: site vCenter 의 location.region 은 등록부 값이 이긴다(도시·좌표는 엣지 값)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611b-reg-'));
+  const dir = tmpDir('audit2611b-reg-');
   fs.writeFileSync(path.join(dir, 'vcenters.json'), JSON.stringify({ vcenters: [
     { id: 'vc-pl', name: 'PL', host: 'https://10.0.0.1', collectMode: 'site', location: { city: 'Warsaw', region: 'EMEA', lat: 52, lon: 21 } },
     { id: 'vc-kr', name: 'KR', host: 'https://10.0.0.2', collectMode: 'site', location: { city: 'Seoul', region: 'APAC', lat: 37, lon: 127 } },

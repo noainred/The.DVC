@@ -18,6 +18,7 @@
  * TLS: NSX 전용 로컬 dispatcher(security/tlsTrust.js deviceTlsConnect — CA 체인 또는 승인 지문, 2026-10-09 S-02).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
@@ -30,6 +31,7 @@ import { effectiveRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T
 import { numOrNull } from '../util/numOrNull.js';
 import { pushAll } from '../util/pushAll.js';
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
+import { trimTrailingSlashes } from '../util/trimSlashes.js';
 
 /**
  * NSX 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로). 예전에는 `client.node()` 가 401/403 으로
@@ -43,14 +45,14 @@ export const nsxAuthGuard = createAuthGuard({ file: 'nsx-auth-stops.json' });
 /** 오류가 NSX **자격증명 거부**인가(출처 `#get` 이 붙인 플래그만 본다). */
 export const isNsxAuthError = (err) => !!(err && err.authFailed === true);
 
-const norm = (s) => String(s || '').replace(/\/+$/, '');
+const norm = (s) => trimTrailingSlashes(String(s || ''));   // 155회차: 선형(예전 /\/+$/ 는 '/' 가 이어진 저장 host 에서 주기마다 O(n²))
 
 /**
  * 목록 조회의 페이지 상한(v2.599 감사 C2599-05). NSX 목록 API 는 한 페이지(기본 1,000개)만 주고 다음 페이지는
  * 응답의 `cursor` 로 받는다. 예전에는 cursor 를 무시해 그룹·세그먼트·포트·전송 노드 개수가 **첫 페이지로 조용히**
  * 잘렸다. 상한까지 따라가고, 상한에 걸려 남은 페이지가 있으면 `truncated` 로 밝힌다(조용한 상한 금지).
  */
-export const NSX_LIST_MAX_PAGES = Math.max(1, Number(process.env.NSX_LIST_MAX_PAGES) || 20);
+export const NSX_LIST_MAX_PAGES = Math.max(1, envPositive(process.env.NSX_LIST_MAX_PAGES, 20));
 /** 규칙을 조회하는 DFW 정책 수 상한(정책마다 GET 1회 — 고RTT 매니저 부하). 넘으면 개수를 밝힌다. */
 export const NSX_DFW_POLICY_MAX = 60;
 /** IDS 이벤트는 한 페이지(이 개수)만 받는다 — 닿으면 idsEventsTruncated 로 밝힌다(v2.603 COL-2603-05). */

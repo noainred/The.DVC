@@ -113,7 +113,8 @@ async function cvpItems() {
   return { unavailable: !!r.unavailable, rows: (r.rows || []).filter(own).map((d) => ({ ...d, corp: corp(d.cvpId) })), servers: servers.length };
 }
 
-async function powerTotal() {
+// v3.42.0: 공개 API /resources/power(routes/publicApiRows.js powerSummary)가 같은 합을 쓴다 — 사본을 만들지 않게 내보낸다.
+export async function powerTotal() {
   const snap = store.get() || {};
   const assign = getDatacenterAssign();
   const dcName = new Map(listDatacenters().map((d) => [String(d.id), d.name || String(d.id)]));
@@ -134,6 +135,19 @@ async function powerTotal() {
   } catch (e) { errors.serversRegistry = e?.message || String(e); }
   const out = buildPowerTotal({ servers, network, storage, dcOfVc: (vc) => String(assign[vc] || ''), dcName, serversRegistered });
   return { ...out, errors, serverHosts };
+}
+
+/**
+ * v3.42.0: 전력 합 요약 — Overview 카드와 공개 API /resources/power 가 **같은 모양**을 쓴다(v2.682 R3D-01: 못 읽음 · 오래됨 · 일부만 읽음을 함께 싣는다 —
+ *   measured 만 실으면 부분 합이 전체처럼 보인다). 오류(원문)는 넣지 않는다 — 판본에 따라 cardErrorsFor 로 부르는 쪽이 붙인다.
+ */
+export function powerSummaryOf(p) {
+  return {
+    totalWatts: p.totalWatts,
+    servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread, ome: p.servers.ome, excludedVcenter: p.servers.excludedVcenter },
+    network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices, unread: p.network.unread, stale: p.network.stale, noTime: p.network.noTime, outputOnly: p.network.outputOnly }, // v2.727(감사 C-06): 시각 없음은 오래됨과 다른 사유
+    storage: { watts: p.storage.watts, measured: p.storage.measured, partial: p.storage.partial, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread, stale: p.storage.stale, noTime: p.storage.noTime },
+  };
 }
 
 /**
@@ -178,11 +192,7 @@ export function registerOverviewCards(api) {
         catch (e) { network = { count: null, ...(admin ? { error: e?.message || String(e) } : { errorHidden: true }) }; }
         const p = await powerTotal();
         // v2.682 R3D-01: 카드도 못 읽음·오래됨·일부만 읽음을 싣는다 — 예전에는 measured 만 실어 부분 합을 전체처럼 보였다.
-        power = { totalWatts: p.totalWatts,
-          servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread, ome: p.servers.ome, excludedVcenter: p.servers.excludedVcenter },
-          network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices, unread: p.network.unread, stale: p.network.stale, noTime: p.network.noTime, outputOnly: p.network.outputOnly }, // v2.727(감사 C-06): 시각 없음은 오래됨과 다른 사유
-          storage: { watts: p.storage.watts, measured: p.storage.measured, partial: p.storage.partial, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread, stale: p.storage.stale, noTime: p.storage.noTime },
-          ...cardErrorsFor(p.errors, admin) };
+        power = { ...powerSummaryOf(p), ...cardErrorsFor(p.errors, admin) };   // v3.42.0: 모양은 powerSummaryOf 하나(공개 API /resources/power 와 같다)
       }
       return {
         ok: true, scoped: !full,
@@ -190,7 +200,7 @@ export function registerOverviewCards(api) {
         farms: farms || { count: null, reason: FLEET_ONLY },
         physical: { count: pc.count, inventoryRead: pc.invRead, inventoryStale: pc.invStale, disabled: pc.disabled },
         virtual: { count: vms.length, poweredOn: vms.filter((v) => v.powerState === 'POWERED_ON').length, templates: vms.filter((v) => v.template).length, vcenters: vcs.length, vcentersPending: vcPending },
-        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, inventoryMissing: pc.invMissing, gpusStale: pc.gpusStale, gpusUnnamed: pc.gpusUnnamed, servers: pc.count },
+        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, inventoryMissing: pc.invMissing, gpusStale: pc.gpusStale, gpusUnnamed: pc.gpusUnnamed, gpuUnread: pc.gpuUnread || 0, servers: pc.count },   // 46회차 I1
         storage: storage || { totalBytes: null, reason: FLEET_ONLY },
         network: network || { count: null, reason: FLEET_ONLY },
         power: power || { totalWatts: null, reason: FLEET_ONLY },
@@ -225,9 +235,13 @@ export function registerOverviewCards(api) {
         if (TREND_CACHE.size > 64) TREND_CACHE.delete(TREND_CACHE.keys().next().value);
       }
       res.setHeader('Cache-Control', 'no-store');
-      res.json(await p);
+      // 73회차 F3: 원천 오류 원문은 admin + 전체 범위에게만(형제 /overview/cards 의 v2.682 R3S-07 규칙) — 캐시는 역할과 무관하게 공유하므로 내보낼 때 가린다.
+      res.json(trendErrorsFor(await p, allowed == null && isAdminReq(req)));
     } catch (e) {
-      if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || String(e) });
+      // 75회차(73회차 F3 반증): 500 사유도 200 경로와 같은 판정(admin + 전체 범위) — 범위 관리자에게는 원문이 실렸다.
+      let full = false;
+      try { full = isAdminReq(req) && !scopedVcenterIds(req.user, store.get() || {}); } catch { full = false; }
+      if (!res.headersSent) res.status(500).json({ ok: false, reason: full ? (e?.message || String(e)) : '추이를 만들지 못했습니다.' });
     }
   });
 
@@ -246,6 +260,20 @@ export function registerOverviewCards(api) {
       return { ok: true, ...out };
     }, { ttlMs: 20_000, extraKey: `role:${admin ? 'admin' : 'user'}` });
   });
+}
+
+/**
+ * 73회차 F3: 추이 응답의 지표별 `error`(원천 오류 원문 — DB 경로 · SQLite 문구가 실릴 수 있다)를 admin + 전체 범위가 아니면
+ *   `errorHidden:true` 로 바꾼다. 형제 /overview/cards 의 cardErrorsFor(v2.682 R3S-07)와 같은 규칙. 원본(캐시)은 바꾸지 않는다.
+ */
+export function trendErrorsFor(body, admin) {
+  if (admin || !body || typeof body !== 'object') return body;
+  const out = { ...body };
+  for (const k of ['virtual', 'storage', 'power', 'physical']) {
+    const m = out[k];
+    if (m && typeof m === 'object' && m.error) { const { error: _e, ...rest } = m; out[k] = { ...rest, errorHidden: true }; }
+  }
+  return out;
 }
 
 const TREND_TTL_MS = 5 * 60_000;

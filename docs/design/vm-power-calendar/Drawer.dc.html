@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 상세 드로어 — 전원 이력 섹션</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.icon{width:32px;padding:0;justify-content:center}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.new{background:rgba(34,211,238,.16);color:#67e8f9}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.dh{padding:14px 18px 10px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px}
+.dh h2{margin:0;font-size:18px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center}
+.crumb a{text-decoration:none}
+.acts{display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px;border-bottom:1px solid #1f2a40;background:#141b2d}
+.sec{display:flex;flex-direction:column;gap:8px}
+.sh{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.sh h3{margin:0;font-size:12.5px;font-weight:700;color:#8b9bb4;letter-spacing:.3px;display:flex;align-items:center;gap:8px}
+.sh a{font-size:12px;text-decoration:none}
+.box{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:12px}
+.ph{height:74px;border-radius:10px;border:1px dashed #243049;display:flex;align-items:center;justify-content:center;color:#7483a0;font-size:12px}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:5px 12px;font-size:11px;color:#8b9bb4;align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.hm-mon{display:flex;gap:2px;height:15px;margin-bottom:2px}
+.hm-mon span{width:9px;flex:none;font-size:10px;color:#8b9bb4;white-space:nowrap;overflow:visible}
+.hm{display:grid;grid-template-rows:repeat(7, 9px);grid-auto-flow:column;grid-auto-columns:9px;gap:2px}
+.hm i{display:block;width:9px;height:9px;border-radius:2px}
+.nums{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:8px;margin-top:12px}
+.nums div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.nums span{font-size:11px;color:#8b9bb4;font-weight:600}
+.nums b{font-size:16px;font-weight:800;white-space:nowrap}
+.nums small{font-size:11px;color:#8b9bb4;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.last{display:flex;flex-direction:column;margin-top:10px;border-top:1px solid #1f2a40}
+.last div{display:grid;grid-template-columns:128px 96px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid #1f2a40;font-size:12px;align-items:baseline}
+.last div:last-child{border-bottom:0;padding-bottom:0}
+</style>
+</helmet>
+
+<div style="width:640px;box-sizing:border-box;background:#0f1626;border-left:1px solid #243049;display:flex;flex-direction:column;min-height:820px">
+  <div class="dh">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0">
+      <span class="dot" style="background:#22c55e" title="켜짐"></span>
+      <h2>batch-kr1-014</h2>
+      <span class="tag ok">켜짐 · {{upFor}}째</span>
+      <span style="flex:1"></span>
+      <button class="btn icon" type="button" aria-label="이전 VM">‹</button>
+      <button class="btn icon" type="button" aria-label="다음 VM">›</button>
+      <button class="btn icon" type="button" aria-label="닫기">×</button>
+    </div>
+    <div class="crumb"><a href="#">VC-KR1</a><span>›</span><a href="#">DC-KR1</a><span>›</span><a href="#">Cluster-B</a><span>›</span><a href="#">esx-kr1-11</a><span style="flex:1"></span><span class="mono">목록 14/48</span></div>
+  </div>
+  <div class="acts">
+    <a href="Main.dc.html" class="btn primary">⤢ 개체 보기</a>
+    <button class="btn" type="button">콘솔</button><button class="btn" type="button">원격 접속</button><button class="btn" type="button">사양 변경</button><button class="btn" type="button">메트릭</button>
+  </div>
+
+  <div style="flex:1;padding:14px 18px 18px;display:flex;flex-direction:column;gap:14px">
+    <div class="sec"><div class="sh"><h3>한눈에</h3></div><div class="ph">CPU · 메모리 · 디스크 · 네트워크 타일 (지금 그대로)</div></div>
+    <div class="sec"><div class="sh"><h3>신호</h3></div><div class="ph">신호 목록 (지금 그대로)</div></div>
+
+    <div class="sec">
+      <div class="sh"><h3>전원 이력 · 최근 12개월 <span class="tag new">새 섹션</span></h3><a href="Main.dc.html">전원 달력 열기 →</a></div>
+      <div class="box">
+        <div style="overflow-x:auto">
+          <div style="width:max-content">
+            <div class="hm-mon" aria-hidden="true"><sc-for list="{{monLabels}}" as="ml" hint-placeholder-count="52"><span>{{ml.t}}</span></sc-for></div>
+            <div class="hm" role="img" aria-label="{{hmAria}}">
+              <sc-for list="{{cells}}" as="c" hint-placeholder-count="364"><i style="{{c.style}}"></i></sc-for>
+            </div>
+          </div>
+        </div>
+        <div class="legend" style="margin-top:8px" aria-label="범례">
+          <span><i class="sw" style="background:#22c55e"></i>켜짐</span>
+          <span><i class="sw" style="background:linear-gradient(0deg,#22c55e 0 55%,#64748b 55% 100%)"></i>일부 꺼짐</span>
+          <span><i class="sw" style="background:#64748b"></i>꺼짐</span>
+          <span><i class="sw" style="background:repeating-linear-gradient(135deg,#33415c 0 2px,#111a2c 2px 5px)"></i>판정 못함</span>
+        </div>
+        <div class="nums">
+          <div><span>켜진 시간</span><b class="mono">{{t.on}}</b><small>판정된 시간의 {{t.onPct}}%</small></div>
+          <div><span>꺼진 시간</span><b class="mono">{{t.off}}</b><small>꺼짐 구간 {{t.offCount}}번</small></div>
+          <div><span>가장 길게 꺼짐</span><b class="mono">{{t.longest}}</b><small class="mono">{{t.longestRange}}</small></div>
+        </div>
+        <div class="last" aria-label="최근 전원 전환">
+          <sc-for list="{{last}}" as="x" hint-placeholder-count="3">
+            <div><span class="mono">{{x.at}}</span><b style="font-weight:600"><span class="dot" style="{{x.dot}}"></span> {{x.kind}}</b><span class="muted">{{x.note}}</span></div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec"><div class="sh"><h3>구성 · 배치</h3></div><div class="ph">구성 · 배치 표 (지금 그대로)</div></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() {
+    if (this._v) return this._v;
+    var H = 3600000, D = 24 * H;
+    function T(y, m, d, h, mi) { return Date.UTC(y, m - 1, d, h || 0, mi || 0); }
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    function ymd(t) { var x = new Date(t); return x.getUTCFullYear() + '-' + p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate()); }
+    function hm(t) { var x = new Date(t); return p2(x.getUTCHours()) + ':' + p2(x.getUTCMinutes()); }
+    function dur(ms) {
+      var m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+      if (d > 0) return d + '일' + (h ? ' ' + h + '시간' : '');
+      if (h > 0) return h + '시간' + (mi ? ' ' + mi + '분' : '');
+      return mi + '분';
+    }
+    // 가상 데이터(시안 A 와 같은 VM · 같은 구간)
+    var NOW = T(2026, 11, 24, 11, 0), START = T(2025, 12, 1), W0 = T(2025, 11, 30);
+    var GRAN = { event: 0, check: 6 * H, track: 12 * H };
+    var offs = [];
+    function off(a, b, src) { offs.push({ a: a, b: b, src: src }); }
+    off(T(2025, 12, 21, 0, 0), T(2025, 12, 21, 0, 0), 'track');
+    off(T(2026, 1, 17, 2, 10), T(2026, 1, 17, 6, 40), 'event');
+    off(T(2026, 3, 8, 19, 20), T(2026, 3, 21, 9, 5), 'event');
+    for (var i = 0; i < 13; i++) { var f = T(2026, 4, 3, 20, 0) + i * 7 * D; off(f, f + 2 * D + 11.5 * H, 'event'); }
+    off(T(2026, 9, 2, 12, 0), T(2026, 9, 2, 18, 0), 'check');
+    off(T(2026, 10, 28, 23, 40), T(2026, 11, 12, 8, 15), 'event');
+    var marks = [{ a: T(2026, 7, 10, 3, 0), b: T(2026, 7, 13, 11, 0), st: 'unk' }];
+    offs.forEach(function (o) {
+      var g = GRAN[o.src];
+      if (g) marks.push({ a: o.a - g, b: o.a, st: 'est' });
+      if (o.b > o.a) marks.push({ a: o.a, b: o.b, st: 'off' });
+      if (g) marks.push({ a: o.b, b: o.b + g, st: 'est' });
+    });
+    marks.sort(function (x, y) { return x.a - y.a; });
+    var segs = [], cur = START;
+    marks.forEach(function (m) { if (m.a > cur) segs.push({ a: cur, b: m.a, st: 'on' }); segs.push(m); cur = m.b; });
+    if (cur < NOW) segs.push({ a: cur, b: NOW, st: 'on' });
+    function sumOf(a, b) {
+      var s = { on: 0, off: 0, est: 0, unk: 0 };
+      for (var k = 0; k < segs.length; k++) { var g = segs[k]; if (g.b <= a || g.a >= b) continue; s[g.st] += Math.min(b, g.b) - Math.max(a, g.a); }
+      return s;
+    }
+    var HATCH = 'repeating-linear-gradient(135deg,#33415c 0 2px,transparent 2px 5px)';
+    var cells = [], monLabels = [], total = sumOf(START, NOW);
+    for (var w = 0; w < 52; w++) {
+      var lab = '';
+      for (var k = 0; k < 7; k++) {
+        var t = W0 + (w * 7 + k) * D, x = new Date(t);
+        if (x.getUTCDate() === 1) lab = (x.getUTCMonth() + 1) + '월';
+        if (t < START) { cells.push({ style: 'background:transparent' }); continue; }
+        if (t >= NOW) { cells.push({ style: 'background:transparent;box-shadow:inset 0 0 0 1px #1f2a40' }); continue; }
+        var s = sumOf(t, Math.min(t + D, NOW)), all = s.on + s.off + s.est + s.unk;
+        var a = (s.on / all * 100).toFixed(1), b = ((s.on + s.off) / all * 100).toFixed(1);
+        cells.push({ style: 'background:linear-gradient(0deg,#22c55e 0 ' + a + '%,#64748b ' + a + '% ' + b + '%,transparent ' + b + '% 100%),' + HATCH + ',#111a2c' });
+      }
+      monLabels.push({ t: lab });
+    }
+    var longest = offs.reduce(function (p, o) { return !p || o.b - o.a > p.b - p.a ? o : p; }, null), known = total.on + total.off;
+    var lastOff = offs[offs.length - 1], prevOff = offs[offs.length - 2];
+    this._v = {
+      cells: cells, monLabels: monLabels, upFor: dur(NOW - lastOff.b),
+      hmAria: '최근 12개월 — 켜짐 ' + dur(total.on) + ' · 꺼짐 ' + dur(total.off) + ' · 판정 못함 ' + dur(total.est + total.unk),
+      t: { on: dur(total.on), off: dur(total.off), onPct: (total.on / known * 100).toFixed(1), offCount: offs.length,
+        longest: dur(longest.b - longest.a), longestRange: ymd(longest.a) + ' ~ ' + ymd(longest.b) },
+      last: [
+        { at: ymd(lastOff.b) + ' ' + hm(lastOff.b), kind: '켜짐', dot: 'background:#22c55e', note: '꺼짐 ' + dur(lastOff.b - lastOff.a) + ' 뒤 · vCenter 이벤트' },
+        { at: ymd(lastOff.a) + ' ' + hm(lastOff.a), kind: '꺼짐', dot: 'background:#64748b', note: '켜짐 약 ' + dur(lastOff.a - prevOff.b) + ' 뒤 · vCenter 이벤트' },
+        { at: ymd(prevOff.b) + ' ' + hm(prevOff.b) + '~', kind: '켜짐', dot: 'background:#22c55e', note: '주기 점검 · 두 관측 사이로만 압니다' }
+      ]
+    };
+    return this._v;
+  }
+}
+</script>
+</body>
+</html>

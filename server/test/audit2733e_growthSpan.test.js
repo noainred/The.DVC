@@ -13,7 +13,7 @@
  *  ④ 서버 totalsOf 와 웹 aggregateGrowth 가 **같은 입력에 같은 답**을 낸다(상수·한계 함수·합계 객체 대조)
  *  ⑤ 실제 라우터 — 내부 /api/tools/storage-growth 합계와 공개 API /capacity/storage-growth(growthSpanDays·meta.inexactCount)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,7 +21,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2733e-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2733e-');
 process.env.CONFIG_DIR = process.env.CONFIG_DIR || path.join(tmp, 'config');
 fs.mkdirSync(process.env.CONFIG_DIR, { recursive: true });
 
@@ -179,7 +186,7 @@ test('C2-03 ④ 서버 totalsOf 와 웹 aggregateGrowth 는 같은 입력에 같
 
 test('C2-03 ⑤ 실제 라우터 — 내부 합계 inexact/partial · 공개 API growthSpanDays·meta.inexactCount · 키 집합 == 선언', () => {
   const J = (rel) => JSON.stringify(path.join(SRC, rel));
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2733e-route-'));
+  const dir = tmpDir('a2733e-route-');
   // 표본 시각은 일 인덱스의 정오(날 경계에서 12시간 떨어뜨림 — v2.517 규약). 라우트의 '오늘' 은 dayIndex(Date.now()).
   const boot = `
     const express = (await import('express')).default;

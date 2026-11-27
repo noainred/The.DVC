@@ -5,14 +5,13 @@ import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { queryKey, keepRowsOnError } from './queryKeyText.js'; // v2.612 RECENT2612-06
 import { readFailText } from './readFailText.js'; // v2.733(C5-02): 원본 목록 조회 실패를 '0개 일치' 로 그리지 않는다
+import { PLACEMENT_HINT, notAppliedText, jobStatusLabel, vmStatusLabel, doneCountLabel, liveSubmitNote, startIndexOut, LOCKED_PLACEMENT_NOTE, lockedPlacementText, jobProgressPct } from './provisionText.js'; // 74회차 F5 · F6 · F8 · 75회차(시작 번호 0) · 결정 74 ① ②
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
 
-const JOB_BADGE = { running: 'amber', completed: 'green', completed_with_errors: 'amber', error: 'red' };
-const JOB_LABEL = { running: '진행 중', completed: '완료', completed_with_errors: '일부 실패', error: '실패' };
-const VM_BADGE = { queued: 'gray', running: 'amber', done: 'green', error: 'red' };
-const VM_LABEL = { queued: '대기', running: '생성 중', done: '완료', error: '실패' };
+const JOB_BADGE = { running: 'amber', completed: 'green', completed_with_errors: 'amber', completed_with_unknown: 'amber', error: 'red' };
+const VM_BADGE = { queued: 'gray', running: 'amber', submitted: 'amber', done: 'green', error: 'red', unknown: 'amber' };
 
 const EMPTY = {
   vcenterId: '', sourceId: '',
@@ -79,7 +78,7 @@ export default function VmProvision() {
 
   const specBody = useMemo(() => ({
     sourceId: form.sourceId,
-    namePattern: form.namePattern, count: Number(form.count) || 0, startIndex: Number(form.startIndex) || 1, pad: Number(form.pad) || 0,
+    namePattern: form.namePattern, count: Number(form.count) || 0, startIndex: startIndexOut(form.startIndex), pad: Number(form.pad) || 0,
     powerOn: form.powerOn,
     placement: form.placement,
     guest: {
@@ -107,7 +106,7 @@ export default function VmProvision() {
     } catch (e) { if (gen === previewGen.current) setMsg({ ok: false, text: e.message }); }
   };
   // Auto-refresh the preview as the user types the pattern/count/IP.
-  useEffect(() => { const t = setTimeout(doPreview, 350); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [form.namePattern, form.count, form.startIndex, form.pad, form.guest.ipMode, form.guest.ipStart, form.guest.ipAssign, form.guest.ipList, form.guest.hostnamePattern]);
+  useEffect(() => { const t = setTimeout(doPreview, 350); return () => clearTimeout(t); }, [form.namePattern, form.count, form.startIndex, form.pad, form.guest.ipMode, form.guest.ipStart, form.guest.ipAssign, form.guest.ipList, form.guest.hostnamePattern]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     if (!form.sourceId) return setMsg({ ok: false, text: '원본 VM/템플릿을 선택하세요.' });
@@ -131,7 +130,7 @@ export default function VmProvision() {
       sourceId: sp.sourceId || entry.sourceId || '',
       namePattern: sp.namePattern || 'vm-{n}',
       count: sp.count || 0,
-      startIndex: sp.startIndex || 1,
+      startIndex: startIndexOut(sp.startIndex) ?? 1,
       pad: sp.pad || 0,
       powerOn: sp.powerOn !== false,
       placement: { ...EMPTY.placement, ...(sp.placement || {}) },
@@ -224,20 +223,22 @@ export default function VmProvision() {
               {(placement?.datastores || []).map((d) => <option key={d.id} value={d.name}>{d.name}{d.freeGB != null ? ` · 여유 ${d.freeGB >= 1024 ? `${(d.freeGB / 1024).toFixed(1)}TB` : `${d.freeGB}GB`}` : ''}</option>)}
             </Select>
           </label>
+          {/* 결정(56~75 남긴 것) 74 ①: 폴더 · 리소스 풀 · 스토리지 프로파일은 생성에 쓰지 않으므로 칸을 잠근다(불러온 값은 보이되 쓰지 않음을 밝힌다). */}
           <label>폴더(VM Folder)
-            <input className="input" list="prov-folders" value={form.placement.folder} onChange={setP('folder')} placeholder="예: Production" />
-            <DataList id="prov-folders">{(placement?.folders || []).map((x) => <option key={x} value={x} />)}</DataList>
+            <input className="input" value={form.placement.folder} disabled readOnly placeholder="원본 VM 의 폴더" title={LOCKED_PLACEMENT_NOTE} />
+            <span className="muted" style={{ fontSize: 11 }}>{LOCKED_PLACEMENT_NOTE}</span>
           </label>
           <label>리소스 풀(Resource Pool)
-            <input className="input" list="prov-pools" value={form.placement.resourcePool} onChange={setP('resourcePool')} placeholder="예: Prod" />
-            <DataList id="prov-pools">{(placement?.resourcePools || []).map((x) => <option key={x} value={x} />)}</DataList>
+            <input className="input" value={form.placement.resourcePool} disabled readOnly placeholder="원본 VM 의 리소스 풀" title={LOCKED_PLACEMENT_NOTE} />
+            <span className="muted" style={{ fontSize: 11 }}>{LOCKED_PLACEMENT_NOTE}</span>
           </label>
           <label>스토리지 프로파일(정책)
-            <input className="input" list="prov-profiles" value={form.placement.storageProfile} onChange={setP('storageProfile')} placeholder="예: vSAN Default Storage Policy" />
-            <DataList id="prov-profiles">{(placement?.profiles || []).map((x) => <option key={x} value={x} />)}</DataList>
+            <input className="input" value={form.placement.storageProfile} disabled readOnly placeholder="데이터스토어 기본 정책" title={LOCKED_PLACEMENT_NOTE} />
+            <span className="muted" style={{ fontSize: 11 }}>{LOCKED_PLACEMENT_NOTE}</span>
           </label>
         </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>비워두면 원본 VM과 동일한 위치(클러스터/호스트/데이터스토어)에 배치됩니다. 폴더·리소스풀·프로파일은 vCenter의 정확한 이름을 입력하세요(목록은 추천값).</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{PLACEMENT_HINT}</div>
+        {lockedPlacementText(form.placement) && <div style={{ fontSize: 12, marginTop: 4, color: 'var(--amber)' }}>{lockedPlacementText(form.placement)}</div>}
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
@@ -368,17 +369,19 @@ export default function VmProvision() {
 function JobProgress({ jobId }) {
   const { data: job } = usePolling(jobId ? `/provision/jobs/${jobId}` : null, {}, 2000);
   if (!jobId || !job) return null;
-  const pct = job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0;
+  const pct = jobProgressPct(job);   // 74 ②: 결과 모름도 끝난 것으로 센다
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
         <b style={{ fontSize: 14 }}>작업 진행 — {job.sourceName} 복제</b>
-        <span className={`badge ${JOB_BADGE[job.status] || 'gray'}`}>{JOB_LABEL[job.status] || job.status}</span>
+        <span className={`badge ${JOB_BADGE[job.status] || 'gray'}`}>{jobStatusLabel(job.status, job.live)}</span>
       </div>
       <div style={{ height: 8, borderRadius: 6, background: 'rgba(255,255,255,.08)', overflow: 'hidden', marginBottom: 8 }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: job.failed ? 'var(--amber)' : 'var(--green)', transition: 'width .3s' }} />
+        <div style={{ width: `${pct}%`, height: '100%', background: job.failed || job.unknown ? 'var(--amber)' : 'var(--green)', transition: 'width .3s' }} />
       </div>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>완료 {job.done} · 실패 {job.failed} · 전체 {job.total} {job.live ? '· LIVE (실제 vCenter)' : '· MOCK (데모)'}</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{doneCountLabel(job.live)} {job.done} · 실패 {job.failed}{job.unknown ? ` · 결과 모름 ${job.unknown}` : ''} · 전체 {job.total} {job.live ? '· LIVE (실제 vCenter)' : '· MOCK (데모)'}</div>
+      {liveSubmitNote(job.live) && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{liveSubmitNote(job.live)}</div>}
+      {notAppliedText(job.placementNotApplied, job.placement) && <div style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>{notAppliedText(job.placementNotApplied, job.placement)}</div>}
       {job.placement && (job.placement.cluster || job.placement.host || job.placement.datastore || job.placement.folder || job.placement.resourcePool || job.placement.storageProfile) && (
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>배치 — {[
           job.placement.cluster && `클러스터 ${job.placement.cluster}`, job.placement.host && `호스트 ${job.placement.host}`,
@@ -393,7 +396,7 @@ function JobProgress({ jobId }) {
             {job.vms.map((v) => (
               <tr key={v.name}>
                 <td><b>{v.name}</b></td><td>{v.hostname}</td><td className="muted">{v.ip || 'DHCP'}</td>
-                <td><span className={`badge ${VM_BADGE[v.status] || 'gray'}`}>{VM_LABEL[v.status] || v.status}</span></td>
+                <td><span className={`badge ${VM_BADGE[v.status] || 'gray'}`}>{vmStatusLabel(v.status, job.live)}</span></td>
                 <td className="muted" style={{ fontSize: 12 }}>{v.error || (v.task ? `task ${v.task}` : '')}</td>
               </tr>
             ))}
@@ -407,10 +410,13 @@ function JobProgress({ jobId }) {
 function RecentJobs({ onOpen, activeId }) {
   const { data } = usePolling('/provision/jobs', {}, 5000);
   const jobs = (data?.jobs || []).filter((j) => j.id !== activeId);
-  if (!jobs.length) return null;
+  // 반증 후속 ⑥: 작업 기록 파일을 못 읽어 저장을 보류하는 중이면 사유를 보인다(목록이 비어도 — '작업 없음' 으로 읽히지 않게).
+  const storeNote = data?.storeError?.reason ? <div className="muted" style={{ fontSize: 12.5, color: '#fb0', margin: '6px 0' }}>{data.storeError.reason}</div> : null;
+  if (!jobs.length) return storeNote;
   return (
     <>
       <div className="section-title">최근 작업</div>
+      {storeNote}
       <div className="table-wrap">
         <STable>
           <thead><tr><th>시작</th><th>원본</th><th>대수</th><th>상태</th><th></th></tr></thead>
@@ -419,8 +425,8 @@ function RecentJobs({ onOpen, activeId }) {
               <tr key={j.id}>
                 <td className="muted">{new Date(j.createdAt).toLocaleString()}</td>
                 <td>{j.sourceName}</td>
-                <td>{j.done}/{j.total}{j.failed ? ` · 실패 ${j.failed}` : ''}</td>
-                <td><span className={`badge ${JOB_BADGE[j.status] || 'gray'}`}>{JOB_LABEL[j.status] || j.status}</span></td>
+                <td>{j.done}/{j.total}{j.failed ? ` · 실패 ${j.failed}` : ''}{j.unknown ? ` · 결과 모름 ${j.unknown}` : ''}</td>
+                <td><span className={`badge ${JOB_BADGE[j.status] || 'gray'}`}>{jobStatusLabel(j.status, j.live)}</span></td>
                 <td className="right"><button className="tab" onClick={() => onOpen(j.id)}>보기</button></td>
               </tr>
             ))}
@@ -456,7 +462,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
         setLoadErr(e?.message || String(e));
       });
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, limit, reloadKey]);
+  useEffect(() => { load(); }, [vc, limit, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) {
     return loadErr ? (
       <>
@@ -487,6 +493,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
       <div className="section-title">저장된 작업 (재사용)</div>
       {loadErr && <div className="banner warn" style={{ marginBottom: 8 }}>저장된 작업 목록을 읽지 못했습니다: {loadErr} — 아래는 직전에 받은 목록입니다.</div>}
       {opErr && <div className="banner warn" style={{ marginBottom: 8 }}>{opErr}</div>}
+      {data.readError && <div className="banner warn" style={{ marginBottom: 8 }}>{data.reason || '저장된 작업 파일을 읽지 못했습니다.'} — 저장된 작업이 없다는 뜻이 아닙니다.</div>}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <span className={vc === '' ? 'login-btn' : 'logout-btn'} style={{ cursor: 'pointer', padding: '5px 12px', fontSize: 12, borderRadius: 6 }} onClick={() => { setVc(''); setLimit(10); }}>전체 ({data.vcenters ? '' : ''}{vc === '' ? data.total : ''})</span>
         {(data.vcenters || []).map((id) => (
@@ -499,7 +506,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
         <STable>
           <thead><tr><th>시작</th><th>이름 패턴</th><th>원본</th><th>vCenter</th><th>대수</th><th>메모 · 태그</th><th className="right">작업</th></tr></thead>
           <tbody>
-            {items.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>저장된 작업이 없습니다. VM을 생성하면 자동 저장됩니다.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>{data.readError ? '—' : '저장된 작업이 없습니다. VM을 생성하면 자동 저장됩니다.'}</td></tr>}
             {items.map((e) => (
               <tr key={e.id}>
                 <td className="muted" style={{ fontSize: 12 }}>{new Date(e.createdAt).toLocaleString()}</td>
@@ -549,7 +556,7 @@ function IpGuideModal({ onClose }) {
   const H = ({ children }) => <div style={{ fontWeight: 800, fontSize: 13, margin: '12px 0 4px', color: '#c7d2fe' }}>{children}</div>;
   const code = { fontFamily: 'monospace', background: 'rgba(255,255,255,.06)', padding: '1px 5px', borderRadius: 4 };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 640, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="flex between" style={{ marginBottom: 8, flex: '0 0 auto' }}>
@@ -577,4 +584,4 @@ function IpGuideModal({ onClose }) {
 }
 
 import Select from '../components/Select.jsx';
-import DataList from '../components/DataList.jsx';
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만

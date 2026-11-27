@@ -7,6 +7,8 @@ import { policySpecSize } from './ipmsRangeText.js';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 정책 파일을 못 읽은 동안의 0건 목록을 '정책 없음' 으로 보이지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 
 
 // v2.691: 'vCenter별 IP 대역 저장 + 주기 스캔' 페이지(IpamRanges)는 지웠다 — 스캔 대역·설정(IpScanSettings)으로 합쳐졌다.
@@ -54,7 +56,6 @@ export function IpamNetMap() {
     if (vc) qs.set('vcenterId', vc); if (base) qs.set('base', base); qs.set('days', String(days)); qs.set('buckets', String(bucketsFor(days)));
     fetchJson(`/tools/ipam/netmap?${qs.toString()}`).then((d) => { if (!active) return; setData(d); setError(null); setSel(null); if (!base && d.base) setBase(d.base); }).catch((e) => { if (active) setError(e.message); });
     return () => { active = false; };
-    // eslint-disable-next-line
   }, [vc, base, days]);
   if (error && !data) return <ErrorBox message={error} />; // v2.478(감사 B15): 데이터 보유 중 일시 오류는 화면 유지(아래 배너)
   if (!data) return <Loading />;
@@ -227,12 +228,15 @@ export function RangePolicies({ scope, canManage, vcenters = [], onChanged }) {
         <Card label="상태 분포" value={Object.keys(sm.byStatus || {}).length} meta={Object.entries(sm.byStatus || {}).map(([k, v]) => `${MGMT[k]?.[0] || k} ${v}`).join(' · ') || '—'} />
       </div>
       {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      {/* 112회차: 정책 파일을 못 읽은 동안 목록은 0건이다 — '정책 없음' 이 아니다(추가 · 변경은 서버가 503 으로 거절한다). */}
+      <SettingsUnreadBanner le={unreadMarkOf(data)} what="IP 대역 정책" save="정책 추가 · 변경" onRecheck={load} />
       <div className="flex between" style={{ marginBottom: 10, alignItems: 'center' }}>
         <div className="muted" style={{ fontSize: 12 }}>우선순위: <b>IP 수동(override)</b> &gt; <b>대역 정책</b> &gt; 자동발견. 좁은 대역·높은 priority가 겹침 시 우선.</div>
-        {canManage && <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} onClick={() => setEdit({ __new: true, priority: 100, enabled: true })}>＋ 새 정책</button>}
+        {/* 128회차(123회차가 추정으로 남긴 것): 배너는 ‘잠급니다’ 라고 말하는데 버튼이 열려 있었다(서버는 503 으로 거절) — 읽기 오류 동안 잠근다. */}
+        {canManage && <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} disabled={saveLockedByUnread(unreadMarkOf(data))} title={saveLockedByUnread(unreadMarkOf(data)) ? '정책 파일을 읽지 못한 상태라 잠겼습니다 — 다시 읽히면 풀립니다' : undefined} onClick={() => setEdit({ __new: true, priority: 100, enabled: true })}>＋ 새 정책</button>}
       </div>
       {policies.length === 0 ? (
-        <div className="card"><span className="muted">등록된 대역 정책이 없습니다. ‘＋ 새 정책’으로 대역(예: 10.0.0.0/24)에 기본 관리상태를 지정하세요.</span></div>
+        <div className="card"><span className="muted">{unreadKind(unreadMarkOf(data)) ? '대역 정책 파일을 읽지 못했습니다 — 목록이 비어 보여도 정책이 없는 것이 아닙니다.' : '등록된 대역 정책이 없습니다. ‘＋ 새 정책’으로 대역(예: 10.0.0.0/24)에 기본 관리상태를 지정하세요.'}</span></div>
       ) : (
         <div className="table-wrap">
           <STable minWidth={860} wrap={false}>

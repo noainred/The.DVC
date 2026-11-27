@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 포트 구성도 — 못 읽은 상태</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">LLDP 이웃을 읽지 못함</b>
+<div style="padding: 10px 12px; border-radius: 10px; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6; font-size: 12.5px; overflow-wrap: anywhere;">이 장비의 LLDP 이웃을 읽지 못했습니다 — 연결 장비는 포트 설명만으로 표시합니다. ‘이웃이 없다’ 는 뜻이 아닙니다.</div>
+<div style="display: flex; flex-direction: column; font-size: 12.5px;">
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;"><span style="flex: 0 0 96px; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #7dd3fc;">Ethernet1</span><span style="flex: 1 1 0; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace;">esx-kr1-01</span><span style="color: #d8b4fe; white-space: nowrap;">설명만(LLDP 못 읽음)</span></div>
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;"><span style="flex: 0 0 96px; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #7dd3fc;">Ethernet22</span><span style="flex: 1 1 0; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace;">—</span><span style="color: #fbbf24; white-space: nowrap;">근거 없음</span></div>
+</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">일치 · 불일치는 판정하지 않습니다. 사용 · 예비 개수는 LLDP 없이도 그대로 나옵니다(링크 · 설명 · 관리 상태만 쓰기 때문).</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">포트 설명을 읽지 못함</b>
+<div style="padding: 10px 12px; border-radius: 10px; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6; font-size: 12.5px; overflow-wrap: anywhere;">설명(주석)을 읽지 못한 포트는 예비로 세지 않습니다 — 설명이 없는 것과 못 읽은 것은 다릅니다.</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; min-width: 0;"><div style="font-size: 12px; color: #a9b6cc;">사용 중</div><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 600;">35</div></div>
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; min-width: 0;"><div style="font-size: 12px; color: #a9b6cc;">예비</div><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 600; color: #a9b6cc;">—</div></div>
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; min-width: 0;"><div style="font-size: 12px; color: #a9b6cc;">확인 불가</div><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 600; color: #fbbf24;">21</div></div>
+</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">링크가 없는 21포트는 구성도에서 회색 빗금 ‘확인 불가’ 로 그립니다. 다음 부품 주기에 설명을 읽으면 예비 · 확인 필요로 갈립니다.</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">포트 목록을 읽지 못함</b>
+<div style="padding: 10px 12px; border-radius: 10px; background: #0f1626; border: 1px solid #243049; color: #e6edf6; font-size: 12.5px; overflow-wrap: anywhere;">이 장비의 포트 목록을 아직 읽지 못했습니다(텔레메트리 스트리밍·수집 경로를 ‘읽은 경로’ 에서 확인하세요).</div>
+<div style="display: flex; align-items: center; justify-content: center; height: 86px; border: 1px dashed #5d6b85; border-radius: 10px; color: #a9b6cc; font-size: 12.5px;">구성도를 그리지 않습니다</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">개수는 전부 ‘—’ 이고, 전 스위치 여유 표에서는 합계에서 빠져 ‘확인 불가’ 로 따로 셉니다. 0 포트로 쓰지 않습니다.</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":330}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">LLDP 이웃을 읽지 못함</b>
+<div style="padding: 10px 12px; border-radius: 10px; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6; font-size: 12.5px; overflow-wrap: anywhere;">이 장비의 LLDP 이웃을 읽지 못했습니다 — 연결 장비는 포트 설명만으로 표시합니다. ‘이웃이 없다’ 는 뜻이 아닙니다.</div>
+<div style="display: flex; flex-direction: column; font-size: 12.5px;">
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;"><span style="flex: 0 0 96px; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #7dd3fc;">Ethernet1</span><span style="flex: 1 1 0; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace;">esx-kr1-01</span><span style="color: #d8b4fe; white-space: nowrap;">설명만(LLDP 못 읽음)</span></div>
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;"><span style="flex: 0 0 96px; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #7dd3fc;">Ethernet22</span><span style="flex: 1 1 0; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace;">—</span><span style="color: #fbbf24; white-space: nowrap;">근거 없음</span></div>
+</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">일치 · 불일치는 판정하지 않습니다. 사용 · 예비 개수는 LLDP 없이도 그대로 나옵니다(링크 · 설명 · 관리 상태만 쓰기 때문).</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">포트 설명을 읽지 못함</b>
+<div style="padding: 10px 12px; border-radius: 10px; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6; font-size: 12.5px; overflow-wrap: anywhere;">설명(주석)을 읽지 못한 포트는 예비로 세지 않습니다 — 설명이 없는 것과 못 읽은 것은 다릅니다.</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; min-width: 0;"><div style="font-size: 12px; color: #a9b6cc;">사용 중</div><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 600;">35</div></div>
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; min-width: 0;"><div style="font-size: 12px; color: #a9b6cc;">예비</div><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 600; color: #a9b6cc;">—</div></div>
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; min-width: 0;"><div style="font-size: 12px; color: #a9b6cc;">확인 불가</div><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 600; color: #fbbf24;">21</div></div>
+</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">링크가 없는 21포트는 구성도에서 회색 빗금 ‘확인 불가’ 로 그립니다. 다음 부품 주기에 설명을 읽으면 예비 · 확인 필요로 갈립니다.</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">포트 목록을 읽지 못함</b>
+<div style="padding: 10px 12px; border-radius: 10px; background: #0f1626; border: 1px solid #243049; color: #e6edf6; font-size: 12.5px; overflow-wrap: anywhere;">이 장비의 포트 목록을 아직 읽지 못했습니다(텔레메트리 스트리밍·수집 경로를 ‘읽은 경로’ 에서 확인하세요).</div>
+<div style="display: flex; align-items: center; justify-content: center; height: 86px; border: 1px dashed #5d6b85; border-radius: 10px; color: #a9b6cc; font-size: 12.5px;">구성도를 그리지 않습니다</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">개수는 전부 ‘—’ 이고, 전 스위치 여유 표에서는 합계에서 빠져 ‘확인 불가’ 로 따로 셉니다. 0 포트로 쓰지 않습니다.</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":800}}'>
+class Component extends DCLogic {
+renderVals() {
+const MONO = "'JetBrains Mono', ui-monospace, monospace";
+const CLS = {
+use: { label: '사용 중', paint: 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;' },
+spareX: { label: '예비 · GBIC 꽂힘', paint: 'background: #172f5c; border: 1px solid #60a5fa; color: #e6f0ff;' },
+spareE: { label: '예비 · 빈 케이지', paint: 'background: #0f1626; border: 1px dashed #60a5fa; color: #bfdbfe;' },
+check: { label: '확인 필요', paint: 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;' },
+off: { label: '관리상 꺼짐', paint: 'background: #2a3446; border: 1px solid #64748b; color: #cbd5e1; text-decoration: line-through;' }
+};
+const plan = { 3: [], 4: [['check', 17], ['off', 36]], 5: [['check', 9], ['off', 30]], 6: [] };
+const subOf = (slot, n) => {
+const ex = (plan[slot] || []).find((x) => x[1] === n);
+if (ex) return ex[0];
+if (slot === 6) return n <= 4 ? 'spareX' : 'spareE';
+if (slot === 5 && n >= 28 && n !== 30) return n <= 32 ? 'spareX' : 'spareE';
+return 'use';
+};
+const all = [];
+const slots = [3, 4, 5, 6].map((slot) => {
+const ports = [];
+for (let n = 1; n <= 36; n++) {
+const sub = subOf(slot, n);
+all.push(sub);
+ports.push({ short: String(n), tip: 'Ethernet' + slot + '/' + n + ' — ' + CLS[sub].label, cell: 'box-sizing: border-box; width: 30px; height: 28px; padding: 0; border-radius: 5px; font: 600 10.5px ' + MONO + '; cursor: pointer; display: flex; align-items: center; justify-content: center; ' + CLS[sub].paint });
+}
+const c = (s) => ports.filter((p) => p.tip.indexOf(CLS[s].label) >= 0).length;
+return { label: '슬롯 ' + slot + ' · Ethernet' + slot + '/1–' + slot + '/36', meta: '사용 ' + c('use') + ' · 예비 ' + (c('spareX') + c('spareE')) + ' · 확인 필요 ' + c('check') + ' · 꺼짐 ' + c('off'), ports: ports };
+});
+const legend = ['use', 'spareX', 'spareE', 'check', 'off'].map((k) => ({ label: CLS[k].label, n: all.filter((s) => s === k).length, sw: 'display: inline-block; box-sizing: border-box; width: 14px; height: 12px; border-radius: 3px; flex: 0 0 auto; ' + CLS[k].paint }));
+return { slots: slots, legend: legend };
+}
+}
+</script>
+</body>
+</html>

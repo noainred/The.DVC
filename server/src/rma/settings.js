@@ -3,10 +3,10 @@
  * 비밀 없음(봉인 대상 아님). 원자적 쓰기 + 로드 손상 preserveCorrupt(설정 파일 공통 규약).
  */
 import { strictIpv4Num, cidrMatch } from '../util/ipv4.js';
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 
 export const MODES = [
   { id: 'active-active', label: 'Active-Active (선착 인출)', desc: '모든 인스턴스가 동시에 일합니다. 먼저 폴링한 인스턴스가 명령을 가져갑니다.' },
@@ -18,12 +18,26 @@ const RE_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 const FILE = path.join(config.configDir, 'rma-settings.json');
 let _db = null;
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'rma-settings' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function rmaSettingsWriteRefusal() {
+  load();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `RMA 분배 · 접속 허용 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 
 function load() {
   if (_db) return _db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { defaultMode: 'active-active', agents: {} }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       _db = { defaultMode: MODE_IDS.has(p.defaultMode) ? p.defaultMode : 'active-active', agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
       return _db;
     }
@@ -31,7 +45,9 @@ function load() {
   _db = { defaultMode: 'active-active', agents: {} };
   return _db;
 }
-function persist() { atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...load() }, null, 2), { mode: 0o600 }); }
+function persist() {
+  { const no = rmaSettingsWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
+  atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...load() }, null, 2), { mode: 0o600 }); }
 
 const lc = (a) => String(a || '').trim().toLowerCase();
 
@@ -123,4 +139,4 @@ export function remoteFor(agent) {
   return { longpollMs: r.longpollMs || 0, testConcurrency: r.testConcurrency || 0, disabledTests: r.disabledTests || [] };
 }
 
-export function _resetRmaSettings() { _db = null; }
+export function _resetRmaSettings() { _db = null; _reader.reset(); _readErr = ''; }

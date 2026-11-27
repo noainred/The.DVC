@@ -23,13 +23,14 @@
  *     수집이 끝나기 전에 다음 주기가 오고 재진입 가드에 막혀 '설정만 바뀌고 실효 없음'이 된다.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { agentValueOf } from '../util/agentKey.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 105회차 A5: 읽기 오류 ≠ 손상
+import { ISI_CMD_TIMEOUT_DEF_MS, ISI_CMD_TIMEOUT_MIN_MS, ISI_CMD_TIMEOUT_MAX_MS, ISI_CMD_TIMEOUT_PRESETS, ISI_SESSION_EXTRA_MS } from './isiTimeouts.js';
 
 /** 조정 가능한 주기 항목. min/def 는 서버가 단일 소스 — UI 가 이 표를 받아 폼을 그린다. */
 export const INTERVAL_SPEC = [
@@ -46,9 +47,28 @@ export const INTERVAL_SPEC = [
     label: '중앙 설정 수신(pull) 주기', hint: '장비 목록·이 주기 설정·수집 요청을 중앙에서 받아오는 간격. 중앙 "수집" 버튼의 반응 속도이기도 하다.' },
   { key: 'areasMs', env: 'STORAGE_AREAS_MS', def: 60 * 60_000, min: 10 * 60_000,
     label: '영역(쿼터/공유) 전수 수집 주기', hint: 'PowerScale 쿼터·SMB/NFS 등 무거운 전수 조회 간격. 장비 부하가 커 기본이 길다.' },
+  // v2.932(2차 ⑨): 노드 부하 표본 — 수집 주기와 따로 도는 가벼운 폴러(storage/nodeLoadPoller.js — 아이실론만 · 장비 토글 nodeLoadEnabled 기본 켬).
+  //   상한 60분(`max`) — 수집 주기보다 길게 두면 표본은 수집 주기(1시간 스냅샷)마다만 남는다. 하한 1분은 다른 항목과 같다.
+  { key: 'nodeLoadMs', env: 'STORAGE_NODELOAD_MS', def: 5 * 60_000, min: 60_000, max: 60 * 60_000,
+    label: '노드 부하 표본 주기', hint: '아이실론 노드별 부하·클라이언트·프로토콜 표본을 읽는 간격(수집 주기와 따로 돕니다 — 장비 편집의 ‘노드 부하 표본 수집’ 이 켜진 장비만). SSH 장비는 이 간격마다 로그인이 생겨 장비 감사 로그가 늘어납니다.' },
+  // v3.39.0(사용자 요청 — "isi 명령어 처리에 오래 걸려서 timeout · 설정에 timeout 메뉴 · 최대 5분 · 기본 3분"): **주기가 아니라 시한**이다.
+  //   · `timer: false` — 값이 바뀌어도 폴러·push·pull 타이머를 다시 잡지 않는다(주기가 아니다 — applyCentralIntervals).
+  //   · `max`·`presets` — 화면은 이 사양으로 선택지를 그린다(숫자를 화면에 박지 않는다 · 주기 선택지 10분…24시간은 이 항목에 맞지 않는다).
+  //   · 같은 배포 경로(storage-config `intervals`)를 탄다 — 구버전 엣지는 모르는 키를 버린다(normalizeIntervals).
+  //   · 세션 예산·장비 시한은 이 값에서 계산한다(`storage/isiTimeouts.js` — 사람이 세 값을 맞추게 두지 않는다).
+  { key: 'isiCmdTimeoutMs', env: 'STORAGE_ISI_CMD_TIMEOUT_MS', def: ISI_CMD_TIMEOUT_DEF_MS, min: ISI_CMD_TIMEOUT_MIN_MS, max: ISI_CMD_TIMEOUT_MAX_MS,
+    timer: false, presets: ISI_CMD_TIMEOUT_PRESETS,
+    // v3.41.1(점검 1회차): 예전에는 isi 명령이 SSH exec 기본 시한(`SSH_EXEC_TIMEOUT_MS`)을 썼다 — 그 값을 3분보다 길게 잡아 느린 클러스터를
+    //   넘기던 엣지는 업그레이드 뒤 대기가 3분으로 **줄어든다**. 이 항목의 env 가 없을 때 그 옛 env 가 기본값보다 길면 그것을 로컬 값으로 쓴다
+    //   (올리기만 한다 — 줄이지 않는다 · 상한 5분). 중앙 지정 · 이 항목의 env 가 있으면 그것이 우선이다.
+    legacyEnv: 'SSH_EXEC_TIMEOUT_MS',
+    label: 'PowerScale SSH 명령 대기',
+    hint: `주기가 아니라 시한 — PowerScale(Isilon) SSH 수집에서 isi 명령 하나의 응답을 기다리는 최대 시간. 응답이 느린 클러스터가 시간 초과로 수집에 실패하면 늘린다. 장비 한 대의 전체 수집 시한은 이 값 + ${Math.round(ISI_SESSION_EXTRA_MS / 60_000)}분으로 함께 늘어난다.` },
 ];
 const SPEC_BY_KEY = new Map(INTERVAL_SPEC.map((s) => [s.key, s]));
 const MAX_MS = 24 * 60 * 60_000; // 상한 24시간 — 그 이상은 사실상 '끔'이라 오설정으로 본다.
+/** 타이머를 움직이는 항목(주기)인가 — `timer: false` 는 시한이라 재무장 대상이 아니다(v3.39.0). */
+const isTimerKey = (spec) => spec.timer !== false;
 
 /**
  * 입력 정규화(순수). 아는 키만 남기고 하한/상한으로 clamp 한다.
@@ -67,7 +87,8 @@ export function normalizeIntervals(input = {}) {
     if (!Number.isFinite(n) || n <= 0) { issues.push(`${spec.label}: 숫자가 아니어서 무시(${raw})`); continue; }
     let v = Math.round(n);
     if (v < spec.min) { issues.push(`${spec.label}: 하한 ${Math.round(spec.min / 1000)}초로 올림(요청 ${Math.round(v / 1000)}초)`); v = spec.min; }
-    if (v > MAX_MS) { issues.push(`${spec.label}: 상한 24시간으로 내림`); v = MAX_MS; }
+    const max = spec.max || MAX_MS; // v2.932: 항목별 상한(nodeLoadMs 60분) — 없으면 공통 24시간
+    if (v > max) { issues.push(`${spec.label}: 상한 ${max === MAX_MS ? '24시간' : `${Math.round(max / 60_000)}분`}으로 내림`); v = max; }
     values[k] = v;
   }
   return { values, issues };
@@ -78,9 +99,23 @@ export function envIntervals() {
   const out = {};
   for (const s of INTERVAL_SPEC) {
     const n = Number(process.env[s.env]);
-    out[s.key] = Number.isFinite(n) && n > 0 ? Math.min(MAX_MS, Math.max(s.min, Math.round(n))) : s.def;
+    out[s.key] = Number.isFinite(n) && n > 0 ? Math.min(s.max || MAX_MS, Math.max(s.min, Math.round(n))) : (legacyEnvMs(s) ?? s.def);
   }
   return out;
+}
+
+/**
+ * 옛 env 가 이 항목의 로컬 기본값을 **올리는** 값(없으면 null). 사양의 `legacyEnv` 가 있고 · 그 값이 기본값보다 길 때만.
+ * 줄이는 방향으로는 쓰지 않는다(옛 env 의 기본 60초가 새 기본 3분을 깎으면 안 된다).
+ * 큰 값도 버리지 않고 이 항목의 상한으로 자른다 — `proxy/sshExec.js` 가 그 env 를 버리지 않고 30분으로 잘라 썼으므로(예전에 실제로 길게 기다렸다),
+ *   여기서만 버리면 그런 엣지의 대기가 업그레이드로 줄어든다(점검 2회차 N4 — 1회차는 30분 초과를 '단위 착오' 로 보고 무시했다).
+ */
+function legacyEnvMs(spec) {
+  if (!spec?.legacyEnv) return null;
+  const raw = process.env[spec.legacyEnv];
+  const l = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  if (!Number.isFinite(l) || l <= spec.def) return null;
+  return Math.min(spec.max || MAX_MS, Math.round(l));
 }
 
 // ── 런타임(이 노드에서 실제로 쓰이는 값) ───────────────────────────────────────
@@ -102,7 +137,7 @@ export function runtimeIntervalSource() {
   const eff = runtimeIntervals();
   return INTERVAL_SPEC.map((s) => ({
     key: s.key, label: s.label, ms: eff[s.key],
-    from: !localPinned() && _override[s.key] ? 'central' : (process.env[s.env] ? 'env' : 'default'),
+    from: !localPinned() && _override[s.key] ? 'central' : (process.env[s.env] || legacyEnvMs(s) != null ? 'env' : 'default'),
   }));
 }
 
@@ -124,11 +159,14 @@ export function applyCentralIntervals(input = {}) {
   _overrideAt = Date.now();
   const eff = runtimeIntervals();
   const effectiveChanged = INTERVAL_SPEC.some((s) => eff[s.key] !== effBefore[s.key]);
+  // v3.39.0: 타이머는 **주기 항목이 바뀔 때만** 다시 잡는다 — 시한(`timer: false` · PowerScale SSH 명령 대기)만 바뀌었으면 값은 다음
+  //   수집부터 그대로 먹고(수집기가 매번 runtimeIntervals 를 읽는다), 타이머를 건드릴 이유가 없다(재무장하면 첫 실행 전의 firstDelay 가 사라진다).
+  const timersChanged = INTERVAL_SPEC.some((s) => isTimerKey(s) && eff[s.key] !== effBefore[s.key]);
   console.log('[storage-intervals] 중앙 지정 주기 적용: '
     + INTERVAL_SPEC.map((s) => `${s.key}=${Math.round(eff[s.key] / 1000)}s`).join(' ')
-    + (effectiveChanged ? '' : ' (실효 주기는 그대로 — 타이머를 다시 잡지 않습니다)'));
-  if (effectiveChanged) for (const cb of _listeners) { try { cb(eff); } catch { /* 리스너 하나가 나머지를 막지 않게 */ } }
-  return { applied: true, values, effective: eff, effectiveChanged };
+    + (timersChanged ? '' : effectiveChanged ? ' (주기는 그대로 — 타이머를 다시 잡지 않습니다)' : ' (실효 주기는 그대로 — 타이머를 다시 잡지 않습니다)'));
+  if (timersChanged) for (const cb of _listeners) { try { cb(eff); } catch { /* 리스너 하나가 나머지를 막지 않게 */ } }
+  return { applied: true, values, effective: eff, effectiveChanged, timersChanged };
 }
 
 export function onIntervalsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
@@ -159,11 +197,24 @@ const _loadErr = makeSettingsLoadError(() => FILE, { label: '스토리지 수집
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function storageIntervalsLoadError() { load(); return _loadErr.get(); }
 
+/*
+ * 105회차 A5(103 남긴 것 — cvp/settings F20 과 같은 최소 수정): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 원본을 `.corrupt.*` 로 옮겼다 —
+ *   재시작 뒤 '보존본만 있음' 이 되고, 관리자 저장(전체 교체 · 오류 검사 없음)이 빈 설정 위에 쓴 값으로 엣지별 주기를 잃었다.
+ *   이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — 읽히면 재시작 · 확정 없이 풀림) · 표지 readError(배포에 intervals 를 싣지 않음은 그대로 · 확정 불가) · 저장 409.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'storage-intervals' });
+/** 105회차 A5: 읽기 오류 중 저장 거절 사유(라우트 409), 아니면 null. */
+export function storageIntervalsWriteRefusal() {
+  const le = storageIntervalsLoadError();
+  return le?.readError ? { ok: false, status: 409, code: 'settings-unreadable', readError: true, reason: '스토리지 수집 주기 파일(storage-intervals.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).' } : null;
+}
 function load() {
   if (_db) return _db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return { global: {}, agents: {} }; }   // 캐시하지 않는다 — 저장은 409
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아닌 JSON 값');
       _db = {
         global: normalizeIntervals(p.global || {}).values,
@@ -187,6 +238,7 @@ export function loadIntervalConfig() { const d = load(); return { global: { ...d
  * — registry.js 의 agent '' 규약과 같다.
  */
 export function saveIntervalConfig({ global = {}, agents = {} } = {}) {
+  { const ref = storageIntervalsWriteRefusal(); if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true }); }   // 105회차 A5
   const issues = [];
   const g = normalizeIntervals(global);
   issues.push(...g.issues);
@@ -212,9 +264,24 @@ export function saveIntervalConfig({ global = {}, agents = {} } = {}) {
  */
 export function intervalsForAgent(agent) {
   const d = load();
-  return { ...d.global, ...(agentValueOf(d.agents, agent) || {}) };
+  // 106회차(재현 — v2.597 회귀): 빈 이름('' = 중앙 자신 — 위 저장 계약)은 공용 조회(agentValueOf)가 '이름 없음' 으로 보아 값을 주지 않는다 —
+  //   화면의 ‘중앙(직접 수집)’ 칸에 적은 주기가 저장만 되고 중앙 자신에게 한 번도 적용되지 않았다(전역 칸만 먹었다). '' 키는 글자 그대로 찾는다.
+  const own = String(agent ?? '').trim() === '' ? (Object.hasOwn(d.agents, '') ? d.agents[''] : undefined) : agentValueOf(d.agents, agent);
+  return { ...d.global, ...(own || {}) };
 }
 
+/**
+ * 저장된 설정(전역 + 모든 엣지) 중 그 항목의 가장 큰 값. 지정한 곳이 없으면 0.
+ * v3.39.0: 중앙이 '엣지가 장비 한 대를 수집하는 데 길어야 얼마나 걸리는가' 를 어림할 때 쓴다(`collectRequests.js perItemMs`).
+ */
+export function maxConfiguredIntervalMs(key) {
+  const d = load();
+  let m = Number(d.global?.[key]) || 0;
+  for (const v of Object.values(d.agents || {})) m = Math.max(m, Number(v?.[key]) || 0);
+  return m;
+}
+
+let _ownRetry = null;   // 106회차: 읽기 오류로 미룬 자기 주기 재적용 타이머
 /**
  * 중앙 노드가 **자기 자신**(직접 수집 장비 = registry 의 agent '')에 지정한 주기를 적용한다.
  * 엣지는 이 경로를 타지 않는다 — 엣지 값은 config pull 로 온다(파일이 엣지엔 없다).
@@ -224,7 +291,18 @@ export function applyOwnIntervals() {
   if (config.agent.centralUrl && config.agent.centralToken) {
     return { applied: false, reason: '엣지 노드 — 주기는 중앙 설정 pull 로 적용된다' };
   }
+  // 106회차(105회차 A5 남긴 것 — 재현): 기동 때 주기 파일이 읽기 오류면 빈 지정({})을 적용했고, 파일이 다시 읽혀도(표지는 풀리고 화면은 저장된 주기를 보인다)
+  //   이 함수를 다시 부르는 길이 없어 중앙 자신은 저장 · 재시작 전까지 env · 기본 주기로 돌았다(backup/settings 105회차 A1 과 같은 꼴).
+  //   읽기 오류 동안은 적용하지 않고(못 읽은 값은 '지정 없음' 이 아니다) 재읽기 간격마다 다시 본다 — 읽히면 그 지정으로 적용한다.
+  if (_ownRetry) { clearTimeout(_ownRetry); _ownRetry = null; }
+  if (storageIntervalsLoadError()?.readError) {
+    _ownRetry = setTimeout(() => { _ownRetry = null; try { applyOwnIntervals(); } catch { /* 다음 저장 · 재시작이 적용한다 */ } }, READ_RETRY_MS + 1_000);
+    _ownRetry.unref?.();
+    return { applied: false, held: true, reason: '수집 주기 파일을 읽지 못했습니다(읽기 오류) — 다시 읽히면 적용합니다' };
+  }
   return applyCentralIntervals(intervalsForAgent(''));
 }
+/** 테스트 전용(106회차) — 읽기 오류로 미룬 자기 주기 재적용이 걸려 있는가. */
+export function _ownRetryPendingForTest() { return !!_ownRetry; }
 
-export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; _loadErr.ok(); }
+export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; _loadErr.ok(); _reader.reset(); if (_ownRetry) { clearTimeout(_ownRetry); _ownRetry = null; } }

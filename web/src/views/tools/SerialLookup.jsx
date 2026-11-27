@@ -71,6 +71,7 @@ export default function SerialLookup() {
       {addressHiddenNote(data) && (
         <div className="card" style={{ marginBottom: 12, fontSize: 12.5, borderLeft: '3px solid var(--border)' }}>
           🔒 <BoldText text={addressHiddenNote(data)} />
+          {data?.uuidHidden && <div style={{ marginTop: 4 }}><BoldText text={'서버의 **시스템 UUID** 는 관리자에게만 검색 · 표시됩니다(하드웨어 내보내기와 같은 기준).'} /></div>}
         </div>
       )}
 

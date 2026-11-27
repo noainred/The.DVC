@@ -87,7 +87,7 @@ async function _pull({ force = false } = {}) {
       }
       _lastSig = sig;
       // 빠진·접속처가 바뀐 Director 의 이 엣지 인증 정지 기록은 사실이 아니게 됐다(같은 cred id 로 새 접속처를 막지 않게)
-      for (const id of [...applied.removed, ...applied.moved]) { const d = before.get(id); if (d) bareosAuthGuard.clearAuthStop(directorCred(d).id); }
+      for (const id of [...applied.removed, ...applied.moved]) { const d = before.get(id); if (d) bareosAuthGuard.clearAuthStop(directorCred(d).id, { verified: false }); }
       console.log(`[bareos-config] 중앙 배정 법인 Director 적용: ${applied.count}개${applied.removed.length ? ` · 빠짐 ${applied.removed.length}` : ''}${applied.moved.length ? ` · 접속처 변경 ${applied.moved.length}` : ''}${applied.rejected ? ` · 형식 오류로 버림 ${applied.rejected}` : ''}`);
     }
     _last = { at: Date.now(), ok: true, count: body.directors.length, ...(applied ? { applied: true, rejected: applied.rejected, removed: applied.removed.length, moved: applied.moved.length } : { unchanged: true }) };

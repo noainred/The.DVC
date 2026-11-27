@@ -57,17 +57,26 @@ export function veeamHostFor(vc, { manual = '', aliasHosts = [] } = {}) {
  * @param {boolean} ctx.known      이 vCenter 의 대조 결과를 읽었는가(match 가 있다)
  * @param {object|undefined} ctx.entry  match.byVm[vm.id]
  */
-export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
+/** 96회차: 잘린 결과에서 '대조에 없음 · 복원 지점 없음' 의 사유(미보호로 단정하지 않는다). */
+export const TRUNCATED_UNKNOWN_REASON = 'Veeam 수집 목록(작업 · 백업 객체 · 복원 지점 · VM)이 상한에서 잘려 이 VM 의 백업 근거를 끝까지 읽지 못했습니다 — 미보호로 단정하지 않고 포탈 전용 잡에 넣지 않습니다(Veeam 콘솔에서 확인하세요).';
+export function runStatusOf(vm, { servers = [], known = false, truncated = false, entry } = {}) {
   const objectId = morefOf(vm);
   if (!servers.length) return { status: 'unmapped', objectId, reason: '이 vCenter 를 맡는 Veeam B&R 서버가 등록돼 있지 않습니다(Veeam 서버 설정의 연결 vCenter).' };
   if (!known) return { status: 'unknown', objectId, reason: '이 vCenter 의 Veeam 결과를 아직 읽지 못했습니다 — 미보호로 단정하지 않습니다.' };
-  if (!entry) return { status: 'unprotected', objectId, serverId: servers[0].id, serverName: servers[0].name };
+  // 96회차(94회차 남긴 것 ① — 결정 권장안): 결과가 상한에서 잘렸으면 '대조에 없음' 은 잘린 쪽에 있던 보호 VM 일 수 있다 — 모름(두 번째 잡 방지).
+  if (!entry) return truncated ? { status: 'unknown', objectId, reason: TRUNCATED_UNKNOWN_REASON } : { status: 'unprotected', objectId, serverId: servers[0].id, serverName: servers[0].name };
   const rp = typeof entry.rp === 'number' && Number.isFinite(entry.rp) ? entry.rp : null;
   const lb = typeof entry.lb === 'number' && Number.isFinite(entry.lb) ? entry.lb : null;
   const jobs = Array.isArray(entry.jobs) ? entry.jobs.slice(0, 10) : [];
   const names = new Set((Array.isArray(entry.servers) ? entry.servers : []).map(lc));
-  const owner = servers.find((s) => names.has(lc(s.name))) || null;
+  const owners = servers.filter((s) => names.has(lc(s.name)));
   const base = { objectId, restorePoints: rp, lastBackup: lb, jobs, running: entry.run === 1 };
+  // 전체 점검 2회차(V-7): 대조 결과는 서버를 **표시명**으로 적는다(veeam/parse.js byVm.servers) — 이 vCenter 를 맡는 B&R 둘이 같은 이름이면
+  //   어느 쪽 백업인지 가를 수 없다. 등록 순서상 첫 서버로 보내면 그 VM 을 모르는 서버가 거절했다 — 단정하지 않고 보내지 않는다(이름을 다르게 하면 풀린다).
+  if (owners.length > 1) {
+    return { status: 'unknown', ...base, reason: `이 vCenter 를 맡는 Veeam B&R 서버 ${owners.length}대가 같은 이름('${owners[0].name}')이라 이 VM 의 백업이 어느 서버 것인지 가를 수 없습니다 — Veeam 서버 설정에서 이름을 서로 다르게 하세요.` };
+  }
+  const owner = owners[0] || null;
   // 게스트 에이전트 백업(컴퓨터 이름으로 맞춘 것 — ag 1)이 하나라도 섞이면 VM 단위 백업인지 이 값만으로는 가를 수 없다(대조 코어가 근거를 합친다):
   //   Quick Backup 근거로 쓰지 않고(에이전트 백업이면 Veeam 이 거절), 미보호로 단정해 포탈 잡에 넣지도 않는다(v2.820.1 재검토 — 'agent').
   if (entry.ag === 1) return { status: 'agent', ...base, serverId: (owner || servers[0]).id, serverName: (owner || servers[0]).name,
@@ -79,6 +88,8 @@ export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
     return { status: 'protected', ...base, serverId: owner.id, serverName: owner.name };
   }
   const tgt = owner || servers[0];
+  // 96회차: 잘린 결과의 '복원 지점 없음' 도 단정이 아니다(복원 지점 목록이 잘렸을 수 있다) — 모름.
+  if (truncated) return { status: 'unknown', ...base, reason: TRUNCATED_UNKNOWN_REASON };
   if (jobs.length) return { status: 'in-job', ...base, serverId: tgt.id, serverName: tgt.name, reason: '잡에는 있지만 복원 지점이 없습니다(첫 실행 전이거나 실패) — Quick Backup 은 전체 복원 지점이 있어야 합니다.' };
   return { status: 'unprotected', ...base, serverId: tgt.id, serverName: tgt.name };
 }

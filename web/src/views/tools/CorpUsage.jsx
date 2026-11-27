@@ -18,6 +18,7 @@ import {
   GROUP_LABEL, ROLE_LABEL, pctText, coresText, memText, coverageText, srcText, isPartial,
   filterCorps, groupCounts, noticesOf, footnotes, csvOf, usageTone, toneVar,
 } from './corpUsageText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const NOTICE_COLOR = { bad: 'var(--red)', warn: 'var(--amber)', info: 'var(--text-dim)' };
 
@@ -85,9 +86,7 @@ export default function CorpUsage({ scope = '' } = {}) {
     try {
       const name = `corp-usage-${dayStamp()}${group !== 'all' || effScope ? '-filtered' : ''}.csv`;
       const blob = new Blob([`﻿${csvOf(rows)}`], { type: 'text/csv;charset=utf-8' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = name; a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      saveBlob(blob, name);
       setMsg(`법인 ${rows.length}곳을 CSV 로 내보냈습니다(${name}).`);
     } catch (e) { setMsg(`내보내기 실패: ${e?.message || e}`); }
   }
@@ -134,7 +133,7 @@ export default function CorpUsage({ scope = '' } = {}) {
       <div className="card" style={{ padding: 0, minWidth: 0 }}>
         {rows.length === 0 ? (
           <div className="muted" style={{ padding: 16, fontSize: 13 }}>
-            {(data.corps || []).length === 0 ? '서버가 있는 법인이 없습니다 — 서버 분석 › 구분이 비어 있거나 첫 수집 중입니다.' : `${GROUP_LABEL[group]} 구분에 해당하는 법인이 없습니다.`}
+            {(data.corps || []).length === 0 ? '서버가 있는 법인이 없습니다 — Physical Server › 구분이 비어 있거나 첫 수집 중입니다.' : `${GROUP_LABEL[group]} 구분에 해당하는 법인이 없습니다.`}
           </div>
         ) : (
           <STable className="table" minWidth={980}>

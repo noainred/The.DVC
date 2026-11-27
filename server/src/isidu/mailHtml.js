@@ -14,7 +14,7 @@ import { localStamp } from '../util/dayKey.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { slotLabel, daysLabel, failTitleOf, SURGE_MIN_BYTES, SURGE_MIN_RATIO } from './digestRules.js';
 
-export const SETTINGS_PATH = '설정 › 수집 › 아이실론 디렉터리 사용량';
+export const SETTINGS_PATH = '설정 › 수집 주기·임계 › 아이실론 디렉터리 사용량';
 export const VIEW_PATH = '특수 기능 › 아이실론 디렉터리 사용량';
 const FONT = "'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo','Noto Sans KR',sans-serif";
 const MONO = "Consolas,'D2Coding','Courier New',monospace";
@@ -387,7 +387,7 @@ export function renderResultMail({ label, corp = '', report, change = null, reci
   rows.push(section(kpis([
     { label: '전체 사용량', value: bytesText(k.denomBytes), sub: label },
     { label: '7일 변화', valueHtml: d7 ? deltaCell(d7) : `<span style="color:${C.faint};">—</span>`, sub: report.base7 ? `${d7Pct != null ? `${signedPct(d7Pct)} · ` : ''}기준 ${short(report.base7.ts)} 조사` : '7일 이전 조사가 없어 비교하지 않았습니다' },
-    { label: '폴더 수', value: (numOrNull(k.users) ?? 0).toLocaleString('ko-KR'), sub: k.new7 != null ? `7일 신규 ${k.new7} · 사라짐 ${k.removed7 ?? 0}` : '신규·사라짐: 7일 전 조사 없음' },
+    { label: '폴더 수', value: (numOrNull(k.users) ?? 0).toLocaleString('ko-KR'), sub: k.compareLimited ? '신규·사라짐: 폴더 상한으로 잘린 조사라 판정하지 않음' : k.new7 != null ? `7일 신규 ${k.new7} · 사라짐 ${k.removed7 ?? 0}` : '신규·사라짐: 7일 전 조사 없음' },   // 36회차 F5
     { label: `상위 ${k.topN ?? 0}개 비중`, value: pct(k.topShare), sub: `${bytesText(k.topBytes)} / ${bytesText(k.denomBytes)}` },
   ]), '22px 26px 4px 26px'));
   const notes = [];
@@ -439,7 +439,7 @@ export function renderResultMail({ label, corp = '', report, change = null, reci
     ...(schedLine ? [schedLine] : []),
     `경로: ${s.path}`, `장비: ${s.host || '—'}`, `조사 노드: ${s.node || '메인'}`, `조사 시각: ${when}`, `소요: ${secText(s.durationMs)}`,
     `전체 합계: ${bytesText(k.denomBytes)}${d7 ? ` (7일 ${deltaText(d7)})` : ''}`,
-    `폴더 수: ${(numOrNull(k.users) ?? 0).toLocaleString()}개${k.new7 != null ? ` · 7일 신규 ${k.new7}개` : ''}${k.removed7 != null ? ` · 사라짐 ${k.removed7}개` : ''}`,
+    `폴더 수: ${(numOrNull(k.users) ?? 0).toLocaleString()}개${k.compareLimited ? ' · 신규·사라짐은 판정하지 않음(폴더 상한으로 잘린 조사)' : ''}${k.new7 != null ? ` · 7일 신규 ${k.new7}개` : ''}${k.removed7 != null ? ` · 사라짐 ${k.removed7}개` : ''}`,
     '',
     ...top.map((r) => `${String(r.rank).padStart(2)}. ${r.name} — ${bytesText(r.bytes)} (${pct(r.share)}, 7일 ${r.new7 === true ? '신규' : deltaText(r.d7)})`),
     ...(growth.length ? ['', '7일 증가 상위:', ...growth.map((g) => `- ${g.name} ${deltaText(g.d7)} (지금 ${bytesText(g.bytes)})`)] : []),

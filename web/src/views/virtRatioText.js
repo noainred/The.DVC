@@ -53,6 +53,21 @@ export function ratioKpi(ratio, kind = 'cpu') {
   return { accent: 'var(--green)', sub: '정상 범위' };
 }
 
+/**
+ * vCenter 행의 '용량을 못 읽은 호스트' 수(서버 /summary byVcenter.hostsCapacityUnknown — 2차 공통 기능 점검 10회차). 없거나 못 읽었으면 0.
+ * 0 보다 크면 그 행의 물리 코어 · 물리 RAM 은 **읽은 호스트만의 부분 합**이다 — 비율을 판정하지 않고, 칸에는 부분 합임을 표시한다.
+ */
+export function capUnknownOf(vc) {
+  const n = numOrNull(vc?.hostsCapacityUnknown);
+  return n != null && n > 0 ? n : 0;
+}
+
+/** 부분 합 표시(물리 칸 옆 '*')의 툴팁 · 판정 보류 배지의 이유 — 미상 호스트가 없으면 null. */
+export function capUnknownTitle(vc) {
+  const n = capUnknownOf(vc);
+  return n > 0 ? `용량을 못 읽은 호스트 ${n.toLocaleString()}대 — 물리 코어 · RAM 은 읽은 호스트만의 부분 합이라 가상화율을 판정하지 않았습니다.` : null;
+}
+
 /** 표 셀 수치 — 결측은 '—'(0 으로 채우지 않는다). */
 export function numCell(v) {
   const n = numOrNull(v);

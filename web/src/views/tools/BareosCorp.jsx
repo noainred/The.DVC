@@ -10,6 +10,7 @@ import {
   SECRET_SLOT, consoleText, sdDeviceText, dirStorageText, passwordIssue, pwPairIssue, nameIssue, storageRows, portalText, diskText, pathCheckLines,
   accountRows, portalOf, diskTotal, tlsText, profileOptions, DEFAULT_PROFILE, poolFormOf, retentionText, PORTAL_POOLS, PORTAL_SCHEDULE, maskPw, sshSourceText, noSshNeeded, reregisterSummary, scanWaitMs,
 } from './bareosCorpText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * 법인별 Bareos 설정(v2.845 · 설정 탭 — 전 법인 범위 관리자만 보인다).
@@ -44,7 +45,7 @@ export async function call(path, body, opts) {
   if (r?.ok === false) throw Object.assign(new Error(r.reason || '실패했습니다.'), { body: r, status: 409 });
   return r;
 }
-const copyText = (t, say) => { try { navigator.clipboard.writeText(t).then(() => say({ ok: true, text: '복사했습니다.' }), () => say({ ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' })); } catch { say({ ok: false, text: '복사하지 못했습니다.' }); } };
+const copyText = (t, say) => { copyToClipboard(t).then((ok) => say(ok ? { ok: true, text: '복사했습니다.' } : { ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' }), () => say({ ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' })); };
 export const FILE_ACTION = Object.freeze({ created: '새 파일', updated: '바꿈', deleted: '지움', unchanged: '그대로' });
 export const filesText = (r) => (r.files || []).map((f) => `${f.path}(${FILE_ACTION[f.action] || f.action})`).join(' · ');
 

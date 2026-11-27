@@ -6,6 +6,7 @@
  * GPU 클릭은 Vms 의 기존 gpuOnly·gpuType 상태(KPI GPU 카드와 같은 상태)로 간다 — 새 상태를 만들지 않는다.
  * 스타일은 vmDist.css(.vmd 아래만) — 색은 CSS 변수로만.
  */
+import { useNarrowScreen as useNarrowBase } from '../components/useNarrowScreen.js';
 import React, { useState, useEffect } from 'react';
 import { WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import {
@@ -19,29 +20,8 @@ const fmt = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US') : '—');
 const POWER_COLOR = { on: 'var(--green)', off: 'var(--vmd-off)', suspended: 'var(--amber)', other: 'var(--text-faint)' };
 const GPU_COLOR = { vgpu: 'var(--purple)', passthrough: 'var(--accent-2)', mixed: 'var(--amber)' };
 
-/** 좁은 화면 여부 — matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR·구형 브라우저). */
-export function useNarrowScreen(query = NARROW_QUERY) {
-  const read = () => {
-    try {
-      return typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? !!window.matchMedia(query).matches : false;
-    } catch { return false; }
-  };
-  const [narrow, setNarrow] = useState(read);
-  useEffect(() => {
-    let mq = null;
-    try { mq = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(query) : null; } catch { mq = null; }
-    if (!mq) return undefined;
-    const on = () => setNarrow(!!mq.matches);
-    on();
-    try {
-      mq.addEventListener('change', on);
-      return () => { try { mq.removeEventListener('change', on); } catch { /* 무시 */ } };
-    } catch {
-      try { mq.addListener(on); return () => { try { mq.removeListener(on); } catch { /* 무시 */ } }; } catch { return undefined; }
-    }
-  }, [query]);
-  return narrow;
-}
+/** 좁은 화면 여부 — 본체는 components/useNarrowScreen.js(v2.987 물리서버 폴더와 함께 쓴다). 이 화면 기본 기준은 NARROW_QUERY. */
+export function useNarrowScreen(query = NARROW_QUERY) { return useNarrowBase(query); }
 
 /** CPU·메모리 사용률 분포 패널 — 5% 칸 20개. */
 function UsagePanel({ title, what, panel, sel, onSel, others = false }) {
@@ -265,13 +245,16 @@ export function VmUsageBar({ pct }) {
 }
 
 /** VM 이름 칸 — 앞에 전원 점(색 + title + 화면판독 글자). */
-export function VmNameCell({ vm, onOpen }) {
+// v2.915(가상화 플랫폼 · 상세 한 규칙): href 가 있으면 이름은 개체 보기 링크(브레드크럼)이고 드로어는 옆의 '빠른 확인' 버튼 — 없으면 예전처럼 이름이 드로어(onOpen).
+export function VmNameCell({ vm, onOpen, href }) {
   const d = powerDot(vm?.powerState);
   return (
     <span className="vmd-name">
       <span className="vmd-pdot" style={{ background: d.color }} title={d.label} aria-hidden="true" />
       <span className="vmd-sr">{d.label} </span>
-      <button type="button" className="cell-link" onClick={() => onOpen(vm)}>{vm?.name}</button>
+      {href
+        ? <><a className="cell-link" href={href} title="개체 보기(요약 · 모니터 · 구성 …)">{vm?.name}</a><button type="button" className="vmd-quick" onClick={() => onOpen(vm)} title="빠른 확인(드로어 — ‹ › 로 이동)">빠른 확인</button></>
+        : <button type="button" className="cell-link" onClick={() => onOpen(vm)}>{vm?.name}</button>}
     </span>
   );
 }

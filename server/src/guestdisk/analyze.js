@@ -19,6 +19,7 @@
  *  - 추이는 관측 시작 이후만. 표본이 정책 하한(점 수)을 못 넘으면 증가율을 계산하지 않고 null.
  */
 import { fsTypeOf } from '../util/fsType.js';   // v2.798 파일 시스템 종류(엣지 정제)
+import { numOrNull } from '../util/numOrNull.js';
 
 /** 사용량을 모르는 파티션인가(v2.600 LO2600-07 — soapParse 가 freeSpace 없는 파티션을 usedGB:null 로 준다). */
 export function partUsedUnknown(p) {
@@ -117,15 +118,20 @@ export function reclaimAdvice(freeGB, trend, { minReclaimGB = 5 } = {}) {
 
 /**
  * 엣지 push 로 받은 게스트 디스크 VM 배열을 정규화·검증한다(중앙 수신 경로 — 엣지를 맹신하지 않음).
- * 상한: VM 200,000 · VM 당 파티션 128. 숫자는 유한·음수 아님으로 강제하고 문자열은 잘라낸다.
+ * 상한: VM 200,000 · VM 당 파티션 128. 문자열은 잘라낸다.
  * commitCollection 이 기대하는 형태로 되돌린다: [{vmId,vmName,allocGB,usedGB,partCount,parts:[{path,capGB,usedGB}]}].
  * 순수 함수라 라우트·테스트가 공유한다(부수효과 없음).
+ *
+ * 결정(56~75 남긴 것) 68 P1: 수치(VM 합계 · 파티션 용량 · 사용량)의 글자 · NaN · 빈 값 · 음수 · 무한대는 **0 이 아니라 null**(numOrNull) —
+ *   예전 `nn` 은 0 으로 바꿔 '비어 있는 파티션 · 0 GB VM' 으로 적재 · 추이에 넣었다('못 읽은 값은 0 이 아니다').
+ *   · 파티션의 용량 · 사용량을 못 읽으면 '값 모름 파티션' 이다(partsUnknown 으로 세고 경로는 unknownPaths — 여유 미보고와 같은 길).
+ *   · VM 합계를 못 읽으면 null 로 둔다 — commitCollection 이 그 VM 을 적재하지 않고 skippedVms 로 센다(중앙 수신은 응답 dropped 로 밝힌다).
  */
 export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } = {}) {
   const src = Array.isArray(raw) ? raw : [];
   const out = [];
   const str = (v, n = 512) => (v == null ? '' : String(v).slice(0, n));
-  const nn = (v) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? round1(x) : 0; };
+  const nn = (v) => { const x = numOrNull(v); return x != null && x >= 0 ? round1(x) : null; };   // 68 P1: 못 읽음 · 음수는 null(0 이 아니다)
   for (const vm of src) {
     if (out.length >= maxVms) break;
     if (!vm || typeof vm !== 'object') continue;
@@ -146,12 +152,14 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
     for (const p of partsSrc) {
       if (!p || typeof p !== 'object') continue;
       const ppath = str(p.path, 1024); const cap = nn(p.capGB);
-      if (!ppath && !cap) continue; // 경로·용량 모두 없는 잡음 파티션은 버린다(parseGuestDisks 와 동일)
+      if (!ppath && !cap) continue; // 경로·용량 모두 없는(또는 0 인) 잡음 파티션은 버린다(parseGuestDisks 와 동일)
       // v2.600(감사 LO2600-07): 사용량을 모르는 파티션은 저장하지 않는다 — nn(null) 이 0 이 되어 '비어 있는 파티션' 으로
       //   적재·추이에 남았다. VM 합계(allocGB·usedGB)도 vmSummary 가 같은 파티션을 뺐으므로 일관된다. 개수는 밝힌다.
-      if (p.usedGB == null || p.usedGB === '') { partsUnknown += 1; if (ppath && unknownPaths.length < maxParts) unknownPaths.push(ppath); continue; }
+      // 68 P1: 사용량 · 용량을 **읽지 못한** 것(글자 · NaN · 음수)도 같은 '값 모름' 이다 — 예전에는 0 으로 바꿔 저장했다.
+      const used = nn(p.usedGB);
+      if (used == null || cap == null) { partsUnknown += 1; if (ppath && unknownPaths.length < maxParts) unknownPaths.push(ppath); continue; }
       const fs = fsTypeOf(p.fs);   // v2.798 파일 시스템 종류 — 엣지가 보낸 값도 같은 형식만(정제 화이트리스트)
-      parts.push({ path: ppath, capGB: cap, usedGB: nn(p.usedGB), ...(fs ? { fs } : {}) });
+      parts.push({ path: ppath, capGB: cap, usedGB: used, ...(fs ? { fs } : {}) });
     }
     out.push({
       vmId,

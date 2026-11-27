@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 비교 — 2~5대 동시 보기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.sv{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;border:1px solid #243049;background:#0f1626;color:#e6edf6}
+.sv i{display:inline-block;width:10px;height:10px;border-radius:3px}
+.sv button{border:0;background:transparent;color:#8b9bb4;font:inherit;cursor:pointer;padding:0 2px;min-width:20px;min-height:20px}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 12px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer;font-size:12px}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sel{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px;line-height:1.5;white-space:nowrap}
+.hm{display:inline-block;min-width:44px;text-align:center;padding:3px 5px;border-radius:5px;font-weight:600;font-size:11.5px}
+.h0{background:rgba(34,197,94,.14);color:#4ade80}.h1{background:rgba(245,158,11,.16);color:#fbbf24}.h2{background:rgba(239,68,68,.18);color:#f87171}.hn{color:#8b9bb4;border:1px dashed #243049}
+.col{border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:6px}
+.col .nm{font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.col .m{display:flex;justify-content:space-between;gap:6px;font-size:11.5px;color:#8b9bb4;align-items:center}
+.col .m b{color:#e6edf6;font-size:13px}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4">특수 기능 › 서버 분석 › <a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › <b style="color:#e6edf6">서버 비교</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">서버 비교 — 내가 고른 2~5대를 한 화면에서 (사용률 · 평균 · 피크 · 편차)</h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">보드·용도 매트릭스·상세 어디서든 ‘비교에 추가’ 로 담는다 · <b style="color:#e6edf6">기본은 같은 법인 서버만</b>, 필요하면 ‘법인 간 허용’ 으로 바꿔 다른 법인 서버를 섞는다(범위 계정은 자기 법인만) · 시간축·커서·구간은 전부 공유 · 수치는 가상</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <div class="seg" role="group" aria-label="기간"><button type="button">1시간</button><button class="on" type="button">24시간</button><button type="button">7일</button></div>
+    <button class="btn" type="button">비교 세트 저장</button><button class="btn" type="button">CSV</button>
+  </div>
+
+  <!-- 선택기 -->
+  <div class="card" style="padding:12px 16px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center">
+    <span class="dim" style="font-size:12.5px">범위</span><div class="seg" role="group" aria-label="비교 범위"><button type="button">같은 법인만 (기본)</button><button class="on" type="button">법인 간 허용</button></div><span class="chip warn">법인 간 — PL-WAW 1대 포함</span><span class="dim" style="font-size:12.5px;margin-left:6px">선택 5/5</span>
+    <span class="sv"><i style="background:#3b82f6"></i> bm-kr1-db01 <span class="dim" style="font-weight:500">KR-SEL</span><button type="button" aria-label="제거">✕</button></span>
+    <span class="sv"><i style="background:#f59e0b"></i> bm-kr1-gp01 <span class="dim" style="font-weight:500">KR-SEL · GPDB coord</span><button type="button" aria-label="제거">✕</button></span>
+    <span class="sv"><i style="background:#22d3ee"></i> bm-kr1-gp02 <span class="dim" style="font-weight:500">KR-SEL · GPDB seg</span><button type="button" aria-label="제거">✕</button></span>
+    <span class="sv"><i style="background:#a855f7"></i> bm-kr1-gp03 <span class="dim" style="font-weight:500">KR-SEL · GPDB seg</span><button type="button" aria-label="제거">✕</button></span>
+    <span class="sv"><i style="background:#4ade80"></i> bm-pl1-db02 <span class="dim" style="font-weight:500">PL-WAW</span><button type="button" aria-label="제거">✕</button></span>
+    <span class="dim" style="font-size:12px">· 6대째는 넣을 수 없다(상한 5) · ‘같은 법인만’ 이면 다른 법인 서버는 칩이 비활성이고 “법인 간 허용으로 바꾸면 담을 수 있습니다” 라고 말한다</span>
+    <span style="flex:1 1 20px"></span>
+    <select class="sel" aria-label="빠르게 고르기"><option>빠르게 고르기 — 같은 용도 그룹</option><option>GPDB 세그먼트 전부(8대 → 상위 5)</option><option>Airflow 워커</option><option>병목 Top 5</option></select>
+    <select class="sel" aria-label="저장된 세트"><option>저장된 세트</option><option>GPDB 클러스터 A</option><option>DB 3대</option></select>
+    <button class="btn primary" type="button">5대 동시 집중 모니터링(10분)</button>
+  </div>
+
+  <!-- 보기 모드 -->
+  <div style="display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:12.5px">
+    <span class="dim">보기</span>
+    <div class="seg" role="group" aria-label="보기"><button class="on" type="button">나란히(서버마다 열)</button><button type="button">겹쳐서(한 차트)</button><button type="button">표(편차 · 순위)</button></div>
+    <span class="dim">지표</span>
+    <div class="seg" role="group" aria-label="지표"><button class="on" type="button">사용률 6종</button><button type="button">USE 전부</button><button type="button">큐 · 버퍼</button><button type="button">하드웨어</button></div>
+    <span class="dim">값</span>
+    <div class="seg" role="group" aria-label="값"><button class="on" type="button">평균 + 피크</button><button type="button">평균</button><button type="button">피크</button></div>
+    <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" checked style="width:16px;height:16px"> 편차 큰 지표 강조 (max/min ≥ 2)</label>
+  </div>
+
+  <!-- A. 나란히 — 5열 동시 사용률 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px"><h2>A · 나란히 — 5대 동시 사용률 (지금 값 + 24시간 추이, 같은 눈금)</h2><span class="dim" style="font-size:12px">열 = 서버 · 행 = 지표 · 각 칸은 지금 평균/피크 + 스파크(평균 회색 · 피크 색) · 눈금은 열마다 같다(비교 가능)</span></div>
+    <div style="overflow-x:auto"><div style="display:grid;grid-template-columns:130px repeat(5,minmax(190px,1fr));gap:8px;min-width:1100px">
+      <div></div>
+      <div class="col"><div class="nm"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#3b82f6"></i> bm-kr1-db01 <span class="chip bad">디스크 포화</span></div><div class="dim" style="font-size:11px">DB · 32코어 · 256GB · OS+iDRAC</div></div>
+      <div class="col"><div class="nm"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#f59e0b"></i> bm-kr1-gp01 <span class="chip ok">정상</span></div><div class="dim" style="font-size:11px">GPDB coord · 32코어 · 256GB</div></div>
+      <div class="col"><div class="nm"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#22d3ee"></i> bm-kr1-gp02 <span class="chip warn">경계</span></div><div class="dim" style="font-size:11px">GPDB seg · 48코어 · 512GB</div></div>
+      <div class="col"><div class="nm"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#a855f7"></i> bm-kr1-gp03 <span class="chip bad">CPU 포화</span></div><div class="dim" style="font-size:11px">GPDB seg · 48코어 · 512GB</div></div>
+      <div class="col"><div class="nm"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#4ade80"></i> bm-pl1-db02 <span class="chip warn">ECC</span></div><div class="dim" style="font-size:11px">DB · 32코어 · 512GB · PL-WAW</div></div>
+
+      <div style="display:flex;align-items:center;font-weight:700;font-size:12.5px">CPU %<br><span class="dim" style="font-weight:500;font-size:11px">0–100</span></div>
+      <div class="col"><div class="m"><span>평균 / 피크</span><b>62 / 97</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,26 30,25 60,20 80,18 110,24 140,22 180,20"></polyline><polyline fill="none" stroke="#3b82f6" stroke-width="2" points="0,18 30,17 60,8 80,4 110,16 140,12 180,6"></polyline></svg></div>
+      <div class="col"><div class="m"><span>평균 / 피크</span><b>24 / 51</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,32 30,32 60,30 80,30 110,31 140,30 180,30"></polyline><polyline fill="none" stroke="#f59e0b" stroke-width="2" points="0,26 30,25 60,20 80,19 110,24 140,22 180,21"></polyline></svg></div>
+      <div class="col"><div class="m"><span>평균 / 피크</span><b>71 / 94</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,18 30,16 60,14 80,13 110,16 140,14 180,12"></polyline><polyline fill="none" stroke="#22d3ee" stroke-width="2" points="0,10 30,8 60,6 80,4 110,8 140,6 180,4"></polyline></svg></div>
+      <div class="col" style="border-color:rgba(239,68,68,.4)"><div class="m"><span>평균 / 피크</span><b class="bad">96 / 100</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,10 30,8 60,4 80,3 110,4 140,3 180,2"></polyline><polyline fill="none" stroke="#f87171" stroke-width="2" points="0,4 30,2 60,1 80,1 110,1 140,1 180,1"></polyline></svg></div>
+      <div class="col"><div class="m"><span>평균 / 피크</span><b>27 / 44</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,31 30,31 60,30 80,30 110,30 140,29 180,29"></polyline><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,26 30,25 60,23 80,23 110,24 140,22 180,22"></polyline></svg></div>
+
+      <div style="display:flex;align-items:center;font-weight:700;font-size:12.5px">디스크 busy %<br><span class="dim" style="font-weight:500;font-size:11px">가장 바쁜 장치</span></div>
+      <div class="col" style="border-color:rgba(239,68,68,.4)"><div class="m"><span>nvme1n1</span><b class="bad">94 / 100</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,30 30,30 50,12 70,10 90,28 120,26 150,10 180,6"></polyline><polyline fill="none" stroke="#3b82f6" stroke-width="2" points="0,22 30,20 50,2 70,2 90,18 120,14 150,2 180,2"></polyline></svg></div>
+      <div class="col"><div class="m"><span>nvme0n1</span><b>18 / 42</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,34 30,33 60,32 80,32 110,33 140,32 180,32"></polyline><polyline fill="none" stroke="#f59e0b" stroke-width="2" points="0,28 30,26 60,24 80,23 110,26 140,24 180,24"></polyline></svg></div>
+      <div class="col"><div class="m"><span>nvme2n1</span><b>61 / 88</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,22 30,20 60,16 80,15 110,18 140,16 180,14"></polyline><polyline fill="none" stroke="#22d3ee" stroke-width="2" points="0,14 30,12 60,8 80,6 110,10 140,8 180,5"></polyline></svg></div>
+      <div class="col"><div class="m"><span>nvme2n1</span><b class="warn">79 / 98</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,16 30,14 60,10 80,9 110,12 140,10 180,8"></polyline><polyline fill="none" stroke="#a855f7" stroke-width="2" points="0,8 30,6 60,3 80,2 110,4 140,3 180,1"></polyline></svg></div>
+      <div class="col"><div class="m"><span>sdb</span><b>58 / 71</b></div><svg viewBox="0 0 180 40" aria-hidden="true" style="width:100%;height:40px"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,20 30,20 60,18 80,18 110,19 140,18 180,17"></polyline><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,14 30,14 60,12 80,12 110,13 140,12 180,11"></polyline></svg></div>
+
+      <div style="display:flex;align-items:center;font-weight:700;font-size:12.5px">await ms<br><span class="dim" style="font-weight:500;font-size:11px">0–50 (초과는 위로 잘림)</span></div>
+      <div class="col" style="border-color:rgba(239,68,68,.4)"><div class="m"><span>nvme1n1</span><b class="bad">18 / 212</b></div><div class="dim" style="font-size:11px">피크가 눈금 밖 — 눌러서 확대</div></div>
+      <div class="col"><div class="m"><span>nvme0n1</span><b>0.3 / 1.9</b></div></div>
+      <div class="col"><div class="m"><span>nvme2n1</span><b>2.1 / 9.4</b></div></div>
+      <div class="col"><div class="m"><span>nvme2n1</span><b class="warn">4.8 / 31</b></div></div>
+      <div class="col"><div class="m"><span>sdb</span><b>6.2 / 18</b></div></div>
+
+      <div style="display:flex;align-items:center;font-weight:700;font-size:12.5px">메모리 %<br><span class="dim" style="font-weight:500;font-size:11px">· 스왑아웃/s</span></div>
+      <div class="col"><div class="m"><span>사용 · 스왑</span><b>71 · 0</b></div></div>
+      <div class="col"><div class="m"><span>사용 · 스왑</span><b>39 · 0</b></div></div>
+      <div class="col"><div class="m"><span>사용 · 스왑</span><b>84 · 0</b></div></div>
+      <div class="col" style="border-color:rgba(245,158,11,.4)"><div class="m"><span>사용 · 스왑</span><b class="warn">91 · 12</b></div></div>
+      <div class="col"><div class="m"><span>사용 · 스왑</span><b>63 · 0</b></div></div>
+
+      <div style="display:flex;align-items:center;font-weight:700;font-size:12.5px">네트워크 %<br><span class="dim" style="font-weight:500;font-size:11px">가장 높은 회선</span></div>
+      <div class="col"><div class="m"><span>bond0 10G×2</span><b>23 / 61</b></div></div>
+      <div class="col"><div class="m"><span>bond0 10G×2</span><b>14 / 38</b></div></div>
+      <div class="col"><div class="m"><span>eno1 25G</span><b>41 / 77</b></div></div>
+      <div class="col"><div class="m"><span>eno1 25G</span><b>44 / 83</b></div></div>
+      <div class="col"><div class="m"><span>bond0 10G×2</span><b>11 / 29</b></div></div>
+
+      <div style="display:flex;align-items:center;font-weight:700;font-size:12.5px">전력 W · 흡기 ℃<br><span class="dim" style="font-weight:500;font-size:11px">iDRAC</span></div>
+      <div class="col"><div class="m"><span>cap 680</span><b>412 · 24</b></div></div>
+      <div class="col"><div class="m"><span>cap 680</span><b>318 · 23</b></div></div>
+      <div class="col"><div class="m"><span>cap 900</span><b>541 · 25</b></div></div>
+      <div class="col" style="border-color:rgba(245,158,11,.4)"><div class="m"><span>cap 900</span><b class="warn">612 · 31</b></div></div>
+      <div class="col"><div class="m"><span>cap 680</span><b>388 · 22</b></div></div>
+    </div></div>
+    <div class="dim" style="font-size:11.5px;margin-top:10px">열 머리의 색이 겹쳐서 보기의 선 색이고, 열을 누르면 그 서버 상세로 간다. 눈금은 행마다 5열이 같다 — 큰 값 때문에 눈금 밖이면 ‘위로 잘림’ 표시. 못 읽은 칸은 ‘—’. 400폭에서는 서버가 아래로 쌓이고 행 머리가 각 블록 위에 붙는다.</div>
+  </div>
+
+  <!-- B. 겹쳐서 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:6px"><h2>B · 겹쳐서 — 지표 하나를 5대 선으로 (CPU 사용률 · 평균)</h2><span class="dim" style="font-size:12px">서버 색 고정 · 범례 클릭 = 그 서버만 · 피크로 바꾸면 같은 색의 점선 · 시간축·커서·구간 공유</span></div>
+    <svg viewBox="0 0 1300 230" role="img" aria-label="24시간 CPU 평균 5대 겹침: bm-kr1-gp03 은 거의 100% 에 머물고, bm-kr1-gp02 는 70% 대, bm-kr1-db01 은 새벽에 올랐다 내려오며, gp01 과 pl1-db02 는 30% 아래" style="width:100%;height:auto;display:block">
+      <rect x="430" y="10" width="190" height="180" fill="rgba(34,211,238,.08)" stroke="rgba(34,211,238,.35)" stroke-dasharray="3 3"></rect>
+      <line x1="150" y1="10" x2="150" y2="190" stroke="#243049"></line><line x1="150" y1="190" x2="1280" y2="190" stroke="#243049"></line>
+      <line x1="150" y1="100" x2="1280" y2="100" stroke="#1f2a40"></line><line x1="150" y1="28" x2="1280" y2="28" stroke="#f87171" stroke-dasharray="3 4" opacity=".6"></line>
+      <text x="144" y="194" fill="#8b9bb4" font-size="11" text-anchor="end">0</text><text x="144" y="104" fill="#8b9bb4" font-size="11" text-anchor="end">50</text><text x="144" y="32" fill="#8b9bb4" font-size="11" text-anchor="end">90</text>
+      <polyline fill="none" stroke="#a855f7" stroke-width="2" points="150,20 250,18 350,19 430,16 520,14 620,15 700,17 800,16 900,15 1000,14 1100,14 1200,13 1280,13"></polyline>
+      <polyline fill="none" stroke="#22d3ee" stroke-width="2" points="150,66 250,64 350,68 430,60 520,52 620,54 700,62 800,64 900,60 1000,56 1100,54 1200,52 1280,50"></polyline>
+      <polyline fill="none" stroke="#3b82f6" stroke-width="2" points="150,86 250,84 350,88 430,78 520,60 620,62 700,80 800,82 900,78 1000,70 1100,66 1200,64 1280,62"></polyline>
+      <polyline fill="none" stroke="#4ade80" stroke-width="2" points="150,140 250,138 350,142 430,140 520,136 620,138 700,141 800,140 900,139 1000,138 1100,140 1200,139 1280,138"></polyline>
+      <polyline fill="none" stroke="#f59e0b" stroke-width="2" points="150,148 250,146 350,150 430,146 520,140 620,144 700,148 800,147 900,146 1000,146 1100,145 1200,144 1280,144"></polyline>
+      <line x1="1240" y1="10" x2="1240" y2="190" stroke="#e6edf6" stroke-dasharray="3 3"></line><text x="1236" y="22" fill="#e6edf6" font-size="11" text-anchor="end">13:35</text>
+      <text x="10" y="30" fill="#a855f7" font-size="11">— gp03 96%</text><text x="10" y="46" fill="#22d3ee" font-size="11">— gp02 71%</text><text x="10" y="62" fill="#3b82f6" font-size="11">— db01 62%</text><text x="10" y="78" fill="#4ade80" font-size="11">— pl1-db02 27%</text><text x="10" y="94" fill="#f59e0b" font-size="11">— gp01 24%</text>
+      <text x="150" y="210" fill="#8b9bb4" font-size="11">13:40 어제</text><text x="525" y="210" fill="#67e8f9" font-size="11" text-anchor="middle">02:00 ~ 05:10 (선택)</text><text x="1280" y="210" fill="#8b9bb4" font-size="11" text-anchor="end">13:35</text>
+    </svg>
+  </div>
+
+  <!-- C. 표 — 편차·순위 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>C · 표 — 선택 구간의 평균 / 피크 · 편차(max÷min) · 순위</h2><span class="dim" style="font-size:12px">같은 용도 그룹이면 편차가 곧 스큐 — GPDB 세그먼트 3대 중 gp03 만 포화</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>지표</th><th><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#3b82f6"></i> db01</th><th><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#f59e0b"></i> gp01</th><th><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#22d3ee"></i> gp02</th><th><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#a855f7"></i> gp03</th><th><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#4ade80"></i> pl1-db02</th><th>편차</th><th>최고</th></tr></thead>
+      <tbody>
+        <tr><td>CPU % (평균/피크)</td><td>62 / 97</td><td>24 / 51</td><td>71 / 94</td><td class="bad">96 / 100</td><td>27 / 44</td><td class="bad">4.0×</td><td class="mono">gp03</td></tr>
+        <tr><td>런큐 ÷ 코어</td><td>0.3</td><td>0.1</td><td>0.9</td><td class="bad">2.4</td><td>0.2</td><td class="bad">24×</td><td class="mono">gp03</td></tr>
+        <tr><td>디스크 busy %</td><td class="bad">94 / 100</td><td>18 / 42</td><td>61 / 88</td><td class="warn">79 / 98</td><td>58 / 71</td><td class="bad">5.2×</td><td class="mono">db01</td></tr>
+        <tr><td>await ms</td><td class="bad">18 / 212</td><td>0.3 / 1.9</td><td>2.1 / 9.4</td><td class="warn">4.8 / 31</td><td>6.2 / 18</td><td class="bad">60×</td><td class="mono">db01</td></tr>
+        <tr><td>메모리 %</td><td>71</td><td>39</td><td>84</td><td class="warn">91</td><td>63</td><td class="warn">2.3×</td><td class="mono">gp03</td></tr>
+        <tr><td>네트워크 %</td><td>23 / 61</td><td>14 / 38</td><td>41 / 77</td><td>44 / 83</td><td>11 / 29</td><td class="bad">4.0×</td><td class="mono">gp03</td></tr>
+        <tr><td>전력 W</td><td>412</td><td>318</td><td>541</td><td class="warn">612</td><td>388</td><td>1.9×</td><td class="mono">gp03</td></tr>
+        <tr><td>흡기 ℃</td><td>24</td><td>23</td><td>25</td><td class="warn">31</td><td>22</td><td>1.4×</td><td class="mono">gp03</td></tr>
+        <tr><td>USE 판정</td><td><span class="chip bad">디스크 포화</span></td><td><span class="chip ok">정상</span></td><td><span class="chip warn">경계</span></td><td><span class="chip bad">CPU 포화</span></td><td><span class="chip warn">ECC</span></td><td class="dim">—</td><td class="dim">—</td></tr>
+        <tr><td>베이스라인 이탈</td><td class="bad">2.9×</td><td class="ok">1.0×</td><td class="ok">1.1×</td><td class="bad">3.1×</td><td class="ok">1.0×</td><td class="dim">—</td><td class="dim">—</td></tr>
+      </tbody></table></div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">편차는 결측을 뺀 서버들만으로 내고 2대 미만이면 ‘—’ · 단위가 없는 판정 행은 편차를 내지 않는다 · 같은 용도 그룹(GPDB 세그먼트)에서 한 대만 높으면 ‘스큐 후보’ 로 표시하고 용도 탭의 gprecoverseg 안내로 잇는다.</div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">규칙 · 데이터</h2>
+    <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px" class="dim">
+      <li><b style="color:#e6edf6">선택 2~5대</b>(상한은 설정 · 기본 5). 보드 행 체크 → ‘비교’, 상세 머리 ‘비교에 추가’, 용도 매트릭스 ‘그룹 전부 비교(상위 5)’, 병목 Top → ‘Top 5 비교’. 세트는 사용자별로 저장(이름 · 서버 키 목록)하고 서버가 사라지면 그 자리를 ‘없음’ 으로 둔다.</li>
+      <li><b style="color:#e6edf6">범위 기본값은 ‘같은 법인만’</b> — 첫 서버의 법인이 비교 법인이 되고 다른 법인 칩은 비활성(이유를 말한다). ‘법인 간 허용’ 으로 바꾸면 섞을 수 있고, 그때 화면 머리에 ‘법인 간’ 배지와 법인별 읽은 시각이 붙는다. 서버마다 그 법인 엣지의 봉투·이력을 따로 당겨 합친다(요청 5개 · 늦게 온 이전 응답은 버린다 · 한 법인이 못 오면 그 열만 ‘오래됨/없음’). 범위 계정은 자기 법인 서버만 고를 수 있고 ‘법인 간 허용’ 은 보이지 않는다(404 은닉). 저장된 세트는 범위 설정을 함께 저장한다.</li>
+      <li><b style="color:#e6edf6">눈금</b>: 나란히 보기는 행마다 5열이 같은 눈금(비교가 목적) · 값이 눈금 밖이면 잘림 표시와 확대 링크 · 겹쳐서 보기는 서버 색 고정(선택 순서가 아니라 서버 키에 색을 매긴다).</li>
+      <li><b style="color:#e6edf6">시간축 · 커서 · 구간 · 장치 토글</b>은 추이 탭 규칙 그대로 공유. 서버마다 경로(OS/iDRAC)가 달라 한 지표가 어떤 서버에는 ‘경로 없음’ 일 수 있다 — 칸이 그렇게 말한다.</li>
+      <li><b style="color:#e6edf6">5대 동시 집중 모니터링</b>: 선택한 서버 전부에 10분 × 1분 세션을 건다(법인당 동시 상한 안에서 · 넘치면 대기열) · 끝나면 비교 화면이 5대 세션을 나란히 보여 준다.</li>
+      <li>CSV 는 보기 모드대로(나란히 = 서버 열, 표 = 그대로). 캡처·공유는 기존 내보내기 규약.</li>
+    </ul>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2200}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

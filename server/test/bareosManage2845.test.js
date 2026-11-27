@@ -583,3 +583,35 @@ test('⑥-3 재등록: Director 에 없는 원장 대상만 · 화면 목록을 
     store.snapshot = prevSnap;
   }
 });
+
+/* ───────── 전체 점검 8회차(I-1 · I-2) ───────── */
+const KNOWN_FA8 = { config: { storages: [{ name: 'File', mediaType: ['File'], address: 'bareos.corp' }] }, address: 'bareos.corp' };
+test('④-4c 전체 점검 8회차(I-2): reload 실패 되돌리기의 SD 재시작도 같은 셸에서 실행 중 작업 0 을 다시 확인한다', async () => {
+  const plan = M.planManage('storage.add', { name: 'Nas', path: '/mnt/nas01/bareos', count: 6 }, KNOWN_FA8);
+  const srv = manageServer({ install: false });
+  let reloadFail = true;
+  A._setDepsForTest({ ssh: (creds, fn, opts) => srv.ssh(creds, (api) => fn({ ...api, exec: async (c) => {
+    // 첫 reload 가 실패하는 사이 옛 설정 Director 가 백업 2건을 시작했다
+    if (reloadFail && c.startsWith('printf') && c.includes('bconsole')) { reloadFail = false; srv.st.run2 = '2'; return { code: 1, stdout: 'reload failed', stderr: '' }; }
+    return api.exec(c);
+  } }), opts), sleep: async () => {} });
+  await assert.rejects(M.applyManage(plan, SSH, {}), (e) => /되돌렸습니다/.test(e.message) && /SD 를 다시 시작하지 않았습니다/.test(e.message) && /systemctl restart bareos-sd/.test(e.message));
+  assert.equal(srv.st.sdRestarts, 1, '처음(실행 중 0) 재시작만 — 되돌리기는 실행 중 작업이 있어 다시 띄우지 않는다');
+  assert.ok(!srv.st.all.includes('systemctl restart bareos-sd 2>&1'), '확인 없는 재시작 명령은 보내지 않는다');
+});
+
+test('④-4d 전체 점검 8회차(I-1): 세션이 끊기면 이번에 만든 디렉터리 · SELinux 규칙을 새 세션으로 되돌린다', async () => {
+  const plan = M.planManage('storage.add', { name: 'Nas', path: '/mnt/nas01/bareos', count: 6 }, KNOWN_FA8);
+  const srv = manageServer({ install: false, se: 'SE=added' });
+  let session = 0;
+  A._setDepsForTest({ ssh: (creds, fn, opts) => { session += 1; const my = session; let cut = false; return srv.ssh(creds, (api) => fn({ ...api, exec: async (c) => {
+    // 첫 세션: 경로 준비(디렉터리 · SELinux 규칙)가 끝난 뒤 임시 폴더를 만들 때 연결이 끊긴다 — 그 뒤 명령은 모두 실패
+    if (my === 1 && (cut || c.startsWith('mktemp -d'))) { cut = true; throw Object.assign(new Error('세션이 끊겼습니다'), { code: 'closed' }); }
+    return api.exec(c);
+  } }), opts); }, sleep: async () => {} });
+  await assert.rejects(M.applyManage(plan, SSH, {}), (e) => /새 세션으로 되돌렸습니다/.test(e.message) && !/직접 지우세요/.test(e.message));
+  assert.equal(session, 2, '되돌리기 세션 하나');
+  assert.deepEqual(srv.st.made, ['/mnt/nas01/bareos']);
+  assert.ok(srv.st.removedDirs.some((c) => c.includes('rmdir /mnt/nas01/bareos')), '만든 디렉터리를 지웠다(새 세션)');
+  assert.equal(srv.st.seDeleted.length, 1, '넣은 SELinux 규칙을 지웠다(새 세션)');
+});

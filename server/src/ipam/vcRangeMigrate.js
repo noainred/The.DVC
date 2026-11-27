@@ -24,9 +24,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, loadVcenterConfig } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { registerStateFile } from '../util/stateFiles.js';
-import { listVcRanges, removeVcRanges } from './rangeStore.js';
-import { loadScanSettings, saveScanSettings, listScanAgents, LOCAL } from './scanStore.js';
+import { listVcRanges, removeVcRanges, vcRangesLoadError } from './rangeStore.js';
+import { loadScanSettings, saveScanSettings, listScanAgents, LOCAL, scanSettingsLoadError } from './scanStore.js';
 import { checkRangeList } from './rangeSyntax.js';
 import { RANGE_CAP } from './scan.js';
 import { store } from '../store.js';
@@ -94,9 +95,22 @@ export function unionRanges(cur, add) {
   return { ranges: out, dup };
 }
 
+/*
+ * 105회차 A2(103 추정 재현 — EISDIR): 예전에는 읽기 오류(EACCES · EIO · EISDIR)도 '없음 = 아직 이전 안 함' 으로 봐서 기동 1분 뒤 이전을 다시 돌렸고,
+ *   그 기록(옮긴 대역 — netmap 이 쓰는 items)을 남은 대역만 든 새 기록으로 덮었다(수동 옮김 · 지움도 한 건짜리 기록으로 덮음). 이제 읽기 오류는
+ *   표지만 세우고(원본 그대로) 이번 이전 · 수동 옮김 · 지움을 건너뛴다(다음 실행에서 다시 본다). 손상(parse 실패)은 예전과 같다.
+ */
+let _stateReadErr = null;   // { at, code } — 마지막 readMigrationState 가 읽기 오류
+/** 105회차 A2: 이전 기록 파일 읽기 오류(원본 그대로)면 `{ at, code }`, 아니면 null. */
+export function migrationStateReadError() { readMigrationState(); return _stateReadErr ? { ..._stateReadErr } : null; }
 export function readMigrationState() {
   let raw;
-  try { raw = fs.readFileSync(STATE_FILE(), 'utf8'); } catch { return null; } // 없음 = 아직 이전 안 함
+  try { raw = fs.readFileSync(STATE_FILE(), 'utf8'); } catch (e) {
+    if (e?.code === 'ENOENT') { _stateReadErr = null; return null; }   // 없음 = 아직 이전 안 함
+    if (!_stateReadErr) _stateReadErr = { at: Date.now(), code: String(e?.code || 'read-error').slice(0, 32) };
+    return null;
+  }
+  _stateReadErr = null;
   try {
     const j = JSON.parse(raw);
     return j && typeof j === 'object' ? j : null;
@@ -126,7 +140,13 @@ function moveInto(agent, ranges) {
  */
 export function runVcRangeMigration({ now = Date.now(), force = false } = {}) {
   const prev = readMigrationState();
+  if (_stateReadErr) return { ran: false, state: null, reason: `이전 기록 파일(${STATE_NAME})을 읽지 못해(읽기 오류 ${_stateReadErr.code} — 원본은 그대로) 옮기지 않았습니다 — 파일 권한 · 소유자 · 디스크를 확인하세요(다음 실행에서 다시 봅니다).` };   // 105회차 A2
   if (prev?.done && !force) return { ran: false, state: prev };
+  // 27회차 반증 D-8: 배정 파일(ipam-scan.json)을 못 읽는 동안은 시작하지 않는다 — 옮기기가 전부 settings-unreadable 로 실패한 채
+  //   'done' 으로 기록되어 확정 · 복구 뒤에도 다시 돌지 않았다. 다른 보류 분기와 같이 reason 만 돌려 다음 실행에서 다시 본다.
+  if (scanSettingsLoadError()) return { ran: false, state: prev, reason: 'IP 스캔 배정 파일을 읽지 못해 옮기지 않았습니다(설정 파일 점검에서 확정 · 복구 뒤 다시 시도합니다).' };
+  // 60회차 F1: 옮길 원본(vCenter 별 대역 파일)을 못 읽으면 빈 목록으로 보고 'done' 을 굳혔다(복구 뒤에도 다시 돌지 않았다) — 같은 보류.
+  if (vcRangesLoadError()) return { ran: false, state: prev, reason: 'vCenter 별 스캔 대역 파일을 읽지 못해 옮기지 않았습니다(설정 파일 점검에서 확정 · 보존본 복구 뒤 다시 시도합니다).' };
   const vcRanges = listVcRanges();
   if (!vcRanges.length) {
     const st = { version: 1, done: true, at: now, items: [], backup: null, dismissedAt: now };
@@ -141,7 +161,7 @@ export function runVcRangeMigration({ now = Date.now(), force = false } = {}) {
   let backup = null;
   try {
     const src = VC_FILE();
-    if (fs.existsSync(src)) {
+    if (!fileMissing(src)) {   // 134회차: 확인하지 못한 원본(stat 실패)을 '없음' 으로 보고 백업 없이 옮기지 않는다 — 복사가 던져 아래 '백업하지 못해' 로 멈춘다
       backup = `ipam-vcenter-ranges.json.pre-v2.691-${now}.bak`;
       fs.copyFileSync(src, path.join(config.configDir, backup));
       try { fs.chmodSync(path.join(config.configDir, backup), 0o600); } catch { /* */ }
@@ -168,7 +188,12 @@ export function runVcRangeMigration({ now = Date.now(), force = false } = {}) {
 }
 
 /** 사용자가 고른 에이전트로 남은 vCenter 대역을 옮긴다. */
+const UNREADABLE_MANUAL = { ok: false, status: 409, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일을 읽지 못한 상태입니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌린 뒤 다시 하세요.' };
+// 105회차 A2: 이전 기록을 못 읽은 동안 수동 옮김 · 지움은 기록(updateItem)을 한 건짜리로 덮는다 — 대역을 옮기기 전에 거절한다.
+const stateUnreadable = () => (migrationStateReadError() ? { ok: false, status: 409, code: 'settings-unreadable', readError: true, reason: `이전 기록 파일(${STATE_NAME})을 읽지 못한 상태입니다(읽기 오류 — 원본은 그대로) — 파일 권한 · 소유자 · 디스크를 확인한 뒤 다시 하세요.` } : null);
 export function moveVcRangeManually(vcenterId, agent, { user = '', now = Date.now() } = {}) {
+  if (vcRangesLoadError()) return { ...UNREADABLE_MANUAL };   // 60회차 F1: 빈 목록을 보고 '옮길 대역이 없습니다(404)' 라 하지 않는다
+  { const ref = stateUnreadable(); if (ref) return ref; }   // 105회차 A2
   const id = t(vcenterId); const a = t(agent) || LOCAL;
   const e = listVcRanges().find((x) => x.vcenterId === id);
   if (!e) return { ok: false, status: 404, reason: '옮길 대역이 없습니다(이미 옮겼거나 지웠습니다).' };
@@ -183,6 +208,8 @@ export function moveVcRangeManually(vcenterId, agent, { user = '', now = Date.no
 
 /** 남은 vCenter 대역을 지운다. */
 export function removeVcRangeManually(vcenterId, { user = '', now = Date.now() } = {}) {
+  if (vcRangesLoadError()) return { ...UNREADABLE_MANUAL };   // 60회차 F1
+  { const ref = stateUnreadable(); if (ref) return ref; }   // 105회차 A2
   const id = t(vcenterId);
   const r = removeVcRanges(id);
   if (!r.ok) return { ok: false, status: 404, reason: '지울 대역이 없습니다.' };

@@ -22,6 +22,7 @@ import { checkRangeList, cleanLines, lineIssueText, listSummaryText, normalizeRa
 import { VcRangeImportModal } from './VcRangeImportModal.jsx';
 import { applyImport, classifyLine, dupReasonText, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
 import Select from '../../components/Select.jsx';
+import { loadErrorText } from '../loadErrorText.js'; // 결정(56~75 남긴 것) 62
 
 export const RANGE_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%' };
 export const SCAN_CAP = 4096; // 서버 ipam/scan.js RANGE_CAP — 한 줄이 이보다 크면 스캔은 앞부분만 돈다(경고용)
@@ -34,6 +35,8 @@ export const SCAN_CAP = 4096; // 서버 ipam/scan.js RANGE_CAP — 한 줄이 �
  */
 export function vcRangesGate(vcRanges, err) {
   const loaded = !!vcRanges && typeof vcRanges === 'object';
+  // 결정(56~75 남긴 것) 62: 서버가 대역 파일을 못 읽었으면(손상 · 읽기 오류 — loadError) 빈 목록은 '대역 없음' 이 아니다 — 저장 · 스캔을 잠그고 사유를 보인다(서버도 409).
+  if (loaded && vcRanges.loadError) return { locked: true, failed: true, note: loadErrorText('vCenter 별 스캔 대역(ipam-vcenter-ranges.json)', vcRanges.loadError, '그동안 저장된 대역이 비어 보입니다.') };
   if (!loaded && err) return { locked: true, failed: true, note: `저장된 스캔 대역을 불러오지 못했습니다(${err}) — 빈 칸은 ‘대역 없음’ 이 아니므로 저장·스캔을 잠갔습니다.` };
   if (!loaded) return { locked: true, failed: false, note: '저장된 스캔 대역을 불러오는 중입니다 — 불러온 뒤 저장할 수 있습니다.' };
   if (err) return { locked: false, failed: true, note: `스캔 대역을 다시 불러오지 못했습니다(${err}) — 아래는 마지막으로 불러온 값입니다.` };

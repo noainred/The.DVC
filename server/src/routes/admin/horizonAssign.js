@@ -1,6 +1,6 @@
 // Horizon 등록·svcmon 할당 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
-import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue, featureSummary, invalidateHorizonLicenseCache } from '../../horizon/horizon.js';
+import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue, featureSummary, invalidateHorizonLicenseCache, horizonLoadError } from '../../horizon/horizon.js';
 import { clearHzNoEndpoint } from '../../horizon/sessionPoller.js';
 import * as hzBulk from '../../horizon/bulk.js';                     // v2.525: CSV/자유텍스트 대량 등록
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
@@ -10,6 +10,7 @@ import { listCollectors } from '../../collector/registry.js';
 import { listAssignments, addAssignment, updateAssignment, removeAssignment, getResults, parseCsv as parseAssignmentsCsv, importAssignments, mergeKnownAgents } from '../../central/assignments.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
@@ -18,18 +19,19 @@ const fleetOnly = fullScopeOnlyWith('Horizon 연결 서버·엣지 스캔 배정
 export function registerHorizonAssign(adminRouter) {
 
 // ---- Horizon Connection Server (라이선스 만료일 확인용 등록) ---------------
-adminRouter.get('/horizon', adminOnly, fleetOnly, (_req, res) => res.json({ servers: listHorizonServers() }));
-adminRouter.post('/horizon', adminOnly, fleetOnly, (req, res) => {
+// 36회차 F4: 등록부를 못 읽었으면 GET 이 그 사실(loadError)을 싣고 쓰기는 409 — 빈 목록이 '등록 없음' 으로 읽히지 않게.
+adminRouter.get('/horizon', adminOnly, fleetOnly, (_req, res) => { const servers = listHorizonServers(); const le = horizonLoadError(); res.json({ servers, ...(le ? { loadError: { reason: le.reason, at: le.at } } : {}) }); });
+adminRouter.post('/horizon', adminOnly, fleetOnly, textFields('id'), (req, res) => {
   const r = upsertHorizon(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'Horizon 서버 등록/수정', target: String(req.body?.id || ''), ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
 adminRouter.delete('/horizon/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeHorizon(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'Horizon 서버 삭제', target: req.params.id, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
-adminRouter.post('/horizon/test', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/horizon/test', adminOnly, fleetOnly, textFields('id'), async (req, res) => {
   const r = await testHorizon(req.body || {});
   // v2.686 HZ2686-R2: 저장된 서버의 테스트가 세션·라이선스 조회 성공을 확인하면 '이 서버에 없음' 기억(6시간)을 버린다 —
   //   Horizon 을 업그레이드한 뒤 테스트는 '됨' 인데 수집·라이선스 화면은 몇 시간 동안 옛 404 를 말하던 것.
@@ -101,7 +103,7 @@ adminRouter.get('/horizon/servers/sample.txt', csvPerm, adminOnly, fleetOnly, (_
  * ② 실제 연결 테스트 — 저장 **전에** 행마다 Horizon 로그인을 시도한다.
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = AD 계정 잠금). `bulkRun` 이 강제한다.
  */
-adminRouter.post('/horizon/servers/import/test', csvPerm, adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/horizon/servers/import/test', csvPerm, adminOnly, fleetOnly, textFields('csv'), (req, res) => {
   const p = hzParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const existing = hzExistingMap();
@@ -143,7 +145,7 @@ adminRouter.get('/horizon/servers/import/test/:id', csvPerm, adminOnly, fleetOnl
  * ①/③ 가져오기 — `dryRun:true` 면 검증만, 아니면 저장.
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
-adminRouter.post('/horizon/servers/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/horizon/servers/import', csvPerm, adminOnly, fleetOnly, textFields('csv'), (req, res) => {
   const p = hzParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 
@@ -201,17 +203,17 @@ adminRouter.get('/assignments', adminOnly, fleetOnly, (_req, res) => {
 
 adminRouter.post('/assignments', adminOnly, fleetOnly, (req, res) => {
   const result = addAssignment(req.body || {});
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);
 });
 
 adminRouter.put('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = updateAssignment(req.params.agent, req.body || {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);
 });
 
 adminRouter.delete('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = removeAssignment(req.params.agent);
-  res.status(result.ok ? 200 : 404).json(result);
+  res.status(result.ok ? 200 : (result.status || 404)).json(result);
 });
 
 // Import assignments from CSV text or a JSON array. Body:
@@ -222,6 +224,6 @@ adminRouter.post('/assignments/import', csvPerm, adminOnly, fleetOnly, (req, res
   if (typeof b.csv === 'string') list = parseAssignmentsCsv(b.csv);
   else list = Array.isArray(b) ? b : b.assignments;
   const result = importAssignments(list, b.mode === 'replace' ? 'replace' : 'merge');
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);
 });
 }
