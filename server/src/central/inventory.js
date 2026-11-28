@@ -21,6 +21,8 @@ import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽�
 import { envPositive } from '../util/envNumber.js';   // 55회차: 양수 env 는 하나로
 import { logAudit } from '../audit.js';   // 결정(76~105 남긴 것 · 2026-11-20) A6: 읽기 오류 창의 TOFU 소유 기록
 
+import { sanitizeVmGos } from '../inventory/guestDetail.js';   // 9회차: 저장본 vm.gos 재정규화
+
 const FILE = path.join(config.configDir, 'central-inventory.json');
 
 // null-proto 캐시: 에이전트가 제어하는 vcenterId가 '__proto__'/'constructor' 등이어도 프로토타입을
@@ -30,7 +32,19 @@ let cache = Object.create(null); // vcenterId -> { at, agent, generatedAt, data:
 //   `.corrupt.*` 로 옮겼다(소유 엣지 지정 — 관리자 해제 · 지정 포함 — 까지 보존본에만 남는다). 이제 읽기 오류는 원본을 두고 빈 캐시로 시작하되 **저장하지 않는다**
 //   (원자적 rename 이 원본을 덮는다). 저장 시점에 READ_RETRY_MS 간격으로 다시 읽어 읽히면 합친다 — 메모리에 없는 vCenter 는 파일 값, 둘 다 있으면
 //   소유 엣지가 같을 때만 메모리(더 새 push), 다르면 파일(그동안 TOFU 로 다른 엣지가 가져간 소유를 되돌린다). 손상은 예전과 같다(보존 후 빈 캐시).
-const parseInventoryFile = (text) => { const p = JSON.parse(text); return p && typeof p === 'object' ? Object.assign(Object.create(null), p.inventory || p || {}) : Object.create(null); };
+export const parseInventoryFile = (text) => {
+  const p = JSON.parse(text);
+  const out = p && typeof p === 'object' ? Object.assign(Object.create(null), p.inventory || p || {}) : Object.create(null);
+  // 9회차(실제 OS — 반증 재현): 옛 중앙(3.54 ~ 3.58)이 저장한 vm.gos(parse 칸 없음)를 기동 · 재읽기 때 지금 모양으로 다시 세운다 —
+  //   예전에는 push 를 받을 때만 정제해 업그레이드 뒤 저장본이 옛 모양 그대로 스냅샷에 실렸다. 정제는 sanitizeVmGos 하나(고정점 — 이미 새 모양이면 그대로).
+  for (const e of Object.values(out)) {
+    const vms = e && typeof e === 'object' && e.data && Array.isArray(e.data.vms) ? e.data.vms : null;
+    if (!vms) continue;
+    const at = typeof e.at === 'number' && Number.isFinite(e.at) ? e.at : Date.now();
+    for (const v of vms) if (v && typeof v === 'object' && Object.hasOwn(v, 'gos') && v.gos != null) v.gos = sanitizeVmGos(v.gos, at);
+  }
+  return out;
+};
 let readBlocked = false; let readRetryAt = 0;
 {
   const r = readJsonFile(FILE, { parse: parseInventoryFile, preserve: false });

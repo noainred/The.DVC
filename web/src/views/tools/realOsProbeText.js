@@ -1,6 +1,8 @@
 // realOsProbeText.js — '실제 OS 수집 점검'(v3.54 · 실제 OS 1단계 실측) 화면 문구 · 숫자 표기(순수 — node 테스트).
 // 판정(사유 키)은 서버 inventory/osProbe.js NO_DETAIL_REASONS 하나다 — 여기는 그 키의 글자만 소유한다(키가 같은지 테스트가 대조).
 
+import { EMPTY_TOKENS } from '../../components/sortableText.js';
+
 export const REASON_TEXT = Object.freeze({
   notRead: '아직 읽지 않음(수집 전 · 꺼짐 · 엣지 미업그레이드 등)',
   notAsked: '묻지 않음(vCenter API 8.0.2 미만 또는 판 미상)',
@@ -46,27 +48,34 @@ export function at(ms) {
  * @param ctx  응답의 { collect:{ osEnabled }, demo }
  */
 export function statusText(st, row = null, ctx = null) {
-  // 점검 4회차: 오류도 언제 났는지 · 마지막 성공이 언제인지 함께(오류 문구만 보이면 낡은 오류인지 지금 오류인지 가를 수 없었다).
+  // 9회차 재구성: **수집 경로를 먼저** 정한다 — 이 포탈의 상태(st)는 이 포탈이 SOAP 로 수집하는 행(direct)에만 뜻이 있다(서버도 그 행에만 싣는다).
+  //   예전에는 st 를 먼저 읽어, st 가 딸려 온 엣지 · REST 행이 '… · Tools 보고 요청' 으로 보일 수 있었다.
+  if (ctx?.demo && !st) return { text: '데모 데이터(수집 상태 없음)', tone: 'muted' };
+  // 5회차: REST 폴백으로 받은 vCenter 는 Tools 보고 · 구성을 읽지 않는다.
+  if (row?.collectSource === 'rest') return { text: 'REST 폴백 수집 — Tools 보고를 읽지 않음', tone: 'amber' };
+  if (row?.collectSource === 'site' && row?.collectMethod === 'rest') return { text: '엣지 수집(REST 폴백 — Tools 보고를 읽지 않음)', tone: 'amber' };
+  if (row?.collectSource === 'site') return { text: '엣지 수집(상태는 엣지에)', tone: 'muted' };
+  // 이하 이 포탈이 직접 수집하는 행.
+  // 9회차: 수집을 껐으면 남은 상태보다 먼저 말한다(꺼진 뒤 정상 톤 '… · Tools 보고 요청' 이 남았다).
+  if (ctx?.collect?.osEnabled === false) {
+    return { text: `이 포탈의 실제 OS 수집 꺼짐${st?.osAt != null ? ` · 마지막 수집 ${at(st.osAt)}` : ''}`, tone: 'amber' };
+  }
+  // 4회차: 오류도 언제 났는지 · 마지막 성공이 언제인지 함께(오류 문구만 보이면 낡은 오류인지 지금 오류인지 가를 수 없었다).
   if (st?.osError) {
     const when = st.osErrorAt != null ? ` ${at(st.osErrorAt)}` : '';
     const last = st.osAt != null && (st.osErrorAt == null || st.osAt < st.osErrorAt) ? ` · 마지막 성공 ${at(st.osAt)}` : (st.osAt == null ? ' · 성공 기록 없음' : '');
     return { text: `오류${when} — ${String(st.osError).slice(0, 80)}${last}`, tone: 'amber' };
   }
-  // 점검 3회차: 예산 때문에 일부만 읽었거나 이번 주기를 건너뛴 것을 정상 톤으로 덮지 않는다.
+  // 3회차: 예산 때문에 일부만 읽었거나 이번 주기를 건너뛴 것을 정상 톤으로 덮지 않는다.
   if (st?.osSkipReason === 'budget' && !(st.osAt != null && st.osSkippedAt != null && st.osAt > st.osSkippedAt)) {
     return { text: `이번 주기 건너뜀(수집 시간 예산 소진${st.osAt != null ? ` · 마지막 수집 ${at(st.osAt)}` : ''})`, tone: 'amber' };
   }
   if (st && st.osAt != null && typeof st.osCut === 'number' && st.osCut > 0) {
     return { text: `${at(st.osAt)} · 일부만 읽음(${n(st.osCut)}대 남음 · 다음 주기에 이어서)`, tone: 'amber' };
   }
-  // 점검 4회차: 묻지 않은 이유가 '판 미달' 인지 '판 미상' 인지 가른다(서버 detailedApiOk 는 판을 못 읽어도 묻지 않는다).
+  // 4회차: 묻지 않은 이유가 '판 미달' 인지 '판 미상' 인지 가른다(서버 detailedApiOk 는 판을 못 읽어도 묻지 않는다).
   if (st && st.osAt != null) return { text: `${at(st.osAt)} · ${st.osAsked ? 'Tools 보고 요청' : notAskedText(st.apiVersion)}`, tone: 'ok' };
   if (ctx?.demo) return { text: '데모 데이터(수집 상태 없음)', tone: 'muted' };
-  // 점검 5회차: REST 폴백으로 받은 vCenter 는 Tools 보고 · 구성을 읽지 않는다 — 낡은 SOAP 시절 상태를 '지금' 으로 보이지 않게(서버도 status 를 붙이지 않는다).
-  if (row?.collectSource === 'rest') return { text: 'REST 폴백 수집 — Tools 보고를 읽지 않음', tone: 'amber' };
-  if (row?.collectSource === 'site' && row?.collectMethod === 'rest') return { text: '엣지 수집(REST 폴백 — Tools 보고를 읽지 않음)', tone: 'amber' };
-  if (row?.collectSource === 'site') return { text: '엣지 수집(상태는 엣지에)', tone: 'muted' };
-  if (ctx?.collect && ctx.collect.osEnabled === false) return { text: '이 포탈의 실제 OS 수집 꺼짐', tone: 'amber' };
   return { text: '이 포탈 수집 기록 없음(수집 전 · 접속 실패 등)', tone: 'muted' };
 }
 
@@ -104,6 +113,7 @@ export function managedText(managed, cfgRead, total) {
  */
 export function versionSortKey(v) {
   if (typeof v !== 'string' || !v.trim()) return '';
+  if (EMPTY_TOKENS.has(v.trim())) return '';   // 9회차: '-' · 'n/a' · '미상' 같은 빈 값 표기는 정렬 맨 뒤(STable 규약)
   return `v${v.trim().slice(0, 64).split(/([.\-_ ])/).map((p) => (/^\d{1,12}$/.test(p) ? p.padStart(12, '0') : p)).join('')}`;
 }
 

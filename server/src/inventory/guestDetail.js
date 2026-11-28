@@ -81,6 +81,7 @@ export function parseGuestDetailedData(raw) {
   let dups = 0;           // 같은 아는 키가 다시 나온 수(점검 6 · 7회차 — 값이 있는 첫 값으로 정하고 흔적은 partial · raw 로 남긴다)
   const seenKnown = new Set();
   let truncated = raw.length > RAW_IN_MAX;
+  let tailFragment = null;   // 입력 끝까지 이어진 형식 밖 조각(있으면)
   const n = s.length;
   let i = 0;
   while (i < n) {
@@ -94,8 +95,11 @@ export function parseGuestDetailedData(raw) {
       skipped += 1;
       if (i === ks) i += 1;
       while (i < n && !isSpace(s[i])) i += 1;
+      // 9회차: 입력 끝까지 이어진 조각은 따로 알린다 — 잘린 원문에서는 이 조각이 잘림 흔적일 수 있다(oldEdgeOutcome 이 판정).
+      tailFragment = i >= n ? s.slice(ks, n) : null;
       continue;
     }
+    tailFragment = null;
     i += 2;
     const parts = [];
     let segStart = i;
@@ -122,7 +126,7 @@ export function parseGuestDetailedData(raw) {
       if (EXTRA_KEY_RE.test(key) && nExtra < EXTRA_MAX) { extra[key] = cap(val, 128); nExtra += 1; } else extraDropped += 1;
     }
   }
-  return { fields, extra, ok, knownKeys, extraDropped, skipped, dups, truncated };
+  return { fields, extra, ok, knownKeys, extraDropped, skipped, dups, truncated, tailFragment };
 }
 
 /** 보고를 읽은 결과의 종류(모듈 머리말 parse 참고). */
@@ -237,21 +241,37 @@ export function toolsAtLeast(v, major, minor = 0) {
  * 512자로 잘랐다 — 그래서 형식 밖 조각 없이 아는 키만 있었다면 원래 보고는 '값이 모두 빈' 보고다(끝이 잘려 닫는 따옴표가 없어도 — 7회차 재현).
  */
 function oldEdgeOutcome(raw) {
-  // 8회차(반증 재현): 512자에 닿았으면 마지막 공백 뒤 꼬리는 잘림이 만든 조각이다(키 이름 가운데 · 'key=' 뒤에서 잘리면 형식 밖 조각으로 세어 malformed 가 됐다).
-  //   꼬리를 떼고 판정한다(공백이 없으면 그대로). 따옴표 안에서 잘린 경우는 원래대로 truncated 로만 남는다.
-  let body = raw.slice(0, RAW_KEEP_MAX);
-  if (raw.length >= RAW_KEEP_MAX) {
-    let j = body.length - 1;
-    while (j >= 0 && !isSpace(body[j])) j -= 1;
-    if (j > 0) body = body.slice(0, j);
-  }
+  // 9회차(8회차 꼬리 떼기가 온전한 마지막 토큰까지 버림 — 재현): 추측으로 꼬리를 떼지 않고 **파서가 알린 끝 조각**만 본다.
+  //   원문이 512자에 닿았을 때만 잘림이 있을 수 있다 — 그때 ① 따옴표 안에서 끝났으면(truncated) 잘림 흔적이고
+  //   ② 입력 끝까지 이어진 형식 밖 조각은 **올바른 토큰의 앞부분일 수 있을 때만**(key · key= · key=' …) 잘림 흔적이다.
+  //   'kernelVersion==bad' 처럼 어떤 토큰의 앞부분도 될 수 없는 조각은 원래 형식 밖이다(malformed 그대로).
+  //   한계: 원래 보고가 정확히 512자에서 그런 앞부분 모양으로 끝났다면 잘림과 가를 수 없다(드묾 — 추정).
+  const body = raw.slice(0, RAW_KEEP_MAX);
   const p = parseGuestDetailedData(body);
   if (!p) return null;
-  if (!p.ok && p.knownKeys > 0 && p.skipped === 0) return 'empty';
-  return p.ok ? 'malformed' : outcomeOf(p);   // 옛 엣지 raw 에 값이 있는 아는 키가 있을 수 없다 — 있으면 모양이 어긋난 것(malformed)
+  const atLimit = raw.length >= RAW_KEEP_MAX;
+  const tailIsCut = atLimit && p.tailFragment != null && isTokenPrefix(p.tailFragment);
+  const skipped = p.skipped - (tailIsCut ? 1 : 0);
+  const truncated = atLimit ? false : p.truncated;
+  // 옛 엣지 raw 에 값이 있는 아는 키가 있을 수 없다 — 있으면 모양이 어긋난 것(malformed).
+  return !p.ok && p.knownKeys > 0 && skipped === 0 && !truncated ? 'empty' : 'malformed';
+}
+/** 'key' · 'key=' · "key='…" 처럼 올바른 토큰의 앞부분일 수 있는 조각인가(키 글자 뒤 '=' 뒤에는 따옴표만). */
+function isTokenPrefix(frag) {
+  let i = 0;
+  while (i < frag.length && isKeyChar(frag.charCodeAt(i))) i += 1;
+  if (i === frag.length) return i > 0;
+  if (frag[i] !== '=' || i === 0) return false;
+  return i + 1 === frag.length || frag[i + 1] === "'";
 }
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+/** 수 · 숫자 글자 → 유한한 수, 그 밖은 null(못 읽음 — 0 이 아니다). */
+const numOf = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && /^\s*\d{1,16}(?:\.\d{1,6})?\s*$/.test(v)) return Number(v);
+  return null;
+};
 
 /**
  * 엣지가 보낸 vm.gos → 같은 모양으로 다시 좁힌다(아는 키만 · 글자만 · 상한). 엣지 시각은 수신 시각(now)보다 뒤일 수 없다.
@@ -259,7 +279,11 @@ const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
  */
 export function sanitizeVmGos(g, now = Date.now()) {
   if (!isObj(g)) return null;
-  const at = typeof g.at === 'number' && Number.isFinite(g.at) && g.at > 0 ? Math.min(g.at, now) : null;
+  // 9회차: 수집기 출력은 늘 asked(불리언)를 싣는다 — 그것이 없는 객체({junk:1} · {})는 모양이 틀린 값이라 '묻지 않음' 으로 지어내지 않고 null(모름 · 중앙 coerced).
+  if (typeof g.asked !== 'boolean') return null;
+  // 9회차(루트 규칙 '문자열 수치는 수로'): 숫자 글자도 받는다.
+  const atN = numOf(g.at);
+  const at = atN != null && atN > 0 ? Math.min(atN, now) : null;
   let detailed = null;
   if (isObj(g.detailed)) {
     const d = {};
@@ -267,7 +291,8 @@ export function sanitizeVmGos(g, now = Date.now()) {
     detailed = Object.keys(d).length ? d : null;
   }
   // 엣지가 보낸 버린 수(정수 · 상한)에 여기서 상한 · 이름 형식으로 더 버린 수를 더한다(조용히 버리지 않는다).
-  let extraDropped = Number.isSafeInteger(g.extraDropped) && g.extraDropped > 0 ? Math.min(g.extraDropped, 10_000) : 0;
+  const dropN = numOf(g.extraDropped);
+  let extraDropped = Number.isSafeInteger(dropN) && dropN > 0 ? Math.min(dropN, 10_000) : 0;
   let extra = null;
   if (isObj(g.extra)) {
     const e = {};
@@ -287,7 +312,7 @@ export function sanitizeVmGos(g, now = Date.now()) {
   // 묶음 규칙(asked · parse · detailed · raw)은 수집기와 같은 normalizeGos 가 세운다. 엣지 시각을 수신 시각으로 잘랐으면 원본은 edgeAt 으로 따로.
   return normalizeGos({
     at,
-    edgeAt: typeof g.at === 'number' && Number.isFinite(g.at) && g.at > now ? Math.trunc(g.at) : null,
+    edgeAt: atN != null && atN > now ? Math.trunc(atN) : null,
     asked: g.asked === true,
     // 점검 6회차(호환): 이미 릴리스된 엣지(3.54 ~ 3.58)는 parse 칸 없이 '아는 키를 못 읽은 원문' 을 raw 로 보낸다(값만 빈 보고 포함).
     //   parse 가 없고 detailed 도 없으면 원문을 같은 파서로 다시 판정한다(원문은 512자 상한 — 비용이 작다). 옛 엣지의 partial 은 원문이 오지 않아 되살릴 수 없다(ok 로 남는다).

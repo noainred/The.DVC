@@ -61,7 +61,8 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
   const cfgOn = !!settings.vmCfgScan;
   const osOn = !!settings.vmOsScan;
   // 점검 5회차: 실제 OS 수집을 끄면 캐시의 os 값을 버린다 — 예전에는 끈 뒤에도 몇 주 지난 값이 VM 에 '지금 보고' 처럼 실렸다.
-  if (!osOn) dropKind(vcId, 'os');
+  // 9회차: 상태의 os 칸도 지운다 — 끈 뒤에도 '… · Tools 보고 요청'(정상 톤)이 남았다.
+  if (!osOn) { dropKind(vcId, 'os'); if (statusOf(vcId)?.osAt != null) setStatus(vcId, { osAt: null, osCut: 0, osSkipReason: null, osError: null }); }
   if (!cfgOn && !osOn) return { skipped: 'off' };
   const live = new Set(vmRefs);
   prune(vcId, live);
@@ -113,7 +114,9 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
     const devWaiting = cfgOn && !(st.devBackoffUntil > now)
       && pickDue(vcId, vmRefs.filter((r) => !_retry.dev.resting(vcId, r, now)), 'dev', { now, periodMs: settings.vmDevRefreshMs, max: 1 }).length > 0;
     const osEnd = devWaiting ? Math.min(budgetEnd, Date.now() + Math.max(0, budgetEnd - Date.now()) / 2) : budgetEnd;
-    setStatus(vcId, skip ? { osAsked: asked, osApiVersion: apiVersion, osSkippedAt: now, osSkipReason: 'budget' } : { osAsked: asked, osApiVersion: apiVersion, osSkipReason: null });
+    // 9회차: 읽을 VM 이 0 이면 지난 주기의 '남은 대수(osCut)' 도 지운다(잘린 VM 이 사라진 뒤 '일부만 읽음' 이 6시간 남았다).
+    setStatus(vcId, skip ? { osAsked: asked, osApiVersion: apiVersion, osSkippedAt: now, osSkipReason: 'budget' }
+      : { osAsked: asked, osApiVersion: apiVersion, osSkipReason: null, ...(dueAll.length === 0 ? { osCut: 0 } : {}) });
     const due = skip ? [] : dueAll;
     if (due.length) {
       const track = {};

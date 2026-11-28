@@ -107,12 +107,13 @@ test('④ vm.gos 모양 — 묻지 않았으면 detailed 를 읽지 않는다 ·
 
 test('⑤ 엣지 수신 정제 — 아는 키만 · 글자만 · 상한 · 엣지 시각은 수신 시각 이하 · 실제 진입 함수(sanitizeInventoryList)', () => {
   const NOW = 2_000_000_000_000;
+  assert.equal(sanitizeVmGos({ at: 1, asked: 'true' }, NOW), null, "9회차: asked 가 불리언이 아니면 모양이 틀린 값 — null(모름)");
   const g = sanitizeVmGos({
-    at: NOW + 999_999, asked: 'true', detailed: { distroName: 'Rocky', prettyName: { x: 1 }, evil: 'x', kernelVersion: 'k'.repeat(999) },
+    at: NOW + 999_999, asked: false, detailed: { distroName: 'Rocky', prettyName: { x: 1 }, evil: 'x', kernelVersion: 'k'.repeat(999) },
     extra: { newKey: 'v', distroName: 'dup', 'bad key': 'x', obj: { a: 1 } }, raw: 5, vapp: { name: ['x'], vendor: 'V' }, more: 'x',
   }, NOW);
   assert.equal(g.at, NOW, '미래 시각은 수신 시각으로 자른다');
-  assert.equal(g.asked, false, "'true' 글자는 참이 아니다");
+  assert.equal(g.asked, false);
   assert.equal(g.detailed, null, '묻지 않았으면 detailed 는 없다(파서 불변조건 — 점검 1회차)');
   assert.equal(g.extra, null);
   assert.equal(g.raw, null);
@@ -124,7 +125,8 @@ test('⑤ 엣지 수신 정제 — 아는 키만 · 글자만 · 상한 · 엣�
   assert.deepEqual(g.vapp, { name: null, vendor: 'V', version: null, fullVersion: null });
   assert.equal(Object.hasOwn(g, 'more'), false);
   for (const x of [null, 'x', [], 3]) assert.equal(sanitizeVmGos(x), null);
-  assert.equal(sanitizeVmGos({ detailed: { evil: 1 } }).detailed, null, '아는 키가 하나도 없으면 null');
+  assert.equal(sanitizeVmGos({ asked: true, detailed: { evil: 1 } }).detailed, null, '아는 키가 하나도 없으면 null');
+  for (const x of [{}, { junk: 1 }, { detailed: { prettyName: 'X' } }]) assert.equal(sanitizeVmGos(x), null, `모양 없는 객체 ${JSON.stringify(x)} 는 null(묻지 않음으로 지어내지 않는다)`);
   // 실제 진입 함수
   const dropped = { notObject: 0, otherVcenter: 0, badId: 0, coerced: 0 };
   const out = sanitizeInventoryList([
@@ -391,8 +393,7 @@ test('R1 정제 불변조건 — 엣지의 모순된 조합을 파서 모양으�
   assert.deepEqual([a.detailed, a.extra, a.raw], [null, null, null], '묻지 않았으면 detailed · extra · raw 없음');
   const b = sanitizeVmGos({ asked: true, detailed: { prettyName: 'X' }, raw: 'zz' }, NOW2);
   assert.equal(b.raw, null, 'detailed 가 있으면 raw 없음');
-  const c = sanitizeVmGos({ detailed: { prettyName: 'X' } }, NOW2);
-  assert.equal(c.asked, false); assert.equal(c.detailed, null, 'asked 생략 = 묻지 않음');
+  assert.equal(sanitizeVmGos({ detailed: { prettyName: 'X' } }, NOW2), null, '9회차: asked 생략 = 모양이 틀린 값(null)');
   const d = sanitizeVmGos({ asked: true, raw: 'zz' }, NOW2);
   assert.equal(d.raw, 'zz', '물었고 못 읽은 원문은 남긴다');
   const p = buildOsProbe([vm('vm-1', 'vc1', { gos: a }), vm('vm-2', 'vc1', { gos: b })], [{ id: 'vc1' }], [], { now: 1 });
@@ -609,7 +610,8 @@ test('R4 모르는 키 상한으로 버린 수를 센다(파서 · 정제 · 집
   assert.equal(Object.keys(g.extra).length, 8); assert.equal(g.extraDropped, 2);
   const s2 = sanitizeVmGos({ asked: true, detailed: { prettyName: 'R' }, extra: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`k${i}`, 'v'])), extraDropped: 3 }, 2);
   assert.equal(Object.keys(s2.extra).length, 8); assert.equal(s2.extraDropped, 5, '엣지가 버린 3 + 여기서 버린 2');
-  assert.equal(Object.hasOwn(sanitizeVmGos({ asked: true, extraDropped: '9' }, 2), 'extraDropped'), false, '글자 수치는 받지 않는다');
+  assert.equal(sanitizeVmGos({ asked: true, extraDropped: '9' }, 2).extraDropped, 9, '9회차: 숫자 글자는 수로(루트 규칙)');
+  assert.equal(Object.hasOwn(sanitizeVmGos({ asked: true, extraDropped: '9x' }, 2), 'extraDropped'), false);
   assert.equal(sanitizeVmGos({ asked: true, extraDropped: 1e12 }, 2).extraDropped, 10_000);
   const p = buildOsProbe([vm('vm-1', 'vc1', { gos: g })], [{ id: 'vc1' }], [], { now: 1 });
   assert.equal(p.total.extraDropped, 2);
@@ -681,7 +683,7 @@ test('R5 정규화 하나 — 어떤 조합이 와도 묶음 규칙이 선다(�
       detailed: pick([null, { prettyName: 'R' }, {}, { evil: 1 }]), raw: pick([null, 'zz', '', '   ']),
       extra: pick([null, { a: 'b' }]), extraDropped: pick([0, 3, -1, '2']),
     };
-    for (const g of [normalizeGos(input), sanitizeVmGos(input, 10)]) {
+    for (const g of [normalizeGos(input), sanitizeVmGos(input, 10)].filter(Boolean)) {
       const msg = JSON.stringify(input);
       if (!g.asked) { assert.equal(g.parse, null, msg); assert.equal(g.detailed, null, msg); assert.equal(g.raw, null, msg); assert.equal(g.extra, null, msg); assert.equal(Object.hasOwn(g, 'extraDropped'), false, msg); }
       if (g.detailed) assert.ok(g.parse === 'ok' || g.parse === 'partial', msg);
@@ -870,4 +872,68 @@ test('R8 옛 엣지 512자 잘림 — 잘린 자리가 어디든(따옴표 안 �
   assert.ok((outcomes.get('empty') || 0) >= 30);
   // 512자에 닿지 않은 옛 원문에서 형식 밖 조각은 그대로 malformed
   assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' extr" }, 5).parse, 'malformed');
+});
+
+/* ---------------------------- 점검 9회차(반증 재현) 회귀 ---------------------------- */
+
+test('R9 옛 엣지 512자 — 파서가 알린 끝 조각으로만 판정(온전한 마지막 토큰을 버리지 않는다 · 토큰 앞부분이 될 수 없는 조각은 malformed)', () => {
+  const fill = (head, tail) => { const pad = 512 - head.length - tail.length - 1; return `${head}${'x'.repeat(Math.max(0, pad))} ${tail}`; };
+  // A: 유일한 아는 키가 512자째에서 끝나는 온전한 마지막 토큰 — empty
+  const a = fill("extraKey0='", "' prettyName=''");
+  assert.equal(a.length, 512);
+  assert.equal(parseVmGosProps({ 'guest.guestDetailedData': a }, 1, { asked: true }).parse, 'empty', '직접 수집');
+  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: a }, 5).parse, 'empty', '옛 엣지 → 중앙');
+  // B: 마지막 조각이 어떤 토큰의 앞부분도 될 수 없는 형식 밖 조각 — malformed + 원문
+  const b = fill("prettyName='' extraKey0='", "' kernelVersion==bad");
+  assert.equal(b.length, 512);
+  const gb = sanitizeVmGos({ at: 1, asked: true, raw: b }, 5);
+  assert.equal(gb.parse, 'malformed'); assert.ok(gb.raw);
+  // C: 키 이름 가운데 · key= 뒤에서 잘림 — empty
+  for (const tail of ["' extr", "' extraKey9=", "' extraKey9='xx"]) {
+    const c = fill("prettyName='' extraKey0='", tail);
+    assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: c }, 5).parse, 'empty', JSON.stringify(tail));
+  }
+});
+
+test('R9 잘린 VM 이 사라지면 osCut 을 지운다 · 수집을 끄면 상태도 꺼짐으로', async () => {
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  setStatus('vcK', { osAt: NOW, osCut: 250, osAsked: true });
+  await refreshVmCfg(fakeClient(), 'vcK', [], { now: NOW + 1000, settings: SET });
+  assert.equal(statusOf('vcK').osCut, 0, '읽을 VM 이 0 이면 남은 대수도 0');
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  await refreshVmCfg(fakeClient(), 'vcL', ['vm-1'], { now: NOW, settings: SET });
+  assert.ok(statusOf('vcL').osAt);
+  await refreshVmCfg(fakeClient(), 'vcL', ['vm-1'], { now: NOW + 1000, settings: { ...SET, vmOsScan: false } });
+  assert.equal(statusOf('vcL').osAt, null, '끄면 상태의 os 시각도 지운다');
+  const t = statusText({ osAt: 5, osAsked: true }, { collectSource: 'direct' }, { collect: { osEnabled: false } });
+  assert.equal(t.tone, 'amber'); assert.match(t.text, /^이 포탈의 실제 OS 수집 꺼짐 · 마지막 수집 /);
+  assert.equal(statusText({ osAt: 5 }, { collectSource: 'site' }, { collect: { osEnabled: false } }).text, '엣지 수집(상태는 엣지에)', '엣지 행은 엣지 설정을 따른다');
+});
+
+test('R9 정렬 — 빈 값 표기(-, ?, n/a, 미상)는 판 사이에 섞이지 않고 맨 뒤', async () => {
+  const { sortKeyOf, compareKeys } = await import('../../web/src/components/sortableText.js');
+  for (const v of ['-', '?', 'n/a', '미상', '—']) assert.equal(versionSortKey(v), '', v);
+  const sortBy = (vs, dir = 1) => [...vs].sort((x, y) => {
+    const a = sortKeyOf(versionSortKey(x)); const b = sortKeyOf(versionSortKey(y));
+    if (a.kind === 'empty' || b.kind === 'empty') return compareKeys(a, b);
+    return dir * compareKeys(a, b);
+  });
+  assert.deepEqual(sortBy(['9', '-', '22.04', 'n/a', '8.4']).slice(-2).sort(), ['-', 'n/a']);
+});
+
+test('R9 옛 중앙이 저장한 인벤토리(vm.gos 옛 모양)도 기동 때 지금 모양으로', async () => {
+  const { parseInventoryFile } = await import('../src/central/inventory.js');
+  const text = JSON.stringify({ inventory: { vc1: { at: 1_000, agent: 'e1', data: { vms: [
+    { id: 'vc1:vm-1', gos: { at: 900, asked: true, detailed: null, extra: null, raw: "prettyName='' distroName=''", vapp: null } },
+    { id: 'vc1:vm-2', gos: { at: 900, asked: true, detailed: { prettyName: 'R' }, extra: null, raw: null, vapp: null } },
+    { id: 'vc1:vm-3', gos: { junk: 1 } },
+    { id: 'vc1:vm-4' },
+  ] } } } });
+  const vms = parseInventoryFile(text).vc1.data.vms;
+  assert.equal(vms[0].gos.parse, 'empty'); assert.equal(vms[0].gos.raw, null);
+  assert.equal(vms[1].gos.parse, 'ok');
+  assert.equal(vms[2].gos, null);
+  assert.equal(Object.hasOwn(vms[3], 'gos'), false);
+  const again = parseInventoryFile(JSON.stringify({ inventory: { vc1: { at: 1_000, data: { vms: [vms[0], vms[1]] } } } })).vc1.data.vms;
+  assert.deepEqual(again.map((v) => v.gos), [vms[0].gos, vms[1].gos], '고정점 — 다시 읽어도 그대로');
 });
