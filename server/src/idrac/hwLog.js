@@ -19,7 +19,8 @@ export const HWLOG_TIMEOUT_MS = 30_000;  // 장비 시한(세션을 끊는다)
 export const HWLOG_MSG_MAX = 300;
 export const HWLOG_SEVS = Object.freeze(['critical', 'warning', 'ok']);
 const MIN_VALID_TIME = Date.UTC(2000, 0, 1);
-const clean = (v, n) => String(v ?? '').slice(0, n).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();   // 길이를 먼저 자른 뒤 · 문자 클래스 한 번(선형)
+// 글자 · 수만(객체 · 배열을 ‘[object Object]’ · ‘X,Y’ 로 지어내지 않는다 — 디버깅 1회차 엣지 #7) · 길이를 먼저 자른 뒤 · 문자 클래스 한 번(선형)
+const clean = (v, n) => (typeof v === 'string' || typeof v === 'number' ? String(v) : '').slice(0, n).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
 
 /** Redfish Severity → critical · warning · ok · ''(모름). */
 export function sevOf(v) {
@@ -47,6 +48,16 @@ export function countsOf(rows) {
  * @returns {Promise<{ ok:true, at:number, status:string, read:number, total:number|null, pages:number, stopped:string, rows:Array, counts:object }>}
  *   status: ok · empty · absent(경로 없음) · forbidden · auth(인증 실패) · auth-stopped(주 폴러가 인증 실패로 멈춤 — 장비에 묻지 않음) · timeout · error
  */
+// 이 노드에서 동시에 장비를 읽는 이벤트 로그 수 상한 — 계정 하나가 여러 서버를 동시에 부르면 그 수만큼 iDRAC 세션이 열렸다(디버깅 2회차 성능 Q10)
+export const HWLOG_CONCURRENCY = (() => { const n = Number(String(process.env.BM_HWLOG_CONCURRENCY ?? '').trim()); return Number.isInteger(n) && n >= 1 && n <= 16 ? n : 4; })();
+let _hwActive = 0;
+export const hwLogBusy = () => _hwActive >= HWLOG_CONCURRENCY;
+/** 상한 안에서 읽기 — 넘치면 장비에 묻지 않고 { ok:false, kind:'busy' }. */
+export async function readHwLogLimited(entry, opts) {
+  if (_hwActive >= HWLOG_CONCURRENCY) return { ok: false, kind: 'busy', reason: `다른 이벤트 로그 읽기 ${HWLOG_CONCURRENCY}건이 진행 중입니다 — 잠시 뒤 다시 읽으십시오.` };
+  _hwActive += 1;
+  try { return await readHwLog(entry, opts); } finally { _hwActive -= 1; }
+}
 export async function readHwLog(entry, { getJson = null, now = Date.now, timeoutMs = HWLOG_TIMEOUT_MS, budgetMs = HWLOG_BUDGET_MS, authStopped = null } = {}) {
   // 주 iDRAC 폴러가 인증 실패로 멈춘 서버는 장비에 묻지 않는다 — 틀린 비밀번호로 ‘기록 읽기’ 마다 로그인을 보내지 않게(계정 잠금 · authGuard 규칙.
   //   디스크 배드 섹터 분석 수동 점검과 같은 판정 — v3.50 반증 A13). 판정을 못 하면(모듈 없음) 막지 않는다.
@@ -86,7 +97,7 @@ export function sanitizeHwLog(b, now = Date.now()) {
   const STATUSES = ['ok', 'empty', 'absent', 'forbidden', 'auth', 'auth-stopped', 'timeout', 'error'];
   const cnt = (v) => { const x = numOrNull(v); return x != null && x >= 0 && x <= 10_000_000 ? Math.floor(x) : null; };
   return {
-    ok: true, at: clampEdgeTs(numOrNull(b.at), now), status: STATUSES.includes(b.status) ? b.status : 'error',
+    ok: true, at: (() => { const a = numOrNull(b.at); return a != null && a >= MIN_VALID_TIME ? clampEdgeTs(a, now) : null; })(), status: STATUSES.includes(b.status) ? b.status : 'error',
     read: cnt(b.read) ?? rows.length, total: cnt(b.total), pages: cnt(b.pages) ?? 0, gap: cnt(b.gap) ?? 0,
     stopped: ['', 'budget', 'max', 'skip', 'short', 'timeout', 'error'].includes(b.stopped) ? b.stopped : '', rows, counts: countsOf(rows),
   };
@@ -114,6 +125,10 @@ function maskToken(tok0) {
   const bare = tok.replace(/^[[(]+|[\]).,;:]+$/g, '');
   if (bare.split(':').length >= 3 && HEXCOLON.test(bare.replace(/%[\w.-]{1,32}$/, ''))) return tok.replace(bare, MASK);
   if (MAC_DASH.test(bare)) return tok.replace(bare, MASK);
+  // 메일 주소 · URL 의 호스트(디버깅 1회차 판정 #12 — 접수 자료에도 실린다). 낱말 길이는 위에서 300 으로 잘려 선형
+  if (/^[^\s@]{1,64}@[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){1,8}$/i.test(bare)) return tok.replace(bare, MASK);
+  const u = /^([a-z][a-z0-9+.-]{1,15}:\/\/)([^/\s?#]{1,255})(.*)$/i.exec(bare);
+  if (u) return tok.replace(bare, `${u[1]}${MASK}${u[3].replace(IPV4_IN, MASK)}`);
   if (FQDN.test(bare) && /[a-z]/i.test(bare.replace(/\.$/, '').split('.').pop())) return tok.replace(bare, MASK);
   return tok.replace(IPV4_IN, MASK);
 }

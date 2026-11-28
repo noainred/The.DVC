@@ -1,6 +1,6 @@
 {
   "name": "vmware-global-monitoring-portal",
-  "version": "3.53.0",
+  "version": "3.58.0",
   "private": true,
   "description": "Unified monitoring portal/dashboard for VMware vCenter infrastructure across global data centers",
   "type": "module",
@@ -12,7 +12,8 @@
     "dev": "concurrently -k -n SERVER,WEB -c green,cyan \"npm --prefix server run dev\" \"npm --prefix web run dev\"",
     "build": "npm --prefix web run build",
     "test": "npm --prefix server test",
-    "verify": "npm --prefix server test && npm --prefix web run lint && npm --prefix web run test && npm --prefix web run build",
+    "verify": "npm --prefix server test && npm --prefix server run lint && npm --prefix web run lint && npm --prefix web run test && npm --prefix web run build",
+    "lint:server": "npm --prefix server run lint",
     "start": "npm --prefix server run start",
     "otp-enroll": "npm --prefix server run otp-enroll --"
   },

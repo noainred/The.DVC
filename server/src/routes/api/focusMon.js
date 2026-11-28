@@ -722,9 +722,11 @@ api.get('/tools/focus-mon/alerts', adminOnly, fullScopeOnly, async (req, res) =>
   const ev = await db.readEventsOfKinds(now - 86_400_000, now + 60_000, ['alert', 'oom', 'kerr', 'tune'], 3000);
   const evs = (ev || []).filter((e) => vis.has(e.target)).map((e) => (demo && e.kind === 'alert' ? { ...e, text: maskAlertText(e.text) } : e));
   const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
-  const kmsg = [...vis.values()].filter((t) => recordIds.has(t.id) || evs.some((e) => e.target === t.id && (e.kind === 'oom' || e.kind === 'kerr'))).map((t) => {
-    const k = store.kmsgOf(t.id); const ooms = evs.filter((e) => e.target === t.id && e.kind === 'oom');
-    const kerr = evs.filter((e) => e.target === t.id && e.kind === 'kerr').reduce((a, e) => a + (Number(/(\d+)줄/.exec(e.text)?.[1]) || 0), 0);
+  // v3.57.0 반증 AE-3: OOM · 커널 오류 표는 '그 서버' 의 것 — 기계 경계(주소 · 노드를 고친 순간) 앞 사건은 예전 서버라 세지 않는다(사건 기록에는 남는다)
+  const sinceMove = (e) => !(e.at < store.resetAtOf(e.target));
+  const kmsg = [...vis.values()].filter((t) => recordIds.has(t.id) || evs.some((e) => e.target === t.id && (e.kind === 'oom' || e.kind === 'kerr') && sinceMove(e))).map((t) => {
+    const k = store.kmsgOf(t.id); const ooms = evs.filter((e) => e.target === t.id && e.kind === 'oom' && sinceMove(e));
+    const kerr = evs.filter((e) => e.target === t.id && e.kind === 'kerr' && sinceMove(e)).reduce((a, e) => a + (Number(/(\d+)줄/.exec(e.text)?.[1]) || 0), 0);
     // OOM 수 — '그 밖 N건' 줄은 N 으로(한 번에 20건을 넘은 증분) · 마지막 OOM 은 실제 줄
     const oomN = ooms.reduce((a, e) => a + (Number(/그 밖 (\d+)건/.exec(e.text)?.[1]) || 1), 0);
     const lastReal = ooms.find((e) => !/그 밖 \d+건/.test(e.text)) || ooms[0];

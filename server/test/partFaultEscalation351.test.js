@@ -181,7 +181,7 @@ test('확인 열쇠 — 키를 싣지 않음 · 수집 주체가 다르면 다�
   assert.equal(E.partOfAckId([PART()], ['x']), null);
   E._resetEscalationStateForTest();
   fs.writeFileSync(path.join(tmp, 'partfault-escalation-state.json'), JSON.stringify({ v: 1, items: { [K()]: { since: 5, sent: [[9, 1, 'x', 'ok'], [-1, 1, 'x', 'ok'], [0, 1, 'x', 'weird']] } } }));
-  assert.deepEqual(E.loadEscalationState().items[K()].sent, [[0, 1, 'x', 'ok']]);
+  assert.deepEqual(E.loadEscalationState().items[K()].sent, [[0, 1, 'x', 'ok', '']], '정책을 적지 않은 옛 줄은 그 기록의 정책(여기서는 없음)으로');
   E._resetEscalationStateForTest(); fs.rmSync(path.join(tmp, 'partfault-escalation-state.json'), { force: true });
 });
 
@@ -209,7 +209,7 @@ test('실행 — 순차 · 받는 곳에 간 것만 보냄 · 회차 중 확인�
     // 채널 억제 열쇠에 수집 주체(반증 A17)
     now = 31 * MIN;
     await RUN.runEscalationNow();
-    assert.equal(chans.at(-1).key, `partfault-esc:|${PART().partKey}:1`);
+    assert.equal(chans.at(-1).key, `partfault-esc:|${PART().partKey}:p1:0:1:1`, '수집 주체 · 정책 · 세대(since) · 단계 · 시도 번호(디버깅 2회차 판정 #3)');
     // 진행 기록 파일 — 다음 기동(메모리 비움)에도 다시 보내지 않는다
     E._resetEscalationStateForTest(); now = 60 * MIN;
     assert.equal((await RUN.runEscalationNow()).sent, 0);

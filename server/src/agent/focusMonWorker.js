@@ -30,6 +30,7 @@ import { createAuditRunner } from '../focusmon/audit/runner.js';
 import { installExec, NODE_INSTALL_CONCURRENCY } from '../focusmon/audit/install.js'; // v3.17.0 자동 설치(이 엣지의 SSH 공용 접속 키로)
 import { installCredFor, credView, credSnapshot, PREP_FEATURE } from '../focusmon/audit/installCred.js';
 import { prepExec } from '../focusmon/audit/prep.js'; // v3.18.0 접속 자동 준비(수집 계정 · 공개키 — 이 엣지의 SSH 공용 접속 root 키로)
+import { localHostIndex } from '../focusmon/audit/sameMachine.js'; // v3.54.0 ④ 엣지가 아는 서버(그 엣지 vCenter 의 VM IP · SSH 공용 접속 서버)
 import { store } from '../store.js';
 const TEST_RESULTS_PER_SYNC = 50; // 중앙이 동기화당 받는 시험 결과 상한(central/focusMonEdge.js arr(b.tests, 50))과 같게 — 넘는 것은 다음 동기화에(반증 3)
 
@@ -77,14 +78,17 @@ let _last = null; let dropped = 0;
 let idleHintMs = null; let fails = 0; let lastRttMs = null; let lastError = ''; let lastErrorAt = 0;
 function noteFail(reason) { fails += 1; idleHintMs = null; lastError = String(reason || '').slice(0, 200); lastErrorAt = Date.now(); }
 const _log = createChangeLogger({ windowMs: 10 * 60_000 });
+/** 중앙이 준 표지(소문자 16진수 — 길이 n) · 아니면 없음. */
+const epOf = (v, n) => (typeof v === 'string' && v.length === n && /^[a-f0-9]+$/.test(v) ? v : undefined);
 
 const runner = createRunner({
   keys: focusKeys,
+  // v3.57.0 묶음 B 반증 F2: 값마다 그 수집기를 연 기계 열쇠(ep — 중앙이 준 값)를 붙인다 — 중앙이 주소 · 노드를 고치기 전 서버의 값을 거른다
   sink: {
-    sample: (id, t, s, hello) => { samples.push({ id, t, s, hello }); trim(samples); },
-    procs: (id, t, p) => { procs.push({ id, t, p }); trim(procs); },
-    status: (id, st) => { statuses[id] = st; },
-    load: (id, l) => { loads[id] = l; },
+    sample: (id, t, s, hello, ep) => { samples.push(ep ? { id, t, s, hello, ep } : { id, t, s, hello }); trim(samples); },
+    procs: (id, t, p, ep) => { procs.push(ep ? { id, t, p, ep } : { id, t, p }); trim(procs); },
+    status: (id, st, ep) => { statuses[id] = ep ? { ...st, ep } : st; },
+    load: (id, l, ep) => { loads[id] = ep ? { ...l, ep } : l; },
   },
 });
 
@@ -138,28 +142,60 @@ const auditRunner = createAuditRunner({
 export function edgeVcs() {
   try { return (store.get()?.vcenters || []).filter((v) => v && v.id).slice(0, 100).map((v) => String(v.id)); } catch { return []; }
 }
+/**
+ * v3.54.0 ④: 이 엣지가 자기 서버로 아는 주소(법인 공통 계정 — root 키 — 은 이 주소에만 쓴다 · installCred 'not-local').
+ * 그 엣지 스냅샷 vCenter 의 VM IP(한 VM 에만 있는 것) + 이 엣지 SSH 공용 접속 서버 주소. 못 읽으면 빈 색인(닫힌다).
+ * ⚠ 정정(반증 F1 edge-target · 재현): 처음 주석은 '중앙이 보낸 값이 아니다' 라고 했으나 서버 항목에는 중앙이 배포(bm-onboard — agent '')로 넣은 것도 있다.
+ *   이 판정은 중앙이 작업 주소 하나를 틀리게 보낸 경우를 막고, 설정까지 배포하는 침해된 중앙은 막지 못한다(문서의 남은 것).
+ * 반증 F2(재현): 첫 수집 전 · 이 엣지의 vCenter 를 못 읽는 동안은 unknown — 'local-unknown'(모르는 서버라고 단정하지 않는다).
+ * @param {{servers?:object[]}} [snap]  credSnapshot 사본(여러 대상을 볼 때 한 번)
+ */
+export function edgeLocal(snap = null) {
+  let vms = []; let servers = []; let unknown = true;
+  try {
+    const s = store.get();
+    vms = s?.vms || [];
+    const vcs = Array.isArray(s?.vcenters) ? s.vcenters : [];
+    unknown = store.beforeFirstCollection() || vcs.some((v) => ['unreachable', 'pending', 'maintenance'].includes(v?.status) && !v?.stale);
+  } catch { vms = []; unknown = true; }
+  try { servers = Array.isArray(snap?.servers) ? snap.servers : (credSnapshot().servers || []); } catch { servers = []; }
+  return localHostIndex({ vms, servers, unknown });
+}
 const installRunner = createAuditRunner({
-  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs }), kind: 'install',
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs, edgeLocal }), kind: 'install',
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
 /** v3.18.0 접속 준비 줄(설치 줄과 따로 — 같은 동시 상한). 준비 뒤 연결 시험은 이 엣지의 집중 모니터링 키로 · 고르면 디스크 점검 설치까지. */
 const prepRunner = createAuditRunner({
-  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec({ edge: true, edgeVcs }), kind: 'prep',
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec({ edge: true, edgeVcs, edgeLocal }), kind: 'prep',
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
 /** 이 엣지가 돌릴 줄 아는 작업 종류(매 동기화에 싣는다 — 중앙은 이번 본문의 표시만 믿는다 · v3.17.0 반증 S1). */
 export const EDGE_AUDIT_CAPS = Object.freeze(['install', 'prep']);
 const CRED_EVERY_MS = 60_000;
 let knownTargets = []; let credDueAt = 0; let lastPrepReport = null;
+/** 받는 맡은 서버 목록 상한 — 중앙 focusmon/audit/service.js KNOWN_MAX 와 같게(시험 대조). */
+export const KNOWN_MAX = 500;
+/**
+ * v3.54.0 ④: 받은 root 작업(설치 · 준비)의 대상이 이 엣지가 맡은 서버인가 — 중앙이 보낸 맡은 서버 목록(audit.known)에 같은 id · 주소 · 포트 · 수집 계정으로 있을 때만.
+ *   (중앙은 root 작업을 싣는 응답에 늘 목록을 싣는다 — 옛 중앙은 계정을 싣지 않으므로 계정 칸이 없으면 계정은 보지 않는다.) 법인 공통 계정은 따로 엣지가 아는 서버인지 본다(edgeLocal).
+ */
+export function jobTargetKnown(tgt, list = knownTargets) {
+  const k = (Array.isArray(list) ? list : []).find((x) => x && x.id === tgt?.id);
+  if (!k) return false;
+  if (k.host !== tgt.host || (Number(k.port) || 22) !== (Number(tgt.port) || 22)) return false;
+  return k.username == null || k.username === tgt.username;
+}
 /** 이번 동기화에 실을 설치 계정 상태(60초에 한 번 · 맡은 서버 목록을 받았을 때만). 시험에서도 부른다. v3.18.0: 접속 준비 계정도 같이 만든다(credPrepReport). */
 export function credReport(now = Date.now(), credOf = installCredFor) {
   if (!knownTargets.length || now < credDueAt) return null;
   credDueAt = now + CRED_EVERY_MS;
   const out = {}; const prep = {}; const corpVcs = edgeVcs();
   const snap = credSnapshot();   // 50회차 R2(측정): 대상 × 기능마다 등록부 전량을 복사해 500 대상 · 1,000 서버에서 매 60초 2초 넘게 막았다
+  const local = edgeLocal(snap); // v3.54.0 ④ 한 번만
   for (const t of knownTargets) {
-    out[t.id] = credView(credOf(t, { edge: true, corpVcs, ...snap }));
-    prep[t.id] = credView(credOf(t, { edge: true, corpVcs, feature: PREP_FEATURE, ...snap }));
+    out[t.id] = credView(credOf(t, { edge: true, corpVcs, local, ...snap }));
+    prep[t.id] = credView(credOf(t, { edge: true, corpVcs, feature: PREP_FEATURE, local, ...snap }));
   }
   lastPrepReport = prep;
   return out;
@@ -304,7 +340,7 @@ export async function syncOnce(now = Date.now()) {
     lastRttMs = Date.now() - t0; fails = 0;
     idleHintMs = Number.isFinite(Number(data.idleMs)) && Number(data.idleMs) > 0 ? Number(data.idleMs) : null;
     if (data.ensureKey === true) { try { focusKeys.ensureKey(); } catch (e) { if (_log('key', e.message)) console.warn(`[focusmon-edge] SSH 키를 만들지 못했습니다: ${e.message}`); } }
-    runner.reconcile(targets.map((t) => ({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username), interval: Number(t.interval) || 2, procEvery: Number(t.procEvery) || 5 })));
+    runner.reconcile(targets.map((t) => ({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username), interval: Number(t.interval) || 2, procEvery: Number(t.procEvery) || 5, ep: epOf(t.ep, 16) })));
     const byId = new Map(targets.map((t) => [String(t.id), { id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username) }]));
     // v2.978: 중앙이 retryTargets(접속 정보)를 주면 수집 중이 아닌 대상도 정지를 푼다 — 이어 오는 시험(tests)이 한 번 접속한다(retries 를 tests 보다 먼저 처리).
     for (const t of Array.isArray(data.retryTargets) ? data.retryTargets.slice(0, 50) : []) {
@@ -316,8 +352,9 @@ export async function syncOnce(now = Date.now()) {
       if (testsInFlight.has(id)) continue;
       if (testsInFlight.size >= EDGE_TEST_CONCURRENCY) break; // 동시 상한(반증 1) — 중앙은 diag.testsBusy 로 덜 보낸다. 넘친 것은 중앙이 60초 뒤 다시 배달
       testsInFlight.add(id);
+      const tep = epOf(t.ep, 12); // 시험한 접속처 표지(중앙이 준 값 그대로 돌려준다 — 그 사이 접속처를 고쳤으면 중앙이 버린다)
       runner.test({ id, host: String(t.host), port: Number(t.port) || 22, username: String(t.username) })
-        .then((result) => { testResults.push({ id, result }); schedule(0); })
+        .then((result) => { testResults.push(tep ? { id, result, ep: tep } : { id, result }); schedule(0); })
         .catch(() => {})
         .finally(() => { testsInFlight.delete(id); });
     }
@@ -329,7 +366,7 @@ export async function syncOnce(now = Date.now()) {
       // 중앙이 모르는 작업(접속처 변경 · 대상 삭제) — 줄에서 기다리는 것은 뺀다(도는 중인 것은 끝까지 — 결과는 중앙이 버린다)
       for (const id of Array.isArray(au.cancel) ? au.cancel.slice(0, 50) : []) { auditRunner.cancel(String(id)); installRunner.cancel(String(id)); prepRunner.cancel(String(id)); }
       // v3.17.0: 맡은 서버 목록(설치 계정 상태를 알려 주려고) — 받으면 다음 동기화에 바로 보고한다
-      if (Array.isArray(au.known)) { knownTargets = au.known.slice(0, 500).filter((t) => t && typeof t.id === 'string').map((t) => ({ id: String(t.id), name: String(t.name || ''), host: String(t.host || ''), port: Number(t.port) || 22 })); credDueAt = 0; }
+      if (Array.isArray(au.known)) { knownTargets = au.known.slice(0, KNOWN_MAX).filter((t) => t && typeof t.id === 'string').map((t) => ({ id: String(t.id), name: String(t.name || ''), host: String(t.host || ''), port: Number(t.port) || 22, username: typeof t.username === 'string' ? t.username : null })); credDueAt = 0; }
       for (const j of Array.isArray(au.jobs) ? au.jobs.slice(0, 20) : []) {
         if (!j || typeof j.runId !== 'string' || auditRunner.has(j.runId) || installRunner.has(j.runId) || prepRunner.has(j.runId) || auditResults.some((r) => r.runId === j.runId)) continue;
         const ex = j.expect && typeof j.expect === 'object' ? j.expect : {};
@@ -341,6 +378,11 @@ export async function syncOnce(now = Date.now()) {
           // v3.18.0 접속 준비 — 참거짓 · 정해 둔 값만(중앙이 보낸 법인 목록은 쓰지 않는다 — 엣지 스냅샷 vCenter)
           ...(j.mode === 'prep' ? { from: ex.from === true, age: ex.age === 'default' ? 'default' : 'never', audit: ex.audit === true } : {}) };
         const tgt = { id: String(j.id), name: String(j.name || ''), host: String(j.host), port: Number(j.port) || 22, username: String(j.username) };
+        // v3.54.0 ④: root 작업은 맡은 서버 목록에 같은 접속처로 있을 때만 — 아니면 돌리지 않고 결과로 알린다(중앙이 'not-mine' 으로 적는다)
+        if ((j.mode === 'install' || j.mode === 'prep') && !jobTargetKnown(tgt)) {
+          queueAuditResult(j.runId, { mode: j.mode, ...(j.mode === 'install' ? { install: { code: 'not-mine', step: 0 } } : { prep: { code: 'not-mine', step: 0 } }), ok: false, kind: 'not-ready', ready: [], out: [], outBytes: 0, truncated: false, code: null, stderr: '', ms: 0, error: '이 엣지가 맡은 서버 목록에 없는 대상이라 돌리지 않았습니다.' });
+          continue;
+        }
         const sub = j.mode === 'install'
           ? installRunner.submit({ runId: j.runId, mode: 'install', target: tgt, expect })
           : j.mode === 'prep'
@@ -375,6 +417,7 @@ export function startFocusMonWorker() {
 export function stopFocusMonWorker() { clearTimeout(timer); clearInterval(nodeTimer); nodeTimer = null; try { nodeSampler?.stop(); } catch { /* */ } nodeSampler = null; runner.stopAll(); }
 /** v2.983 시험용 — 수집 부하 창을 넣는다(실수집 없이 동기화 본문을 시험). */
 export function _putLoadForTest(id, l) { loads[id] = l; }
+export function _bufForTest() { return { samples: samples.slice(), procs: procs.slice(), statuses: { ...statuses }, tests: testResults.slice() }; }
 export function _loadsForTest() { return { ...loads }; }
 export function _resetForTest() { auditResults = []; auditDropped = 0; loads = {}; txBytes = 0; nodeLast = null; nodePrevTx = null; testsInFlight.clear(); samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; idleHintMs = null; fails = 0; lastRttMs = null; lastError = ''; lastErrorAt = 0; runner.stopAll(); }
 export const _runnerForTest = runner;

@@ -18,7 +18,8 @@ process.env.DATA_SOURCE = 'live';
 process.env.COLLECTOR_TOKEN = 'tok-hwlog-rt';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 delete process.env.CENTRAL_URL;
-test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
+const rmDir = () => { try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } };
+test.after(() => { rmDir(); process.once('exit', rmDir); });   // 종료 때 인벤토리 캐시가 다시 쓰는 파일까지(디버깅 1회차 엣지 #9)
 
 const H0 = Date.UTC(2026, 10, 20);
 const entries = (n, { desc = false } = {}) => {

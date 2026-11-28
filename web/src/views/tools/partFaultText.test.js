@@ -273,6 +273,27 @@ describe('notifyNote / lastRunText — 상한과 실패를 숨기지 않는다',
     expect(t).toContain('3건 미발송');
   });
   it('알림이 없으면 빈 문자열', () => { expect(notifyNote({})).toBe(''); });
+  it('v3.52 설계 ③ — 발송 대기 · 실패 · 건너뜀 · 넘침 · 꺼짐 · 지연 · 대신함을 숨기지 않는다(반증 12b · 13b)', () => {
+    expect(notifyNote({ notify: { pending: true, queued: 3, sent: 0 } })).toBe('알림 3건 발송 대기(차례로 보냅니다)');
+    expect(notifyNote({ notify: { pending: true, queued: 200, capped: 300 } })).toBe('알림 200건 발송 대기(차례로 보냅니다) · **상한으로 300건은 보내지 않습니다**');
+    expect(notifyNote({ notify: { pending: false, sent: 2, capped: 0, dropped: 0 } })).toBe('알림 2건 발송');
+    expect(notifyNote({ notify: { pending: false, sent: 0, failed: 1 } })).toBe('알림 0건 발송 · **1건은 채널 오류로 받지 못했습니다**');
+    expect(notifyNote({ notify: { pending: false, sent: 0, skipped: 2 } })).toBe('알림 0건 발송 · 억제나 채널 미설정 등으로 2건 보내지 않음');
+    expect(notifyNote({ notify: { pending: false, sent: 1, queueDropped: 7, disabledSkipped: 4 } })).toBe('알림 1건 발송 · **알림 대기열이 넘쳐 7건은 보내지 않았습니다** · 부품 장애 점검이 꺼져 4건은 보내지 않았습니다');
+    expect(notifyNote({ notify: { pending: false, sent: 1, delayedMs: 180_000, superseded: 2 } })).toBe('알림 1건 발송 · 알림 채널이 늦어 최대 약 3분 뒤에 보냈습니다 · 채널 지연으로 같은 부품의 뒤 알림이 2건을 대신했습니다');
+    // 큐 누적(포탈 시작 뒤)은 가장 새 판정 표지에 없다 — 따로 말한다(같은 수면 되풀이하지 않는다)
+    expect(notifyNote({ notify: { pending: false, sent: 1 } }, { waiting: 2, failed: 150, overflowDropped: 400, superseded: 0 })).toBe('알림 1건 발송 · 발송 대기 2건 · **포탈 시작 뒤 채널 오류로 150건을 받지 못했습니다** · **포탈 시작 뒤 알림 대기열이 넘쳐 400건을 보내지 않았습니다**');
+    expect(notifyNote({ notify: { pending: false, sent: 0, failed: 1 } }, { waiting: 0, failed: 1 })).toBe('알림 0건 발송 · **1건은 채널 오류로 받지 못했습니다**');
+    expect(notifyNote({}, { waiting: 0, overflowDropped: 0, superseded: 5 })).toBe('포탈 시작 뒤 채널 지연으로 같은 부품의 뒤 알림이 5건을 대신했습니다');
+    expect(notifyNote({}, { waiting: 0, overflowDropped: 0 })).toBe('');
+    // 반증 14b · Chromium — 대기 중엔 남은 수와 이미 끝난 것 · 0건 판정은 말하지 않음 · 같은 넘침 수는 한 번
+    expect(notifyNote({ notify: { pending: true, queued: 3, left: 1, sent: 0, failed: 2 } })).toBe('알림 1건 발송 대기(차례로 보냅니다) · **2건은 채널 오류로 받지 못했습니다**');
+    expect(notifyNote({ notify: { pending: true, queued: 4, left: 2, skipped: 1, superseded: 1 } })).toBe('알림 2건 발송 대기(차례로 보냅니다) · 억제나 채널 미설정 등으로 1건 보내지 않음 · 채널 지연으로 같은 부품의 뒤 알림이 1건을 대신했습니다');
+    expect(notifyNote({ notify: { pending: false, total: 0, queued: 0, sent: 0 } })).toBe('');
+    expect(notifyNote({ notify: { pending: false, total: 0, queued: 0, sent: 0 } }, { waiting: 1 })).toBe('발송 대기 1건');
+    expect(notifyNote({ notify: { pending: false, sent: 0, queueDropped: 7 } }, { waiting: 0, overflowDropped: 7 })).toBe('알림 0건 발송 · **알림 대기열이 넘쳐 7건은 보내지 않았습니다**');
+  });
+
   it('점검 이력이 없으면 지어내지 않는다', () => {
     expect(lastRunText(null)).toBe('점검 이력 없음');
     expect(lastRunText({ last: { at: 1000, error: 'x' } }, 2000)).toContain('직전 점검 실패');

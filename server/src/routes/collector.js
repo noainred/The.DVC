@@ -10,6 +10,7 @@ import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { registryLoadError as idracRegistryLoadError, loadRegistry as loadIdracRegistry } from '../idrac/registry.js'; // v2.743(감사 EDGE-01) · v3.50 하드웨어 이벤트 로그(등록부에서 서버 찾기)
+import { reqTimeoutMs } from '../util/envTimeout.js';   // v3.52 원격 전원 엣지 상한(BM_POWER_EDGE_MAX — 범위 닫힌 수 해석)
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 503 사유는 요약(원문 없음)
 import { upgradeManager } from '../upgrade/manager.js';
 import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
@@ -324,6 +325,30 @@ collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-ser
 // v3.50 물리서버 ‘하드웨어 이벤트 로그’(SEL) — 이 엣지에 등록된 iDRAC 서버 한 대의 SEL 을 읽어 돌려준다(central/bmHwLogPull.js).
 //   읽기만(GET) · 장비 상태를 바꾸지 않는다 · 서버는 등록부 id(id) 또는 중앙이 아는 열쇠(k — 엣지가 함대 push 에 실은 fleetId = 태그 · 등록 id 소문자)로 찾는다.
 //   같은 서버는 60초에 한 번만 장비에 묻는다(진행 중이면 함께 기다린다 — 드로어를 빠르게 여닫아도 iDRAC 를 두드리지 않게). 계정 · 주소는 싣지 않는다.
+/**
+ * 엣지 등록부에서 중앙이 말한 서버를 찾는다(bm-hwlog · bm-power 공용 — 디버깅 1회차 엣지 #1 · #2).
+ *  · 꺼진 등록 · 주소 없는 등록은 후보에서 뺀다 · 등록부를 못 읽었으면 503(‘없다’ 고 단정하지 않는다).
+ *  · 열쇠 k 의 순위: 등록 id → **인벤토리 태그**(엣지 fleetId 가 이것을 먼저 쓴다) → 등록부 태그. 한 순위에 켜진 후보가 둘 이상이면 409(어느 장비인지 몰라 보내지 않는다).
+ */
+function findEdgeIdrac(id, k, getInventory) {
+  if (idracRegistryLoadError()) return { status: 503, body: { ok: false, error: 'registryUnreadable', code: 'registry-unreadable', reason: '이 엣지의 iDRAC 등록부를 읽지 못했습니다 — 등록부에 없다고 단정하지 않습니다.' } };
+  const lc = (v) => String(v ?? '').trim().toLowerCase();
+  const reg = loadIdracRegistry().filter((e) => e && e.enabled !== false && e.host);
+  const notFound = { status: 404, body: { ok: false, code: 'not-found', reason: '이 엣지에 등록된(켜진) iDRAC 서버가 아닙니다.' } };
+  if (id) { const e = reg.find((x) => String(x.id) === id); return e ? { entry: e } : notFound; }
+  const invTag = (e) => { try { return lc(getInventory(String(e.id))?.system?.serviceTag); } catch { return ''; } };
+  // 장비가 지금 말하는 태그(인벤토리)가 먼저 · 그다음 등록 id · 등록부 태그(디버깅 2회차 엣지 #3).
+  //   등록부 태그가 k 인데 장비는 다른 태그를 말하면 그 등록은 낡은 것(주소가 다른 장비로 재배정)이다 — id · 등록부 태그 단계에서 뺀다.
+  //   id 만 k 와 같은 등록은 빼지 않는다(id 가 태그가 아닐 수 있다 — 인벤토리 태그가 달라도 정상).
+  const stale = (e) => { const it = invTag(e); return !!it && it !== k && lc(e.serviceTag) === k; };
+  const live = reg.filter((e) => !stale(e));
+  for (const [pick, pool] of [[(e) => invTag(e) === k, reg], [(e) => lc(e.id) === k, live], [(e) => lc(e.serviceTag) === k, live]]) {
+    const hits = pool.filter(pick);
+    if (hits.length === 1) return { entry: hits[0] };
+    if (hits.length > 1) return { status: 409, body: { ok: false, code: 'ambiguous', reason: '이 열쇠에 맞는 켜진 등록이 둘 이상입니다(같은 서비스 태그) — 어느 장비인지 몰라 처리하지 않았습니다.' } };
+  }
+  return notFound;
+}
 const _hwlogMemo = new Map();
 collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
   try {
@@ -334,20 +359,79 @@ collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
     const { isMockMode } = await import('../mock/demo/flags.js');
     if (isMockMode()) return res.json(L.demoHwLog(id || k));
     const { getInventory } = await import('../idrac/invCache.js');
-    const lc = (v) => String(v ?? '').trim().toLowerCase();
-    const reg = loadIdracRegistry();
-    const entry = id ? reg.find((e) => String(e.id) === id)
-      : reg.find((e) => lc(e.id) === k || lc(e.serviceTag) === k || (() => { try { return lc(getInventory(String(e.id))?.system?.serviceTag) === k; } catch { return false; } })());
-    if (!entry || entry.enabled === false || !entry.host) return res.status(404).json({ ok: false, code: 'not-found', reason: '이 엣지에 등록된 iDRAC 서버가 아닙니다.' });
+    const fx = findEdgeIdrac(id, k, getInventory);
+    if (!fx.entry) return res.status(fx.status).json(fx.body);
+    const entry = fx.entry;
     const key = String(entry.id);
     const hit = _hwlogMemo.get(key);
     if (hit && (hit.pending || Date.now() - hit.at < 60_000)) return res.json(await hit.p);
+    if (L.hwLogBusy()) return res.status(429).json({ ok: false, code: 'busy', reason: '이 엣지에서 다른 이벤트 로그 읽기가 상한만큼 진행 중입니다 — 잠시 뒤 다시.' });   // 엣지 노드 동시 상한(성능 Q10)
     const ent = { at: Date.now(), pending: true, p: null };
-    ent.p = L.readHwLog(entry).finally(() => { ent.pending = false; ent.at = Date.now(); });
-    _hwlogMemo.set(key, ent);
-    while (_hwlogMemo.size > 256) _hwlogMemo.delete(_hwlogMemo.keys().next().value);
+    // 기한(60초)이 지나면 결과를 놓는다 — 개수(256)로만 밀어내면 묵은 결과를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
+    // 진행 중에 밀려난 항목 · 동시 상한 busy 는 해제 타이머 · 기억을 남기지 않는다(디버깅 3회차 성능 R3 · R4)
+    ent.p = L.readHwLogLimited(entry).then((r) => { ent.busy = r?.kind === 'busy'; return r; }).finally(() => {
+      ent.pending = false; ent.at = Date.now();
+      if (_hwlogMemo.get(key) !== ent) return;
+      if (ent.busy) { _hwlogMemo.delete(key); return; }
+      ent.timer = setTimeout(() => { if (_hwlogMemo.get(key) === ent) _hwlogMemo.delete(key); }, 60_000); ent.timer.unref?.();
+    });
+    // 밀려난 항목의 해제 타이머도 지운다(타이머가 결과를 60초 쥐고 있었다 — 디버깅 2회차 성능 Q6)
+    const drop = (k2) => { const old = _hwlogMemo.get(k2); if (old?.timer) clearTimeout(old.timer); _hwlogMemo.delete(k2); };
+    drop(key); _hwlogMemo.set(key, ent);
+    while (_hwlogMemo.size > 256) drop(_hwlogMemo.keys().next().value);
     res.json(await ent.p);
   } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+// v3.52 물리서버 원격 전원 조작 · 위치 LED(⑦ ⑥) — 중앙이 판단(권한 · OTP · 켜기 스위치 · 감사)해 보낸 한 건을 이 엣지가 자기 등록부의 iDRAC 에 보낸다(central/bmPowerPull.js).
+//   **상태를 바꾸는 요청** — 토큰이 먼저 · 다시 보내지 않는다 · 같은 서버 60초 간격(idrac/power.js).
+//   **엣지가 스스로 켜야 보낸다**(반증 A1): 토큰만으로는 장비를 끌 수 없게 — env BM_POWER_EDGE_ENABLE=true 가 없으면 403(code disabled) ·
+//   강제 재시작 · 강제 끄기는 BM_POWER_EDGE_FORCE=true 도 있어야(403 code force-off) · 이 엣지 전체로 10분에 BM_POWER_EDGE_MAX(기본 30)건까지(429 code rate).
+//   법인 엣지 운영자가 그 법인 장비에 대한 최종 결정을 갖는다(백업 · 수집과 같은 ‘법인 로컬’ 원칙). 옛 env BM_POWER_EDGE_DISABLE=true 도 막는다.
+//   엣지에도 감사 로그를 남긴다(받기 전 · 결과 — 중앙이 알려 준 사용자 이름 · 사유). 서버 찾기는 /bm-hwlog 와 같은 규칙(id 또는 열쇠 k · 꺼진 등록은 404).
+const EDGE_POWER_WINDOW_MS = 10 * 60_000;
+const _edgePowerHits = [];
+collectorRouter.post('/bm-power', tokenFirst('bm-power'), express.json({ limit: '4kb' }), async (req, res) => {
+  try {
+    if (process.env.BM_POWER_EDGE_ENABLE !== 'true' || process.env.BM_POWER_EDGE_DISABLE === 'true') return res.status(403).json({ ok: false, code: 'disabled', reason: '이 엣지는 원격 전원 · LED 요청을 켜지 않았습니다(엣지 env BM_POWER_EDGE_ENABLE=true 가 필요합니다).' });
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+    const id = str(b.id, 128); const k = str(b.k, 128).toLowerCase();
+    const kind = b.kind === 'led' ? 'led' : b.kind === 'power' ? 'power' : '';
+    const action = str(b.action, 32);
+    if ((!id && !k) || !kind || !action) return res.status(400).json({ ok: false, reason: 'id 또는 k · kind · action 이 필요합니다.' });
+    const P = await import('../idrac/power.js');
+    if (kind === 'power' && P.POWER_ACTIONS[action]?.force === true && process.env.BM_POWER_EDGE_FORCE !== 'true') return res.status(403).json({ ok: false, code: 'force-off', status: 'force-off', reason: '이 엣지는 강제 재시작 · 강제 끄기를 허용하지 않았습니다(엣지 env BM_POWER_EDGE_FORCE=true).' });
+    // 이 엣지 전체 상한(10분 창) — 토큰이 새도 한꺼번에 많은 장비를 끄지 못하게
+    const nowMs = Date.now(); while (_edgePowerHits.length && nowMs - _edgePowerHits[0] > EDGE_POWER_WINDOW_MS) _edgePowerHits.shift();
+    // 0 · 음수는 ‘막음’(기본값 30 으로 느슨해지지 않게 — 디버깅 1회차 엣지 #3)
+    const rawMax = String(process.env.BM_POWER_EDGE_MAX ?? '').trim();
+    const max = /^-|^0+(\.0*)?$/.test(rawMax) ? 0 : reqTimeoutMs(rawMax, 30, { min: 1, max: 500 });
+    if (_edgePowerHits.length >= max) return res.status(429).json({ ok: false, code: 'rate', status: 'rate', reason: `이 엣지는 10분에 ${max}건까지만 보냅니다 — 잠시 뒤 다시.` });
+    // 자리를 **검사할 때 먼저** 잡고, 장비에 닿지 않고 끝나면 돌려준다 — 장비 응답 뒤에 세면 동시 요청이 모두 검사를 통과했다(디버깅 2회차 보안 #2 · 엣지 #2 — 1회차 수정의 회귀).
+    //   장비를 조회한 뒤 보내지 않은 것(태그 다름 · 허용 안 함)은 돌려주지 않는다 — 조회 · 감사를 상한 없이 되풀이하지 못하게.
+    const slot = nowMs; _edgePowerHits.push(slot);
+    const release = () => { const i = _edgePowerHits.lastIndexOf(slot); if (i >= 0) _edgePowerHits.splice(i, 1); };
+    const { isMockMode } = await import('../mock/demo/flags.js');
+    if (isMockMode()) { release(); return res.json({ ok: true, status: 'accepted', http: 204, message: '데모 — 장비에 보내지 않았습니다.' }); }
+    const { getInventory } = await import('../idrac/invCache.js');
+    const fx = findEdgeIdrac(id, k, getInventory);
+    if (!fx.entry) { release(); return res.status(fx.status).json(fx.body); }
+    const entry = fx.entry;
+    // 모르는 동작 · 같은 서버 간격(진행 중)은 감사 줄을 남기기 전에 거르고 자리를 돌려준다 — 돌려준 자리로 감사 로그를 상한 없이 채우지 못하게(디버깅 3회차 보안 #2)
+    //   응답 꼴은 장비 동작 결과(runDeviceAction)와 같다 — 중앙이 지금처럼 status 로 가른다(계약 유지)
+    if (kind === 'power' ? !Object.hasOwn(P.POWER_ACTIONS, action) : !P.LED_WANTS.includes(action)) { release(); return res.json({ ok: false, status: 'bad-args', message: '모르는 동작입니다.', sent: false }); }
+    const gap = P.powerGapIssue(`${kind}|${String(entry.id ?? entry.host ?? '')}`);
+    if (gap) { release(); return res.json({ ok: false, status: 'busy', message: gap, sent: false }); }
+    const who = `중앙:${str(b.by, 80) || '?'}`; const tgt = String(entry.name || entry.id).slice(0, 120);
+    logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작 요청(중앙)' : '물리서버 위치 LED 요청(중앙)', target: tgt, detail: `${action}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });   // 보내기 전에도 남긴다(반증 A12)
+    const invTag = (() => { try { return String(getInventory(String(entry.id))?.system?.serviceTag || ''); } catch { return ''; } })();
+    const r = await P.runDeviceAction(entry, { kind, action, expectTag: entry.serviceTag || invTag });
+    if (kind === 'led' && r?.ok) { try { (await import('../idrac/invCache.js')).markInventoryStale(String(entry.id)); } catch { /* */ } }   // LED 상태 다시 읽기(판정 #9)
+    // 감사 줄을 남긴 뒤에는 돌려주지 않는다(인증 정지 · 사이에 끼어든 진행 중도 센다 — 3회차 보안 #2). 앞의 거르기가 흔한 경우를 감사 없이 돌려준다
+    logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작(중앙 요청)' : '물리서버 위치 LED(중앙 요청)', target: tgt,
+      detail: `${action} · ${r.status}${r.reset ? ` · ${r.reset}` : ''}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, status: 'error', reason: String(err?.message || err).slice(0, 300) }); }
 });
 // v3.48 물리서버 ‘같은 묶음 대비’ — 이 엣지가 수집하는 서버 **여러 대**의 구간 평균(CPU · 메모리) · 지금 값(전력 · 흡기 온도)을 요청 1개로(central/bmPeerPull.js).
 //   읽기 요청이다(엣지 상태를 바꾸지 않는다) — 키 목록이 길어 POST 본문으로 받는다(키 80개 × 256자 — 한글 키도 들어가게 80KB 상한 · 반증 A13). 대상 목록 밖 키는 건너뛰고 수를 밝힌다(존재를 가르지 않는다). 보관 없음.

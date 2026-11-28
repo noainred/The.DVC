@@ -4,17 +4,18 @@
  *  - 반환은 부호만 의미 있는 -1/0/1.
  * (views/tools/linkCheckText.js 의 cmpVersion 은 3세그먼트 강제·차이값 반환으로 규칙이 다르다 — 새 코드는 이 파일을 쓸 것.)
  */
-export function cmpVersion(a, b) {
-  const parse = (v) => {
-    const s = String(v ?? '').trim().replace(/^v/i, '');
-    if (!s) return null;
-    // v3.10.7(공통 기능 점검 5회차): 세그먼트는 **숫자 글자만**. 예전엔 `Number(x)` 로 읽어 빈 세그먼트(`3..10`·`3.10.`)가
-    //   `Number('') === 0` 으로 '0' 이 됐고(못 읽은 값이 0 으로 둔갑 — v2.561 규약), `0x10`·`1e3`·` 5` 도 숫자로 통과했다.
-    const raw = s.split('.');
-    if (raw.some((x) => !/^\d{1,9}$/.test(x))) return null;
-    return raw.map(Number);
-  };
-  const pa = parse(a); const pb = parse(b);
+/** 버전 글자 → 숫자 세그먼트 배열(못 읽으면 null). 같은 값을 여러 번 견주는 곳(보안 권고 대조 — v3.52 디버깅 1회차 성능 P1)은 한 번 파싱해 cmpParsed 로. */
+export function parseVersion(v) {
+  const s = String(v ?? '').trim().replace(/^v/i, '');
+  if (!s) return null;
+  // v3.10.7(공통 기능 점검 5회차): 세그먼트는 **숫자 글자만**. 예전엔 `Number(x)` 로 읽어 빈 세그먼트(`3..10`·`3.10.`)가
+  //   `Number('') === 0` 으로 '0' 이 됐고(못 읽은 값이 0 으로 둔갑 — v2.561 규약), `0x10`·`1e3`·` 5` 도 숫자로 통과했다.
+  const raw = s.split('.');
+  if (raw.some((x) => !/^\d{1,9}$/.test(x))) return null;
+  return raw.map(Number);
+}
+/** parseVersion 결과 둘을 견준다(-1/0/1 · 하나라도 null 이면 null). */
+export function cmpParsed(pa, pb) {
   if (!pa || !pb) return null;
   for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
     const d = (pa[i] || 0) - (pb[i] || 0);
@@ -22,4 +23,8 @@ export function cmpVersion(a, b) {
   }
   return 0;
 }
+export function cmpVersion(a, b) {
+  return cmpParsed(parseVersion(a), parseVersion(b));
+}
+
 export default cmpVersion;

@@ -67,7 +67,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 영역별 규칙 문서 — 그 영역을 고치기 전에 해당 파일을 읽을 것
 
 목록·목차는 `docs/rules/README.md`. 서버 모듈별 불변조건은 그 폴더의 CLAUDE.md 에도 있다(자동 로드):
-`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,bmcheck,sshaccess,serverinfo,winrm,servercmd,rack}/CLAUDE.md`.
+`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,bmcheck,sshaccess,serverinfo,winrm,servercmd,rack,svcstatus}/CLAUDE.md`.
 
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|
@@ -79,7 +79,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/storage.md` (39항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | `docs/rules/sanswitch.md` (22항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
 | `docs/rules/idrac-server.md` (29항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
-| `docs/rules/vcenter.md` (32항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
+| `docs/rules/vcenter.md` (33항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | `docs/rules/gpu.md` (8항목) | GPU 모니터링(할당·메모리·온도·수집 점검) — server/src/gpu/ · web/src/views/tools/Gpu* |
 | `docs/rules/cvp.md` (22항목) | Arista CVP 수집·장애·GBIC·Overview — server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
 | `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
@@ -87,7 +87,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | `docs/rules/demo.md` (8항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
 | `docs/rules/audits.md` (83항목) | 회차별 점검(감사) 기록 v2.583~v3.34.2(전체 점검 1~135회차 · 새 코드 점검 136~145회차 · 결정 반영 146~151회차 · 전체 소스 점검(Fable) 152~162회차 · 결정 구현 163~165회차 포함 — 1MB · 통째로 읽지 말고 `grep -n` 으로 해당 절만) — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
-| `docs/rules/focusmon.md` (14항목) | 서버 집중 모니터링 상세 기록(v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 · v3.11.0 디스크 점검(배드 섹터 프로그램 · sudo 예외 · 묶어 보기) · v3.12.0 더할 지표) — server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js |
+| `docs/rules/focusmon.md` (15항목) | 서버 집중 모니터링 상세 기록(v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 · v3.11.0 디스크 점검(배드 섹터 프로그램 · sudo 예외 · 묶어 보기) · v3.12.0 더할 지표 …) — server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js |
 | `docs/rules/rack.md` (3항목) | 랙 실장도 점검 기록(2026-11-26 1~4회차 — 비관리자 가림 규칙 · 화면의 늦은 응답 · 자리표시 태그) — server/src/rack/ · routes/api/rack.js · web/src/views/tools/RackTool.jsx·rackView.js |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |
 
@@ -111,7 +111,7 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
 - 위임(엣지) 수집 환경에서 중앙 화면이 비면 안 된다(`findRemoteServer`) · 값이 없는 이유를 단정하지 말 것 · 주기·상한 숫자를 화면에 박지 말 것(API 값).
 - 긴 작업의 '진행 중' 잠금은 그 대상만 · 무거운 API 는 15초 폴링 금지(마운트 1회 + 버튼) · 늦게 온 이전 응답은 버린다 · 조회 실패 상태로 저장 버튼을 열지 않는다.
 
-## 작업 규모 기본값 (2026-10-20 사용자 승인 — 시간·토큰 절감)
+## 작업 규모 기본값 (2026-11-27 — 절감 규칙 폐기 · 품질 우선)
 
 - **단계별 모델**(2026-10-27 사용자 지시 '기억해줘'): 시안 = **Fable**(`model: 'fable'`) · 구현·테스트·문서 수정·커밋·푸시 = **Opus**(메인) ·
   전량 verify · Chromium · 내보내기 파일 확인 · PR/CI/머지/릴리스 · `versions.json` 확인 = **Sonnet**. 작업 현황 표의 `실행` 열도 이대로 적는다.
@@ -131,12 +131,11 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   하위 에이전트가 끝나면 메인이 **직접 재확인**한다 — PR 머지 상태·head CI·`versions.json` latest, 그리고 화면이 바뀐 작업은 스크린샷을 메인이 다시 본다
   (v2.780 실례: Sonnet 이 1440px 표 열 숨김을 '사소한 관찰' 로 분류 — 메인 재판독에서 결함으로 확정, v2.780.1 수정).
 
-- **변이 검증·적대적 재검토(반증 에이전트)는 위험한 수정에만** 쓴다: 보안·권한·범위·자격증명·데이터 손실/삭제·엣지 수신 계약·
-  동시성·업그레이드/설치 경로. 화면·문구·문서·단순 조회 수정은 **관련 테스트 + (화면이면) Chromium 1회**로 끝낸다.
-- **다중 에이전트 점검은 사용자가 요청할 때만**. 규모를 지정하지 않으면 5축 × 반증 1인으로 시작하고, 그 이상은 먼저 묻는다.
-  수정 그룹은 파일이 겹치지 않게 나누고 그룹 수는 꼭 필요한 만큼만.
+- **기능 작업의 기본 검증 = 반증 · 변이 검증 · 다중 에이전트 점검**(2026-11-27 사용자 결정 — 10-20 의 '위험한 수정에만' · '요청할 때만' 을 대체):
+  기능 · 결함 수정은 관련 테스트 + 변이 검증 + 반증 에이전트 + (화면이면) Chromium 을 거치고, 새 기능 · 큰 변경은 5축 점검 + 반증 1인이 기본이다.
+  반증을 거친 수정만 릴리스한다(못 거쳤으면 보고의 '타협한 것' 에). 회차마다 수정이 새 결함을 만들면 부분 수정을 멈추고 **구조를 다시 설계**한다(11-26 랙 가림 실례).
+  문서 · 문구만 바뀌면 해당 없음. 수정 그룹은 파일이 겹치지 않게 나눈다.
 - 전량 테스트는 커밋 직전 1회(또는 CI 에 맡기고 그 사실을 보고). 개발 중에는 바꾼 모듈의 테스트만.
-- 사용자가 '전체 검증'·'자세하게' 를 고르면 그것이 우선이다.
 
 ## 사용자 선호 (반드시 준수)
 
@@ -148,6 +147,9 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   실패·한계·리스크는 축소 없이 그대로 보고한다.
   **틀린 것을 찾으면 보고하고 과감하게 고친다**(2026-11-01 사용자 '기억해줘' — "틀린 것은 괜찮지만, 숨기거나 왜곡하는 것은 나쁘다"): 내가 앞서 말한 수치·판단·
   보고가 틀렸으면 다음 응답에서 먼저 '정정' 으로 밝히고(무엇이·왜·근거) 코드·문서도 고친다. 틀린 것을 조용히 덮어쓰거나 작게 말하지 않는다.
+- ★★ **최고를 목표로 — 타협하지 않는다**(2026-11-27 사용자 '기억해줘'): 사용자와 Claude 는 세계 최고의 인프라/플랫폼 관리 솔루션을 함께 만드는 아키텍트 · 개발자다.
+  **시간 · 토큰을 아끼지 말고** 최고의 기술 · 안정성을 고른다 — 대충 하거나 쉬운 타협안을 고르지 않는다. 사용자가 타협하는 모습이 보이면 **바로 충고**하고(근거와 함께 · 돌려 말하지 않는다),
+  사용자도 Claude 에게 그렇게 한다. Claude 가 고른 타협(수용 · 보류 · '범위 밖')은 보고에 **'타협한 것'** 으로 따로 적는다.
 - **항상 한글로 응답**: 모든 답변/설명 메시지는 한국어로 작성한다.
 - **표시하는 글은 한글 또는 영어(한글)**(2026-11-18 사용자 지시 — "그래야 나도 실력이 증진"): 답변뿐 아니라 도구 실행 설명(Bash description) · 진행 메시지 · 표의 글자도
   한글로 쓴다. 영어 용어를 써야 하면 `drawer(드로어)` 처럼 뜻을 괄호로 붙인다(코드 식별자 · 파일 경로 · 명령은 그대로).

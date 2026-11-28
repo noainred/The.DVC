@@ -10,7 +10,7 @@ import { Modal } from '../../../components/Modal.jsx';
 import { STable } from '../../../components/STable.jsx';
 import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../../api.js';
 import { opErrorText } from '../bmFoldersText.js';
-import { importSummaryText, importRowNote, IMPORT_ACTION } from './checkText.js';
+import { importSummaryText, importRowNote, IMPORT_ACTION, IMPORT_ACTION_ORDER } from './checkText.js';
 import { decodeCsvBytes } from '../csvDecode.js';   // UTF-8 로 못 읽으면 EUC-KR(한국어 엑셀의 ‘CSV(쉼표로 분리)’) · UTF-16
 
 const FILE_MAX = 900 * 1024;   // 서버 본문 한도(1MB) 안 — 일곱 열을 채운 줄로 약 1만 줄(서버 줄 상한과 같은 크기)
@@ -61,7 +61,7 @@ export default function AssetLedger({ meta, onClose, onChanged }) {
   const blocked = replace && s && s.error > 0;
   const csvOk = canCsv();   // 올리기 · 내려받기 · 샘플은 CSV 권한(data.csv)도 본다 — 없으면 단추를 잠그고 이유를 쓴다(눌러서 403 을 보게 하지 않는다)
   return (
-    <Modal title="자산 원장(보증 · 계약) 올리기" onClose={onClose} width={720}>
+    <Modal title="자산 원장(보증 · 계약) 올리기" onClose={() => { if (!busy) onClose(); }} width={720}>
       <div className="bmd-al">
         <div className="muted bmd-note">
           서비스 태그마다 보증 만료일 · 보증 종류 · 구매일 · 계약 번호 · 지원 종료일을 CSV 로 올립니다. 포탈은 제조사에 조회하지 않습니다 — 값은 이 파일에서만 옵니다.
@@ -104,7 +104,7 @@ export default function AssetLedger({ meta, onClose, onChanged }) {
                     <tr key={`${x.line}:${i}`}>
                       <td data-sort={x.line ?? ''}>{x.line ?? '—'}</td>
                       <td className="mono" data-sort={x.tag || ''}>{x.tag || '—'}</td>
-                      <td data-sort={a.label}><span className={`badge ${a.badge}`}>{a.label}</span></td>
+                      <td data-sort={IMPORT_ACTION_ORDER[x.action] ?? 9}><span className={`badge ${a.badge}`}>{a.label}</span></td>
                       <td data-sort={importRowNote(x)} style={{ overflowWrap: 'anywhere' }}>{importRowNote(x)}</td>
                     </tr>
                   );

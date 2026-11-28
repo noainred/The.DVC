@@ -50,7 +50,8 @@ test('SEC2620-02 · 파트 장애 poller.last 의 알림 결과(파트 키 원�
   assert.equal(v.notify.results, undefined);
   assert.ok(!JSON.stringify(v).includes('10.1.1.5'));
   assert.deepEqual(lastView(last, true), last);
-  assert.match(src('routes/api/partFaults.js'), /last:\s*lastView\(st\.last,[^)]*\)\s*\}\s*:\s*null/);
+  // v3.54 — 같은 폴러 객체 끝에 알림 큐 상태(건수만 · queueView)가 붙는다
+  assert.match(src('routes/api/partFaults.js'), /last:\s*lastView\(st\.last,[^)]*\)(?:,\s*notifyQueue:\s*queueView\(st\.notifyQueue\))?\s*\}\s*:\s*null/);
   assert.match(src('routes/api/partFaults.js'), /\.\.\.st,\s*last:\s*lastView\(/);
 });
 

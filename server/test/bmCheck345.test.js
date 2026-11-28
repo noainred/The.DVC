@@ -504,7 +504,7 @@ test('⑧ 중앙 fleet — 검증된 이름만 펌웨어 · BIOS 를 받고 정�
 
 // ───────── ⑨ 라우트 ─────────
 const routes = new Map();
-const reg = { get: (p, ...h) => routes.set(`GET ${p}`, h), post: (p, ...h) => routes.set(`POST ${p}`, h) };
+const reg = { get: (p, ...h) => routes.set(`GET ${p}`, h), post: (p, ...h) => routes.set(`POST ${p}`, h), put: (p, ...h) => routes.set(`PUT ${p}`, h) };   // v3.52 설정 PUT(원격 전원 · 이벤트 구독)
 registerBmFolders(reg); svcinv.registerSvcInventory(reg); registerBmAssets(reg);
 const ADMIN = { username: 'admin', role: 'admin', scope: { vcenters: [], regions: [], writeVcenters: [] } };
 const VIEWER = { username: 'viewer1', role: 'viewer', scope: { vcenters: [], regions: [], writeVcenters: [] } };

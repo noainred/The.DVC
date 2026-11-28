@@ -180,7 +180,8 @@ export async function buildSettingsTargets(deps = {}) {
   for (const c of await load('collectors', '../collector/registry.js', ['listCollectors'], (m, n) => m[n]())) {
     push(makeTarget('set:collector', {
       ref: t(c.id), name: t(c.name) || t(c.id), address: c.url, enabled: c.enabled !== false,
-      facts: { hasToken: !!(c.hasToken ?? c.token), datacenter: t(c.datacenter), vcenterId: t(c.vcenterId) },
+      // v3.54: 사용자가 고른 법인 id(datacenterId · v2.972)도 싣는다 — svcmon corpOf 가 facts.datacenterId 를 먼저 본다(이름 맞춤보다 확실하다).
+      facts: { hasToken: !!(c.hasToken ?? c.token), datacenter: t(c.datacenter), vcenterId: t(c.vcenterId), datacenterId: t(c.datacenterId) },
     }));
   }
   {
@@ -234,12 +235,18 @@ export async function buildSettingsTargets(deps = {}) {
   }
 
   /* ── 스토리지 · SAN · PDU ─────────────────────────────────────────────── */
+  /*
+   * v3.54(포탈 서비스 상태 모니터링 — 조사로 확인한 결함): REST 를 443 으로 고정해 PowerMax(8443) · Isilon REST(8080) 를 틀린 포트로 점검했고,
+   *   수집 방식이 빈 옛 Isilon 항목(기본 SSH)을 API 로 읽었다. 접속처는 수집기와 같은 판정 하나(storage/endpoint.js storageEndpointOf — env 포트 포함)로.
+   */
+  const storageEndpoint = await safe('storage', async () => (await import('../storage/endpoint.js')).storageEndpointOf, errors);
   for (const d of await load('storage', '../storage/registry.js', ['listDevices'], (m, n) => m[n]())) {
-    const ssh = t(d.collectMethod) === 'ssh';
+    const ep = typeof storageEndpoint === 'function' ? storageEndpoint(d) : null;
+    const ssh = ep ? ep.method === 'ssh' : t(d.collectMethod) === 'ssh';
     push(makeTarget(ssh ? 'set:storage-ssh' : 'set:storage-api', {
-      ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, port: ssh ? (Number(d.sshPort) || 22) : 443,
+      ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, port: ep ? ep.port : (ssh ? (Number(d.sshPort) || 22) : 443),
       agent: t(d.agent), vcenterId: t(d.datacenterId), enabled: d.enabled !== false,
-      facts: { type: t(d.type), collectMethod: t(d.collectMethod) || 'api', username: t(d.username) },
+      facts: { type: t(d.type), collectMethod: ep ? ep.method : (t(d.collectMethod) || 'api'), username: t(d.username), defaultPort: ep ? ep.defaultPort : null },
     }));
   }
   for (const d of await load('sanswitch', '../sanswitch/registry.js', ['listDevices'], (m, n) => m[n]())) {

@@ -18,6 +18,7 @@
 
 import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
+import { sanitizeVmGos } from '../inventory/guestDetail.js';   // v3.54(실제 OS 1단계)
 import { sanitizeSnapTree } from '../vcenter/soapParse.js';   // v2.898 스냅샷 트리
 import { sanitizeVcInfo } from '../vcinfo/parse.js';   // v2.898 vCenter 알람·작업·권한
 import { putFromEdge as putVcInfoFromEdge } from '../vcinfo/collect.js';
@@ -950,6 +951,8 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
     // v2.697(B10): VM 구성 속성·장치 위생 요약 — 아는 필드만(모양이 아니면 null = 모름).
     if (Object.hasOwn(o, 'cfg') && o.cfg != null) { const v = sanitizeVmCfg(o.cfg); if (v == null) dropped.coerced += 1; o.cfg = v; }
     if (Object.hasOwn(o, 'dev') && o.dev != null) { const v = sanitizeVmDev(o.dev); if (v == null) dropped.coerced += 1; o.dev = v; }
+    // v3.54(실제 OS 1단계): VMware Tools 보고 실제 설치 OS · 어플라이언스 제품 정보(inventory/guestDetail.js) — 아는 키만 · 글자만 · 상한 · 엣지 시각은 수신 시각 이하.
+    if (Object.hasOwn(o, 'gos') && o.gos != null) { const v = sanitizeVmGos(o.gos); if (v == null) dropped.coerced += 1; o.gos = v; }
     // v2.898: 스냅샷 트리(soapParse.snapshotTreeNodes) — 아는 키만 · 64개 상한(배열이 아니면 null = 모름).
     if (Object.hasOwn(o, 'snapshotTree') && o.snapshotTree != null) { const v = sanitizeSnapTree(o.snapshotTree); if (v == null) dropped.coerced += 1; o.snapshotTree = v; }
     // v2.699: 호스트 구성·보안(hostcfg/parse.js) — 아는 필드만.

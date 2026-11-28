@@ -29,30 +29,41 @@ function biosOfObj(owner, attrs) {
  *        advisories(v3.50) 가 null 이면(권고 표를 읽지 못함) 권고 대조를 하지 않는다(adv = undefined) · 빈 목록이면 adv.state = 'no-table'.
  * @returns {{ of: (key:string) => { warranty?:object, fw?:object, bios?:object } }}
  */
-export function bmCheckFor({ members, placeOf, hxOf, assets, adminBase, today, advisories = null } = {}) {
-  const list = Array.isArray(members) ? members : [];
-  const fwIn = []; const biosIn = []; const atOf = new Map();
-  if (typeof hxOf === 'function') {
-    for (const m of list) {
-      if (m?.kind !== 'bm') continue;
-      let hx = null;
-      try { hx = hxOf(m); } catch { hx = null; }
-      const p = placeOf?.get?.(m.key);
-      const path = p?.src ? String(p.path || '') : '';
-      let fw; let bios;
-      if (hx?.via === 'edge') {
-        // 정제본 — 쓰기 직전에 형식을 다시 본다(재시작 뒤 저장본은 다시 정제되지 않는다: 반증 A14). 없으면 undefined(받지 못함)
-        fw = fwStoredOf(hx.fw);
-        bios = hx.bios && typeof hx.bios === 'object' && !Array.isArray(hx.bios) ? (biosOfObj(hx.bios, hx.bios) || undefined) : undefined;
-        atOf.set(m.key, numOrNull(hx.hw?.at));   // 엣지는 요약의 읽은 시각(같은 인벤토리)
-      } else if (hx?.inv) {
-        fw = fwComponentsOfInv(hx.inv); bios = biosOfObj(hx.inv, hx.inv.bios?.attributes);
-        atOf.set(m.key, numOrNull(hx.inv.collectedAt));
-      } else { fw = null; bios = null; }                         // 인벤토리 없음 = 못 읽음
-      fwIn.push({ id: m.key, corp: m.corp, model: m.model, fw });
-      biosIn.push({ id: m.key, corp: m.corp, path, model: m.model, bios });
-    }
+function pushInput(m, placeOf, hxOf, acc) {
+  if (m?.kind !== 'bm') return;
+  let hx = null;
+  try { hx = hxOf(m); } catch { hx = null; }
+  const p = placeOf?.get?.(m.key);
+  const path = p?.src ? String(p.path || '') : '';
+  let fw; let bios;
+  if (hx?.via === 'edge') {
+    // 정제본 — 쓰기 직전에 형식을 다시 본다(재시작 뒤 저장본은 다시 정제되지 않는다: 반증 A14). 없으면 undefined(받지 못함)
+    fw = fwStoredOf(hx.fw);
+    bios = hx.bios && typeof hx.bios === 'object' && !Array.isArray(hx.bios) ? (biosOfObj(hx.bios, hx.bios) || undefined) : undefined;
+    acc.atOf.set(m.key, numOrNull(hx.hw?.at));   // 엣지는 요약의 읽은 시각(같은 인벤토리)
+  } else if (hx?.inv) {
+    fw = fwComponentsOfInv(hx.inv); bios = biosOfObj(hx.inv, hx.inv.bios?.attributes);
+    acc.atOf.set(m.key, numOrNull(hx.inv.collectedAt));
+  } else { fw = null; bios = null; }                         // 인벤토리 없음 = 못 읽음
+  acc.fwIn.push({ id: m.key, corp: m.corp, model: m.model, fw });
+  acc.biosIn.push({ id: m.key, corp: m.corp, path, model: m.model, bios });
+}
+export function bmCheckFor(input = {}) {
+  const list = Array.isArray(input.members) ? input.members : [];
+  const acc = { fwIn: [], biosIn: [], atOf: new Map() };
+  if (typeof input.hxOf === 'function') for (const m of list) pushInput(m, input.placeOf, input.hxOf, acc);
+  return judgeAll(input, list, acc);
+}
+/** 목록 라우트용 — 입력 모으기(서버마다 인벤토리 훑기) 사이에 양보한다(y = createYielder). 결과는 bmCheckFor 와 같다(v3.52 디버깅 1회차 성능 P10). */
+export async function bmCheckForAsync(input = {}, y = null) {
+  const list = Array.isArray(input.members) ? input.members : [];
+  const acc = { fwIn: [], biosIn: [], atOf: new Map() };
+  if (typeof input.hxOf === 'function') {
+    for (const m of list) { pushInput(m, input.placeOf, input.hxOf, acc); if (y) await y(); }
   }
+  return judgeAll(input, list, acc);
+}
+function judgeAll({ hxOf, assets, adminBase, today, advisories = null }, list, { fwIn, biosIn, atOf }) {
   const fwOf = typeof hxOf === 'function' ? judgeFirmware(fwIn, { admin: adminBase }) : null;
   const biosOf = typeof hxOf === 'function' ? judgeBios(biosIn) : null;
   return {

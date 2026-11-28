@@ -39,6 +39,8 @@ export const PEER_REASON_LEN = 200;
 const fmtOf = (id) => (x) => Number(x).toLocaleString('en-US', { minimumFractionDigits: DIGITS[id] ?? 0, maximumFractionDigits: DIGITS[id] ?? 0 });
 /** 지표 값 글자 — 값이 없으면 ‘—’(단위 없음) · 천 단위 구분(드로어 한눈에 타일과 같은 표기 — 반증 B6). */
 export const peerVal = (id, v) => unitText(numOrNull(v), UNIT[id] ?? '', { fmt: fmtOf(id) });
+/** 한 자리 더 — 폭 끝과 같아 보이는 줄에서만(peerRows). */
+const peerValFine = (id, v) => unitText(numOrNull(v), UNIT[id] ?? '', { fmt: (x) => Number(x).toLocaleString('en-US', { minimumFractionDigits: (DIGITS[id] ?? 0) + 1, maximumFractionDigits: (DIGITS[id] ?? 0) + 1 }) });
 
 /** 기준 글자 — 응답의 basis · hours 로. 모르는 기준은 ‘기준 모름’(지어내지 않는다). */
 export function basisText(basis, hours) {
@@ -120,7 +122,10 @@ export function peerStrip(id, m, W = 420) {
   }
   // 끝에 붙은 대수 글자는 안쪽으로 정렬(그림 밖으로 나가지 않게)
   for (const c of counts) c.anchor = c.x < padL + 12 ? 'start' : c.x > w - padR - 12 ? 'end' : 'middle';
-  const label = `이 서버 ${peerVal(id, value)}`;
+  // 행 글자와 같은 자리수 — 반올림하면 폭 끝과 같아 보이는데 서버가 높음 · 낮음으로 판정했으면 한 자리 더(디버깅 2회차 화면 D4 — 1회차 판정 #4 의 띠 쪽)
+  const edgeV = m.state === 'high' ? hi : m.state === 'low' ? lo : null;
+  const fineV = edgeV != null && peerVal(id, value) === peerVal(id, edgeV) && value !== edgeV;
+  const label = `이 서버 ${fineV ? peerValFine(id, value) : peerVal(id, value)}`;
   const anchor = sx < 64 ? 'start' : sx > w - 64 ? 'end' : 'middle';
   return {
     w, h: STRIP_H, mid: STRIP_MID, padL, padR,
@@ -178,15 +183,19 @@ export function peerView(d) {
             : '이 서버의 값이 없어 견주지 않았습니다.';
     }
     const vMin = numOrNull(m.min); const vMax = numOrNull(m.max);
+    // 반올림하면 폭 끝과 같아 보이는데 서버가 ‘높음 · 낮음’ 으로 판정한 경우(40.4 → ‘40’ · 폭 ~40) — 그 줄만 한 자리 더(디버깅 1회차 판정 #4)
+    const edge = m.state === 'high' ? numOrNull(m.hi) : m.state === 'low' ? numOrNull(m.lo) : null;
+    const fine = edge != null && numOrNull(m.value) != null && peerVal(id, m.value) === peerVal(id, edge) && Number(m.value) !== Number(edge);
+    const pv = (v) => (fine ? peerValFine(id, v) : peerVal(id, v));
     rows.push({
       id, label: PEER_LABEL[id], basis: basisText(m.basis, hours), state: m.state, badge: { label: st.label, color: st.color },
-      valueText: peerVal(id, m.value), judged: ok,
+      valueText: pv(m.value), judged: ok,
       medianText: ok ? `가운데값 ${peerVal(id, m.median)}` : '',
-      spanText: ok && vMin != null && vMax != null ? `값 범위 ${peerVal(id, vMin)} ~ ${peerVal(id, vMax)}` : '',
-      rangeText: ok ? `묶음의 폭 ${peerVal(id, m.lo)} ~ ${peerVal(id, m.hi)}` : '',
+      spanText: ok && vMin != null && vMax != null ? `값 범위 ${pv(vMin)} ~ ${pv(vMax)}` : '',   // 같은 자리수(디버깅 3회차 판정 #6 — ‘40.4% · 값 범위 30% ~ 40%’ 였다)
+      rangeText: ok ? `묶음의 폭 ${pv(m.lo)} ~ ${pv(m.hi)}` : '',
       countText: `값 있는 서버 ${n}대${missing > 0 ? ` · 값 없는 ${missing}대 제외` : ''}`,
       note,
-      aria: ok ? `${PEER_LABEL[id]} — 묶음 가운데값 ${peerVal(id, m.median)} · 이 서버 ${peerVal(id, m.value)} · ${st.label}` : `${PEER_LABEL[id]} — ${st.label}`,
+      aria: ok ? `${PEER_LABEL[id]} — 묶음 가운데값 ${peerVal(id, m.median)} · 이 서버 ${pv(m.value)} · ${st.label}` : `${PEER_LABEL[id]} — ${st.label}`,
     });
   }
   // 머리 기준 글 — 지표들을 기준별로 묶어 응답 그대로(예: ‘CPU · 메모리 · 전력은 지난 24시간 평균 · 흡기 온도는 지금 값’)

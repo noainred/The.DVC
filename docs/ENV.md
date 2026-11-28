@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **763개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **768개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-26)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-27)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -55,7 +55,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (241)
+## 공통 (244)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -282,6 +282,9 @@
 | `VM_DEV_REFRESH_MS` | `21600000` |  | config.js |
 | `VM_LIST_XLSX_TIMEOUT_MS` | `180000` |  | veeam/vmListXlsx.js |
 | `VM_LIST_XLSX_WORKER` | `'1'` |  | veeam/vmListXlsx.js |
+| `VM_OS_PER_CYCLE` | `1000` |  | config.js |
+| `VM_OS_REFRESH_MS` | `21600000` |  | config.js |
+| `VM_OS_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VMDNS_HISTORY_INTERVAL_MS` | `600000` |  | vmdns/poller.js |
 | `VMDNS_HISTORY_RETENTION_DAYS` | `365` |  | vmdns/poller.js |
 | `VMSERIES_CONCURRENCY` | `4` |  | vmseries/poller.js |
@@ -419,7 +422,7 @@
 | `POWER_CURRENT_STALE_MS` | `7200000` |  | collector/state.js, idrac/service.js |
 | `UPGRADE_PUSH_CONCURRENCY` | `4` |  | collector/upgradePush.js |
 
-## 스토리지 수집 (35)
+## 스토리지 수집 (29)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -437,7 +440,6 @@
 | `STORAGE_INSPECT_TIMEOUT_MS` | `180000` |  | storage/inspect/runner.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISI_CMD_TIMEOUT_MS` | `ISI_CMD_TIMEOUT_DEF_MS` |  | storage/intervals.js |
-| `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
 | `STORAGE_NODECLIENT_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_NODECLIENT_HOURLY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_NODECLIENT_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
@@ -448,16 +450,11 @@
 | `STORAGE_POLL_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
-| `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/arrayPerf.js, storage/collectors/powerstore.js |
 | `STORAGE_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | storage/push.js |
 | `STORAGE_PUSH_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_TLS_VERIFY` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
-| `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/arrayPerf.js, storage/collectors/powermax.js |
-| `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/arrayPerf.js, storage/collectors/unity.js |
-| `STORAGE_VPLEX_PORT` | `443` |  | storage/collectors/vplex.js |
 | `STORAGE_XLSX_TIMEOUT_MS` | `300000` |  | storage/usageXlsx.js |
 | `STORAGE_XLSX_WORKER` | `'1'` |  | storage/usageXlsx.js |
-| `STORAGE_XMS_PORT` | `443` |  | storage/collectors/xtremio.js |
 
 ## 시스템 (1)
 
@@ -481,7 +478,7 @@
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
-## 엣지 에이전트 (53)
+## 엣지 에이전트 (54)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -512,6 +509,7 @@
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
 | `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/fleetPush.js 외 4 |
 | `AGENT_PUSH_TIMEOUT_MS` | `60000` |  | agent/fleetPush.js, agent/inventoryPush.js |
+| `AGENT_SVC_STATUS` | `''` |  | agent/svcStatusWorker.js |
 | `AGENT_VEEAM_RUN_POLL_MS` | `5000` |  | agent/veeamRunWorker.js |
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
 | `AGENT_VMSERIES_CONFIG_PULL_MS` | `600000` |  | agent/vmSeriesConfigPull.js |
@@ -666,11 +664,12 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (59)
+## 중앙(위임 수집) (60)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BM_HWLOG_PULL_TIMEOUT_MS` | `40000` |  | central/bmHwLogPull.js |
+| `BM_POWER_PULL_TIMEOUT_MS` | `45000` |  | central/bmPowerPull.js |
 | `BMUSAGE_PULL_STALE_MS` | `1800000` |  | central/bmUsageEdgePull.js |
 | `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmCapacityPull.js, central/bmComparePull.js 외 6 |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
@@ -744,11 +743,15 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (37)
+## API 라우트 (41)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BAREOS_BUNDLE_BASE_URL` | `''` |  | bareos/install/bundle.js, routes/api/bareosInstall.js |
+| `BM_POWER_EDGE_DISABLE` | `기본 아님('true' 일 때만 적용)` |  | routes/collector.js |
+| `BM_POWER_EDGE_ENABLE` | `기본 적용('true' 로 끄기)` |  | routes/collector.js |
+| `BM_POWER_EDGE_FORCE` | `기본 적용('true' 로 끄기)` |  | routes/collector.js |
+| `BM_POWER_EDGE_MAX` | `''` |  | routes/collector.js |
 | `BMUSAGE_PULL_BUDGET_MS` | `150000` |  | routes/api/bmUsage.js |
 | `BMUSAGE_PULL_CONCURRENCY` | `4` |  | routes/api/bmUsage.js |
 | `CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS` |  |  | routes/central.js |
@@ -810,10 +813,12 @@
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 | `HZSESS_NO_ENDPOINT_BACKOFF_MS` | `21600000` |  | horizon/sessionPoller.js |
 
-## iDRAC/전력 (17)
+## iDRAC/전력 (19)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `BM_HWLOG_CONCURRENCY` | `''` |  | idrac/hwLog.js |
+| `BM_POWER_DEVICE_TIMEOUT_MS` | `30000` |  | idrac/power.js |
 | `BMUSAGE_MAX_REPORTS` | `6` |  | idrac/redfish.js |
 | `BMUSAGE_REPORT_TTL_MS` | `21600000` |  | idrac/redfish.js |
 | `BMUSAGE_SENSOR_TTL_MS` | `21600000` |  | idrac/redfish.js |
@@ -952,4 +957,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 763
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 768

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { stripComments } from '../../test/_stripComments.js';
-import { escMarkView, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults, ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL } from './partFaultEscText.js';
+import { escMarkView, escToForm, formToEsc, newPolicy, newOncall, nextOncallAgent, oncallDupOf, agentLabel, escRunText, escRunResults, escOrphanText, ESC_NOTE, ESC_ONCALL_NOTE, ESC_STATE_LABEL } from './partFaultEscText.js';
 
 const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 const read = (p) => stripComments(fs.readFileSync(new URL(p, import.meta.url), 'utf8'));
@@ -75,8 +75,8 @@ describe('편집 모델', () => {
   });
   it('회차 줄 — 시도 · 감 · 안 감을 가른다 · 보내지 않은 이유 · 주기는 API 값(숫자를 박지 않음 — B10) · 결과 줄', () => {
     expect(escRunText(null)).toBe('아직 돌지 않았습니다.');
-    expect(escRunText(null, 60_000)).toContain('60초 안에');
-    expect(escRunText(null, 30_000)).toContain('30초 안에');
+    expect(escRunText(null, 60_000)).toContain('60초 뒤 처음 돕니다');
+    expect(escRunText(null, 30_000)).toContain('30초 뒤 처음 돕니다');
     const t = escRunText({ at: 0, enabled: true, sent: 20, delivered: 0, failed: 20, deferred: 3, held: 2, overCap: 1, errors: ['진행 기록을 쓰지 못했습니다'] });
     for (const s of ['시도 20 · 감 0 · 안 감 20', '다음 회차로 미룸 3', '정비 창 보류 2', '기록 상한을 넘어 보내지 않음 1', '진행 기록을 쓰지 못했습니다']) expect(t).toContain(s);
     expect(escRunText({ at: 0, enabled: true, why: 'demo', sent: 0 })).toContain('데모 점검이라 보내지 않음');
@@ -87,7 +87,7 @@ describe('편집 모델', () => {
   });
   it('안내문 — 1단계가 나갔다고 단정하지 않음(B6) · 요일마다 ‘모두’ 표로 대체(B12)', () => {
     expect(ESC_NOTE).not.toContain('1분'); expect(ESC_NOTE).toContain('정책 대상으로 처음 본 때부터');
-    expect(ESC_ONCALL_NOTE).toContain('그 요일 당직이 없으면'); expect(ESC_ONCALL_NOTE).toContain('이 포탈 서버의 시각');
+    expect(ESC_ONCALL_NOTE).toContain('그 요일 당직이 없으면'); expect(ESC_ONCALL_NOTE).toContain('포탈의 지역 시계');   // 디버깅 2회차 판정 #5 — 요일은 localClock
   });
 });
 
@@ -98,7 +98,7 @@ describe('렌더 · 연결', () => {
     const html = renderToStaticMarkup(React.createElement(P, { initial: D }));
     const t = text(html);
     expect(t).toContain('알림 단계 올리기 · 당직'); expect(t).toContain('1단계 — 지금 부품 장애 알림'); expect(t).toContain('2단계');
-    expect(t).toContain('60초 안에');
+    expect(t).toContain('60초 뒤 처음 돕니다');
     expect((html.match(/당직 메일"/g) || []).length).toBe(7);
     expect(html).toMatch(/<button type="button" class="login-btn bmd-btn">저장<\/button>/);
     expect(html).toContain('class="logout-btn pfe-add"');
@@ -136,5 +136,20 @@ describe('렌더 · 연결', () => {
     expect(src).toMatch(/tab === 'open' && !isEdge && settings \? \(/);
     expect(src).toMatch(/tab === 'open' && !isEdge && settings && escOpen \? <PartFaultEscalation onSaved=\{load\} onDirty=/);
     expect(src).toMatch(/if \(escOpen && escDirty\.current && !window\.confirm\('알림 단계 · 당직에 저장하지 않은 변경이 있습니다/, '바뀐 칸이 있을 때만 닫기 전에 묻는다(변이 M41)');
+  });
+});
+
+describe('v3.54 반증 14c M2 — 닫힘을 확인할 수 없는 진행 기록', () => {
+  it('0 이면 아무 말도 하지 않고 · 있으면 이유와 결과를 말한다', () => {
+    expect(escOrphanText(null)).toBe('');
+    expect(escOrphanText({ orphans: 0 })).toBe('');
+    expect(escOrphanText({ orphans: 3, orphanReasons: { unassigned: 2, unjudgeable: 1 } })).toBe('닫힘을 확인할 수 없는 진행 기록 3건 — 엣지 · 포탈 보고에서 장비가 빠짐(재배정 · 등록 삭제 등) 2건 · 판정할 재료가 없는 옛 기록 1건. 남아 있으면 같은 부품의 다음 장애가 옛 확인과 단계를 이어받습니다(장비 읽기 실패 · 정비 창 같은 일시적 보류는 세지 않습니다).');
+    expect(escOrphanText({ orphans: 1 })).toMatch(/^닫힘을 확인할 수 없는 진행 기록 1건\. 남아 있으면/);
+  });
+  it('패널은 정리 단추를 관리자 경로로 부른다(소스)', () => {
+    const src = stripComments(fs.readFileSync(new URL('./PartFaultEscalation.jsx', import.meta.url), 'utf8'));
+    expect(src).toMatch(/postJson\('\/tools\/part-faults\/escalation\/forget-orphans', \{\}\)/);
+    expect(src).toMatch(/orphanText \? \(/);
+    expect(src).toMatch(/orphanMsg \? <div/);   // 결과는 그 줄 자리에
   });
 });

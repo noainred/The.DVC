@@ -130,13 +130,14 @@ test('F6 — 서비스 목록이 상한에서 잘린 표본(allCut)의 없는 �
     for (let t = now - 90_000; t <= now; t += 15_000) store.ingestProcs(id, t, { n: cur.length, top: [], apps: g });
     const rule = { id: 'ar-000000000001', metric: 'app', app: 'oracle-db.service', threshold: 1, durMin: 1, op: 'lt' };
     const pts = AL.pointsFor(store, rule, id, now);
-    const viaEdge = edge.cleanApps ? edge.cleanApps({ sv: [], cm: [], all: { 'a.service': 1, 'bad name!': 2 } }) : null;
-    console.log(JSON.stringify({ cut: g.allCut ?? null, vals: pts.map((p) => p[1]), ev: AL.judge(pts, rule, null, now).event, edgeCut: viaEdge ? viaEdge.allCut === true : null }));`);
+    // v3.57.0 묶음 B 반증: 예전 줄은 내보내지 않는 cleanApps 를 찾아 늘 null 이었다(아래 단언이 돌지 않음) — 내보내는 cleanProcs 를 거친다
+    const viaEdge = edge.cleanProcs({ n: 1, top: [], apps: { sv: [], cm: [], all: { 'a.service': 1, 'bad name!': 2 } } }).apps;
+    console.log(JSON.stringify({ cut: g.allCut ?? null, vals: pts.map((p) => p[1]), ev: AL.judge(pts, rule, null, now).event, edgeCut: viaEdge.allCut === true }));`);
   // 30회차 E: .service 를 먼저 싣는다 — 살아 있는 oracle-db.service 는 목록에 들고(값 1), 잘린 것은 scope 뿐이라 'nonsvc'
   assert.equal(out.cut, 'nonsvc');
   assert.ok(out.vals.every((v) => v === 1), `수정 전: 0,0,…,0 → fire(살아 있는 서비스를 죽음으로) — ${out.vals}`);
   assert.notEqual(out.ev, 'fire');
-  if (out.edgeCut !== null) assert.equal(out.edgeCut, true, '엣지 수신에서 거른 칸이 있어도 allCut');
+  assert.equal(out.edgeCut, true, '엣지 수신에서 거른 칸이 있어도 allCut');
 });
 
 test('F7 — 등록부 손상이면 조회 · 시험 · 수집 시작도 503(메인 GET 과 같은 문 — 없는 대상 404 가 아니다)', () => {

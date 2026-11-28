@@ -14,6 +14,7 @@ import * as store from './store.js';
 import * as db from './db.js';
 import { getSettings, registryLoadError } from './registry.js';
 import { markDirty, rollupTick } from './rollup.js'; // v3.13.0 ⑭ 요약 표
+import { forgetCached } from './query.js'; // v3.57.0 반증 SD-4 — 합쳐 쓴 분의 조회 기억
 
 const MIN_FREE_BYTES = 2 * 2 ** 30;
 const MIN_FREE_RATIO = 0.05;
@@ -55,6 +56,8 @@ export async function recordTick(now = Date.now()) {
       if (rows.length) {
         const r = await db.writeBlocks(rows);
         if (r.ok) { for (const x of rows) if (x.kind === 's1') markDirty(x.target, x.minute); } // v3.13.0 ⑭ 1시간 요약 할 일
+        // v3.57.0 반증 SD-4: 합쳐 쓴 분 — 메모리 묶음을 합친 것으로 · 조회 기억을 버린다(화면이 DB 와 같은 값을 본다)
+        if (r.ok) for (const x of r.merged || []) { try { store.adoptMerged(x.target, x.minute, x.block); forgetCached(x.target, x.minute); } catch { /* 화면 보조 */ } }
         if (r.ok) { st.bytesWritten += rows.reduce((a, x) => a + rowBytes(x), 0); st.lastWriteAt = now; st.lastWriteRows = rows.length; st.lastWriteMs = Math.round(r.ms * 100) / 100; st.maxWriteMs = Math.max(st.maxWriteMs, r.ms); st.writes += 1; st.lastError = ''; }
         else { st.errors += 1; st.lastError = r.error || ''; }
       }

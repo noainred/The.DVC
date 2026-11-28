@@ -43,10 +43,14 @@ import {
   LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
 } from '../../bmfolders/store.js';
 import { scopeSig } from '../../util/scopeSig.js';
-import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';
+import { bmCheckFor, bmCheckForAsync, chkRowOf } from '../../bmcheck/state.js';
+import { createYielder } from '../../util/timeSlice.js';
 import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.50 건강 점수(⑩)
-import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
+import { maskHwLogText, readHwLogLimited, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { memCeOf } from '../../idrac/partLife.js';   // v3.51 부품 수명(⑧) — 메모리 교정 오류 경고 슬롯별 수
+import { POWER_ACTIONS, LED_WANTS, runDeviceAction, powerGapIssue } from '../../idrac/power.js';   // v3.52 원격 전원 · LED(⑦ ⑥)
+import { remotePower } from '../../idrac/remotePowerSettings.js';
+import { ownOtpGate } from './reauth.js';
 import { assetStore, fwBaselineStore, adminBaselineLookup, advisoryStore, caseStore, upsertCase, removeCase, casesOfTag, CASE_STATUSES } from '../../bmcheck/store.js';
 import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
 import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.48 같은 묶음 대비
@@ -67,8 +71,7 @@ const inSnap = (snap, vc) => (snap?.vcenters || []).some((v) => t(v.id) === t(vc
 const writableOf = (user, snap, vc) => writerOk(user) && inSnap(snap, vc) && inUserWriteScope(user, snap, vc);
 /** 전 법인 설정 — 조회 ∧ 쓰기 무제한 관리자만(server/CLAUDE.md v2.733 · v2.904 — 조회 범위만 보면 writeVcenters 관리자가 통과한다). */
 const fleetAdmin = (user, snap) => {
-  if (!isAdminDetailUser(user) || scopedVcenterIds(user, snap)) return false;
-  try { return !writeScopedVcenterIds(user, snap); } catch { return false; }
+  try { return isAdminDetailUser(user) && !scopedVcenterIds(user, snap) && !writeScopedVcenterIds(user, snap); } catch { return false; }   // 판정이 던지면 거절(500 이 아니라 — 반증 A 후속)
 };
 const unreadable = (res) => res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못했습니다 — 빈 트리로 시작하지 않습니다(백업에서 복원하거나 전체 범위 관리자가 초기화).' });
 
@@ -299,10 +302,19 @@ async function trendOnce(key, fn, now = Date.now()) {
   const hit = _trendMemo.get(key);
   if (hit && (hit.pending || now - hit.at < (hit.ok ? TREND_OK_MS : TREND_FAIL_MS))) return hit.p;
   const ent = { at: now, ok: false, pending: true, p: null };
-  ent.p = Promise.resolve().then(fn).then((r) => { ent.ok = !!r?.ok; return r; }, (e) => ({ ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }))
-    .finally(() => { ent.pending = false; ent.at = Date.now(); });
-  _trendMemo.delete(key); _trendMemo.set(key, ent);
-  while (_trendMemo.size > TREND_MAX) _trendMemo.delete(_trendMemo.keys().next().value);
+  ent.p = Promise.resolve().then(fn).then((r) => { ent.ok = !!r?.ok; ent.busy = r?.kind === 'busy' || r?.kind === 'edge-busy'; return r; }, (e) => ({ ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }))
+    .finally(() => {
+      ent.pending = false; ent.at = Date.now();
+      if (_trendMemo.get(key) !== ent) return;   // 진행 중에 밀려난 항목 — 해제 타이머로 결과를 쥐지 않는다(디버깅 3회차 성능 R4)
+      if (ent.busy) { _trendMemo.delete(key); return; }   // 동시 상한 busy 는 기억하지 않는다 — 자리가 비면 바로 다시 읽게(3회차 성능 R3)
+      // 기한이 지나면 결과를 놓는다 — 개수로만 밀어내면 묵은 결과(한 벌 수백 KB)를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
+      ent.timer = setTimeout(() => { if (_trendMemo.get(key) === ent) _trendMemo.delete(key); }, ent.ok ? TREND_OK_MS : TREND_FAIL_MS);
+      ent.timer.unref?.();
+    });
+  // 밀려난 항목의 해제 타이머도 지운다 — 타이머가 결과를 쥐고 있어 개수 상한으로 밀려난 것이 60초 동안 남았다(디버깅 2회차 성능 Q6)
+  const drop = (k) => { const old = _trendMemo.get(k); if (old?.timer) clearTimeout(old.timer); _trendMemo.delete(k); };
+  drop(key); _trendMemo.set(key, ent);
+  while (_trendMemo.size > TREND_MAX) drop(_trendMemo.keys().next().value);
   return ent.p;
 }
 /** 추이 의존(서버 비교와 같은 함수들 — 시험에서 갈아 끼운다). */
@@ -324,10 +336,15 @@ async function trendDeps() {
     localPeer: async (o) => (await import('../../bmusage/peerAvg.js')).peerAvgFor(o),
     edgePeer: async (agent, o) => (await import('../../central/bmPeerPull.js')).pullEdgePeerAvg(agent, o),
     // v3.50 하드웨어 이벤트 로그(⑤) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 읽는다
-    hwLogEntry: async (id) => { const { loadRegistry } = await import('../../idrac/registry.js'); const e = loadRegistry().find((x) => String(x.id) === String(id)); return e && e.enabled !== false && e.host ? e : null; },
-    hwLogLocal: async (entry) => readHwLog(entry),
+    // 등록부를 못 읽으면 던진다(호출부가 ‘등록부 밖’ 과 가른다 — 디버깅 2회차 엣지 #5)
+    hwLogEntry: async (id) => { const R = await import('../../idrac/registry.js'); if (R.registryLoadError()) throw Object.assign(new Error('registry-unreadable'), { code: 'registry-unreadable' }); const e = R.loadRegistry().find((x) => String(x.id) === String(id)); return e && e.enabled !== false && e.host ? e : null; },
+    hwLogLocal: async (entry) => readHwLogLimited(entry),   // 노드 동시 상한(디버깅 2회차 성능 Q10)
     hwLogEdge: async (agent, q) => (await import('../../central/bmHwLogPull.js')).pullEdgeHwLog(agent, q),
     hwLogDemo: async (key) => { const { isMockMode } = await import('../../mock/demo/flags.js'); return isMockMode() ? demoHwLog(key) : null; },
+    // v3.52 원격 전원 조작 · 위치 LED(⑦ ⑥) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 보낸다 · 데모는 장비에 보내지 않는다
+    powerLocal: async (entry, o) => runDeviceAction(entry, o),
+    powerEdge: async (agent, q) => (await import('../../central/bmPowerPull.js')).pullEdgePower(agent, q),
+    powerDemo: async () => { const { isMockMode } = await import('../../mock/demo/flags.js'); return isMockMode() ? { ok: true, status: 'accepted', http: 204, message: '데모 — 장비에 보내지 않았습니다.' } : null; },
     // 수집 서버(pull) 출처 서버를 맡은 엣지 — 구성원에는 collectorId 만 있다(반증 A2). 조회는 등록부 하나(findCollectorByName — id 가 먼저 맞는다).
     //   돌려주는 것은 등록 **id**(표시 이름은 겹칠 수 있다 — pullFromEdge 는 id 로도 찾는다).
     collectorName: async (id) => { const c = (await import('../../collector/registry.js')).findCollectorByName(id); return c && typeof c.id === 'string' ? c.id : ''; },
@@ -452,7 +469,7 @@ export async function edgeViewFor(req, snap, D = {}) {
   let pull = null;
   try { pull = (D.pullStatus || (await import('../../agent/bmFoldersPull.js')).bmFoldersPullStatus)(); } catch { pull = null; }
   return {
-    ok: true, edge: true, scoped: hide, admin, canPull: writerOk(req.user), usageOff: !!ix?.off,
+    ok: true, edge: true, scoped: hide, admin, canPull: writerOk(req.user), canFleet: fleetAdmin(req.user, snap), usageOff: !!ix?.off,   // canFleet — 엣지 포탈의 이벤트 구독 창(v3.52 반증 B1)
     copy: copy ? { rev: copy.rev, savedAt: copy.savedAt, at: copy.at } : null, ...(error ? { copyError: error } : {}),
     pull: pull ? { intervalMs: pull.intervalMs, last: pull.last ? { at: pull.last.at, ok: !!pull.last.ok, ...(admin && !hide ? { error: pull.last.error || pull.last.note || undefined } : {}) } : null, running: !!pull.running } : null,
     corps, servers,
@@ -520,8 +537,11 @@ export function registerBmFolders(api) {
       // v3.45 물리서버 점검: 이 응답에 싣는 구성원만으로 판정한다(묶음이 법인을 넘지 않아 결과가 같다 — bmcheck/state.js). 실패해도 목록은 그대로(요약만 빠진다)
       const ci = checkInputs();
       let chk = null;
-      try { chk = bmCheckFor({ members: shown.map((x) => x[0]), placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp(), advisories: ci.advisories }); } catch { chk = null; }
+      // 1,000대 목록은 입력 모으기 · 행 만들기가 수백 ms 한 덩어리였다 — 시간 기준 양보(v3.52 디버깅 1회차 성능 P10). 판정 결과는 같다
+      const y = createYielder(15);
+      try { chk = await bmCheckForAsync({ members: shown.map((x) => x[0]), placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp(), advisories: ci.advisories }, y); } catch { chk = null; }
       for (const [m, p] of shown) {
+        await y();
         // 찾기를 못 만들었으면 hx = undefined → 행에 hw 키를 싣지 않는다(화면이 '인벤토리 없음' 으로 단정하지 않고 '요약을 만들지 못함' 으로 — 반증 F11)
         let hx;
         if (hxOf) { try { hx = hxOf(m); } catch { hx = null; } }
@@ -693,6 +713,107 @@ export function registerBmFolders(api) {
       return res.json({ ok: true });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
+  // v3.52 원격 전원 조작 · 위치 LED 켜기/끄기(시안 ⑦ ⑥) — **장비 상태를 바꾼다**. 기본 꺼짐(remotePowerSettings — 전체 범위 관리자 + OTP 로 켠다).
+  //   게이트: 운영자 이상 · 데모 아님 → 조회 밖 404 → 그 서버 법인의 쓰기 범위 밖 403 → 켜기 스위치 → (전원) 본인 OTP · 서버 이름을 그대로 입력 · 사유 4자 이상 ·
+  //   강제 동작은 따로 허용될 때만. 그 서버를 수집하는 노드가 보낸다(hwLogSourceOf — 이 노드 · 엣지 · 수집 서버). 다시 보내지 않는다 · 감사(성공 · 실패 모두).
+  //   결과 ‘받음’ 은 장비가 요청을 받았다는 뜻이지 끝났다는 뜻이 아니다(화면이 밝힌다). 장비 오류 글자는 전체 범위 관리자 판본만 원문.
+  const powerGate = async (req, res, kind) => {
+    if (!writerOk(req.user)) { res.status(403).json({ ok: false, reason: '원격 전원 · LED 는 운영자 이상 권한이 필요합니다.' }); return null; }
+    const x = await caseMember(req, res); if (!x) return null;
+    const fleet = fleetAdmin(req.user, x.snap);
+    // 전원은 전체 범위(조회 ∧ 쓰기) 관리자만 — 설계 ⑦(‘전체 범위 관리자 · OTP · 이름 재입력’). LED 는 운영자 이상 · 그 법인 쓰기 범위.
+    if (kind === 'power' && !fleet) { res.status(403).json({ ok: false, code: 'power-admin', reason: '원격 전원 조작은 전체 범위 관리자만 할 수 있습니다.' }); return null; }
+    if (x.m.kind !== 'bm') { res.status(400).json({ ok: false, reason: 'ESXi 호스트 행은 이 화면에서 전원을 다루지 않습니다.' }); return null; }
+    // 법인 귀속이 없는 서버(미분류) — 법인 쓰기 범위로 가를 수 없다: 전체 범위 관리자만(반증 A13 — 전에는 관리자에게도 ‘법인 없음’ 404)
+    if (!x.m.corp) { if (!fleet) { res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' }); return null; } }
+    else {
+      const w = corpWriteAccess(req.user, x.snap, x.m.corp);
+      if (w) { res.status(w.status).json({ ok: false, reason: w.reason }); return null; }
+    }
+    const st = remotePower.get();
+    if (!st.enabled) { res.status(403).json({ ok: false, code: 'remote-power-off', reason: '원격 전원 · LED 가 꺼져 있습니다(전체 범위 관리자가 Bare Metal Server › 원격 전원 설정에서 켭니다).' }); return null; }
+    return { ...x, st, kind };
+  };
+  /** 보낼 길 — OTP 앞에서 정한다(길이 없거나 이 노드에서 진행 중이면 OTP 를 쓰기 전에 거절 — 반증 A11). @returns {{via, demo?, agent?, q?, entry?}} 또는 응답을 보낸 뒤 null */
+  const powerRoute = async (res, D, x, kind) => {
+    const demo = await D.powerDemo?.().catch(() => null);
+    if (demo) return { via: 'demo', demo };
+    const src = hwLogSourceOf(x.m);
+    const noWay = () => { res.status(400).json({ ok: false, reason: '이 포탈이 보낼 길이 없는 서버입니다(iDRAC 등록부 밖 · 꺼진 등록 등).' }); return null; };
+    if (!src) return noWay();
+    if (src.via !== 'local') return { via: src.via, agent: src.agent, q: src.q };
+    let regErr = false;
+    const entry = await D.hwLogEntry(src.id).catch((e) => { regErr = e?.code === 'registry-unreadable'; return null; });
+    if (regErr) { res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '이 포탈의 iDRAC 등록부를 읽지 못했습니다 — 보내지 않았습니다(서비스 점검에서 등록부를 확인).' }); return null; }
+    if (!entry) return noWay();
+    const busy = powerGapIssue(`${kind}|${String(entry.id ?? entry.host ?? '')}`);
+    if (busy) { res.status(409).json({ ok: false, status: 'busy', reason: busy }); return null; }
+    return { via: 'local', entry };
+  };
+  const powerRun = async (req, res, x, kind, action, reason, route, D) => {
+    const { m } = x;
+    const full = isAdminDetailUser(req.user) && !x.hide;
+    const finish = (via, r) => {
+      const ok = r?.ok === true && r.status === 'accepted';
+      const message = r?.message ? (full ? String(r.message) : maskHwLogText(String(r.message), { tag: m.serviceTag })).slice(0, 300) : '';
+      logAudit({ user: req.user?.username, action: kind === 'power' ? '물리서버 원격 전원 조작' : '물리서버 위치 LED', target: `${m.name || ''}`.slice(0, 120),
+        detail: `${action} · ${via === 'demo' ? '데모(장비에 보내지 않음)' : ok ? '장비가 받음' : r?.status || r?.kind || '실패'}${r?.reset ? ` · ${r.reset}` : ''} · ${via}${reason ? ` · 사유 ${reason}` : ''}`.slice(0, 300), ip: req.ip });   // 데모는 ‘받음’ 이라 적지 않는다(반증 B6)
+      // 엣지 대행 실패 — 요청이 장비에 가기 전에 멈춘 것이 확실하면 ‘보내지 않음’(edge-refused), 아니면 ‘모름’(edge-fail · 디버깅 1회차 엣지 #4)
+      const refusedKinds = ['not-registered', 'ambiguous', 'disabled', 'disabled-central', 'no-url', 'auth', 'bad-args', 'edge-ambiguous', 'edge-registry'];
+      const kindStatus = r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : r?.kind === 'edge-disabled' ? 'edge-disabled' : r?.kind === 'edge-force-off' ? 'force-off' : r?.kind === 'edge-rate' ? 'rate'
+        : refusedKinds.includes(r?.kind) || (r?.kind === 'http' && r?.body?.sent === false) ? 'edge-refused' : 'edge-fail';
+      return res.json({ ok, via, status: r?.status || kindStatus,
+        ...(r?.http ? { http: r.http } : {}), ...(r?.reset ? { reset: r.reset } : {}), ...(r?.prop ? { prop: r.prop } : {}), ...(r?.before ? { before: r.before } : {}), ...(message ? { message } : {}),
+        ...(typeof r?.tagChecked === 'boolean' ? { tagChecked: r.tagChecked } : {}), ...(full && typeof r?.gotTag === 'string' ? { gotTag: r.gotTag } : {}), ...(full && !r?.ok && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}), ...(!full && !r?.ok && ['edge-ambiguous', 'edge-registry', 'not-registered', 'disabled-central'].includes(r?.kind) && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+    };
+    if (route.via === 'demo') return finish('demo', route.demo);
+    // 보내기 전에도 감사(요청 도중 재시작되면 결과 기록이 없다 — 반증 A12)
+    logAudit({ user: req.user?.username, action: kind === 'power' ? '물리서버 원격 전원 조작 요청' : '물리서버 위치 LED 요청', target: `${m.name || ''}`.slice(0, 120), detail: `${action} · ${route.via}${reason ? ` · 사유 ${reason}` : ''}`.slice(0, 300), ip: req.ip });
+    if (route.via !== 'local') {
+      const r = await D.powerEdge(route.agent, { ...route.q, kind, action, by: req.user?.username || '', reason });
+      return finish(route.via, r?.ok ? r.body : r);
+    }
+    const rl = await D.powerLocal(route.entry, { kind, action, expectTag: m.serviceTag || route.entry.serviceTag || '' });
+    // LED 를 바꿨으면 다음 폴링에서 인벤토리를 다시 읽게 — 드로어의 LED 상태가 30분 옛 값으로 남지 않게(디버깅 1회차 판정 #9)
+    if (kind === 'led' && rl?.ok) { try { (await import('../../idrac/invCache.js')).markInventoryStale(String(route.entry.id)); } catch { /* 표시 실패가 결과를 막지 않는다 */ } }
+    return finish('local', rl);
+  };
+  api.post('/tools/bm-folders/power', toolsPerm, textFields('key', 'action', 'reason', 'confirm', 'otp'), async (req, res, next) => {
+    // 게이트(권한 · 범위 · 스위치 · 입력 · 보낼 길)를 OTP 보다 먼저 — 범위 밖 계정 · 보낼 수 없는 요청이 OTP 를 소모하지 않게(조회 밖 404 → 쓰기 밖 403 → 꺼짐 403 → OTP)
+    try {
+      const x = await powerGate(req, res, 'power'); if (!x) return;
+      const b = req.body || {};
+      const action = String(b.action || '');
+      if (!Object.hasOwn(POWER_ACTIONS, action)) return res.status(400).json({ ok: false, reason: '모르는 전원 동작입니다.' });
+      if (POWER_ACTIONS[action].force && !x.st.allowForce) return res.status(403).json({ ok: false, code: 'force-off', reason: '강제 재시작 · 강제 끄기는 허용되지 않았습니다(원격 전원 설정에서 따로 엽니다).' });
+      const reason = String(b.reason || '').trim().slice(0, 200);
+      if (reason.length < 4) return res.status(400).json({ ok: false, reason: '사유를 4자 이상 적으십시오(감사 로그에 남습니다).' });
+      if (String(b.confirm || '').trim() !== String(x.m.name || '').trim() || !String(x.m.name || '').trim()) return res.status(400).json({ ok: false, code: 'confirm', reason: '확인을 위해 서버 이름을 그대로 입력하십시오.' });
+      const D = await trendDeps();
+      const route = await powerRoute(res, D, x, 'power'); if (!route) return;
+      req._power = { x, action, reason, route, D };
+      return next();
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); return undefined; }
+  }, ownOtpGate('물리서버 원격 전원 조작'), async (req, res) => {
+    try { const { x, action, reason, route, D } = req._power; return await powerRun(req, res, x, 'power', action, reason, route, D); } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); return undefined; }
+  });
+  api.post('/tools/bm-folders/led', toolsPerm, textFields('key', 'state'), async (req, res) => {
+    try {
+      const x = await powerGate(req, res, 'led'); if (!x) return;
+      const state = String(req.body?.state || '');
+      if (!LED_WANTS.includes(state)) return res.status(400).json({ ok: false, reason: 'LED 상태는 on · blink · off 가운데 하나입니다.' });
+      const D = await trendDeps();
+      const route = await powerRoute(res, D, x, 'led'); if (!route) return;
+      return await powerRun(req, res, x, 'led', state, '', route, D);
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); return undefined; }
+  });
+  // 화면용 — 켜기 스위치 · 강제 허용 · 이 계정이 쓸 수 있는가(서버 집행과 같은 판정의 앞부분 — 범위는 서버마다 라우트가 다시 본다)
+  api.get('/tools/bm-folders/power-state', toolsPerm, (req, res) => {
+    const st = remotePower.get();
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, enabled: st.enabled, allowForce: st.allowForce, canUse: writerOk(req.user), canPower: fleetAdmin(req.user, store.get()), otpRequired: !!config.auth.enabled, ...(remotePower.loadError() ? { unreadable: true } : {}), actions: Object.fromEntries(Object.entries(POWER_ACTIONS).map(([k, v]) => [k, { label: v.label, force: v.force }])) });
+  });
+
   // 접수 자료 묶음(JSON 내려받기) — 서버 · 보증 · 열린 부품 장애 · 뒤처진 펌웨어 · 최근 위험 · 주의 기록(인벤토리 주기에 읽은 것) · 하드웨어 요약.
   //   서비스 태그 · 계약 번호는 그것을 볼 수 있는 판본에만(태그: 범위 판본이 아님 · 계약: 전체 범위 관리자).
   //   묶음은 제조사에 붙여 보내는 파일이다 — 기록 글자는 **판본과 관계없이 늘 가린다**(IPv4 · IPv6 · MAC · 호스트 이름 · ‘for 계정 from’ 꼴 계정 · 태그 —
@@ -770,7 +891,12 @@ export function registerBmFolders(api) {
       const D = await trendDeps();
       const full = admin && !hide;
       const finish = async (via, r) => {
-        if (!r || r.ok !== true) return res.json({ ok: true, via, why: r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : 'edge-fail', ...(full && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+        // 엣지가 가른 사유(겹침 · 등록부 못 읽음)는 그대로 — ‘잠시 뒤 다시’ 로 뭉개지 않는다(디버깅 2회차 엣지 #6)
+        const WHY_OF = { 'old-version': 'old-version', 'not-found': 'not-found', 'edge-ambiguous': 'edge-ambiguous', 'edge-registry': 'edge-registry', busy: 'busy', 'edge-busy': 'busy' };
+        // 서버 사유는 뭉뚱그린 ‘edge-fail’ 에만 싣는다 — 따로 문구가 있는 why 에 덧붙이면 같은 문장이 두 번 보였다(디버깅 3회차 화면 N4)
+        const why = WHY_OF[r?.kind] || 'edge-fail';
+        //   구버전 사유(판 번호 등)는 문구와 겹치지 않아 그대로 싣는다
+        if (!r || r.ok !== true) return res.json({ ok: true, via, why, ...(full && (why === 'edge-fail' || why === 'old-version') && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
         const rows = (Array.isArray(r.rows) ? r.rows : []).map((x) => (full ? x : { ...x, msg: maskHwLogText(x.msg, { tag: m.serviceTag }) }));
         // v3.51 부품 수명(⑧): 메모리 교정 오류 경고 — 가리기 전 원문에서 슬롯별로 센다(슬롯 이름은 주소 · 계정이 아니다). DIMM 목록은 이 노드 인벤토리가 있을 때만(0 인 슬롯도 줄로)
         let dimms = [];
@@ -789,7 +915,9 @@ export function registerBmFolders(api) {
         return await finish(src.via, r);
       }
       const sid = src.id;
-      const entry = sid ? await D.hwLogEntry(sid).catch(() => null) : null;
+      let regErr = false;
+      const entry = sid ? await D.hwLogEntry(sid).catch((e) => { regErr = e?.code === 'registry-unreadable'; return null; }) : null;
+      if (regErr) return res.json({ ok: true, why: 'registry-unreadable' });
       if (!entry) return res.json({ ok: true, why: 'no-source' });   // 이 노드 iDRAC 등록부 밖(OME · 꺼진 등록 등) — 읽을 길이 없다
       const r = await trendOnce(`hwlog||id|${sid}`, () => D.hwLogLocal(entry));
       return await finish('local', r);

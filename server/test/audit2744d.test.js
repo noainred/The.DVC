@@ -175,7 +175,9 @@ test('EDGE-01: 등록부를 읽지 못한 장비군의 열린 장애는 unassign
   const poller = stripComments(fs.readFileSync(path.join(SRC, 'partfault/poller.js'), 'utf8'));
   assert.match(poller, /edge\.scopeUnreadable/);
   assert.match(poller, /local\.registryUnreadable/);
-  assert.match(poller, /transition\(\{[^}]*scan:\s*\{[^}]*scopeUnreadable/);
+  // v3.54(반증 13c): 같은 판정 재료(scan)를 실제 전이와 가상 전이(알림 단계 닫힘 근거)가 함께 쓴다 — 변수로 묶었다
+  assert.match(poller, /const scan = \{ deviceOk, kindFailed, agentsReported, deviceReason: edge\.deviceReason, scopeUnreadable/);
+  assert.match(poller, /transition\(\{ open: prev, observed, scan \}\)/);
   seedIdrac();
 });
 

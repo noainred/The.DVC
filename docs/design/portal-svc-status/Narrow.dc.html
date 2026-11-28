@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>포탈 서비스 상태 모니터링 — 좁은 화면</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#7fb2ff}a:hover{color:#b3d1ff}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 400px; min-height: 1500px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: system-ui, 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; font-size: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 18px; font-weight: 700">포탈 서비스 상태 모니터링</h1>
+<div style="font-size: 12px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">마지막 측정 09:47:12 · 주기 60초</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ tiles }}" as="t" hint-placeholder-count="4">
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 10px; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="font-size: 12px; color: #8b9bb4; white-space: nowrap"><span style="color: {{ t.fg }}" aria-hidden="true">{{ t.mark }}</span> {{ t.label }}</span>
+<span style="font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: {{ t.fg }}">{{ t.n }}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px">
+<button type="button" style="height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #4b9bff; background: #1668d8; color: #ffffff; font-size: 13px; white-space: nowrap">전체 15</button>
+<button type="button" style="height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #c8d6e8; font-size: 13px; white-space: nowrap">엣지 포탈 4</button>
+<button type="button" style="height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #c8d6e8; font-size: 13px; white-space: nowrap">vCenter 4</button>
+<button type="button" style="height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #c8d6e8; font-size: 13px; white-space: nowrap">CVP 2</button>
+<button type="button" style="height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #c8d6e8; font-size: 13px; white-space: nowrap">스토리지 5</button>
+</div>
+
+<sc-for list="{{ rows }}" as="r" hint-placeholder-count="7">
+<a href="Detail.dc.html" style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; text-decoration: none; color: #e6edf6; min-width: 0">
+<div style="display: flex; gap: 8px; align-items: center; justify-content: space-between">
+<span style="display: inline-flex; gap: 6px; align-items: center; padding: 3px 9px; border-radius: 999px; background: {{ r.sbg }}; color: {{ r.sfg }}; font-size: 12px; font-weight: 600; white-space: nowrap"><span aria-hidden="true">{{ r.mark }}</span>{{ r.slabel }}</span>
+<span style="font-size: 12px; color: #8b9bb4; white-space: nowrap">{{ r.kind }} · <span style="font-family: 'JetBrains Mono', monospace">{{ r.corp }}</span></span>
+</div>
+<div style="display: flex; gap: 8px; align-items: baseline; justify-content: space-between; min-width: 0">
+<span style="font-size: 15px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ r.name }}</span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: {{ r.rttFg }}; white-space: nowrap">{{ r.rtt }}</span>
+</div>
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #c8d6e8; overflow-wrap: anywhere">{{ r.addr }} <span style="color: #8b9bb4; font-family: system-ui, sans-serif">· {{ r.by }} 측정</span></div>
+<div style="display: flex; gap: 1px" role="img" aria-label="최근 24시간 상태 띠"><sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="24"><span style="flex: 1; height: 12px; border-radius: 1px; background: {{ c }}"></span></sc-for></div>
+<div style="font-size: 12px; color: #8b9bb4; line-height: 1.5">{{ r.since }}</div>
+</a>
+</sc-for>
+
+<div style="font-size: 12px; color: #8b9bb4; line-height: 1.6">좁은 화면에서는 표 대신 카드로 보이고 나쁜 상태가 위에 옵니다. 띠는 1시간 칸입니다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var S = {
+      ok:   { label: '정상', mark: '●', fg: '#4ade80', bg: 'rgba(34,197,94,0.14)', cell: '#22c55e' },
+      slow: { label: '지연', mark: '▲', fg: '#fbbf24', bg: 'rgba(245,158,11,0.16)', cell: '#f59e0b' },
+      down: { label: '끊김', mark: '■', fg: '#ff8585', bg: 'rgba(239,68,68,0.18)', cell: '#ef4444' },
+      unk:  { label: '못 잼', mark: '○', fg: '#9fb4cc', bg: 'rgba(139,155,180,0.14)', cell: '#3a4760' }
+    };
+    var D = [
+      ['down', '엣지 포탈', 'VN-HAN', 'edge-vn-han', '10.40.1.20:443', '중앙', '—', '09:12 부터 35분째 · 연속 35회 실패', 1],
+      ['slow', 'vCenter', 'US-EAST', 'vc-use-01', '198.51.100.24:20444', '중앙', '1,930 ms', '09:31 부터 16분째 · 평소 820 ms 의 2.4배', 1],
+      ['unk', '스토리지', 'VN-HAN', 'unity-han-01', '10.40.3.40:443', '엣지', '—', '09:12 부터 엣지 보고가 끊김', 1],
+      ['unk', 'vCenter', 'DE-FRA', 'vc-fra-01', '10.30.1.10:443', '엣지', '—', '엣지 버전이 낮아 이 측정을 보내지 않음', 24],
+      ['ok', '엣지 포탈', 'KR-SEL', 'edge-kr-sel', '10.10.1.20:443', '중앙', '12 ms', '11일째 정상 · 평소 11 ms', 0],
+      ['ok', '엣지 포탈', 'PL-WRO', 'edge-pl-wro', '172.20.5.11:443', '중앙', '842 ms', '3일째 정상 · 평소 835 ms', 0],
+      ['ok', 'CVP', 'US-EAST', 'cvp-use', '198.51.100.24:20445', '중앙', '818 ms', '27일째 정상 · 평소 821 ms', 0]
+    ];
+    var rows = D.map(function (d) {
+      var s = S[d[0]], cells = [];
+      for (var k = 0; k < 24; k++) cells.push(k >= 24 - d[8] ? s.cell : S.ok.cell);
+      return { slabel: s.label, mark: s.mark, sfg: s.fg, sbg: s.bg, kind: d[1], corp: d[2], name: d[3], addr: d[4], by: d[5], rtt: d[6], rttFg: d[0] === 'slow' ? '#fbbf24' : '#e6edf6', since: d[7], cells: cells };
+    });
+    var tile = function (k, n) { return { label: S[k].label, mark: S[k].mark, fg: S[k].fg, n: n }; };
+    return { rows: rows, tiles: [tile('ok', 11), tile('slow', 1), tile('down', 1), tile('unk', 2)] };
+  }
+}
+</script>
+</body>
+</html>

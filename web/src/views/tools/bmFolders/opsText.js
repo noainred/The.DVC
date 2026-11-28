@@ -62,7 +62,7 @@ export function healthView(r, rules = null) {
 // ───────── ⑥ 위치 LED ─────────
 export const LED_TEXT = Object.freeze({ on: '켜짐', blink: '깜빡임', off: '꺼짐', '': '못 읽음' });
 export const ledText = (v) => LED_TEXT[typeof v === 'string' && Object.hasOwn(LED_TEXT, v) ? v : ''];
-export const LED_NOTE = '위치 LED 상태만 보입니다 — 켜기 · 끄기는 장비 상태를 바꾸는 동작이라 이 화면에서 하지 않습니다.';
+export const LED_NOTE = '위치 LED 상태입니다(못 읽음은 꺼짐이 아닙니다). 켜기 · 끄기는 장비 상태를 바꾸는 동작이라, 관리자가 원격 전원 설정을 켠 포탈에서 그 법인의 쓰기 권한이 있는 계정이 ‘원격 전원 · 위치 LED’ 구역에서 합니다.';
 
 // ───────── ⑤ 하드웨어 이벤트 로그 ─────────
 export const HWLOG_SEV = Object.freeze({ critical: { label: '위험', color: 'red' }, warning: { label: '주의', color: 'amber' }, ok: { label: '정보', color: 'gray' }, '': { label: '모름', color: 'gray' } });
@@ -76,6 +76,10 @@ export const HWLOG_WHY = Object.freeze({
   esxi: 'ESXi 호스트 행은 이 화면에서 읽지 않습니다.', 'no-source': '이 포탈이 읽을 길이 없는 서버입니다(iDRAC 등록부 밖 · 꺼진 등록 등).',
   'old-version': '이 서버를 수집하는 엣지가 구버전이라 로그를 받지 못했습니다(엣지 업그레이드 뒤 읽힙니다).',
   'not-found': '그 엣지의 등록부에서 이 서버를 찾지 못했습니다.', 'edge-fail': '이 서버를 수집하는 엣지에서 로그를 받지 못했습니다(잠시 뒤 다시 읽어 보십시오).',
+  'edge-ambiguous': '그 엣지에 이 서버로 보이는 켜진 등록이 둘 이상입니다(같은 서비스 태그) — 어느 장비인지 몰라 읽지 않았습니다. 엣지 등록부의 겹친 등록을 정리하십시오.',
+  'edge-registry': '그 엣지가 iDRAC 등록부를 읽지 못했습니다 — 그 엣지의 서비스 점검에서 등록부를 확인하십시오.',
+  'registry-unreadable': '이 포탈의 iDRAC 등록부를 읽지 못했습니다 — 서비스 점검에서 등록부를 확인하십시오(등록부 밖이라고 단정하지 않습니다).',
+  busy: '다른 이벤트 로그 읽기가 상한만큼 진행 중이라 장비에 묻지 않았습니다 — 잠시 뒤 다시 읽으십시오.',
 });
 export const HWLOG_STOPPED = Object.freeze({ budget: '시간 예산이 다 돼 일부만 읽었습니다.', max: '읽을 쪽 수 상한에 닿아 일부만 읽었습니다(장비가 정렬을 알려 주지 않으면 가장 새 기록이 빠졌을 수 있습니다).', skip: '장비가 쪽 넘기기를 지원하지 않아 첫 쪽만 읽었습니다.', short: '도중에 끊겨 일부만 읽었습니다.', timeout: '시한에 걸려 일부만 읽었습니다.', error: '도중에 오류가 나 일부만 읽었습니다.' });
 export const HWLOG_SCOPE_NOTE = '시스템 이벤트 로그(SEL)만 읽습니다 — 수명주기(Lifecycle) 로그는 읽지 않습니다. 그 서버를 수집하는 쪽(이 포탈 · 엣지)이 장비에서 읽고, 잠깐 사이에 다시 누르면 장비에 다시 묻지 않고 방금 읽은 결과를 보입니다.';
@@ -98,6 +102,9 @@ export function hwLogHead(d) {
 // ───────── ⑫ 케이스 ─────────
 export const CASE_STATUS = Object.freeze({ open: { label: '접수', color: 'amber' }, parts: { label: '부품 오는 중', color: 'amber' }, replaced: { label: '교체함', color: 'blue' }, closed: { label: '끝남', color: 'gray' } });
 export const caseStatusText = (s) => (CASE_STATUS[s] ? CASE_STATUS[s].label : '모름');
+/** 정렬 순위 — 글자 순이 아니라 진행 순서 · 심각도 순(디버깅 1회차 화면 U2 — 반증 B12 의 다른 경로). */
+export const CASE_STATUS_ORDER = Object.freeze({ open: 0, parts: 1, replaced: 2, closed: 3 });
+export const HWLOG_SEV_ORDER = Object.freeze({ critical: 0, warning: 1, ok: 2, '': 3 });
 export const CASE_NOTE = '포탈은 제조사에 직접 접수하지 않습니다 — 접수 자료를 받아 제조사 창구에 붙이고, 받은 케이스 번호를 여기 적어 끝까지 따라갑니다.';
 
 /**

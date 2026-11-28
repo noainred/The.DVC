@@ -17,9 +17,12 @@
  */
 import { auditSkipped } from '../audit.js';
 
-/** 경로 정규화 — 쿼리 제거·소문자·끝 슬래시 제거(express 는 대소문자·끝 슬래시를 구분하지 않는다). */
+/** 경로 정규화 — 쿼리 제거·소문자·겹친 빗금 합치기·끝 슬래시 제거(express 는 대소문자·끝 슬래시를 구분하지 않고 겹친 빗금도 같은 라우트로 보낸다). */
 export function normApiPath(url) {
-  let p = String(url || '').split('?')[0].split('#')[0].toLowerCase();
+  // 겹친 빗금은 하나로 — express 는 ‘/api/admin//bm-power’ 를 ‘/bm-power’ 라우트로 보낸다(디버깅 2회차 보안 #1: 데모 차단 목록 우회). 선형 치환
+  // 절대 꼴 요청 대상(GET http://h/api/admin/users — express 는 pathname 으로 라우팅한다)도 경로만 본다(디버깅 3회차 보안 #1). 앵커가 있는 선형 치환
+  let p = String(url || '').slice(0, 4096).split('?')[0].split('#')[0].toLowerCase().replace(/^[a-z][a-z0-9+.-]{0,15}:\/\/[^/]*/, '').replace(/\/{2,}/g, '/');
+  if (!p.startsWith('/')) p = `/${p}`;
   while (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
   return p;
 }
@@ -39,13 +42,14 @@ export const READ_DENY = [
   '/api/admin/bm-assets', '/api/admin/bm-assets.csv', '/api/admin/bm-fw-baseline',
   '/api/admin/bm-advisories', '/api/admin/bm-advisories.csv',   // v3.50 보안 권고 표
   '/api/tools/part-faults/escalation',   // v3.51 알림 단계 · 당직 설정(당직 이름 · 메일 주소 — 반증 A10)
+  '/api/admin/bm-power', '/api/admin/bm-events',   // v3.52 원격 전원 스위치 · 이벤트 구독(받은 이벤트 원문 · 구독 결과 · 받는 주소 — 디버깅 1회차 보안 #1)
   // v2.719(감사 R1-08): /api/tools 아래 보안 화면 — 설정 파일 평문 비밀 개수·탐지 위치(secret-scan)와
   //   전 엣지 주소·토큰 지문·길이(portal-check/tokens). 접두가 /api/admin/security 뿐이라 빠져 있었다.
   '/api/tools/secret-scan', '/api/tools/portal-check/tokens',
   // v2.720(감사 B2-03): 같은 이유(전 법인 엣지 주소·내부 IP)로 — 저장된 엣지 콘솔 로그·노드 상태(edge-log), 엣지 주소·인증서 주체·
   //   응답 조각(link-check), RMA 에이전트 허용 IP·명령 이력(rma), 전 사이트 내부 IP 가 든 HAProxy 관리 블록(relaytopo/render).
   //   데모 계정 화면에서 이 도구들은 403(demoGuest 표지 → 데모 안내)으로 보인다 — 의도다.
-  '/api/tools/edge-log', '/api/tools/link-check', '/api/tools/rma', '/api/tools/relaytopo/render',
+  '/api/tools/edge-log', '/api/tools/link-check', '/api/tools/svc-status/settings', '/api/tools/rma', '/api/tools/relaytopo/render',
   // v2.743(감사 AUTHZ-01): 데모 계정이 관리자 판본을 받던 설정·등록부 조회 — 가림 헬퍼를 거치지 않는 admin 전용 응답이라 막는다.
   //   CVP 서버 등록부(관리 IP·계정명 — CVP 도구의 '설정' 탭) · SAN 포트 사용량 설정(DB 절대 경로) · vCenter 로그 보관 설정(설정 탭 —
   //   DB 절대 경로) · IP 원장 공유 DB 위치(절대 경로 — operator 도 adminOnly 라 403 이다) · 중앙 자신의 콘솔 로그·상태(edge-log 와 같은
@@ -142,6 +146,10 @@ export function isAdminDetailUser(user) {
  */
 export function demoGuestDenial(method, originalUrl) {
   const m = String(method || 'GET').toUpperCase();
+  // 데모 계정은 평범한 꼴(‘/’ 로 시작 · 백슬래시 없음 · ‘//’ 로 시작하지 않음 · 4KB 이하)의 요청 주소만 — express 의 경로 해석(옛 url.parse: 절대 꼴 · \ → /)을
+  //   흉내 내지 않고 이상한 꼴은 통째로 거절한다(긴 scheme · 4KB 넘는 authority · 백슬래시로 차단 목록을 비켜 갔다 — 디버깅 4회차 보안 #1)
+  const raw = String(originalUrl ?? '');
+  if (raw.length > 4096 || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '데모 계정은 이 꼴의 요청 주소를 쓸 수 없습니다.';
   const p = normApiPath(originalUrl);
   const denied = READ_DENY.some((d) => p === d || p.startsWith(`${d}/`));
   if (m === 'GET' || m === 'HEAD') {

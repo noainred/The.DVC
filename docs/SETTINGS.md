@@ -55,7 +55,7 @@ _모니터링할 대상을 등록하는 곳 — 법인(DataCenter) · vCenter �
 ### 6. iDRAC 서버 등록 — `#/settings/idrac-admin`
 - **무엇**: Dell iDRAC 장비를 등록해 전력·온도·하드웨어 인벤토리를 수집한다. 대역(IP 범위) 스캔으로 자동 발견하고, 법인별로 스캔을 위임할 수 있다.
 - **저장**: `idrac.json`(장비·계정) · `idrac-scan-ranges.json`(대역) · `idrac-scan-settings.json` · `idrac-inventory.json`(하드웨어 캐시) · `idrac-power.db`(전력 시계열)
-- **환경변수**: `IDRAC_POLL_CONCURRENCY`(동시 폴 상한, 기본 16) · `IDRAC_SCAN_INTERVAL_MS`(자동 스캔 주기, 기본 6시간·0 이하면 끔) · `IDRAC_SENSOR_SAMPLES` · `IDRAC_TIMEOUT_MS`(기본 15초)
+- **환경변수**: `IDRAC_POLL_CONCURRENCY`(동시 폴 상한, 기본 16 — 장비 이벤트 뒤 다시 읽기는 이 상한 밖 전용 자리 1개를 더 쓴다 · v3.52) · `IDRAC_SCAN_INTERVAL_MS`(자동 스캔 주기, 기본 6시간·0 이하면 끔) · `IDRAC_SENSOR_SAMPLES` · `IDRAC_TIMEOUT_MS`(기본 15초)
 - **보존**: `IDRAC_RETENTION_DAYS`(기본 90일 — 원본·롤업 공통 상한) · `IDRAC_RAW_RETENTION_DAYS`(**원본만** 따로 짧게. 기본 `0` = 끔. 켜면 과거 원본이 대량 삭제되므로 위 지표 수집 탭의 경고를 함께 볼 것)
 - **용량 감축(v2.451)**: 전력값도 온도와 같은 **변화분만 저장**(dead-band)이 적용된다 — 직전 저장값과 **3W 미만** 차이면 원본 행을 남기지 않는다(`METRICS_DEADBAND_POWER_W`). 값이 그대로여도 **30분마다 1행**은 남겨 '수집 중단'과 구분하고, 시간당 롤업(`power_hourly`)은 생략분까지 전부 반영하므로 전력 대시보드·FinOps 집계(kWh·비용)는 그대로다.
 - **권한**: `settings`

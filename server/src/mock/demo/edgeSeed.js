@@ -45,6 +45,7 @@ const PUSH_EPS = [
   { ep: '/guest-disk', every: 10, bytes: 42_000, needVc: true },
   { ep: '/fleet', every: 5, bytes: 9_000 },
   { ep: '/link-check', every: 5, bytes: 3_500 },
+  { ep: '/svc-status', every: 1, bytes: 1_200 },   // v3.54 포탈 서비스 상태 — 담당 대상 TCP 측정
   { ep: '/svcmon-report', every: 2, bytes: 6_000 },
   { ep: '/part-faults', every: 15, bytes: 2_200 },
   { ep: '/storage-data', every: 60, bytes: 24_000 },
@@ -54,7 +55,7 @@ const PUSH_EPS = [
 ];
 const PULL_EPS = [
   { ep: '/storage-config', every: 5 }, { ep: '/sanswitch-config', every: 5 }, { ep: '/pdu-config', every: 5 },
-  { ep: '/svcmon-config', every: 2 }, { ep: '/link-check-config', every: 5 }, { ep: '/gpu-guest-config', every: 10 },
+  { ep: '/svcmon-config', every: 2 }, { ep: '/link-check-config', every: 5 }, { ep: '/svc-status-config', every: 1 }, { ep: '/gpu-guest-config', every: 10 },
   { ep: '/partfault-config', every: 10 }, { ep: '/users-config', every: 10 }, { ep: '/health-probe', every: 30 },
   { ep: '/edge-log-jobs', every: 1 }, { ep: '/ping-jobs', every: 1 }, { ep: '/capture-jobs', every: 1 },
   { ep: '/idrac-scan-jobs', every: 2 }, { ep: '/log-queries', every: 1 },

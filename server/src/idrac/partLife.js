@@ -37,7 +37,6 @@ export function mediaKindOf(d) {
   return '';
 }
 export const isSsd = (d) => mediaKindOf(d) === 'ssd' || /nvme/i.test(s(d?.protocol));
-const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 
 /**
  * 인벤토리 디스크 목록 → SSD 수명 줄. 디스크를 못 읽었으면(배열이 아님) null · SSD 가 없으면 [].
@@ -46,7 +45,9 @@ const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = a.le
  */
 export function ssdLifeRows(disks) {
   if (!Array.isArray(disks)) return null;
-  const ssd = disks.filter((d) => d && typeof d === 'object' && isSsd(d)).slice(0, LIFE_ROWS_MAX);
+  // 판정(낮음 · 같은 모델 대비)은 SSD 전부(1,024개까지)로 하고, 줄은 LIFE_ROWS_MAX 개 — 넘치면 **가장 닳은 것부터** 고른다(디버깅 1회차 화면 U5:
+  //   앞 64개만 보면 81번째 3% 디스크가 줄에도 머리에도 없었다). 고른 줄은 인벤토리 순서 그대로.
+  const ssd = disks.filter((d) => d && typeof d === 'object' && isSsd(d)).slice(0, 1024);
   const rows = ssd.map((d) => {
     const life = lifePctOf(d.lifeLeftPct);
     const gb = numOrNull(d.capacityGB);
@@ -55,15 +56,23 @@ export function ssdLifeRows(disks) {
   });
   const byModel = new Map();
   for (const r of rows) if (r.life != null && r.model) { const g = byModel.get(r.model) || []; g.push(r); byModel.set(r.model, g); }
+  // 자기를 뺀 가운데값 — 한 번 정렬하고 자리 계산으로(예전에는 줄마다 나머지를 다시 정렬해 SSD 1,024개에 O(n² log n) · 113ms — 디버깅 2회차 성능 Q7)
   for (const g of byModel.values()) {
     if (g.length < LIFE_PEER_MIN + 1) continue;
-    for (const r of g) {
-      const others = g.filter((x) => x !== r).map((x) => x.life);
-      const gap = Math.round((median(others) - r.life) * 10) / 10;
+    const sorted = g.map((r, j) => [r.life, j]).sort((a, b) => a[0] - b[0]);
+    const pos = new Array(g.length); sorted.forEach((x, k) => { pos[x[1]] = k; });
+    const m = g.length - 1;   // 자기를 뺀 수
+    g.forEach((r, j) => {
+      const i = pos[j]; const at = (k) => sorted[k < i ? k : k + 1][0];
+      const med = m % 2 ? at(m >> 1) : (at(m / 2 - 1) + at(m / 2)) / 2;
+      const gap = Math.round((med - r.life) * 10) / 10;
       if (gap >= LIFE_PEER_GAP) r.gap = gap;
-    }
+    });
   }
-  return rows;
+  if (rows.length <= LIFE_ROWS_MAX) return rows;
+  const rank = (r) => (r.low ? 0 : r.gap != null ? 1 : r.life != null ? 2 : 3);
+  const keep = new Set(rows.map((r, i) => [r, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || (a[0].life ?? 101) - (b[0].life ?? 101) || a[1] - b[1]).slice(0, LIFE_ROWS_MAX).map((x) => x[1]));
+  return rows.filter((_, i) => keep.has(i));
 }
 /** 요약(목록 · 엣지 push) — SSD 가 없으면 null. { n: SSD 수, read: 값을 읽은 수, min: 가장 낮은 값|null }. 줄 상한과 관계없이 **전부**에서 센다(반증 A15). */
 export function lifeSummaryOf(disks) {
@@ -121,10 +130,18 @@ export function memCeOf(log, { now = Date.now(), dimms = [] } = {}) {
   const covered = log.status === 'empty' || (complete && (read <= rows.length || (oldest != null && oldest < from)));
   const counts = new Map();
   for (const k of (Array.isArray(dimms) ? dimms : []).map(dimmLocatorKey).filter(Boolean).slice(0, MEMCE_SLOTS_MAX)) counts.set(k, 0);
-  let unknownSlot = 0; let total = 0;
+  let unknownSlot = 0; let total = 0; let untimed = 0; const uslots = new Map();   // 시각 모름 경고의 슬롯(그 슬롯이 0 으로 보이지 않게 — 디버깅 2회차 판정 #6)
   for (const r of rows) {
     const at = numOrNull(r?.at);
-    if (at == null || at < from || !isMemCeRow(r)) continue;
+    if (!isMemCeRow(r)) continue;
+    // 시각을 못 읽은 경고(빈 시각 · 1970 등)는 기간 안인지 모른다 — 세지는 않되 ‘다 셌다’ 고 하지 않는다(디버깅 1회차 판정 #7)
+    if (at == null || at < 946_684_800_000) {
+      untimed += 1;
+      const uk = dimmSlotOf(r.msg);
+      if (uk && (uslots.size < MEMCE_SLOTS_MAX || uslots.has(uk))) uslots.set(uk, (uslots.get(uk) || 0) + 1);
+      continue;
+    }
+    if (at < from) continue;
     total += 1;
     const k = dimmSlotOf(r.msg);
     if (!k) { unknownSlot += 1; continue; }
@@ -132,5 +149,6 @@ export function memCeOf(log, { now = Date.now(), dimms = [] } = {}) {
     else unknownSlot += 1;   // 슬롯 상한을 넘은 것도 어딘가엔 센다(반증 S4)
   }
   const slots = [...counts].sort((a, b) => a[0].localeCompare(b[0], 'en', { numeric: true }));
-  return { covered, days: MEMCE_DAYS, total, slots, unknownSlot, oldest };
+  // covered = 기록이 기간을 덮었는가(시각 모름 경고와 따로 — 다 읽었는데 ‘다 읽지 못함’ 이라 쓰지 않게: 디버깅 2회차 화면 D5). 시각 모름은 untimed 로 — 화면이 ‘없음’ 이라 하지 않는다
+  return { covered, days: MEMCE_DAYS, total, slots, unknownSlot, oldest, ...(untimed ? { untimed } : {}), ...(uslots.size ? { uslots: [...uslots] } : {}) };
 }
