@@ -4,6 +4,7 @@
 (아트보드 12장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **장비 이름 · 포트 · 수치 · 권고 번호 · 날짜는 전부 가상**이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 계열. 계정의 ‘Design System’ 아티팩트는 `project/` 파일이 없어 쓰지 않았다. 포트 구성도 시안은 `docs/design/cvp-port-map/`.)
 규칙(2026-11-03 ‘기억해’): 설계는 Fable + Claude Design 시안 → **컨펌 뒤** Opus 구현.
+**② 설정 백업 시안은 `docs/design/cvp-config-backup/`(2026-11-26 — 아트보드 6장)이 대체한다** — 이 폴더의 `ConfigBackup.dc.html` 과 아래 ② 서술은 옛 판이다.
 
 ## 1. 요구 (사용자 2026-11-23)
 
