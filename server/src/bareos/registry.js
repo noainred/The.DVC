@@ -58,6 +58,8 @@ export function trimRetired(list) {
   return arr.filter((_, i) => keep[i]).slice(-RETIRED_TOTAL_MAX);
 }
 export const FINISHED_KEEP = 10;
+/** jobDigests 가 싣는 끝난 실행 수(최근 N건 — 이 수가 차 있으면 그보다 앞 실행은 보기에서 밀려났다 · 정기 점검 보고 백업 적재가 본다). */
+export const RECENT_RUNS_VIEW = 5;
 
 let _db = null;
 const _loadErr = makeLoadError({ label: 'Bareos 백업 대상 원장', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
@@ -145,7 +147,8 @@ export function jobDigests() {
     pending: j.pending ? { ...j.pending } : null, lastRun: j.lastRun ? { ...j.lastRun } : null, lastError: j.lastError ? { ...j.lastError } : null,
     cancelReq: j.cancelReq ? { ...j.cancelReq } : null,
     lastOkAt: lastOkAt(j), lastRate: j.lastRate ? { ...j.lastRate } : null,
-    recentRuns: (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).slice(-5).map((r) => ({ ...r })),
+    recentRuns: (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).slice(-RECENT_RUNS_VIEW).map((r) => ({ ...r })),
+    runsEpoch: Number.isFinite(Number(j.runsEpoch)) && Number(j.runsEpoch) > 0 ? Number(j.runsEpoch) : null,   // v3.59 실행 기록을 새로 시작한 시각(그 앞 기록은 없다 — 백업 적재의 '다 봤다' 판정)
   }));
 }
 /** 마지막으로 **백업이 만들어진**(T 성공 · W 경고 — 둘 다 복원 지점이 생긴다) 실행이 끝난 시각. lastRun 이 실패여도 finishedRuns 에 있으면 그 시각. 모르면 null. */

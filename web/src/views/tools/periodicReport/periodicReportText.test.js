@@ -51,6 +51,7 @@ describe('정기 점검 보고 문구', () => {
     const led = raw('../../../../../server/src/periodic/backupLedger.js');
     expect(led).toContain(`PRODUCTS = Object.freeze([${T.BK_PRODUCTS.map((p) => `'${p}'`).join(', ')}])`);
     for (const [k, v] of Object.entries(T.BK_PRODUCT_LABEL)) expect(led).toContain(`${k}: '${v}'`);
+    expect(led).toContain('export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0);');
     const ren = raw('../../../../../server/src/periodic/render.js');
     for (const [k, v] of Object.entries(T.BK_STRIP)) expect(ren).toMatch(new RegExp(`${k}: \\['${v}'`));
     const cat = raw('../../../../../server/src/periodic/catalog.js');
@@ -69,9 +70,18 @@ describe('정기 점검 보고 문구', () => {
     expect(T.deltaText(5, 5)).toBe('±0');
     expect(T.deltaText(5, 5, false)).toBe('');
     expect(T.backupCellText(null)).toBe('—');
-    expect(T.backupCellText({ sealed: 0, fail: 0, unknown: 3 })).toBe('—');
-    expect(T.backupCellText({ sealed: 1, fail: 12, unknown: 0 })).toBe('12');
-    expect(T.backupCellText({ sealed: 1, fail: 0, unknown: 2 })).toBe('0 · ? 2');
+    expect(T.backupCellText({ sealed: 0, known: 0, fail: 0, unknown: 0 })).toBe('—');
+    expect(T.backupCellText({ sealed: 1, known: 0, fail: 0, unknown: 2 })).toBe('— · ? 2', '전부 확인 불가인 회차는 0 이 아니다(화면 축 M5)');
+    expect(T.backupCellText({ sealed: 1, known: 3, fail: 12, unknown: 0 })).toBe('12');
+    expect(T.backupCellText({ sealed: 1, known: 3, fail: 0, unknown: 2 })).toBe('0 · ? 2');
+    expect(T.backupCellText({ off: true })).toBe('꺼짐');
+    expect(T.backupCellText({ error: true })).toBe('오류');
+    // 앞 기간은 두 기간 다 확정 · 알았음 줄이 있을 때만 견준다(부분 합끼리 견주지 않는다 — F6)
+    const full = { prev: { full: true, known: true }, coverage: { full: true }, total: { kd: 3 } };
+    expect(T.prevComparable(full)).toBe(true);
+    expect(T.prevComparable({ ...full, prev: { full: false, known: true } })).toBe(false);
+    expect(T.prevComparable({ ...full, coverage: { full: false } })).toBe(false);
+    expect(T.prevComparable({ ...full, total: { kd: 0 } })).toBe(false);
     expect(T.coverageText({ sealed: 18, days: 31 })).toBe('적재 18 / 31일');
   });
   it('v3.59 백업 3절 — 법인 판정 칸은 백업 항목 행의 가장 나쁜 것(새 판정 없음)', () => {

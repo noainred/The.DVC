@@ -170,7 +170,7 @@ export function normalizeSettings(input, prev, { now = Date.now(), by = null, kn
       const o = {};
       if (v.enabled != null) o.enabled = v.enabled === true;
       if (v.kinds != null) {
-        if (!Array.isArray(v.kinds) || v.kinds.some((x) => !KINDS.includes(String(x)))) return { error: `점검 항목 ${key} 의 주기는 일일 · 주간 · 월간 · 분기 중에서 고릅니다.`, field: `items.${key}.kinds` };
+        if (!Array.isArray(v.kinds) || v.kinds.some((x) => typeof x !== 'string' || !KINDS.includes(x))) return { error: `점검 항목 ${key} 의 주기는 일일 · 주간 · 월간 · 분기 중에서 고릅니다.`, field: `items.${key}.kinds` };
         o.kinds = kindList(v.kinds, []);
       }
       if (Object.keys(o).length) items[key] = o;
@@ -229,7 +229,7 @@ export function normalizeSettings(input, prev, { now = Date.now(), by = null, kn
     const v = input.backup;
     if (typeof v !== 'object' || Array.isArray(v)) return { error: '백업 성공 · 실패 현황 설정 형식이 잘못됐습니다.', field: 'backup' };
     if (v.kinds != null) {
-      if (!Array.isArray(v.kinds) || v.kinds.some((x) => !KINDS.includes(String(x)))) return { error: '백업 현황을 실을 주기는 일일 · 주간 · 월간 · 분기 중에서 고릅니다.', field: 'backup.kinds' };
+      if (!Array.isArray(v.kinds) || v.kinds.some((x) => typeof x !== 'string' || !KINDS.includes(x))) return { error: '백업 현황을 실을 주기는 일일 · 주간 · 월간 · 분기 중에서 고릅니다.', field: 'backup.kinds' };
       out.backup.kinds = kindList(v.kinds, []);
     }
     if (v.products != null) {
@@ -439,6 +439,17 @@ export function scopedCountsFromMatrix(matrix, allowed) {
  *  · 법인 행이 없는 항목(fleet)은 범위 계정에서 뺀다 · 법인 행 항목은 보이는 행만 남기고 판정을 다시 합친다 · 남은 행이 없으면 뺀다.
  *  · 종합 · 개수 · 법인 목록도 다시 낸다. 조치 필요(actions)는 보이는 법인 것만.
  */
+/** 행 묶음 → '법인 3곳 — 이상 1곳 · 정상 2곳'(readers/common.js rowsBasis 와 같은 글 — 순수 · 의존을 늘리지 않으려고 여기 둔다). */
+function scopedRowsText(rows) {
+  const c = { crit: 0, warn: 0, unknown: 0, ok: 0 };
+  for (const r of rows) if (c[r.status] != null) c[r.status] += 1;
+  const parts = [];
+  if (c.crit) parts.push(`이상 ${c.crit}곳`);
+  if (c.warn) parts.push(`주의 ${c.warn}곳`);
+  if (c.unknown) parts.push(`확인 불가 ${c.unknown}곳`);
+  parts.push(`정상 ${c.ok}곳`);
+  return `법인 ${rows.length}곳 — ${parts.join(' · ')}`;
+}
 export function scopeCutDoc(doc, allowed) {
   if (!doc || !allowed) return doc;
   const items = [];
@@ -447,7 +458,11 @@ export function scopeCutDoc(doc, allowed) {
     const rows = it.rows.filter((r) => r && allowed.has(String(r.vc)));
     if (!rows.length) continue;
     const status = it.status === 'info' ? 'info' : (worstOf(rows.map((r) => r.status)) || 'unknown');
-    items.push({ ...it, rows, status, count: it.status === 'info' ? it.count : rows.reduce((a, r) => a + (numOrNull(r.count) ?? 0), 0), basis: rows.length < it.rows.length ? `${it.basis || ''}${it.basis ? ' · ' : ''}내 범위 ${rows.length}곳 기준` : it.basis });
+    const count = it.status === 'info' ? it.count : rows.reduce((a, r) => a + (numOrNull(r.count) ?? 0), 0);
+    if (rows.length === it.rows.length) { items.push({ ...it, rows, status, count }); continue; }
+    // 일부 법인만 보이면 전 법인 글(근거 · 값 · 세부 · 직전 판정)을 싣지 않는다 — 전 법인 분포 · 수가 범위 계정에 새던 기존 결함(2026-11-28 보안 축 E-1). 보이는 행으로 다시 낸다.
+    const prevSt = worstOf(rows.map((r) => r.prev).filter(Boolean));
+    items.push({ ...it, rows, status, count, basis: `내 범위 ${scopedRowsText(rows)}`, value: undefined, detail: undefined, prev: prevSt ? { status: prevSt } : null });
   }
   const corps = (doc.corps || []).filter((c) => allowed.has(String(c.vc)));
   return {

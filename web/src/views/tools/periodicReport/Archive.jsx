@@ -13,7 +13,14 @@ export default function Archive({ status, scoped, onOpen }) {
   const runs = useLoad(`/tools/periodic-report/runs?days=${days}&limit=200${kind ? `&kind=${kind}` : ''}`);
   const list = runs.data?.runs || [];
   const last = list[0] || null;
-  const lastBk = list.find((r) => r.kind === 'daily' && r.backup) || null;   // 최근 일일 회차의 백업(목록 안에서 — 주기 필터가 일일이 아니면 없을 수 있다)
+  const lastBk = list.find((r) => r.kind === 'daily' && r.backup) || null;   // 최근 일일 회차의 백업(목록 안에서 — 주기 필터가 일일이 아니면 없을 수 있다 · 꺼짐 · 오류 회차도 그대로 말한다)
+  const bkTitle = (b) => {
+    if (!b) return '이 회차에는 백업 절이 없습니다';
+    if (b.off) return '이 회차의 백업 절은 꺼져 있었습니다';
+    if (b.error) return '이 회차의 백업 절은 적재를 읽지 못했습니다';
+    if (!(Number(b.known) > 0)) return `확정된 결과가 없습니다(적재 ${numText(b.sealed)} / ${numText(b.days)}일${Number(b.unknown) > 0 ? ` · 확인 불가 ${numText(b.unknown)}` : ''})`;
+    return `끝난 백업 ${numText(b.ended)} · 확정 ${numText(b.sealed)} / ${numText(b.days)}일${Number(b.unknown) > 0 ? ` · ? = 확인 불가(법인 · 백업 · 날) ${numText(b.unknown)}` : ''}`;
+  };
   return (
     <>
       <div className="prr-cards">
@@ -41,9 +48,10 @@ export default function Archive({ status, scoped, onOpen }) {
       )}
       {lastBk && (
         <div className="prr-banner">
-          <b>백업 성공 · 실패</b> — 최근 일일 {lastBk.id}{Number(lastBk.backup.sealed) > 0
+          <b>백업 성공 · 실패</b> — 최근 일일 {lastBk.id}{Number(lastBk.backup.known) > 0
             ? ` · 끝난 백업 ${numText(lastBk.backup.ended)} · 실패 ${numText(lastBk.backup.fail)}${Number(lastBk.backup.unknown) > 0 ? ` · 확인 불가 ${numText(lastBk.backup.unknown)}(법인 · 백업 · 날)` : ''}`
-            : ' · 확정된 날이 없습니다(적재 전)'}{scoped ? ' · 내 범위(법인) 기준' : ''}
+            : lastBk.backup.off ? ' · 백업 절 꺼짐' : lastBk.backup.error ? ' · 적재를 읽지 못함'
+            : ` · 확정된 결과가 없습니다${Number(lastBk.backup.unknown) > 0 ? `(확인 불가 ${numText(lastBk.backup.unknown)})` : '(적재 전)'}`}{scoped ? ' · 내 범위(법인) 기준' : ''}
           {' '}<button type="button" className="prr-rowbtn" onClick={() => onOpen(lastBk.id)}>보고서 열기</button>
         </div>
       )}
@@ -77,7 +85,7 @@ export default function Archive({ status, scoped, onOpen }) {
                   <td data-sort={['crit', 'warn', 'unknown', 'ok'].indexOf(r.overall)}><StatusChip s={r.overall} /></td>
                   <td className="prr-num">{numText(r.counts?.ok)}</td><td className="prr-num">{numText(r.counts?.warn)}</td><td className="prr-num">{numText(r.counts?.crit)}</td>
                   <td className="prr-num">{numText(r.counts?.unknown)}</td><td className="prr-num">{numText(r.counts?.info)}</td>
-                  <td className="prr-num" data-sort={Number(r.backup?.sealed) > 0 ? r.backup.fail : null} title={r.backup ? (Number(r.backup.sealed) > 0 ? `끝난 백업 ${numText(r.backup.ended)} · 확정 ${numText(r.backup.sealed)} / ${numText(r.backup.days)}일${Number(r.backup.unknown) > 0 ? ` · ? = 확인 불가(법인 · 백업 · 날) ${numText(r.backup.unknown)}` : ''}` : '확정된 날이 없습니다(적재 전)') : '이 회차에는 백업 절이 없습니다'}>{backupCellText(r.backup)}</td>
+                  <td className="prr-num" data-sort={Number(r.backup?.known) > 0 ? r.backup.fail : null} title={bkTitle(r.backup)}>{backupCellText(r.backup)}</td>
                   <td className="prr-num">{r.corpsReported != null ? `${numText(r.corpsReported)}/${numText(r.corpsTotal)}` : numText(r.corpsTotal)}</td>
                   <td>{r.manual ? `수동 ${r.by || ''}` : '예약'}</td>
                   <td><button type="button" className="prr-rowbtn" onClick={() => onOpen(r.id)}>열기</button></td>

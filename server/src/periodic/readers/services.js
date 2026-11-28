@@ -27,11 +27,10 @@ export async function svcmon(ctx) {
 }
 
 /** 백업 항목 법인 행 글 — 지금 실패(연속) · 마지막 성공 7일 · 3일 넘음. */
-function backupText(f, { prefix = '', rpo = true, overdue = false } = {}) {
+function backupText(f, { prefix = '', rpo = true } = {}) {
   const rep = f.fails.filter((x) => x.streak >= 2).length;
   const parts = [`${prefix}지금 실패 ${n(f.fails.length)}${rep ? `(연속 ${n(rep)})` : ''}`];
   if (rpo) parts.push(`마지막 성공 7일 넘음 ${n(f.rpo7)}`, `3일 넘음 ${n(f.rpo3)}`);
-  if (overdue) parts.push(`RPO 넘김 ${n(f.overdue)}`, `마지막 성공 7일 넘음 ${n(f.rpo7)}`);
   if (f.rpoUnknown) parts.push(`마지막 성공 모름 ${n(f.rpoUnknown)}`);
   return parts.join(' · ');
 }
@@ -115,8 +114,9 @@ export async function unprotected(ctx) {
 }
 
 /**
- * VM 복제(백업식) 실패 · RPO(컨펌 ④) — 잡마다 실행 기록(위임 잡은 엣지 보고). 연속 2회 이상 실패 · 마지막 성공 7일 넘음은 이상 ·
- *   한 번 실패 · RPO 넘김(rpoOf — 기대 주기의 2배 + 1시간 · VM 백업 실패 메일과 같은 기준)은 주의. 켜진 잡이 없으면 해당 없음.
+ * VM 복제(백업식) 실패 · RPO(컨펌 ④ ⑤) — 잡마다 실행 기록(위임 잡은 지금 담당 엣지의 보고 — Detail 의 Clone 칸과 같은 판정).
+ *   연속 2회 이상 실패 · 마지막 성공 7일 넘음은 이상 · 한 번 실패 · 3일 넘음은 주의(다른 백업과 같은 기준 — 2026-11-28 사용자 결정 그대로) ·
+ *   담당 엣지가 지금 보고하지 않은 잡이 있으면(아는 실패 · RPO 가 없을 때) 확인 불가. 켜진 잡이 없으면 해당 없음 · 잡 원장을 못 읽으면 확인 불가.
  */
 export async function vmClone(ctx) {
   const { backupFacts } = await import('../backupService.js');
@@ -129,8 +129,8 @@ export async function vmClone(ctx) {
     const c = x.clone;
     if (!c) continue;
     jobs += c.jobs;
-    const st = backupJudge({ failNow: c.fails.length, failRepeat: repeatOf(c), rpo7: c.rpo7, rpo3: c.overdue });
-    rows.push(vcRow(vc, st, c.fails.length + c.overdue, `잡 ${n(c.jobs)} · ${backupText(c, { rpo: false, overdue: true })}`));
+    const st = backupJudge({ failNow: c.fails.length, failRepeat: repeatOf(c), rpo7: c.rpo7, rpo3: c.rpo3, unknown: c.unknown });
+    rows.push(vcRow(vc, st, c.fails.length + c.rpo7, `잡 ${n(c.jobs)} · ${backupText(c)}${c.unknownJobs ? ` · 결과 모름 ${n(c.unknownJobs)}(담당 엣지 보고 없음)` : ''}`));
   }
   if (!jobs) return { na: true, basis: '켜진 VM 복제 잡이 없습니다' };
   return { rows, basis: `잡 ${n(jobs)}개 · ${rowsBasis(rows)}` };

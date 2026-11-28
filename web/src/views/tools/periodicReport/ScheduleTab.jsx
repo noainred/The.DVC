@@ -75,6 +75,11 @@ export default function ScheduleTab({ status: given = null, isAdmin = hasRole('a
   const db = status?.db;
   const bks = status?.backup || null;   // 적재 상태(서버 ledgerStatus — 관측 주기 · 보관 상한도 서버 값)
   const bkSet = (patch) => setF({ ...f, backup: { ...f.backup, ...patch } });
+  // 일일 시각이 '날 끝 + 확정 지연' 보다 이르면 전날이 아직 확정 전이라 3절이 늘 '적재 0 / 1일' 이다(판정 축 F11 · 지연 시간은 서버 값)
+  const minOf = (hhmm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+  const dailyMin = minOf(f.kinds?.daily?.time);
+  const lagMin = Number.isFinite(Number(bks?.sealLagMs)) ? Math.ceil(Number(bks.sealLagMs) / 60_000) + Math.ceil((Number(bks.captureMs) || 0) / 60_000) : null;
+  const dailyTooEarly = !!f.kinds?.daily?.enabled && f.backup.kinds.includes('daily') && f.backup.ledger && dailyMin != null && lagMin != null && dailyMin < lagMin;
   return (
     <div className="prr-sched">
       {standalone && <div className="prr-muted">특수 기능 › 리포트 · 점검 › 정기 점검 보고 의 ‘일정 · 전달’ 과 같은 화면입니다 — 보관함 · 보고서는 <a href="#/tools/periodic-report">그 도구</a>에서 봅니다.</div>}
@@ -139,6 +144,7 @@ export default function ScheduleTab({ status: given = null, isAdmin = hasRole('a
           <div className="prr-panel">
             <div className="prr-card-h"><b>백업 성공 · 실패 현황(보고서 3절)</b><label className="prr-check"><input type="checkbox" checked={f.backup.ledger} onChange={(e) => bkSet({ ledger: e.target.checked })} disabled={!canSave} />하루 치 적재</label></div>
             <div className="prr-lab">실을 주기</div>
+            {dailyTooEarly && <div className="prr-banner amber">일일 시각({f.kinds.daily.time})이 전날을 확정하는 시각보다 이릅니다 — 전날이 아직 확정 전이라 일일 3절이 늘 ‘적재 0 / 1일’ 이 됩니다. 일일 시각을 {String(Math.floor(lagMin / 60)).padStart(2, '0')}:{String(lagMin % 60).padStart(2, '0')} 뒤로 두세요.</div>}
             <div className="prr-checks">{KINDS.map((k) => <label key={k} className="prr-check"><input type="checkbox" checked={f.backup.kinds.includes(k)} onChange={() => bkSet({ kinds: toggleIn(f.backup.kinds, k) })} disabled={!canSave} />{KIND_LABEL[k]}</label>)}</div>
             <div className="prr-lab">실을 백업</div>
             <div className="prr-checks">{BK_PRODUCTS.map((p) => <label key={p} className="prr-check"><input type="checkbox" checked={!!f.backup.products[p]} onChange={(e) => bkSet({ products: { ...f.backup.products, [p]: e.target.checked } })} disabled={!canSave} />{BK_PRODUCT_LABEL[p]}</label>)}</div>
@@ -152,7 +158,7 @@ export default function ScheduleTab({ status: given = null, isAdmin = hasRole('a
                 {bks.db ? ` · 적재 시작 ${bks.db.firstDayAt ? kstText(bks.db.firstDayAt, { withYear: true }).slice(0, 10) : '없음'} · 확정 줄 ${numText(bks.db.days)} · 관측 줄 ${numText(bks.db.obs)}` : ' · 보관 DB 를 열지 못했습니다'}
               </> : '—'}
             </div>
-            <div className="prr-note">적재는 포탈이 이미 저장한 결과(Veeam 엣지 push · Bareos 원장 · VM 백업 잡 기록)만 읽습니다 — Veeam · Director · 법인 엣지를 새로 부르지 않습니다. 끈 동안의 날은 ‘적재 전’ 으로 남고 소급해 채우지 않습니다. 백업 고르기는 3절에만 적용됩니다 — 항목 판정은 ‘점검 항목’ 에서 켜고 끕니다.</div>
+            <div className="prr-note">적재는 포탈이 이미 저장한 결과(Veeam 엣지 push · Bareos 원장 · VM 백업 잡 기록)만 읽습니다 — Veeam · Director · 법인 엣지를 새로 부르지 않습니다. 처음 켜기 전 날은 ‘적재 전’ 이고 소급해 채우지 않습니다. 끄거나 포탈이 멈춘 동안의 날은, 다시 켰을 때 원본에 그날 실행 기록이 다 남아 있으면 채우고(Bareos · VM 백업), 다 봤다고 말할 수 없으면 ‘확인 불가’ 로 둡니다(Veeam 은 VM 마다 마지막 결과만 있어 대개 확인 불가). 백업 고르기는 3절에만 적용됩니다 — 항목 판정은 ‘점검 항목’ 에서 켜고 끕니다.</div>
           </div>
           {canSave && <div className="prr-bar"><button type="button" className="prr-btn primary" onClick={save} disabled={!!busy}>{busy === 'save' ? '저장하는 중…' : '저장'}</button><span className="prr-muted">저장은 감사 로그에 남습니다.</span></div>}
           <div className="prr-panel">

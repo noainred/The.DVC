@@ -91,7 +91,7 @@ export const ITEMS = Object.freeze([
   it({ key: 'unprotected', axis: 'service', label: '미보호 VM(백업 공백)', kinds: [W, M], tool: 'unprotected-vms',
     rule: '미보호 VM 리포트 판정 그대로 — 이벤트를 모으지 않는 vCenter(엣지 법인)는 확인 불가', source: 'vCenter 이벤트 DB(직접 수집분만)', fix: '엣지 법인은 2단계(엣지 요약 push) 전까지 확인 불가입니다 — 특수 기능 › 미보호 VM 에서 연합 조회로 확인하세요' }),
   it({ key: 'vm-clone', axis: 'service', label: 'VM 복제(백업식) 실패 · RPO', kinds: [D, W], tool: 'vm-clone',
-    rule: '연속 2회 이상 실패 · 마지막 성공 7일 넘음은 이상 · 한 번 실패 · 마지막 성공이 기대 주기의 2배 + 1시간을 넘음(VM 백업 실패 메일과 같은 기준)은 주의', source: 'VM 복제 잡 기록(위임 잡은 엣지 보고)' }),
+    rule: '연속 2회 이상 실패 · 마지막 성공 7일 넘음은 이상 · 한 번 실패 · 마지막 성공 3일 넘음은 주의(다른 백업과 같은 기준) · 위임 잡을 담당 엣지가 지금 보고하지 않으면 확인 불가', source: 'VM 복제 잡 기록(위임 잡은 지금 담당 엣지의 보고)' }),
   it({ key: 'link-check', axis: 'service', label: '중앙 ↔ 엣지 통신 점검', kinds: [D, W, M], tool: 'link-check',
     rule: '통신 점검 판정 그대로(실패 단계) · 기능이 꺼져 있으면 확인 불가', source: '통신 점검 DB', fix: '설정 › 통신 점검을 켜면 다음 회차부터 실립니다' }),
   it({ key: 'edge-fresh', axis: 'service', label: '엣지 보고 신선도', kinds: [D, W, M], tool: 'portal-check',

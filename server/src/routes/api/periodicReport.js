@@ -55,7 +55,7 @@ function statusView(st, admin) {
 export function backupView(bk, admin) {
   if (!bk || bk.off || bk.error) return bk || null;
   const v = admin ? bk : publicBackup(bk);
-  return { ...v, summary: backupSummary(v), corpRows: (v.corps || []).map((c) => backupCorpRow(c, v.products)) };
+  return { ...v, summary: backupSummary(v), corpRows: (v.corps || []).map((c) => backupCorpRow(c, v.products, v.nowOk)) };
 }
 /** 회차 문서를 요청자 범위로 자르고 화면이 쓸 묶음(조치 · 확인 불가 · 법인 표 · 3절 합계)을 붙인다. */
 function docFor(req, doc) {
@@ -164,10 +164,13 @@ export function registerPeriodicReport(api) {
       if (bk && !bk.off && !bk.error) {
         const nOr = (v) => (v == null ? '' : v);
         const kq = (c, v) => (Number(c?.kd) > 0 ? v : '');   // 확정된 날이 없는 법인의 수는 빈칸(0 을 지어내지 않는다)
-        add('백업 법인별', [['법인', 20], ['대상', 10], ['끝난 백업', 12], ['성공', 10], ['경고', 10], ['실패', 10], ['성공률(%)', 10], ['실행 없음', 10], ['확인 불가(날)', 12], ['실패한 날', 10], ['되풀이 VM', 10], ['지금 실패', 10]],
-          (bk.corpRows || []).map((c) => [name(c.vc), kq(c, c.t), kq(c, c.e), kq(c, c.ok), kq(c, c.w), kq(c, c.f), nOr(c.rate), kq(c, c.n), c.unknownDays, c.failDays, c.repeatVms, c.failNow]));
+        add('백업 법인별', [['법인', 20], ['대상', 10], ['끝난 백업', 12], ['성공', 10], ['경고', 10], ['실패', 10], ['성공률(%)', 10], ['실행 없음', 10], ['확인 불가(백업 · 날)', 14], ['실패한 날', 10], ['되풀이 VM', 10], ['지금 실패', 10], ['앞 기간 실패', 12]],
+          (bk.corpRows || []).map((c) => [name(c.vc), kq(c, c.t), kq(c, c.e), kq(c, c.ok), kq(c, c.w), kq(c, c.f), nOr(c.rate), kq(c, c.n), c.unknownDays, c.failDays, c.repeatVms, nOr(c.failNow),
+            bk.summary?.prev?.full && c.prev?.kd > 0 ? c.prev.f : '']));
         add('백업 실패', [['법인', 18], ['백업', 14], ['VM', 30], ['실패한 날', 10], ['마지막 실패', 18], ['연속 실패(회)', 12], ['마지막 성공', 18], ['사유', 80]],
-          (bk.fails || []).map((x) => [name(x.vc), PRODUCT_LABEL[x.product] || x.product, x.name || x.vm, x.failDays, stamp(x.endedAt), nOr(x.streak), stamp(x.lastOkAt), x.reason || '']));
+          [...(bk.fails || []).map((x) => [name(x.vc), PRODUCT_LABEL[x.product] || x.product, x.name || x.vm, x.failDays, stamp(x.endedAt), nOr(x.streak), stamp(x.lastOkAt), x.reason || '']),
+            // 문서 상한으로 잘렸으면 그 사실을 마지막 줄로 말한다(조용한 상한 금지)
+            ...((bk.failsTotal ?? 0) > (bk.fails || []).length ? [[`… 상위 ${(bk.fails || []).length}건만 실었습니다(전체 ${bk.failsTotal}건)`, '', '', '', '', '', '', '']] : [])]);
       }
       const buf = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

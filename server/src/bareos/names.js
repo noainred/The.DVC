@@ -150,6 +150,9 @@ export function statusOf(code) {
   return 'unknown';
 }
 /** 끝난 상태인가(폴러가 pending 을 내릴지). */
+/** 원장 대조가 Director 에서 받는 최근 실행 창(일) — `list jobs days=N`. 이 창보다 오래 끊겼다 돌아오면 그 앞 실행은 원장에 들어오지 않는다
+ *  (정기 점검 보고 백업 적재가 '그날을 다 봤다' 를 이 창으로 가른다 — periodic/backupLedger.js BAREOS_WINDOW_MS). */
+export const RECONCILE_RECENT_DAYS = 2;
 export const isFinalStatus = (code) => ['ok', 'warning', 'error', 'canceled'].includes(statusOf(code));
 
 /**

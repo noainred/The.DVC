@@ -100,11 +100,16 @@ export function deltaText(cur, prev, known = true) {
 }
 /** 확정 범위 한 줄 — '적재 18 / 31일'. 다 확정됐으면 '적재 7 / 7일'. */
 export const coverageText = (cov) => (cov ? `적재 ${numText(cov.sealed)} / ${numText(cov.days)}일` : '');
-/** 보관함 '백업 실패' 칸 — 확정된 날이 없으면 '—'(적재 전) · 확인 불가가 있으면 '· ? n' 을 덧붙인다. */
+/** 보관함 '백업 실패' 칸 — 알았음 줄이 없으면(적재 전 · 전부 확인 불가) '—' · 확인 불가가 있으면 '· ? n' · 꺼짐 · 오류는 그 글자. */
 export function backupCellText(b) {
-  if (!b || !(Number(b.sealed) > 0)) return '—';
+  if (!b) return '—';
+  if (b.off) return '꺼짐';
+  if (b.error) return '오류';
+  if (!(Number(b.known) > 0)) return Number(b.unknown) > 0 ? `— · ? ${numText(b.unknown)}` : '—';
   return `${numText(b.fail)}${Number(b.unknown) > 0 ? ` · ? ${numText(b.unknown)}` : ''}`;
 }
+/** 앞 기간과 견줄 수 있는가 — 서버 backupLedger.js prevComparable 과 같은 조건(두 기간 다 확정 · 알았음 줄 있음 — 부분 합끼리 견주지 않는다). */
+export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0);
 /** 백업 항목들(run.items)에서 법인(vc) 하나의 가장 나쁜 판정 — 항목이 없거나 그 법인 행이 없으면 null. */
 export function backupCorpStatus(items, vc, products = BK_PRODUCTS) {
   const rank = { ok: 0, unknown: 1, warn: 2, crit: 3 };

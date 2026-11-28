@@ -40,7 +40,8 @@ export default function ReportView({ id = '', run: given = null, previewId = nul
   const deliveries = ld.data?.deliveries || [];
   if (!given && ld.err) return <ErrorBox error={ld.err} />;
   if (!run) return <div className="prr-muted">{ld.busy ? '보고서를 불러오는 중…' : '보고서를 찾지 못했습니다.'}</div>;
-  const corpName = (vc) => { const c = (run.corps || []).find((x) => x.vc === vc); return vc == null ? '법인 미지정' : corpLabel(c) || vc; };
+  // 문서에 없는 vCenter(기간 중 지운 · 꺼진 vCenter — 백업 적재 줄에 남는다)는 id 그대로(corpLabel(undefined) 는 '—' 라 || 로 떨어지지 않았다 — 화면 축 M1)
+  const corpName = (vc) => { const c = (run.corps || []).find((x) => x.vc === vc); return vc == null ? '법인 미지정' : c ? corpLabel(c) : String(vc); };
   const byAxis = itemsByAxis(run.items);
   const off = run.backup ? 1 : 0;   // 3절(백업)이 있으면 뒤 절 번호가 하나씩 밀린다
   const keep = async () => {
@@ -105,7 +106,7 @@ export default function ReportView({ id = '', run: given = null, previewId = nul
         <div className="prr-bar"><button type="button" className="prr-rowbtn" onClick={() => setAllActs((x) => !x)} aria-expanded={allActs}>{allActs ? '처음 30건만 보기' : `전부 보기(${numText(run.actions.length)}건)`}</button><span className="prr-muted">제목을 누르면 정렬한 뒤 자릅니다.</span></div>
       )}
 
-      {run.backup && <BackupSection bk={run.backup} items={run.items} corpName={corpName} no={3} />}
+      {run.backup && <BackupSection bk={run.backup} items={run.items} corpName={corpName} no={3} scoped={!!run.scoped} />}
 
       <h3 className="prr-h">{3 + off}. 법인별 현황 <span className="prr-muted">칸은 그 축에서 가장 나쁜 판정</span></h3>
       <div className="prr-tablewrap">
