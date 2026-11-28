@@ -78,7 +78,7 @@ async function cloneSources(now) {
       const r = known ? rpoOf(job, now) : null;
       const ats = h.map((x) => Number(x?.at)).filter((t) => Number.isFinite(t) && t > 0);
       out.push({
-        vc, key: `job:${j.id}`, name: j.vmName, at, known, target: known && r != null, runs,
+        vc, key: `job:${j.id}`, name: j.vmName, at, known, target: known && r != null, runs, src: tg.where === 'edge' ? `edge:${String(tg.agent || '').toLowerCase()}` : tg.where,
         full: h.length >= CLONE_HISTORY_KEEP, oldestAt: ats.length ? Math.min(...ats) : null,
         rpo: r, lastOkAt: known ? lastSuccessAt(job) : null, createdAt: Number(j.createdAt) > 0 ? Number(j.createdAt) : null, enabled: def.enabled && !j.suspended,
       });
@@ -126,7 +126,7 @@ export async function ledgerStatus() {
  * 백업 항목 판정 자료(회차마다 한 번 — ctx.cache). 공급자를 지금 부르고(저장된 결과), 연속 실패는 적재 원본과 합친다.
  *   provider.ok=false 면 Veeam · Bareos 는 확인 불가(리더가 사유를 싣는다) · cloneOk=false 면 복제 잡 원장을 못 읽음.
  *   nowUnknown = 지금 결과를 다 읽지 못한 법인(Veeam 일부 · Director 결과 모름 · 복제 보고 없음) — 3절 '지금 실패' 는 그 법인을 부분 합으로 세지 않는다.
- * @returns {Promise<{provider:{ok:boolean, reason?:string}, cloneOk:boolean, at:number, vcs:Map<string,object>, now:Array, nowUnknown:Set<string>}>}
+ * @returns {Promise<{provider:{ok:boolean, reason?:string}, cloneOk:boolean, at:number, vcs:Map<string,object>, now:Array, nowUnknown:Set<string>}>} nowUnknown = `${vc}|${product}`
  */
 export async function backupFacts(ctx) {
   if (ctx?.cache?.has('backup-facts')) return ctx.cache.get('backup-facts');
@@ -158,7 +158,7 @@ export async function backupFacts(ctx) {
           if (age == null) f.rpoUnknown += 1; else { if (age > 3 * DAY) f.rpo3 += 1; if (age > 7 * DAY) f.rpo7 += 1; }
           if (veeamStateOf(m.lr) === 'fail' && Number.isFinite(m.lrt)) { f.fails.push({ vm: String(m.id), name: m.name, endedAt: m.lrt, lastOkAt: Number.isFinite(m.lb) ? m.lb : null }); failKeys.push(`veeam|${m.id}`); }
         }
-        if (f.unknown) nowUnknown.add(String(vc.id));
+        if (f.unknown) nowUnknown.add(`${vc.id}|veeam`);
         x.veeam = f;
       }
       const b = vc.bareos;
@@ -166,7 +166,7 @@ export async function backupFacts(ctx) {
         // Director 결과를 모르면(인증 정지 · 조회 실패 · 잘린 조회) 원장의 옛 실패를 '지금 실패' 로 세지 않는다 — Detail(backupVmRows)과 같은 판정(판정 축 F4)
         const known = b.resultsKnown === true && b.partial !== true;
         const f = { known, state: b.state, jobs: 0, fails: [], rpo3: 0, rpo7: 0, rpoUnknown: 0 };
-        if (!known) nowUnknown.add(String(vc.id));
+        if (!known) nowUnknown.add(`${vc.id}|bareos`);
         for (const j of b.jobs || []) {
           if (j.enabled === false || j.missing) continue;
           f.jobs += 1;
@@ -187,7 +187,7 @@ export async function backupFacts(ctx) {
       const f = x.clone;
       f.jobs += 1;
       // 담당 엣지가 지금 보고하지 않은 위임 잡 — 결과 · RPO 를 모른다(만든 시각부터 세어 '7일 넘음' 을 지어내지 않는다 — 엣지 축 E1)
-      if (!c.known) { f.unknownJobs += 1; f.unknown = true; nowUnknown.add(c.vc); continue; }
+      if (!c.known) { f.unknownJobs += 1; f.unknown = true; nowUnknown.add(`${c.vc}|clone`); continue; }
       const runs = (c.runs || []).map((h) => ({ endedAt: Number(h.at), state: cloneStateOf(h) })).filter((r) => r.state && Number.isFinite(r.endedAt));
       const streak = failStreak(runs);
       if (streak > 0) f.fails.push({ vm: c.key, name: c.name, streak, endedAt: runs.sort((a, d) => d.endedAt - a.endedAt)[0]?.endedAt ?? null, lastOkAt: c.lastOkAt ?? null });
@@ -199,7 +199,8 @@ export async function backupFacts(ctx) {
     const facts = await bs.vmFacts(failKeys);
     for (const [id, x] of vcs) {
       for (const f of x.veeam?.fails || []) {
-        const runs = [...(facts.get(`veeam|${f.vm}`)?.runs || [])];
+        // 마지막 성공(공급자 lb) 뒤의 실행만 — 관측이 빈 동안의 성공은 원본에 없어 그 앞 실패와 이어 세면 '연속' 이 부푼다(반증 F1)
+        const runs = (facts.get(`veeam|${f.vm}`)?.runs || []).filter((r) => f.lastOkAt == null || r.endedAt > f.lastOkAt);
         if (!runs.some((r) => r.endedAt === f.endedAt)) runs.push({ endedAt: f.endedAt, state: 'fail' });
         f.streak = failStreak(runs);
         nowList.push({ vc: id, product: 'veeam', vm: f.vm, name: f.name });
@@ -242,6 +243,8 @@ export async function backupSectionFor({ from, to, now = Date.now(), settings, c
       if (cur && Number.isFinite(f.lastOkAt) && (cur.lastOkAt == null || f.lastOkAt > cur.lastOkAt)) cur.lastOkAt = f.lastOkAt;
     }
   }
+  // 연속 실패는 마지막 성공 뒤의 실행만(관측이 빈 동안의 성공을 원본이 모른다 — 반증 F1)
+  for (const cur of vmFacts.values()) if (cur.lastOkAt != null) cur.streak = failStreak((cur.runs || []).filter((r) => r.endedAt > cur.lastOkAt));
   let strips = null;
   if (len > 1 && len <= 7) {
     const byVm = new Map();
@@ -256,3 +259,4 @@ export async function backupSectionFor({ from, to, now = Date.now(), settings, c
 }
 
 export function _resetBackupServiceForTest() { _busy = false; _last = null; _known.clear(); }
+export const _cloneSourcesForTest = cloneSources;

@@ -2,6 +2,7 @@
 // 조회 전용·로그인 사용자(트리를 볼 수 있는 계정이면 배지도 본다 — 어떤 VM 이 백업 대상인지·작업 이름뿐, 계정 없음 · 오류 원문(주소)은 관리자만).
 // scope: id 를 직접 받는 단건 라우트라 범위 밖 vCenter 는 404(존재 은닉 — server/CLAUDE.md). 체크박스를 켰을 때만 60초 폴링한다.
 import { setPeriodicProvider, SYSTEM_REQ } from '../../periodic/providers.js';   // v3.32 정기 점검 보고 공급자
+import { bareosJobView } from '../../periodic/backupLedger.js';   // v3.59 백업 적재 — Bareos 관측용 잡(순수)
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { serversForVcenter, registryLoadError, listServers } from '../../veeam/registry.js';
@@ -35,7 +36,7 @@ import { renderVmListWorkbook, XLSX_MIME } from '../../veeam/vmListXlsx.js';   /
 import { setVeeamVmViewProvider } from '../../veeam/vmViewProvider.js';
 import { cloneStateByVm } from '../../vmclone/jobState.js';   // v2.803 백업 현황 Detail 'Clone' 칸(복제 잡 마지막 실행 — 실행 노드 기준)
 import { jobsRev } from '../../vmclone/store.js';
-import { jobDigests as bareosJobDigests, registryLoadError as bareosRegistryLoadError, registryRev as bareosRegistryRev, RECENT_RUNS_VIEW } from '../../bareos/registry.js';   // v2.828 Detail 'Bareos' 칸
+import { jobDigests as bareosJobDigests, registryLoadError as bareosRegistryLoadError, registryRev as bareosRegistryRev } from '../../bareos/registry.js';   // v2.828 Detail 'Bareos' 칸
 import { bareosVmView } from '../../bareos/vmView.js';   // v2.801 VM 전체 정보 내보내기의 Veeam 묶음(같은 vcBackup → vmBackupView)
 import { listGroups as bareosGroups, groupsLoadError as bareosGroupsLoadError, groupsRev as bareosGroupsRev } from '../../bareos/groups.js';   // v2.835 Detail '다음 예정'(Bareos 그룹 예약)
 import { nextSlot as bareosNextSlot } from '../../bareos/groupSchedule.js';
@@ -1315,22 +1316,8 @@ async function backupObserveData(snap) {
     const bmsg = vr.ledger ? new Map(bareosRows(vr.ledger, null, { id: vc.id, name: vc.name || vc.id }, 0).map((x) => [String(x.jobid), x.msg])) : new Map();
     const bareos = {
       mapped: !!dir && dir.state !== 'unset', state: dir?.state || 'unset', resultsKnown: !!dir?.resultsKnown && !!vr.ledger, partial: !!dir?.partial, at: dir?.at ?? null,
-      jobs: vr.ledger ? [...vr.ledger.values()].filter((j) => !j.demo || bareosIsDemoActive()).map((j) => {
-        // 끝난 실행은 lastRun 과 recentRuns 양쪽에 같은 jobid 로 들어 있다 — 한 번만(연속 실패를 두 번 세지 않게 · 판정 축 반증 F1)
-        const recent = Array.isArray(j.recentRuns) ? j.recentRuns : [];
-        const seen = new Set(); const runs = [];
-        for (const r of [j.lastRun, ...recent]) {
-          if (!r) continue;
-          const k = r.jobid != null ? String(r.jobid) : `t${r.endedAt ?? ''}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          runs.push({ jobid: r.jobid ?? null, status: r.status, startedAt: r.startedAt ?? null, endedAt: r.endedAt ?? null, msg: bmsg.get(String(r.jobid)) || '' });
-        }
-        const ends = recent.map((r) => Number(r?.endedAt)).filter((t) => Number.isFinite(t) && t > 0);
-        return { vmId: j.vmId, vmName: j.vmName, enabled: j.enabled !== false, missing: !!j.missingInDirector, lastOkAt: j.lastOkAt ?? null, createdAt: j.createdAt ?? null, runs,
-          // v3.59 '그날을 다 봤다' 근거 — 보기가 가득 찼으면(RECENT_RUNS_VIEW) 가장 오래된 끝난 실행 앞은 밀려났을 수 있다 · 기록을 새로 시작한 시각 앞은 없다
-          full: recent.length >= RECENT_RUNS_VIEW, oldestAt: ends.length ? Math.min(...ends) : null, epoch: j.runsEpoch ?? null };
-      }) : [],
+      // v3.59 관측용 잡 — 판정 · 중복 제거 · 완결 근거는 backupLedger.bareosJobView 하나(시험이 실제 보기 모양으로 부른다)
+      jobs: vr.ledger ? [...vr.ledger.values()].filter((j) => !j.demo || bareosIsDemoActive()).map((j) => bareosJobView(j, (id) => bmsg.get(String(id)))) : [],
     };
     vcs.push({ id: vc.id, name: vc.name || vc.id, veeam, bareos });
   }

@@ -28,7 +28,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { makeLoadError } from '../util/registryCore.js';
-import { isFinalStatus, statusOf } from './names.js';
+import { isFinalStatus, statusOf, RECENT_RUNS_VIEW } from './names.js';
 import { cancelTracked } from './cancelState.js';
 import { DEFAULT_DIRECTOR_ID } from './settings.js';
 
@@ -58,8 +58,7 @@ export function trimRetired(list) {
   return arr.filter((_, i) => keep[i]).slice(-RETIRED_TOTAL_MAX);
 }
 export const FINISHED_KEEP = 10;
-/** jobDigests 가 싣는 끝난 실행 수(최근 N건 — 이 수가 차 있으면 그보다 앞 실행은 보기에서 밀려났다 · 정기 점검 보고 백업 적재가 본다). */
-export const RECENT_RUNS_VIEW = 5;
+export { RECENT_RUNS_VIEW };   // 값은 names.js(순수 — 정기 점검 보고 백업 적재가 원장을 싣지 않고 쓴다)
 
 let _db = null;
 const _loadErr = makeLoadError({ label: 'Bareos 백업 대상 원장', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)

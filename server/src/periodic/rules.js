@@ -459,8 +459,8 @@ export function scopeCutDoc(doc, allowed) {
     if (!rows.length) continue;
     const status = it.status === 'info' ? 'info' : (worstOf(rows.map((r) => r.status)) || 'unknown');
     const count = it.status === 'info' ? it.count : rows.reduce((a, r) => a + (numOrNull(r.count) ?? 0), 0);
-    if (rows.length === it.rows.length) { items.push({ ...it, rows, status, count }); continue; }
-    // 일부 법인만 보이면 전 법인 글(근거 · 값 · 세부 · 직전 판정)을 싣지 않는다 — 전 법인 분포 · 수가 범위 계정에 새던 기존 결함(2026-11-28 보안 축 E-1). 보이는 행으로 다시 낸다.
+    // 범위 판본에는 전 법인 글(근거 · 값 · 세부 · 직전 판정)을 싣지 않는다 — 행이 전부 범위 안이어도 근거가 전 법인 수(예 '점검 서버 412대')일 수 있다
+    //   (2026-11-28 보안 축 E-1 · 반증 F8 — 기존 결함). 보이는 행으로 다시 낸다.
     const prevSt = worstOf(rows.map((r) => r.prev).filter(Boolean));
     items.push({ ...it, rows, status, count, basis: `내 범위 ${scopedRowsText(rows)}`, value: undefined, detail: undefined, prev: prevSt ? { status: prevSt } : null });
   }

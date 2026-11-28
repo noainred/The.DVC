@@ -88,7 +88,8 @@ export function backupParts(bk) {
 function prevText(s, key = 'f') {
   if (!s.prev.days) return '';
   if (prevComparable(s)) return `(앞 기간 ${num(s.prev[key])})`;
-  return s.prev.sealed ? `(앞 기간은 적재 ${num(s.prev.sealed)} / ${num(s.prev.days)}일이라 견주지 않음)` : '';
+  if (!s.prev.full) return s.prev.sealed ? `(앞 기간은 적재 ${num(s.prev.sealed)} / ${num(s.prev.days)}일이라 견주지 않음)` : '';
+  return (s.prev.ud > 0 || s.total.ud > 0) ? '(확인 불가가 있어 앞 기간과 견주지 않음)' : '';
 }
 const failNowText = (s) => (s.failNow == null ? ' · 지금 실패 상태 모름(결과를 읽지 못함)' : `${s.failNow ? ` · 지금 실패 상태 ${num(s.failNow)}대` : ''}${s.nowPartial ? `(법인 ${num(s.nowPartial)}곳은 지금 결과를 못 읽어 뺌)` : ''}`);
 /** 3절 한 줄 요약(메일). 실을 것이 없으면 ''. */
@@ -122,7 +123,7 @@ function backupHtml(bk, name, no) {
     + `<span class="cnt">경고 <b>${kn(t, t.w)}</b></span><span class="cnt">실패 <b>${kn(t, t.f)}</b>${cmp ? ` (앞 기간 ${num(s.prev.f)})` : ''}</span><span class="cnt">실행 없음 <b>${kn(t, t.n)}</b></span>`
     + `<span class="cnt">지금 실패 상태 <b>${s.failNow == null ? '—' : num(s.failNow)}</b>대${s.nowPartial ? `(법인 ${num(s.nowPartial)}곳 뺌)` : ''}</span><span class="cnt">확인 불가 <b>${num(t.ud)}</b>(법인 · 백업 · 날)</span></p>`
     + `<div class="note">적재 ${num(cov.sealed)} / ${num(cov.days)}일${cov.sealed < cov.days ? ' — 적재 전 · 아직 확정하지 않은 날은 성공으로도 실패로도 세지 않았습니다' : ''}${s.pending ? ` · 확정 대기 ${num(s.pending)}(그 법인을 날 끝 뒤 아직 보지 못함 — 확인 불가에 넣음)` : ''}.`
-    + `${s.prev.days && !cmp ? ` 앞 기간은 적재 ${num(s.prev.sealed)} / ${num(s.prev.days)}일이라 수를 견주지 않았습니다.` : ''} ‘실행 없음’ 은 그날 대상인데 끝난 실행이 없는 VM 입니다(주 1회 잡이면 정상 — RPO 가 판정합니다).</div>`;
+    + `${s.prev.days && !cmp ? (s.prev.full ? ' 확인 불가가 있어 앞 기간과 수를 견주지 않았습니다.' : ` 앞 기간은 적재 ${num(s.prev.sealed)} / ${num(s.prev.days)}일이라 수를 견주지 않았습니다.`) : ''} ‘실행 없음’ 은 그날 대상인데 끝난 실행이 없는 VM 입니다(주 1회 잡이면 정상 — RPO 가 판정합니다).</div>`;
   const prod = `<table><thead><tr><th>백업</th><th>대상</th><th>끝난 백업</th><th>성공</th><th>경고</th><th>실패</th><th>성공률</th><th>실행 없음</th><th>확인 불가(법인 · 백업 · 날)</th></tr></thead><tbody>${(bk.products || []).map((p) => {
     const x = s.products[p] || {};
     return `<tr><td>${esc(PRODUCT_LABEL[p] || p)}</td><td class="n">${kn(x, x.t)}</td><td class="n">${kn(x, x.e)}</td><td class="n">${kn(x, x.ok)}</td><td class="n">${p === 'clone' ? '—' : kn(x, x.w)}</td><td class="n">${kn(x, x.f)}</td><td class="n">${pct(x.rate)}</td><td class="n">${kn(x, x.n)}</td><td class="n">${num(x.ud)}</td></tr>`;

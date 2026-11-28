@@ -20,7 +20,7 @@
  *     Bareos 는 원장이 Director 에서 최근 RECONCILE_RECENT_DAYS 일 실행만 받으므로, 틈 시작이 이번 관측보다 BAREOS_WINDOW_MS 넘게 앞이면 lossy.
  *   · 날이 끝난 뒤 한 번 더 신선하게 봤어야 한다(그날 끝까지 덮는 틈) · 적재를 처음 시작한 날보다 앞의 날은 확정하지 않는다('적재 전' — 소급하지 않는다).
  */
-import { statusOf, RECONCILE_RECENT_DAYS } from '../bareos/names.js';
+import { statusOf, RECONCILE_RECENT_DAYS, RECENT_RUNS_VIEW } from '../bareos/names.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 export const PRODUCTS = Object.freeze(['veeam', 'bareos', 'clone']);
@@ -85,6 +85,29 @@ export function jobHorizon({ full = false, oldestAt = null, epoch = null } = {})
 }
 
 /**
+ * Bareos 원장 보기(registry.js jobDigests 한 줄) → 관측용 잡(순수 — 공급자 routes/api/veeam.js backupObserveData 가 쓴다 · 시험이 실제 보기 모양으로 부른다).
+ *   끝난 실행은 lastRun 과 recentRuns 양쪽에 같은 jobid 로 들어 있다 — 한 번만(연속 실패를 두 번 세지 않게 · 판정 축 F1).
+ *   완결 근거: 보기가 가득 찼으면(RECENT_RUNS_VIEW) 가장 오래된 끝난 실행 앞은 밀려났을 수 있다 · 기록을 새로 시작한 시각(runsEpoch) 앞은 없다.
+ * @param {object} j jobDigests 한 줄
+ * @param {(jobid:any)=>string} [msgOf] jobid → 첫 오류 줄
+ */
+export function bareosJobView(j, msgOf = () => '') {
+  const recent = Array.isArray(j?.recentRuns) ? j.recentRuns : [];
+  const seen = new Set(); const runs = [];
+  for (const r of [j?.lastRun, ...recent]) {
+    if (!r) continue;
+    const k = r.jobid != null ? String(r.jobid) : `t${r.endedAt ?? ''}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    runs.push({ jobid: r.jobid ?? null, status: r.status, startedAt: r.startedAt ?? null, endedAt: r.endedAt ?? null, msg: String(msgOf(r.jobid) || '') });
+  }
+  const ends = recent.map((r) => Number(r?.endedAt)).filter((t) => Number.isFinite(t) && t > 0);
+  const ep = Number(j?.runsEpoch);
+  return { vmId: j?.vmId, vmName: j?.vmName, enabled: j?.enabled !== false, missing: !!j?.missingInDirector, lastOkAt: j?.lastOkAt ?? null, createdAt: j?.createdAt ?? null, runs,
+    full: recent.length >= RECENT_RUNS_VIEW, oldestAt: ends.length ? Math.min(...ends) : null, epoch: Number.isFinite(ep) && ep > 0 ? ep : null };
+}
+
+/**
  * 공급자 자료 → 관측(obs) · 관측 범위(seen). 순수.
  * @param {{vcs?:Array, clones?:Array, now?:number}} a
  *   vcs[]: { id, veeam?: { state, at, vms:[{id,name,lr,lrt,lrs,msg,msgPub}] },
@@ -92,7 +115,8 @@ export function jobHorizon({ full = false, oldestAt = null, epoch = null } = {})
  *   clones[]: { vc, key, name, at(데이터 시각 — 0 이면 모름), target:boolean, full, oldestAt, runs:[{at,ok,kind,skipped,detail,ms}] }
  * @returns {{obs:object[], seen:object[]}}
  *   obs: { product, vc, vm, name, endedAt, startedAt, state, reason, reasonPub, runId }
- *   seen: { product, vc, fresh, dataAt, targets:string[]|null, horizon:number|null, windowMs:number|null }
+ *   seen: { product, vc, fresh, dataAt, targets:string[]|null, horizon:number|null, windowMs:number|null, src?:string|null }
+ *     src = 그 법인 결과의 출처(복제 — 'local' · 'edge:<담당 엣지>'). 출처가 바뀐 틈은 잃은 틈이다(옛 출처가 끝낸 실행을 새 출처 기록은 모른다 — 반증 F5).
  */
 export function observeOf({ vcs = [], clones = [], now = Date.now() } = {}) {
   const obs = []; const seen = [];
@@ -146,8 +170,10 @@ export function observeOf({ vcs = [], clones = [], now = Date.now() } = {}) {
   for (const c of Array.isArray(clones) ? clones : []) {
     const vc = str(c?.vc); const key = str(c?.key);
     if (!vc || !key) continue;
-    const g = cloneBy.get(vc) || { at: Infinity, targets: [], horizon: -Infinity };
+    const g = cloneBy.get(vc) || { at: Infinity, targets: [], horizon: -Infinity, src: null };
     if (c.target === true) g.targets.push(key);
+    const cs = typeof c.src === 'string' && c.src ? c.src : null;
+    g.src = g.src == null ? cs : (g.src === cs ? g.src : 'mixed');
     g.at = Math.min(g.at, okTime(c.at) ? c.at : -Infinity);
     g.horizon = Math.max(g.horizon, jobHorizon({ full: c.full === true, oldestAt: c.oldestAt, epoch: null }));
     cloneBy.set(vc, g);
@@ -162,7 +188,7 @@ export function observeOf({ vcs = [], clones = [], now = Date.now() } = {}) {
   }
   for (const [vc, g] of cloneBy) {
     const fresh = isFin(g.at) && g.at > 0;
-    seen.push({ product: 'clone', vc, fresh, dataAt: fresh ? Math.min(g.at, now) : null, targets: fresh ? g.targets : null, horizon: fresh ? g.horizon : null, windowMs: null });
+    seen.push({ product: 'clone', vc, fresh, dataAt: fresh ? Math.min(g.at, now) : null, targets: fresh ? g.targets : null, horizon: fresh ? g.horizon : null, windowMs: null, src: g.src });
   }
   return { obs, seen };
 }
@@ -287,7 +313,7 @@ function capFair(list, total, perCorp) {
  * @param {Map<string,Array<{day,state}>>} [a.strips] `${product}|${vm}` → 날마다 마지막 결과(주간 줄무늬 — 7일 이하 기간만)
  * @param {Array} [a.now] 지금 실패 상태 [{ vc, product, vm, name }]
  * @param {boolean} [a.nowOk] 지금 결과 공급자를 읽었는가(false 면 '지금 실패' 는 모름)
- * @param {Iterable<string>} [a.nowUnknown] 지금 결과를 다 읽지 못한 법인(그 법인의 '지금 실패' 는 모름 — 부분 합으로 세지 않는다 · M6 · F4)
+ * @param {Iterable<string>} [a.nowUnknown] 지금 결과를 다 읽지 못한 `${vc}|${product}`(그 법인의 '지금 실패' 는 모름 — 부분 합으로 세지 않는다 · M6 · F4 · 실은 백업만)
  * @param {string[]} [a.products] 실을 백업(빈 목록은 빈 것 — 전부로 바꾸지 않는다)
  * @param {(day:number)=>string} [a.dayLabel]
  * @param {number|null} [a.firstDay] 적재를 시작한 날
@@ -370,7 +396,12 @@ export function buildBackupSection(a) {
   const nowOk = a.nowOk !== false;
   const nowList = nowOk ? (Array.isArray(a.now) ? a.now : []).filter((x) => x && pset.has(x.product)) : [];
   for (const x of nowList) corpOf(String(x.vc)).fn += 1;
-  for (const vc of a.nowUnknown || []) { const c = corps.get(String(vc)); if (c) c.fnu = true; }
+  // 지금 결과를 못 읽은 (법인, 백업) — 이 절에 실은 백업의 것만(실지 않은 백업의 '모름' 이 다른 백업의 지금 실패를 빼지 않게 — 반증 F7)
+  for (const k of a.nowUnknown || []) {
+    const [vc, product] = String(k).split('|');
+    if (product && !pset.has(product)) continue;
+    const c = corps.get(vc); if (c) c.fnu = true;
+  }
   const sealedMask = maskUnion([...corps.values()].map((c) => maskOf(c.d.map((x) => x[4] + x[5] > 0))), days.length);
   return {
     v: 2, products, days: days.map((d) => ({ day: d, label: a.dayLabel ? a.dayLabel(d) : String(d) })), prevDays: prevDays.length,
@@ -418,8 +449,8 @@ export function backupSummary(sec) {
   };
 }
 
-/** 앞 기간과 견줄 수 있는가 — 두 기간 모두 다 확정됐고 알았음 줄이 있을 때만(일부 날만이면 부분 합끼리라 견주지 않는다 · F6). */
-export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0);
+/** 앞 기간과 견줄 수 있는가 — 두 기간 모두 다 확정됐고 알았음 줄이 있고 확인 불가 줄이 없을 때만(어느 쪽이든 부분 합이면 견주지 않는다 · 판정 F6 · 반증 F6). */
+export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0 && !(s.prev?.ud > 0) && !(s.total?.ud > 0));
 
 /** 법인 하나의 3절 한 줄(표) — 합계 · 성공률 · 실패한 날 수 · 확인 불가 줄 수 · 앞 기간(그 법인의 알았음 줄 kd 와 함께 — 모르면 화면이 '—'). */
 export function backupCorpRow(c, products, nowOk = true) {

@@ -108,8 +108,8 @@ export function backupCellText(b) {
   if (!(Number(b.known) > 0)) return Number(b.unknown) > 0 ? `— · ? ${numText(b.unknown)}` : '—';
   return `${numText(b.fail)}${Number(b.unknown) > 0 ? ` · ? ${numText(b.unknown)}` : ''}`;
 }
-/** 앞 기간과 견줄 수 있는가 — 서버 backupLedger.js prevComparable 과 같은 조건(두 기간 다 확정 · 알았음 줄 있음 — 부분 합끼리 견주지 않는다). */
-export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0);
+/** 앞 기간과 견줄 수 있는가 — 서버 backupLedger.js prevComparable 과 같은 조건(두 기간 다 확정 · 알았음 줄 있음 · 확인 불가 줄 없음 — 부분 합끼리 견주지 않는다). */
+export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0 && !(s.prev?.ud > 0) && !(s.total?.ud > 0));
 /** 백업 항목들(run.items)에서 법인(vc) 하나의 가장 나쁜 판정 — 항목이 없거나 그 법인 행이 없으면 null. */
 export function backupCorpStatus(items, vc, products = BK_PRODUCTS) {
   const rank = { ok: 0, unknown: 1, warn: 2, crit: 3 };

@@ -190,7 +190,7 @@ const strips = new Map([['veeam|vm1', [{ day: D, state: 'fail' }, { day: D + 1, 
 const sec = L.buildBackupSection({
   days: [D, D + 1], prevDays: [D - 2, D - 1], dayRows, vmRows, prevDayRows, strips,
   vmFacts: new Map([['veeam|vm1', { streak: 3, lastOkAt: T0 - DAY }], ['veeam|vm2', { streak: 1, lastOkAt: T0 }]]),
-  now: [{ vc: 'a', product: 'veeam', vm: 'vm1', name: 'one' }, { vc: 'b', product: 'veeam', vm: 'vb', name: 'bee' }], nowUnknown: ['b'],
+  now: [{ vc: 'a', product: 'veeam', vm: 'vm1', name: 'one' }, { vc: 'b', product: 'veeam', vm: 'vb', name: 'bee' }], nowUnknown: ['b|veeam', 'a|clone-x'],
   products: ['veeam', 'bareos', 'clone'], dayLabel: (d) => `d${d - D}`, firstDay: D, asOf: T0 + 2 * DAY,
 });
 
@@ -200,8 +200,12 @@ test('⑤ 3절 조립 — 알았음 줄 · 앞 기간 표지 · 지금 실패 �
     { t: 31, e: 30, ok: 25, w: 1, f: 4, n: 1, kd: 5, ud: 1 }, '확인 불가 날의 수는 합계에 넣지 않는다');
   assert.deepEqual(s.days.map((d) => [d.e, d.f, d.u, d.k]), [[13, 1, 1, 2], [17, 3, 0, 3]], 'k = 알았음 줄(확인 불가 줄을 세지 않는다 — 화면 축 M4)');
   assert.deepEqual([s.prev.e, s.prev.f, s.prev.kd, s.prev.sealed, s.prev.days, s.prev.full], [20, 1, 2, 2, 2, true]);
-  assert.equal(L.prevComparable(s), true);
-  assert.equal(s.failNow, 1, '지금 결과를 다 읽지 못한 법인(b)은 지금 실패를 부분 합으로 세지 않는다');
+  assert.equal(L.prevComparable(s), false, '이번 기간에 확인 불가 줄(b 하루)이 있으면 부분 합이라 견주지 않는다(반증 F6)');
+  const clean = L.backupSummary(L.buildBackupSection({ days: [D, D + 1], prevDays: [D - 2, D - 1], dayRows: dayRows.filter((r) => r.vc === 'a'), vmRows, prevDayRows, products: ['veeam', 'bareos'] }));
+  assert.equal(L.prevComparable(clean), true, '두 기간 다 확정 · 확인 불가 없음 — 견준다');
+  const prevUnk = L.backupSummary(L.buildBackupSection({ days: [D, D + 1], prevDays: [D - 2, D - 1], dayRows: dayRows.filter((r) => r.vc === 'a'), vmRows, prevDayRows: [...prevDayRows, { day: D - 1, product: 'veeam', vc: 'q', status: 'unknown' }], products: ['veeam', 'bareos'] }));
+  assert.equal(L.prevComparable(prevUnk), false, '앞 기간에 확인 불가가 있어도 견주지 않는다');
+  assert.equal(s.failNow, 1, '지금 결과를 다 읽지 못한 법인(b)은 지금 실패를 부분 합으로 세지 않는다 · 실지 않은 백업의 모름(a|clone-x)은 a 를 빼지 않는다(반증 F7)');
   assert.equal(s.nowPartial, 1);
   assert.equal(s.repeatVms, 1); assert.equal(s.fails, 3);
   assert.deepEqual(s.coverage, { sealed: 2, days: 2, firstDay: D, full: true });
@@ -443,7 +447,7 @@ test('⑨ 리더 — 실제 공급자 모양(lastRun 중복) · Director 모름 
   assert.equal(st(b, 'x6'), 'unknown');
   assert.equal(st(b, 'x7'), 'crit', '연속 2회(실패 · 취소 섞임) · 7일 넘음');
   const facts = await SV.backupFacts(ctx);
-  assert.ok(facts.nowUnknown.has('x6') && facts.nowUnknown.has('x4'));
+  assert.ok(facts.nowUnknown.has('x6|bareos') && facts.nowUnknown.has('x4|veeam'), '모름은 (법인, 백업) 마다');
   assert.ok(!facts.now.some((x) => x.vc === 'x6'), 'Director 결과를 모르는 법인의 옛 실패는 지금 실패가 아니다(판정 축 F4)');
   let calls = 0;
   setPeriodicProvider('backup-observe', async () => { calls += 1; return { at: now, vcs: [] }; });
@@ -522,7 +526,9 @@ test('⑩ HTML · 메일 · 채널 — 절 번호 · 확정 없는 수 — · �
   assert.match(h2, /실패가 없다는 뜻이 아닙니다/);
   assert.match(RD.backupLine(empty), /확정된 결과가 아직 없습니다/);
   const line = RD.backupLine(sec, (vc) => ({ a: 'A', b: 'B' }[vc] || vc));
-  assert.match(line, /실패 4\(앞 기간 1\)/); assert.match(line, /\n실패 — A 3 · B 1/);
+  assert.match(line, /실패 4\(확인 불가가 있어 앞 기간과 견주지 않음\)/, '확인 불가가 있으면 견주지 않는다(반증 F6)'); assert.match(line, /\n실패 — A 3 · B 1/);
+  const cleanSec = L.buildBackupSection({ days: [D, D + 1], prevDays: [D - 2, D - 1], dayRows: dayRows.filter((r) => r.vc === 'a'), vmRows, prevDayRows, products: ['veeam', 'bareos'] });
+  assert.match(RD.backupLine(cleanSec), /실패 3\(앞 기간 1\)/);
   assert.match(line, /법인 1곳은 지금 결과를 못 읽어 뺌/);
   const half = L.buildBackupSection({ days: [D, D + 1], prevDays: [D - 2, D - 1], dayRows, vmRows, prevDayRows: prevDayRows.slice(1), products: ['veeam'] });
   assert.match(RD.backupChat(half), /앞 기간은 적재 1 \/ 2일이라 견주지 않음/, '일부 날만 확정된 앞 기간과 견주지 않는다');
@@ -594,3 +600,85 @@ test('⑪ 실제 api — 보관함 백업 수 · 보고서 3절 · 범위 계정
   const sa = await call('/tools/periodic-report/status', { user: admin });
   assert.equal(sa.body.backup.captureMs, L.CAPTURE_MS); assert.equal(sa.body.backup.sealLagMs, L.SEAL_LAG_MS);
 });
+
+/* ── ⑫ 반증(2026-11-28) 재현 — 결함마다 하나 ── */
+test('⑫ 반증 재현 — Veeam 연속 실패는 마지막 성공 뒤만 · 출처 바뀐 틈 · 대상 목록 지어내지 않음 · 범위 근거 · 백업별 모름', async () => {
+  // F1 — 실패(관측함) → 성공(관측 못 함 · 공급자 lb 가 앎) → 실패: 연속 1회(주의)이지 2회(이상)가 아니다
+  const now = T0 + 70 * DAY;
+  const o1 = L.observeOf({ now: now - 5 * DAY, vcs: [{ id: 'xf1', veeam: { state: 'ok', at: now - 5 * DAY, vms: [{ id: 'vf1', lr: 'Failed', lrt: now - 5 * DAY - H }] } }] });
+  assert.ok((await S.recordCapture({ ...o1, now: now - 5 * DAY })).ok);
+  setPeriodicProvider('backup-observe', async () => ({ at: now, vcs: [
+    { id: 'xf1', veeam: { state: 'ok', at: now, vms: [{ id: 'vf1', name: 'f', lr: 'Failed', lrt: now - H, lb: now - DAY }] } },
+    { id: 'x8', bareos: { mapped: true, resultsKnown: true, partial: true, state: 'error', at: now, jobs: [{ vmId: 'b8', runs: [{ jobid: 1, status: 'E', endedAt: now - H }] }] } },
+    { id: 'x9', bareos: { mapped: true, resultsKnown: true, state: 'ok', at: now, jobs: [{ vmId: 'b9', lastOkAt: now - 4 * DAY, runs: [{ jobid: 1, status: 'T', endedAt: now - 4 * DAY }] }] } },
+  ] }));
+  const ctx = { now, cache: new Map() };
+  const f = await SV.backupFacts(ctx);
+  assert.equal(f.vcs.get('xf1').veeam.fails[0].streak, 1, '관측이 빈 동안의 성공(lb)을 넘어 이어 세지 않는다(반증 F1)');
+  const v = await READERS.veeam(ctx);
+  assert.equal(v.rows.find((r) => r.vc === 'xf1').status, 'warn');
+  const b = await READERS.bareos(ctx);
+  assert.equal(b.rows.find((r) => r.vc === 'x8').status, 'unknown', '잘린 조회(partial)의 Bareos 결과는 모름');
+  assert.ok(f.nowUnknown.has('x8|bareos'));
+  assert.equal(b.rows.find((r) => r.vc === 'x9').status, 'warn', 'Bareos 마지막 성공 3일 넘음 = 주의');
+
+  // F5 — 복제 결과 출처가 바뀐 틈(담당 엣지 교대)은 잃은 틈: 옛 엣지가 끝낸 실패를 새 엣지 기록은 모른다
+  const dS = D + 50; const s0 = dayStartMs(dS);
+  const cs = (t, src, runs) => L.observeOf({ now: t, clones: [{ vc: 'csrc', key: 'job:s', name: 's', at: t, target: true, src, runs }] });
+  const capS = async (t, src, runs) => { const x = await S.recordCapture({ ...cs(t, src, runs), now: t }); assert.ok(x.ok); await S.sealDue({ now: t, dirty: x.dirty }); };
+  await capS(s0 + 0.5 * H, 'edge:a', [{ at: s0 - H, ok: true }]);
+  await capS(s0 + 13 * H, 'edge:b', [{ at: s0 - H, ok: true }]);   // 12:55 뒤 edge-a 가 죽고 13:00 실패 → 13:05 edge-b 로 재배정(그 실패는 edge-b 기록에 없다)
+  for (let t = s0 + 14 * H; t <= s0 + DAY + 4 * H; t += H) await capS(t, 'edge:b', [{ at: s0 - H, ok: true }]);
+  const gS = await S.ledgerFor({ p0: dS, d0: dS, d1: dS, now: s0 + 2 * DAY });
+  assert.equal(gS.dayRows.find((x) => x.vc === 'csrc').status, 'unknown', '출처가 바뀐 날은 확인 불가(예전 판은 알았음 · 성공 — 반증 F5)');
+  // 같은 출처면 알았음(통제)
+  const dK = D + 52; const k0 = dayStartMs(dK);
+  const capK = async (t) => { const x = await S.recordCapture({ ...L.observeOf({ now: t, clones: [{ vc: 'ckeep', key: 'job:k', name: 'k', at: t, target: true, src: 'edge:b', runs: [{ at: k0 + 2 * H, ok: true }] }] }), now: t }); await S.sealDue({ now: t, dirty: x.dirty }); };
+  for (let t = k0 + 0.5 * H; t <= k0 + DAY + 4 * H; t += H) await capK(t);
+  assert.equal((await S.ledgerFor({ p0: dK, d0: dK, d1: dK, now: k0 + 2 * DAY })).dayRows.find((x) => x.vc === 'ckeep').status, 'known');
+
+  // F3 — 잡이 없던 날(마지막 잡을 지우고 며칠 뒤 새로 만듦)에 새 잡을 대상으로 지어내 '실행 없음' 을 만들지 않는다
+  const dT = D + 55; const t0 = dayStartMs(dT);
+  const capT = async (t, key) => { const x = await S.recordCapture({ ...L.observeOf({ now: t, clones: key ? [{ vc: 'cnew', key, name: key, at: t, target: true, runs: [] }] : [] }), now: t }); await S.sealDue({ now: t, dirty: x.dirty }); };
+  for (let t = t0 + 0.5 * H; t <= t0 + 12 * H; t += H) await capT(t, 'job:old');
+  for (let t = t0 + 6 * DAY; t <= t0 + 7 * DAY + 4 * H; t += H) await capT(t, 'job:new');
+  const gT = await S.ledgerFor({ p0: dT + 1, d0: dT + 1, d1: dT + 5, now: t0 + 8 * DAY });
+  const rowsT = gT.dayRows.filter((x) => x.vc === 'cnew');
+  assert.ok(rowsT.length >= 1);
+  assert.ok(rowsT.every((x) => x.status !== 'known' || x.norun === 0), `잡이 없던 날에 실행 없음을 지어내지 않는다(반증 F3): ${JSON.stringify(rowsT.map((x) => [x.day - dT, x.status, x.targets, x.norun]))}`);
+
+  // F8 — 범위 판본: 행이 전부 범위 안이어도 전 법인 근거(점검 서버 412대) · 직전 판정을 싣지 않는다
+  const cut = R.scopeCutDoc({ items: [{ key: 'disk-bad', axis: 'facility', status: 'crit', basis: '점검 서버 412대 · 새 기록 3', value: '412', prev: { status: 'crit', count: 57 }, rows: [{ vc: 'b', status: 'crit', prev: 'ok' }] }], corps: [] }, new Set(['b']));
+  assert.ok(!/412|57/.test(JSON.stringify(cut.items[0])), JSON.stringify(cut.items[0]));
+  assert.deepEqual(cut.items[0].prev, { status: 'ok' });
+});
+
+test('⑬ 실제 원천 모양 — Bareos 원장 보기(jobDigests) → 관측용 잡 · 복제 30회 가득 참', async () => {
+  const REG = await import('../src/bareos/registry.js');
+  const job = REG.addJob({ vcenterId: 'vcR', vmId: 'vcR:vm-1', vmName: 'reg-01', dc: 'DC', folder: '/', directorId: 'dir-1', bareosJob: 'pv-r1', client: 'c', storage: 's', pool: 'p', schedule: '', level: 'Incremental', createdBy: 't' });
+  const base = T0 + 60 * DAY;
+  for (let k = 0; k < 7; k++) REG.applyRunRow(job.id, { jobid: 100 + k, status: k === 6 ? 'E' : 'T', level: 'I', startedAt: base + k * DAY, endedAt: base + k * DAY + H, bytes: 1, files: 1, errors: 0 });
+  const dg = REG.jobDigests().find((x) => x.id === job.id);
+  assert.ok(dg, '원장 보기에 잡이 있다');
+  const view = L.bareosJobView(dg, (id) => (String(id) === '106' ? 'first error line' : ''));
+  assert.equal(view.full, true, `보기가 가득 찼다(최근 ${dg.recentRuns.length}건)`);
+  assert.equal(view.oldestAt, base + 2 * DAY + H, '가장 오래된 끝난 실행 = 7건 중 최근 5건의 첫째');
+  assert.equal(new Set(view.runs.map((r) => r.jobid)).size, view.runs.length, 'lastRun 과 recentRuns 의 같은 jobid 는 한 번(실제 보기 모양)');
+  assert.equal(view.runs.find((r) => r.jobid === 106)?.msg, 'first error line');
+  assert.equal(view.epoch, null);
+  assert.equal(L.jobHorizon(view), base + 2 * DAY + H);
+  // 복제 — 기록 30회가 찬 잡은 가득 참 · 가장 오래된 기록 시각을 싣는다(중앙 잡 · 실제 저장소)
+  const store = await import('../src/vmclone/store.js');
+  const jf = store.saveJob({ vcenterId: 'vcL', vmId: 'vm-full', vmName: 'vm-full', dest: { type: 'datastore', datastoreName: 'ds1' }, schedule: { mode: 'interval', hours: 1 } });
+  for (let k = 0; k < 31; k++) store.recordRun(jf.id, { ok: true, detail: '', historyAt: base + k * H });
+  const src = (await SV._cloneSourcesForTest(Date.now())).find((x) => x.key === `job:${jf.id}`);
+  assert.equal(src.full, true, '30회가 찬 기록');
+  assert.equal(src.oldestAt, base + H, '앞 한 회는 밀려났다(가장 오래된 남은 기록)');
+  assert.equal(src.src, 'local');
+  const lf = (await SV._cloneSourcesForTest(Date.now())).find((x) => x.key === `job:${jf.id}`);
+  assert.equal(lf.runs.length, 30, '기록만 센다(lastRun 사본을 더하지 않는다)');
+  // Bareos 마지막 성공 3일 넘음 · 복제 마지막 성공 3일 넘음 = 주의(컨펌 ⑤ — 모든 백업 같은 기준)
+  const fx = await SV.backupFacts({ now: base + 34 * H + 4 * DAY, cache: new Map() });
+  assert.ok(fx.vcs.get('vcL').clone.rpo3 >= 1, '복제 마지막 성공 3일 넘음을 센다');
+});
+

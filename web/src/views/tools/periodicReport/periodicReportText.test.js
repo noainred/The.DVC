@@ -51,7 +51,7 @@ describe('정기 점검 보고 문구', () => {
     const led = raw('../../../../../server/src/periodic/backupLedger.js');
     expect(led).toContain(`PRODUCTS = Object.freeze([${T.BK_PRODUCTS.map((p) => `'${p}'`).join(', ')}])`);
     for (const [k, v] of Object.entries(T.BK_PRODUCT_LABEL)) expect(led).toContain(`${k}: '${v}'`);
-    expect(led).toContain('export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0);');
+    expect(led).toContain('export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0 && !(s.prev?.ud > 0) && !(s.total?.ud > 0));');
     const ren = raw('../../../../../server/src/periodic/render.js');
     for (const [k, v] of Object.entries(T.BK_STRIP)) expect(ren).toMatch(new RegExp(`${k}: \\['${v}'`));
     const cat = raw('../../../../../server/src/periodic/catalog.js');
@@ -82,6 +82,8 @@ describe('정기 점검 보고 문구', () => {
     expect(T.prevComparable({ ...full, prev: { full: false, known: true } })).toBe(false);
     expect(T.prevComparable({ ...full, coverage: { full: false } })).toBe(false);
     expect(T.prevComparable({ ...full, total: { kd: 0 } })).toBe(false);
+    expect(T.prevComparable({ ...full, prev: { full: true, known: true, ud: 2 } })).toBe(false, '앞 기간에 확인 불가가 있으면 견주지 않는다');
+    expect(T.prevComparable({ ...full, total: { kd: 3, ud: 1 } })).toBe(false);
     expect(T.coverageText({ sealed: 18, days: 31 })).toBe('적재 18 / 31일');
   });
   it('v3.59 백업 3절 — 법인 판정 칸은 백업 항목 행의 가장 나쁜 것(새 판정 없음)', () => {

@@ -90,7 +90,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
   const periodSub = multi
     ? `${s.days[0]?.label} ~ ${s.days[s.days.length - 1]?.label} · 하루에 VM 하나당 한 건(그날 마지막 결과) · ${coverageText(cov)}`
     : `${s.days[0]?.label || ''} 하루 동안 끝난 백업 · VM 단위(하루에 여러 번 돌았으면 그 VM 의 마지막 결과) · 저장된 결과만 읽습니다`;
-  const prevSub = !s.prev?.days ? '' : cmp ? '' : s.prev.sealed ? `앞 기간은 ${coverageText({ sealed: s.prev.sealed, days: s.prev.days })} — 견주지 않음` : '앞 기간 적재 없음';
+  const prevSub = !s.prev?.days ? '' : cmp ? '' : s.prev.full ? '확인 불가가 있어 앞 기간과 견주지 않음' : s.prev.sealed ? `앞 기간은 ${coverageText({ sealed: s.prev.sealed, days: s.prev.days })} — 견주지 않음` : '앞 기간 적재 없음';
   return (
     <>
       {head(periodSub)}
@@ -139,7 +139,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
         </>
       )}
 
-      <div className="prr-bar"><b className="prr-lab">법인별</b><span className="prr-muted">실패 많은 순 · 제목을 누르면 정렬 · ‘앞 기간’ 은 앞 기간의 실패 · ‘확인 불가’ 는 백업 · 날 수 · 판정 칸은 서비스 축의 백업 항목 것{s.prev?.days && !cmp ? ' · 앞 기간은 다 확정되지 않아 비움' : ''}</span></div>
+      <div className="prr-bar"><b className="prr-lab">법인별</b><span className="prr-muted">실패 많은 순 · 제목을 누르면 정렬 · ‘앞 기간’ 은 앞 기간의 실패 · ‘확인 불가’ 는 백업 · 날 수 · 판정 칸은 서비스 축의 백업 항목 것{s.prev?.days && !cmp ? (s.prev.full ? ' · 확인 불가가 있어 앞 기간은 비움' : ' · 앞 기간은 다 확정되지 않아 비움') : ''}</span></div>
       <div className="prr-tablewrap">
         <STable minWidth={multi ? 1080 : 960}>
           <thead><tr>

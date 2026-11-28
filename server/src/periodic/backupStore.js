@@ -32,10 +32,10 @@ function stmts(db) {
   _st = {
     insObs: db.prepare(`INSERT OR IGNORE INTO pr_bk_obs(product, vm, ended_at, vc, day, state, started_at, name, reason, reason_pub, run_id, seen_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    getCursor: db.prepare('SELECT product, vc, last_at, first_day, sealed_to, active_at FROM pr_bk_cursor WHERE product = ? AND vc = ?'),
-    allCursors: db.prepare('SELECT product, vc, last_at, first_day, sealed_to, active_at FROM pr_bk_cursor'),
-    putCursor: db.prepare(`INSERT INTO pr_bk_cursor(product, vc, last_at, first_day, sealed_to, active_at) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(product, vc) DO UPDATE SET last_at = excluded.last_at, first_day = excluded.first_day, sealed_to = excluded.sealed_to, active_at = excluded.active_at`),
+    getCursor: db.prepare('SELECT product, vc, last_at, first_day, sealed_to, active_at, src FROM pr_bk_cursor WHERE product = ? AND vc = ?'),
+    allCursors: db.prepare('SELECT product, vc, last_at, first_day, sealed_to, active_at, src FROM pr_bk_cursor'),
+    putCursor: db.prepare(`INSERT INTO pr_bk_cursor(product, vc, last_at, first_day, sealed_to, active_at, src) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(product, vc) DO UPDATE SET last_at = excluded.last_at, first_day = excluded.first_day, sealed_to = excluded.sealed_to, active_at = excluded.active_at, src = excluded.src`),
     gapSeen: db.prepare(`INSERT INTO pr_bk_seen(product, vc, day, max_gap, lossy) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(product, vc, day) DO UPDATE SET max_gap = MAX(max_gap, excluded.max_gap), lossy = MAX(lossy, excluded.lossy)`),
     freshSeen: db.prepare(`INSERT INTO pr_bk_seen(product, vc, day, first_at, last_at, n_fresh, targets) VALUES (?, ?, ?, ?, ?, 1, ?)
@@ -44,7 +44,8 @@ function stmts(db) {
     staleSeen: db.prepare(`INSERT INTO pr_bk_seen(product, vc, day, n_stale) VALUES (?, ?, ?, 1)
       ON CONFLICT(product, vc, day) DO UPDATE SET n_stale = n_stale + 1`),
     getSeen: db.prepare('SELECT first_at, last_at, max_gap, lossy, n_fresh, n_stale, targets FROM pr_bk_seen WHERE product = ? AND vc = ? AND day = ?'),
-    nextTargets: db.prepare('SELECT targets FROM pr_bk_seen WHERE product = ? AND vc = ? AND day > ? AND targets IS NOT NULL ORDER BY day LIMIT 1'),
+    nextTargets: db.prepare('SELECT targets FROM pr_bk_seen WHERE product = ? AND vc = ? AND day > ? AND day <= ? AND targets IS NOT NULL ORDER BY day LIMIT 1'),
+    prevTargets: db.prepare('SELECT targets FROM pr_bk_seen WHERE product = ? AND vc = ? AND day < ? AND day >= ? AND targets IS NOT NULL ORDER BY day DESC LIMIT 1'),
     obsOfDay: db.prepare('SELECT vm, ended_at, state, name, reason, reason_pub FROM pr_bk_obs WHERE product = ? AND vc = ? AND day = ?'),
     getDay: db.prepare('SELECT status, sealed_at FROM pr_bk_day WHERE day = ? AND product = ? AND vc = ?'),
     putDay: db.prepare(`INSERT INTO pr_bk_day(day, product, vc, status, targets, ended, ok, warn, fail, norun, sealed_at, late) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -115,11 +116,13 @@ export async function recordCapture({ obs = [], seen = [], now = Date.now() }) {
       inserted += insertObs(st, rest, now, dirty);
       for (const s of seen) {
         const cur = st.getCursor.get(s.product, s.vc);
-        const base = { last: cur?.last_at ?? null, first: cur?.first_day ?? null, sealedTo: cur?.sealed_to ?? null };
+        const base = { last: cur?.last_at ?? null, first: cur?.first_day ?? null, sealedTo: cur?.sealed_to ?? null, src: cur?.src ?? null };
         if (s.fresh && s.dataAt != null) {
           const step = coverSegments(base.last, s.dataAt, { dayOf, dayStartOf, product: s.product, horizon: s.horizon, windowMs: s.windowMs });
           if (step.advance) {
-            for (const [d, gap, lossy] of step.segs) st.gapSeen.run(s.product, s.vc, d, gap, lossy ? 1 : 0);
+            // 결과 출처가 바뀌었으면(복제 — 담당 엣지 교대 · 중앙 ↔ 엣지) 그 틈은 잃은 틈 — 옛 출처가 끝낸 실행을 새 출처 기록은 모른다(반증 F5)
+            const srcChanged = s.src != null && base.src != null && s.src !== base.src;
+            for (const [d, gap, lossy] of step.segs) st.gapSeen.run(s.product, s.vc, d, gap, lossy || srcChanged ? 1 : 0);
             const day = dayOf(s.dataAt);
             let targets = Array.isArray(s.targets) ? JSON.stringify(s.targets.slice(0, TARGETS_MAX)) : null;
             const sk = `${s.product}|${s.vc}|${day}`;
@@ -128,11 +131,11 @@ export async function recordCapture({ obs = [], seen = [], now = Date.now() }) {
             st.freshSeen.run(s.product, s.vc, day, s.dataAt, s.dataAt, targets);
             const first = base.first ?? dayOf(s.dataAt);
             // 처음 적재하는 법인 · 백업 — 그 앞날은 확정하지 않는다(적재 전 · 소급 없음)
-            st.putCursor.run(s.product, s.vc, s.dataAt, first, base.sealedTo ?? first - 1, now);
+            st.putCursor.run(s.product, s.vc, s.dataAt, first, base.sealedTo ?? first - 1, now, s.src ?? base.src);
             continue;
           }
         } else st.staleSeen.run(s.product, s.vc, dayOf(now));
-        if (cur) st.putCursor.run(s.product, s.vc, base.last, base.first, base.sealedTo, now);
+        if (cur) st.putCursor.run(s.product, s.vc, base.last, base.first, base.sealedTo, now, base.src);
       }
     });
     for (const [k, v] of sigs) { _targetsSig.delete(k); _targetsSig.set(k, v); }
@@ -156,8 +159,11 @@ function sealOneTx(st, product, vc, day, cursor, now) {
     return 'unknown';
   }
   const rows = st.obsOfDay.all(product, vc, day).map((r) => ({ vm: r.vm, endedAt: r.ended_at, state: r.state, name: r.name, reason: r.reason, reasonPub: r.reason_pub }));
-  // 그날 신선한 관측이 없었는데 확정하는 경우(실행 기록으로 늦게 채움) — 대상 목록은 그 뒤 가장 가까운 날의 것(실행 없음 수의 근거)
-  const targets = jsonOr(seen?.targets, null) ?? jsonOr(st.nextTargets.get(product, vc, day)?.targets, null);
+  // 그날 신선한 관측이 없었는데 확정하는 경우(실행 기록으로 늦게 채움) — 대상은 앞뒤 이틀 안 목록에 **둘 다** 있는 것(실행 없음 수의 근거).
+  //   한쪽 목록만 쓰면 그사이 생긴 잡 · 지운 잡을 그날 대상으로 지어내 '실행 없음' 을 만든다(반증 F3). 둘 중 하나가 없으면 끝난 VM 만 대상으로 센다.
+  const tOf = (row) => jsonOr(row?.targets, null);
+  const after = tOf(st.nextTargets.get(product, vc, day, day + 2)); const before = tOf(st.prevTargets.get(product, vc, day, day - 2));
+  const targets = jsonOr(seen?.targets, null) ?? (Array.isArray(after) && Array.isArray(before) ? after.filter((x) => new Set(before).has(x)) : null);
   const { counts: c, last } = sealCounts(rows, targets);
   st.putDay.run(day, product, vc, 'known', c.targets, c.ended, c.ok, c.warn, c.fail, c.norun, now, late);
   for (const o of last) if (o.state === 'fail') st.insVmDay.run(day, product, o.vm, vc, o.state, o.name || null, o.endedAt, o.reason ?? null, o.reasonPub ?? null);
@@ -190,7 +196,7 @@ export async function sealDue({ now = Date.now(), dirty = [] } = {}) {
           to = d;
           if (sealOneTx(st, c.product, c.vc, d, c, now) != null) sealed += 1;
         }
-        if (to !== c.sealed_to) st.putCursor.run(c.product, c.vc, c.last_at, c.first_day, to, c.active_at);
+        if (to !== c.sealed_to) st.putCursor.run(c.product, c.vc, c.last_at, c.first_day, to, c.active_at, c.src ?? null);
       }
       const again = new Map((Array.isArray(dirty) ? dirty : []).filter((x) => x[2] >= rawFloor).map((x) => [x.join('|'), x]));
       for (const r of st.unknownRefill.all(dayOf(now) - REFILL_DAYS)) {

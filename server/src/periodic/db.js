@@ -20,7 +20,7 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'periodic.db');
  * v3.59 백업 적재(3절 — backupLedger.js · backupStore.js). 날은 포탈 시각의 dayIndex(util/dayKey.js) — 정리는 날 단독 인덱스 + 청크.
  *  · pr_bk_obs    끝난 실행 관측(백업 · VM · 끝난 시각이 키 — 같은 실행을 두 번 넣지 않는다) — RAW_KEEP_DAYS 보관
  *  · pr_bk_seen   법인 · 백업 · 날의 관측 범위(신선한 관측 첫 · 마지막 데이터 시각 · 그날에 걸친 가장 긴 틈 · 그날 걸친 틈이 잃은 것이 있는가(lossy) · 그날 대상 목록) — RAW_KEEP_DAYS
- *  · pr_bk_cursor 법인 · 백업의 마지막 데이터 시각 · 적재 시작 날 · 확정한 마지막 날 · 마지막으로 본 시각
+ *  · pr_bk_cursor 법인 · 백업의 마지막 데이터 시각 · 적재 시작 날 · 확정한 마지막 날 · 마지막으로 본 시각 · 결과 출처(복제 — 바뀌면 그 틈은 잃은 틈)
  *  · pr_bk_day    날의 확정 결과(법인 · 백업 한 줄 — 확인 불가면 수 칸은 NULL) — 설정 보관 일수
  *  · pr_bk_vmday  그날 마지막 결과가 실패인 VM(목록 · 되풀이 실패) — 설정 보관 일수
  *  pr_bk_day · pr_bk_vmday 는 기본 키가 day 로 시작해 정리 · 기간 조회가 그 키를 탄다(따로 날 인덱스를 두지 않는다 — 성능 축 P8 EXPLAIN 확인).
@@ -37,7 +37,7 @@ const BACKUP_SCHEMA = `CREATE TABLE IF NOT EXISTS pr_bk_obs (
   );
   CREATE INDEX IF NOT EXISTS pr_bk_seen_day ON pr_bk_seen(day);
   CREATE TABLE IF NOT EXISTS pr_bk_cursor (
-    product TEXT NOT NULL, vc TEXT NOT NULL, last_at INTEGER, first_day INTEGER, sealed_to INTEGER, active_at INTEGER, PRIMARY KEY (product, vc)
+    product TEXT NOT NULL, vc TEXT NOT NULL, last_at INTEGER, first_day INTEGER, sealed_to INTEGER, active_at INTEGER, src TEXT, PRIMARY KEY (product, vc)
   );
   CREATE TABLE IF NOT EXISTS pr_bk_day (
     day INTEGER NOT NULL, product TEXT NOT NULL, vc TEXT NOT NULL, status TEXT NOT NULL, targets INTEGER, ended INTEGER, ok INTEGER, warn INTEGER,
