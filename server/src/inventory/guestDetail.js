@@ -246,13 +246,15 @@ function oldEdgeOutcome(raw) {
   //   ② 입력 끝까지 이어진 형식 밖 조각은 **올바른 토큰의 앞부분일 수 있을 때만**(key · key= · key=' …) 잘림 흔적이다.
   //   'kernelVersion==bad' 처럼 어떤 토큰의 앞부분도 될 수 없는 조각은 원래 형식 밖이다(malformed 그대로).
   //   한계: 원래 보고가 정확히 512자에서 그런 앞부분 모양으로 끝났다면 잘림과 가를 수 없다(드묾 — 추정).
+  //   10회차(재현): 옛 **중앙**(3.54)은 저장할 때 원문 끝 공백을 다듬어(trim) 512자 잘림이 511자 이하로 남을 수 있다 — 그래서 '따옴표 안에서 끝남'(truncated)은
+  //   길이와 무관하게 잘림 흔적으로 본다. 가정(추정): Tools 는 값의 따옴표를 닫는다 — 끝의 열린 따옴표는 잘림이 만든다.
   const body = raw.slice(0, RAW_KEEP_MAX);
   const p = parseGuestDetailedData(body);
   if (!p) return null;
   const atLimit = raw.length >= RAW_KEEP_MAX;
   const tailIsCut = atLimit && p.tailFragment != null && isTokenPrefix(p.tailFragment);
   const skipped = p.skipped - (tailIsCut ? 1 : 0);
-  const truncated = atLimit ? false : p.truncated;
+  const truncated = false;
   // 옛 엣지 raw 에 값이 있는 아는 키가 있을 수 없다 — 있으면 모양이 어긋난 것(malformed).
   return !p.ok && p.knownKeys > 0 && skipped === 0 && !truncated ? 'empty' : 'malformed';
 }
@@ -266,6 +268,13 @@ function isTokenPrefix(frag) {
 }
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+/** 이어받을 edgeAt — 양의 정수 · 결과 at 보다 뒤 · now + 10년 이하. 아니면 null. */
+function carriedEdgeAt(v, at, now) {
+  const e = numOf(v);
+  if (e == null || !(e > 0)) return null;
+  const t = Math.trunc(e);
+  return at != null && t > at && t <= now + 10 * 365 * 86_400_000 ? t : null;
+}
 /** 수 · 숫자 글자 → 유한한 수, 그 밖은 null(못 읽음 — 0 이 아니다). */
 const numOf = (v) => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
@@ -312,7 +321,9 @@ export function sanitizeVmGos(g, now = Date.now()) {
   // 묶음 규칙(asked · parse · detailed · raw)은 수집기와 같은 normalizeGos 가 세운다. 엣지 시각을 수신 시각으로 잘랐으면 원본은 edgeAt 으로 따로.
   return normalizeGos({
     at,
-    edgeAt: atN != null && atN > now ? Math.trunc(atN) : null,
+    // 10회차(재현): 이미 정제한 값을 다시 정제할 때(중앙 기동 · 재읽기 — central/inventory.js parseInventoryFile) 저장돼 있던 원본 시각을 이어받는다 —
+    //   예전에는 잘린 at 만 보고 다시 계산해 edgeAt 이 지워졌다(고정점이 아니었다). 이어받는 값은 결과 at 보다 뒤 · 수신 시각 + 10년 이하만.
+    edgeAt: atN != null && atN > now ? Math.trunc(atN) : carriedEdgeAt(g.edgeAt, atN != null && atN > 0 ? Math.min(atN, now) : null, now),
     asked: g.asked === true,
     // 점검 6회차(호환): 이미 릴리스된 엣지(3.54 ~ 3.58)는 parse 칸 없이 '아는 키를 못 읽은 원문' 을 raw 로 보낸다(값만 빈 보고 포함).
     //   parse 가 없고 detailed 도 없으면 원문을 같은 파서로 다시 판정한다(원문은 512자 상한 — 비용이 작다). 옛 엣지의 partial 은 원문이 오지 않아 되살릴 수 없다(ok 로 남는다).

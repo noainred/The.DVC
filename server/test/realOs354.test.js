@@ -937,3 +937,40 @@ test('R9 옛 중앙이 저장한 인벤토리(vm.gos 옛 모양)도 기동 때 �
   const again = parseInventoryFile(JSON.stringify({ inventory: { vc1: { at: 1_000, data: { vms: [vms[0], vms[1]] } } } })).vc1.data.vms;
   assert.deepEqual(again.map((v) => v.gos), [vms[0].gos, vms[1].gos], '고정점 — 다시 읽어도 그대로');
 });
+
+/* ---------------------------- 점검 10회차(반증 재현) 회귀 ---------------------------- */
+
+test('R10 재정제는 고정점 — 엣지 원본 시각(edgeAt)이 다시 읽어도 남는다', async () => {
+  const now = 1_800_000_000_000;
+  const first = sanitizeVmGos({ at: now + 3_600_000, asked: true, detailed: { prettyName: 'R' } }, now);
+  assert.equal(first.edgeAt, now + 3_600_000);
+  const again = sanitizeVmGos(JSON.parse(JSON.stringify(first)), now);
+  assert.deepEqual(again, first, 'sanitize ∘ sanitize = sanitize');
+  const { parseInventoryFile } = await import('../src/central/inventory.js');
+  const text = JSON.stringify({ inventory: { vc1: { at: now, data: { vms: [{ id: 'vc1:vm-1', gos: first }] } } } });
+  const once = parseInventoryFile(text).vc1.data.vms[0].gos;
+  assert.deepEqual(once, first, '기동 · 재읽기 왕복');
+  assert.deepEqual(parseInventoryFile(JSON.stringify({ inventory: { vc1: { at: now, data: { vms: [{ id: 'x', gos: once }] } } } })).vc1.data.vms[0].gos, first);
+  // 지어낸 edgeAt 은 받지 않는다: at 보다 앞 · 10년 넘는 미래 · 글자
+  assert.equal(Object.hasOwn(sanitizeVmGos({ at: now - 10, asked: true, edgeAt: now - 20 }, now), 'edgeAt'), false);
+  assert.equal(Object.hasOwn(sanitizeVmGos({ at: now - 10, asked: true, edgeAt: now + 20 * 365 * 86_400_000 }, now), 'edgeAt'), false);
+  assert.equal(Object.hasOwn(sanitizeVmGos({ at: now - 10, asked: true, edgeAt: 'x' }, now), 'edgeAt'), false);
+  assert.equal(sanitizeVmGos({ at: now - 10, asked: true, edgeAt: String(now + 5) }, now).edgeAt, now + 5, '숫자 글자는 수로');
+});
+
+test('R10 옛 중앙(3.54)이 끝 공백을 다듬어 511자 이하로 저장한 잘린 원문도 empty', () => {
+  // 옛 엣지 원문: 512자째가 모르는 키 값 안의 공백 → 옛 중앙 cap 이 trim 해 511자 이하로 저장
+  let trimmedCases = 0;
+  for (let pad = 0; pad < 40; pad++) {
+    let orig = `prettyName='' distroName='' padKey='${'y'.repeat(pad)}' `;
+    let i = 0;
+    while (orig.length < 600) orig += `fooKey${i++}='v w v w x' `;
+    orig = orig.trim();
+    assert.equal(parseVmGosProps({ 'guest.guestDetailedData': orig }, 1, { asked: true }).parse, 'empty');
+    const stored = orig.slice(0, 512).trim();   // 옛 엣지 cap(512) → 옛 중앙 cap = trim
+    if (stored.length < 512 && parseGuestDetailedData(stored).truncated) trimmedCases += 1;
+    assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: stored }, 5).parse, 'empty', `pad ${pad} · 저장 길이 ${stored.length}`);
+  }
+  assert.ok(trimmedCases > 0, `시험 전제: 다듬어져 512자 미만인 잘린 원문이 있어야 한다(${trimmedCases})`);
+  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' x" }, 5).parse, 'malformed', '형식 밖 조각은 그대로');
+});
