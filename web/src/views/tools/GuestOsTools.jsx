@@ -232,8 +232,9 @@ export function RealOs({ scope }) {
   useEffect(() => { loadStatus(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { loadResults(); }, [scope, mm]);
 
-  if (err) return <ErrorBox message={err} />;
-  if (!st) return <Loading />;
+  // 점검 4회차: 수집 점검 카드는 별개 API(/admin/os-scan/probe)를 쓴다 — 게스트 스캔 상태 조회가 실패 · 로딩 중이어도 가리지 않는다.
+  if (err) return <><RealOsProbe scope={scope} /><ErrorBox message={err} /></>;
+  if (!st) return <><RealOsProbe scope={scope} /><Loading /></>;
   const s = st.settings || {};
   const setS = (patch) => setSt((cur) => ({ ...cur, dirty: true, settings: { ...cur.settings, ...patch } }));
 

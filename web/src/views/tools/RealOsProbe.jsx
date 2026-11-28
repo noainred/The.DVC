@@ -121,7 +121,7 @@ export function RealOsProbe({ scope }) {
                     <td className="right tabular" data-sort={r.poweredOn}>{n(r.poweredOn)}</td>
                     <td className="right tabular" data-sort={r.vcenters}>{n(r.vcenters)}</td>
                     <td style={{ whiteSpace: 'normal', fontSize: 12, minWidth: 200 }} className="muted">{topText(r.configOs, 3, r.configOsOmitted)}</td>
-                    <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', fontSize: 11.5, minWidth: 180, fontFamily: 'monospace' }} className="muted">{topText(r.kernels, 2, r.kernelsOmitted)}</td>
+                    <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', fontSize: 11.5, minWidth: 180, fontFamily: 'monospace' }} className="muted">{topText(r.kernels, 2, r.kernelsOmitted)}{(r.buildNumber || []).length ? <div>빌드 {topText(r.buildNumber, 2, r.buildNumberOmitted)}</div> : null}</td>
                   </tr>
                 ))}
               </tbody>
@@ -152,9 +152,9 @@ export function RealOsProbe({ scope }) {
             </>
           )}
 
-          {((data.extraKeys || []).length > 0 || (data.unparsed || []).length > 0) && (
+          {((data.extraKeys || []).length > 0 || (data.unparsed || []).length > 0 || t.extraDropped > 0) && (
             <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'normal' }}>
-              {(data.extraKeys || []).length > 0 && <div>문서에 없는 키: {data.extraKeys.map((x) => `${x.key}(${n(x.count)})`).join(' · ')}{data.extraKeysOmitted ? ` · 상한으로 ${n(data.extraKeysOmitted)}가지 생략` : ''}</div>}
+              {(data.extraKeys || []).length > 0 && <div>문서에 없는 키: {data.extraKeys.map((x) => `${x.key}(${n(x.count)})`).join(' · ')}{data.extraKeysOmitted ? ` · 상한으로 ${n(data.extraKeysOmitted)}가지 생략` : ''}{t.extraDropped ? ` · VM 마다 상한으로 버린 키 ${n(t.extraDropped)}개(파일에도 없음)` : ''}</div>}
               {(data.unparsed || []).length > 0 && (
                 <div>
                   형식을 읽지 못한 보고 {n(t.unparsedVms ?? data.unparsed.reduce((a, x) => a + x.count, 0))}건 — {data.unparsedOmitted

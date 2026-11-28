@@ -8,7 +8,8 @@ import { toolsAtLeast } from './guestDetail.js';
 
 // 2: 점검 1회차 — samples 의 distroAddlVersion · cpeString · buildNumber 가 값별 개수 목록으로 · architecture 가 묶음 키 · vCenter 행 collectSource.
 // 3: 점검 2회차 — 값별 개수 목록마다 <칸>Omitted · appliances[].fullVersions(값별 개수) · total.cfgRead · unparsedVms · 엣지 수집 행 status 없음.
-export const PROBE_SCHEMA = 3;
+// 4: 점검 4회차 — 사유 emptyValues · total.extraDropped · status.osErrorAt.
+export const PROBE_SCHEMA = 4;
 const SAMPLE_MAX = 300;
 const RAW_MAX = 50;
 const VAPP_MAX = 100;
@@ -16,12 +17,13 @@ const MANAGED_MAX = 50;
 const TOP_MAX = 5;
 
 /** 보고가 없는 VM 의 사유 — 앞의 것부터 처음 맞는 하나. 화면 문구는 웹 realOsProbeText.js 가 같은 키로 소유한다. */
-export const NO_DETAIL_REASONS = Object.freeze(['notRead', 'notAsked', 'unparsed', 'template', 'toolsOld', 'toolsNotRunning', 'poweredOff', 'toolsUnknown', 'other']);
+export const NO_DETAIL_REASONS = Object.freeze(['notRead', 'notAsked', 'emptyValues', 'unparsed', 'template', 'toolsOld', 'toolsNotRunning', 'poweredOff', 'toolsUnknown', 'other']);
 
 export function noDetailReason(vm) {
   const g = vm?.gos;
   if (!g || typeof g !== 'object') return 'notRead';
   if (!g.asked) return 'notAsked';
+  if (g.emptyValues === true) return 'emptyValues';   // 점검 4회차: 형식은 맞고 값만 빈 보고 — 파서 결함(unparsed)과 섞지 않는다
   // 보고는 왔는데 아는 키를 못 읽었다(raw) · 모르는 키만 왔다(extra) — 'Tools 미보고' 가 아니라 파서가 틀린 것이다(점검의 목적이 이것을 가르는 것).
   if ((typeof g.raw === 'string' && g.raw) || (g.extra && typeof g.extra === 'object' && Object.keys(g.extra).length)) return 'unparsed';
   if (vm.template) return 'template';
@@ -86,7 +88,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
   const managed = new Map();
   // cfgRead(점검 2회차): 시스템 VM(managedBy)은 vm.cfg 를 읽은 VM 에서만 셀 수 있다 — 못 읽은 VM 을 0 으로 섞지 않게 분모를 함께 싣는다.
   // unparsedVms: 형식을 못 읽은 원문(raw)이 있는 VM 수(가짓수 상한과 무관한 전체 — 화면이 목록 합으로 세지 않게).
-  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0, unparsedVms: 0 };
+  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0, unparsedVms: 0, extraDropped: 0 };
   const noDetail = Object.fromEntries(NO_DETAIL_REASONS.map((k) => [k, 0]));
 
   for (const vm of Array.isArray(vms) ? vms : []) {
@@ -124,6 +126,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
         if (g.detailed?.prettyName) bump(e.os, g.detailed.prettyName, 1);
         vapps.set(key, e);
       }
+      if (Number.isSafeInteger(g.extraDropped) && g.extraDropped > 0) total.extraDropped += g.extraDropped;
       if (g.extra && typeof g.extra === 'object') {
         for (const [k, v] of Object.entries(g.extra)) {
           const e = extras.get(k) || { key: k, count: 0, example: typeof v === 'string' ? v : null };
@@ -176,6 +179,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     const s = r.collectSource === 'site' ? null : stBy.get(r.id);
     r.status = s ? {
       osAt: Number.isFinite(s.osAt) ? s.osAt : null, osError: typeof s.osError === 'string' ? s.osError : null,
+      osErrorAt: Number.isFinite(s.osErrorAt) ? s.osErrorAt : null,
       osAsked: typeof s.osAsked === 'boolean' ? s.osAsked : null, apiVersion: typeof s.osApiVersion === 'string' ? s.osApiVersion : null,
       osFetched: Number.isFinite(s.osFetched) ? s.osFetched : null, osCut: Number.isFinite(s.osCut) ? s.osCut : null,
       osSkippedAt: Number.isFinite(s.osSkippedAt) ? s.osSkippedAt : null, osSkipReason: typeof s.osSkipReason === 'string' ? s.osSkipReason : null,

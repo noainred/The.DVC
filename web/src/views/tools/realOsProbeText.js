@@ -4,6 +4,7 @@
 export const REASON_TEXT = Object.freeze({
   notRead: '아직 읽지 않음(수집 전 · 꺼짐 · 엣지 미업그레이드 등)',
   notAsked: '묻지 않음(vCenter API 8.0.2 미만 또는 판 미상)',
+  emptyValues: '보고는 왔으나 값이 모두 빔',
   unparsed: '보고는 왔으나 형식을 못 읽음',
   template: '템플릿',
   toolsOld: 'Tools 11.2 미만',
@@ -45,7 +46,12 @@ export function at(ms) {
  * @param ctx  응답의 { collect:{ osEnabled }, demo }
  */
 export function statusText(st, row = null, ctx = null) {
-  if (st?.osError) return { text: `오류 — ${String(st.osError).slice(0, 80)}`, tone: 'amber' };
+  // 점검 4회차: 오류도 언제 났는지 · 마지막 성공이 언제인지 함께(오류 문구만 보이면 낡은 오류인지 지금 오류인지 가를 수 없었다).
+  if (st?.osError) {
+    const when = st.osErrorAt != null ? ` ${at(st.osErrorAt)}` : '';
+    const last = st.osAt != null && (st.osErrorAt == null || st.osAt < st.osErrorAt) ? ` · 마지막 성공 ${at(st.osAt)}` : (st.osAt == null ? ' · 성공 기록 없음' : '');
+    return { text: `오류${when} — ${String(st.osError).slice(0, 80)}${last}`, tone: 'amber' };
+  }
   // 점검 3회차: 예산 때문에 일부만 읽었거나 이번 주기를 건너뛴 것을 정상 톤으로 덮지 않는다.
   if (st?.osSkipReason === 'budget' && !(st.osAt != null && st.osSkippedAt != null && st.osAt > st.osSkippedAt)) {
     return { text: `이번 주기 건너뜀(수집 시간 예산 소진${st.osAt != null ? ` · 마지막 수집 ${at(st.osAt)}` : ''})`, tone: 'amber' };
@@ -53,11 +59,17 @@ export function statusText(st, row = null, ctx = null) {
   if (st && st.osAt != null && typeof st.osCut === 'number' && st.osCut > 0) {
     return { text: `${at(st.osAt)} · 일부만 읽음(${n(st.osCut)}대 남음 · 다음 주기에 이어서)`, tone: 'amber' };
   }
-  if (st && st.osAt != null) return { text: `${at(st.osAt)} · ${st.osAsked ? 'Tools 보고 요청' : '제품 정보만(판 미달)'}`, tone: 'ok' };
+  // 점검 4회차: 묻지 않은 이유가 '판 미달' 인지 '판 미상' 인지 가른다(서버 detailedApiOk 는 판을 못 읽어도 묻지 않는다).
+  if (st && st.osAt != null) return { text: `${at(st.osAt)} · ${st.osAsked ? 'Tools 보고 요청' : notAskedText(st.apiVersion)}`, tone: 'ok' };
   if (ctx?.demo) return { text: '데모 데이터(수집 상태 없음)', tone: 'muted' };
   if (row?.collectSource === 'site') return { text: '엣지 수집(상태는 엣지에)', tone: 'muted' };
   if (ctx?.collect && ctx.collect.osEnabled === false) return { text: '이 포탈의 실제 OS 수집 꺼짐', tone: 'amber' };
   return { text: '이 포탈 수집 기록 없음(수집 전 · 접속 실패 등)', tone: 'muted' };
+}
+
+/** 묻지 않은 vCenter 의 사유 글 — 판을 읽었으면 '판 미달 · 8.0.1.0', 못 읽었으면 '판 미상'. */
+export function notAskedText(apiVersion) {
+  return typeof apiVersion === 'string' && /^\d{1,3}\.\d{1,3}/.test(apiVersion) ? `제품 정보만(판 미달 · ${apiVersion})` : '제품 정보만(판 미상)';
 }
 
 /** 수집 주기(ms) → '6시간' · '30분' — 못 읽으면 null(화면이 숫자 없이 말한다 · 주기 숫자를 박지 않는다). */

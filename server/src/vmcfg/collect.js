@@ -90,10 +90,7 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
   //   guestDetailedData 는 API 8.0.2.0 속성이라 **이 요청만** SOAPAction 을 그 판으로 보낸다(포탈 기본 8.0.0.1). 판이 8.0.2 미만이거나
   //   못 읽은 vCenter 에는 묻지 않는다(asked:false — 화면이 'Tools 가 보고하지 않음' 과 '묻지 않음' 을 가른다).
   //   settings.vmOsScan 이 없는 설정 객체(옛 호출·테스트)는 끈 것으로 본다 — 운영 설정(config.js)은 기본 켜짐.
-  if (osOn && !(st.osBackoffUntil > now) && Date.now() >= budgetEnd) {
-    // 점검 3회차: 앞 종류가 예산을 다 써 이번 주기를 건너뛰었다 — 사유를 남긴다(화면이 '수집 기록 없음 · 접속 실패 등' 으로 흐리지 않게).
-    setStatus(vcId, { osSkippedAt: now, osSkipReason: 'budget' });
-  } else if (osOn && !(st.osBackoffUntil > now)) {
+  if (osOn && !(st.osBackoffUntil > now)) {
     const asked = detailedApiOk(c?.sc?.apiVersion);
     const periodMs = settings.vmOsRefreshMs || 21_600_000;
     const max = settings.vmOsPerCycle || 1_000;
@@ -106,8 +103,12 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
       const e = cacheGet(vcId, r)?.os;
       (e && e.asked !== asked ? stale : rest).push(r);
     }
-    const due = [...stale.slice(0, max), ...pickDue(vcId, rest, 'os', { now, periodMs, max: Math.max(0, max - stale.length) })];
-    setStatus(vcId, { osAsked: asked, osApiVersion: typeof c?.sc?.apiVersion === 'string' ? c.sc.apiVersion.slice(0, 32) : null, osSkipReason: null });
+    const dueAll = [...stale.slice(0, max), ...pickDue(vcId, rest, 'os', { now, periodMs, max: Math.max(0, max - stale.length) })];
+    const apiVersion = typeof c?.sc?.apiVersion === 'string' ? c.sc.apiVersion.slice(0, 32) : null;
+    // 점검 4회차: '예산 소진으로 건너뜀' 은 **읽을 VM 이 있는데** 예산이 없을 때만 — 예전에는 대상이 0 이어도 건너뜀(주황)을 남겼다.
+    const skip = dueAll.length > 0 && Date.now() >= budgetEnd;
+    setStatus(vcId, skip ? { osAsked: asked, osApiVersion: apiVersion, osSkippedAt: now, osSkipReason: 'budget' } : { osAsked: asked, osApiVersion: apiVersion, osSkipReason: null });
+    const due = skip ? [] : dueAll;
     if (due.length) {
       const track = {};
       try {

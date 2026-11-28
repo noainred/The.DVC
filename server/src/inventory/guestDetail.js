@@ -62,6 +62,8 @@ export function parseGuestDetailedData(raw) {
   const extra = {};
   let nExtra = 0;
   let ok = false;
+  let knownKeys = 0;      // 점검 4회차: 아는 키를 형식대로 읽은 수(값이 비어도) — '형식은 맞고 값만 빈 보고' 를 '형식을 못 읽음' 과 가른다
+  let extraDropped = 0;   // 점검 4회차: 모르는 키 상한(EXTRA_MAX)으로 버린 수 — 조용히 버리지 않는다
   const n = s.length;
   let i = 0;
   while (i < n) {
@@ -89,12 +91,13 @@ export function parseGuestDetailedData(raw) {
     if (!closed) break;   // 닫는 따옴표 없이 끝났다 — 잘린 값은 버린다(지어내지 않는다)
     const val = cap(parts.join(''), VALUE_MAX);
     if (DETAIL_SET.has(key)) {
+      knownKeys += 1;
       if (val != null) { fields[key] = val; ok = true; }
-    } else if (nExtra < EXTRA_MAX && EXTRA_KEY_RE.test(key) && val != null && !Object.hasOwn(extra, key)) {
-      extra[key] = cap(val, 128); nExtra += 1;
+    } else if (EXTRA_KEY_RE.test(key) && val != null && !Object.hasOwn(extra, key)) {
+      if (nExtra < EXTRA_MAX) { extra[key] = cap(val, 128); nExtra += 1; } else extraDropped += 1;
     }
   }
-  return { fields, extra, ok };
+  return { fields, extra, ok, knownKeys, extraDropped };
 }
 
 /** 'config.vAppConfig.product' 원문 XML(ArrayOfVAppProductInfo) → 첫 제품(이름이나 제조사가 있는 것). 없으면 null. */
@@ -134,13 +137,17 @@ export function parseVmGosProps(props = {}, at = Date.now(), { asked = false } =
   const rawDetail = typeof p[DETAIL_PATH] === 'string' ? p[DETAIL_PATH] : null;
   const parsed = asked ? parseGuestDetailedData(rawDetail) : null;
   const hasExtra = parsed && Object.keys(parsed.extra).length > 0;
+  // 점검 4회차: 아는 키를 형식대로 읽었는데 값이 모두 비었으면 '형식을 못 읽음'(파서 결함 · raw)이 아니라 '빈 값 보고' 다.
+  const empty = !!parsed && !parsed.ok && parsed.knownKeys > 0;
   return {
     at,
     asked: !!asked,
     detailed: parsed?.ok ? parsed.fields : null,
     extra: hasExtra ? parsed.extra : null,
-    raw: parsed && !parsed.ok ? cap(rawDetail, RAW_KEEP_MAX) : null,
+    raw: parsed && !parsed.ok && !empty ? cap(rawDetail, RAW_KEEP_MAX) : null,
     vapp: parseVappProduct(typeof p[VAPP_PATH] === 'string' ? p[VAPP_PATH] : ''),
+    ...(empty ? { emptyValues: true } : {}),
+    ...(parsed?.extraDropped ? { extraDropped: parsed.extraDropped } : {}),
   };
 }
 
@@ -179,14 +186,17 @@ export function sanitizeVmGos(g, now = Date.now()) {
     detailed = Object.keys(d).length ? d : null;
   }
   let extra = null;
+  // 점검 4회차: 엣지가 보낸 버린 수(extraDropped — 정수 · 상한)에 여기서 상한으로 더 버린 수를 더한다(조용히 버리지 않는다).
+  let extraDropped = Number.isSafeInteger(g.extraDropped) && g.extraDropped > 0 ? Math.min(g.extraDropped, 10_000) : 0;
   if (isObj(g.extra)) {
     const e = {};
     let n = 0;
-    for (const k of Object.keys(g.extra)) {
-      if (n >= EXTRA_MAX) break;
+    for (const k of Object.keys(g.extra).slice(0, 10_000)) {
       if (!EXTRA_KEY_RE.test(k) || DETAIL_SET.has(k)) continue;
       const v = cap(g.extra[k], 128);
-      if (v != null) { e[k] = v; n += 1; }
+      if (v == null) continue;
+      if (n >= EXTRA_MAX) { extraDropped += 1; continue; }
+      e[k] = v; n += 1;
     }
     extra = n ? e : null;
   }
@@ -194,7 +204,8 @@ export function sanitizeVmGos(g, now = Date.now()) {
   //   묻지 않았으면(asked 가 참이 아니면) detailed · extra · raw 는 없고, detailed 가 있으면 raw 는 없다. 어긋나면 점검 집계가
   //   '보고 있음 > 물은 수' · '보고 있음이면서 형식 못 읽음' 으로 셌다.
   const asked = g.asked === true;
-  if (!asked) { detailed = null; extra = null; }
+  if (!asked) { detailed = null; extra = null; extraDropped = 0; }
+  const emptyValues = asked && !detailed && g.emptyValues === true;
   const vapp = isObj(g.vapp) ? {
     name: cap(g.vapp.name, 128), vendor: cap(g.vapp.vendor, 128), version: cap(g.vapp.version, 64), fullVersion: cap(g.vapp.fullVersion, 128),
   } : null;
@@ -205,7 +216,9 @@ export function sanitizeVmGos(g, now = Date.now()) {
     asked,
     detailed,
     extra,
-    raw: asked && !detailed ? cap(g.raw, RAW_KEEP_MAX) : null,
+    raw: asked && !detailed && !emptyValues ? cap(g.raw, RAW_KEEP_MAX) : null,
     vapp: vapp && (vapp.name || vapp.vendor) ? vapp : null,
+    ...(emptyValues ? { emptyValues: true } : {}),
+    ...(extraDropped ? { extraDropped } : {}),
   };
 }

@@ -16,7 +16,7 @@ import { _resetVmCfgCache, get as cacheGet, statusOf, vmCfgStatus, setStatus } f
 import { sanitizeInventoryList } from '../src/routes/central.js';
 import { scopedOsProbe } from '../src/routes/admin/opsSettings.js';
 import { VimSoapClient } from '../src/vcenter/soapClient.js';
-import { REASON_TEXT, pct, n as numText, statusText, periodText, topText, managedText, archText } from '../../web/src/views/tools/realOsProbeText.js';
+import { REASON_TEXT, pct, n as numText, statusText, periodText, topText, managedText, archText, notAskedText } from '../../web/src/views/tools/realOsProbeText.js';
 
 const ROCKY = "architecture='X86' bitness='64' distroName='Rocky Linux' distroVersion='9.4' familyName='Linux' kernelVersion='5.14.0-427.13.1.el9_4.x86_64' prettyName='Rocky Linux 9.4 (Blue Onyx)'";
 
@@ -267,7 +267,7 @@ test('⑧ 점검 집계 — 법인별 개수 · 종류 · 사유 · 어플라이
   const p = buildOsProbe(vms, [{ id: 'vc1', name: 'OC1', version: '8.0.3' }, { id: 'vc2', name: 'OC2' }], [{ vcenterId: 'vc1', osAt: 5, osAsked: true, osApiVersion: '8.0.3.0' }], { now: 10 });
   assert.equal(p.total.vms, 11); assert.equal(p.total.templates, 1);
   assert.equal(p.total.detailed, 3); assert.equal(p.total.detailedOff, 1);
-  assert.deepEqual(p.noDetail, { notRead: 1, notAsked: 1, unparsed: 1, template: 1, toolsOld: 1, toolsNotRunning: 1, poweredOff: 1, toolsUnknown: 1, other: 1 },
+  assert.deepEqual(p.noDetail, { notRead: 1, notAsked: 1, emptyValues: 0, unparsed: 1, template: 1, toolsOld: 1, toolsNotRunning: 1, poweredOff: 1, toolsUnknown: 1, other: 1 },
     '형식을 못 읽은 보고(raw · extra)는 Tools 미보고(other)와 섞지 않는다');
   const oc1 = p.vcenters.find((r) => r.id === 'vc1');
   assert.equal(oc1.name, 'OC1'); assert.equal(oc1.detailed, 2); assert.equal(oc1.status.apiVersion, '8.0.3.0');
@@ -406,7 +406,7 @@ test('R1 샘플 — 아키텍처는 다른 줄 · addl · cpe · build 는 첫 �
     vm('vm-1', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }), vm('vm-2', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:2') }),
     vm('vm-3', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:3') }), vm('vm-4', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }),
   ], [{ id: 'vc1' }], [], { now: 1 });
-  assert.equal(p.schema, 3);
+  assert.equal(p.schema, 4);
   const x86 = p.samples.find((s) => s.architecture === 'X86');
   const arm = p.samples.find((s) => s.architecture === 'Arm');
   assert.equal(x86.count, 2); assert.equal(arm.count, 2);
@@ -585,4 +585,64 @@ test('R3 화면 — vCenter 를 법인이라 부르지 않는다 · 50행 절단
   assert.equal(/종류 · 버전 · 개수만 있습니다/.test(jsx), false, '파일에 vCenter 이름 · 오류 문구도 있다');
   assert.match(jsx, /수집 상태와 오류 문구/);
   assert.equal(pct(5849, 5850), '>99%'); assert.equal(pct(1, 5850), '<1%'); assert.equal(pct(0, 5850), '0%'); assert.equal(pct(5850, 5850), '100%'); assert.equal(pct(1, 2), '50%');
+});
+
+/* ---------------------------- 점검 4회차(반증 재현) 회귀 ---------------------------- */
+
+test('R4 빈 값 보고는 형식 못 읽음과 다른 사유 · 엣지에서도 같은 모양', () => {
+  const g = parseVmGosProps({ 'guest.guestDetailedData': "prettyName='' distroName='' familyName=''" }, 1, { asked: true });
+  assert.equal(g.emptyValues, true); assert.equal(g.raw, null); assert.equal(g.detailed, null);
+  const bad = parseVmGosProps({ 'guest.guestDetailedData': '완전히 다른 형식' }, 1, { asked: true });
+  assert.equal(Object.hasOwn(bad, 'emptyValues'), false); assert.equal(bad.raw, '완전히 다른 형식');
+  const p = buildOsProbe([vm('vm-1', 'vc1', { gos: g }), vm('vm-2', 'vc1', { gos: bad })], [{ id: 'vc1' }], [], { now: 1 });
+  assert.equal(p.noDetail.emptyValues, 1); assert.equal(p.noDetail.unparsed, 1);
+  assert.deepEqual(p.unparsed, [{ raw: '완전히 다른 형식', count: 1 }]);
+  const e = sanitizeVmGos({ asked: true, emptyValues: true, raw: 'x' }, 2);
+  assert.equal(e.emptyValues, true); assert.equal(e.raw, null);
+  assert.equal(Object.hasOwn(sanitizeVmGos({ asked: false, emptyValues: true }, 2), 'emptyValues'), false, '묻지 않았으면 빈 값 보고도 없다');
+  assert.equal(Object.hasOwn(sanitizeVmGos({ asked: true, emptyValues: 'true' }, 2), 'emptyValues'), false);
+  assert.ok(REASON_TEXT.emptyValues);
+});
+
+test('R4 모르는 키 상한으로 버린 수를 센다(파서 · 정제 · 집계)', () => {
+  const g = parseVmGosProps({ 'guest.guestDetailedData': "prettyName='Rocky' " + Array.from({ length: 10 }, (_, i) => `k${i}='v'`).join(' ') }, 1, { asked: true });
+  assert.equal(Object.keys(g.extra).length, 8); assert.equal(g.extraDropped, 2);
+  const s2 = sanitizeVmGos({ asked: true, detailed: { prettyName: 'R' }, extra: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`k${i}`, 'v'])), extraDropped: 3 }, 2);
+  assert.equal(Object.keys(s2.extra).length, 8); assert.equal(s2.extraDropped, 5, '엣지가 버린 3 + 여기서 버린 2');
+  assert.equal(Object.hasOwn(sanitizeVmGos({ asked: true, extraDropped: '9' }, 2), 'extraDropped'), false, '글자 수치는 받지 않는다');
+  assert.equal(sanitizeVmGos({ asked: true, extraDropped: 1e12 }, 2).extraDropped, 10_000);
+  const p = buildOsProbe([vm('vm-1', 'vc1', { gos: g })], [{ id: 'vc1' }], [], { now: 1 });
+  assert.equal(p.total.extraDropped, 2);
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.match(jsx, /t\.extraDropped/);
+  assert.equal(/n\(8\)/.test(jsx), false, '상한 숫자를 화면에 박지 않는다');
+});
+
+test('R4 예산 건너뜀은 읽을 VM 이 있을 때만', async () => {
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  await refreshVmCfg(fakeClient(), 'vcN', ['vm-1'], { now: NOW, settings: SET });
+  await refreshVmCfg(fakeClient(), 'vcN', ['vm-1'], { now: NOW + 60_000, budgetMs: 0, settings: SET });
+  assert.equal(statusOf('vcN').osSkipReason, null, '다시 읽을 VM 이 0대면 건너뜀이 아니다');
+  assert.equal(statusOf('vcN').osSkippedAt ?? null, null);
+  await refreshVmCfg(fakeClient(), 'vcN', ['vm-1', 'vm-2'], { now: NOW + 120_000, budgetMs: 0, settings: SET });
+  assert.equal(statusOf('vcN').osSkipReason, 'budget', '새 VM 이 있는데 예산이 없으면 건너뜀');
+});
+
+test('R4 상태 글 — 오류 시각 · 마지막 성공 · 판 미상', () => {
+  const p = buildOsProbe([], [{ id: 'vc1' }], [{ vcenterId: 'vc1', osAt: 1_000, osErrorAt: 2_000, osError: 'boom' }], { now: 3_000 });
+  assert.equal(p.vcenters[0].status.osErrorAt, 2_000);
+  const t = statusText(p.vcenters[0].status, p.vcenters[0], {});
+  assert.match(t.text, /^오류 \d\d-\d\d \d\d:\d\d — boom · 마지막 성공 /);
+  assert.match(statusText({ osError: 'x' }, null, {}).text, /성공 기록 없음/);
+  assert.equal(notAskedText('8.0.1.0'), '제품 정보만(판 미달 · 8.0.1.0)');
+  for (const v of ['', null, 'abc']) assert.equal(notAskedText(v), '제품 정보만(판 미상)');
+  assert.match(statusText({ osAt: 5, osAsked: false, apiVersion: '' }, { collectSource: 'direct' }, {}).text, /판 미상/);
+});
+
+test('R4 화면 — 빌드 값도 그린다 · 스캔 상태 조회 실패가 점검 카드를 가리지 않는다', () => {
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.match(jsx, /topText\(r\.buildNumber, 2, r\.buildNumberOmitted\)/);
+  const g = fs.readFileSync(new URL('../../web/src/views/tools/GuestOsTools.jsx', import.meta.url), 'utf8');
+  assert.match(g, /if \(err\) return <><RealOsProbe scope=\{scope\} \/><ErrorBox/);
+  assert.match(g, /if \(!st\) return <><RealOsProbe scope=\{scope\} \/><Loading/);
 });
