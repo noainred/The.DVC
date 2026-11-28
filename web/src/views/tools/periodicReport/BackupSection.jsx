@@ -141,11 +141,11 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
 
       <div className="prr-bar"><b className="prr-lab">법인별</b><span className="prr-muted">실패 많은 순 · 제목을 누르면 정렬 · ‘앞 기간’ 은 앞 기간의 실패 · ‘확인 불가’ 는 백업 · 날 수 · 판정 칸은 서비스 축의 백업 항목 것{s.prev?.days && !cmp ? (s.prev.full ? ' · 확인 불가가 있어 앞 기간은 비움' : ' · 앞 기간은 다 확정되지 않아 비움') : ''}</span></div>
       <div className="prr-tablewrap">
-        <STable minWidth={multi ? 1080 : 960}>
+        <STable minWidth={multi ? 1000 : 960}>
           <thead><tr>
             <th>법인</th><th style={{ textAlign: 'right' }}>끝난 백업</th><th style={{ textAlign: 'right' }}>성공</th><th style={{ textAlign: 'right' }}>경고</th><th style={{ textAlign: 'right' }}>실패</th>
             <th style={{ textAlign: 'right' }}>성공률</th><th style={{ textAlign: 'right' }} title="앞 기간(같은 길이)의 실패 — 두 기간 다 확정됐을 때만">앞 기간</th><th style={{ textAlign: 'right' }}>실행 없음</th><th style={{ textAlign: 'right' }} title="확인 불가 줄 수(백업 · 날)">확인 불가</th>
-            {multi && <th style={{ textAlign: 'right' }}>실패한 날</th>}{multi && <th style={{ textAlign: 'right' }}>되풀이 VM</th>}
+            {multi && <th style={{ textAlign: 'right' }}>실패한 날</th>}
             <th style={{ textAlign: 'right' }}>지금 실패</th><th>판정</th>
           </tr></thead>
           <tbody>
@@ -160,7 +160,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
                   <td className="prr-num" data-sort={k ? c.w : null}>{bkNum(c, c.w)}</td><td className="prr-num" data-sort={k ? c.f : null}>{bkNum(c, c.f)}</td>
                   <td className="prr-num" data-sort={c.rate}>{pctText(c.rate)}</td><td className="prr-num" data-sort={pf}>{pf == null ? '—' : numText(pf)}</td>
                   <td className="prr-num" data-sort={k ? c.n : null}>{bkNum(c, c.n)}</td><td className="prr-num">{numText(c.unknownDays)}</td>
-                  {multi && <td className="prr-num">{k ? numText(c.failDays) : '—'}</td>}{multi && <td className="prr-num">{k ? numText(c.repeatVms) : '—'}</td>}
+                  {multi && <td className="prr-num" title={k && c.repeatVms ? `2일 이상 되풀이 ${numText(c.repeatVms)}대` : undefined}>{k ? numText(c.failDays) : '—'}</td>}
                   <td className="prr-num" data-sort={c.failNow}>{c.failNow == null ? '—' : numText(c.failNow)}</td>
                   <td data-sort={st ? STATUS_ORDER.indexOf(st) : null}>{st ? <StatusChip s={st} /> : '—'}</td>
                 </tr>
@@ -170,7 +170,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
               <tr data-pin="1" className="prr-sum">
                 <td>합계</td><td className="prr-num">{bkNum(t, t.e)}</td><td className="prr-num">{bkNum(t, t.ok)}</td><td className="prr-num">{bkNum(t, t.w)}</td><td className="prr-num">{bkNum(t, t.f)}</td>
                 <td className="prr-num">{pctText(t.rate)}</td><td className="prr-num">{cmp ? numText(s.prev.f) : '—'}</td><td className="prr-num">{bkNum(t, t.n)}</td><td className="prr-num">{numText(t.ud)}</td>
-                {multi && <td className="prr-num">—</td>}{multi && <td className="prr-num">{known ? numText(s.repeatVms) : '—'}</td>}
+                {multi && <td className="prr-num">—</td>}
                 <td className="prr-num">{s.failNow == null ? '—' : numText(s.failNow)}</td><td>—</td>
               </tr>
             )}
