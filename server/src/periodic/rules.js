@@ -14,6 +14,7 @@ import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { localParts, localMs, GRACE_MS, CLOCK_TOL_MS } from '../xferspeed/schedule.js';
 import { normalizeMailList, MAIL_LIST_MAX, isEmail } from '../isidu/mailRules.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { LEDGER_KEEP, scopeCutBackup, backupMatrixOf } from './backupLedger.js';
 
 export const KINDS = Object.freeze(['daily', 'weekly', 'monthly', 'quarterly']);
 export const KIND_LABEL = Object.freeze({ daily: '일일', weekly: '주간', monthly: '월간', quarterly: '분기' });
@@ -57,6 +58,12 @@ export const DELIVERY_DEFAULTS = Object.freeze({
   notice: Object.freeze({ enabled: true, kinds: Object.freeze(['weekly', 'monthly', 'quarterly']) }),
   issues: Object.freeze({ enabled: false, dailyMax: 10 }),
 });
+/**
+ * v3.59 보고서 3절 '백업 성공 · 실패 현황'(설계 §9) — 실을 주기 · 백업 · 하루 치 적재 · 적재 보관(컨펌 ③ — 400일).
+ *   적재는 보고서를 꺼도 쌓는다(주간 · 월간이 쓰는 날 수가 끊기지 않게) — ledger:false 일 때만 멈춘다.
+ */
+export const BACKUP_DEFAULTS = Object.freeze({ kinds: Object.freeze([...KINDS]), products: Object.freeze({ veeam: true, bareos: true, clone: true }), ledger: true, keepDays: LEDGER_KEEP.def });
+const BK_PRODUCTS = Object.freeze(['veeam', 'bareos', 'clone']);
 const CORP_MAX = 200;
 const ITEM_OVERRIDE_MAX = 200;
 const ITEM_KEY_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -103,6 +110,10 @@ export function settingsOf(raw) {
   const D = DELIVERY_DEFAULTS;
   const retainDays = {};
   for (const k of KINDS) retainDays[k] = intIn(s.retainDays?.[k], RETAIN[k].min, RETAIN[k].max) ?? RETAIN[k].def;
+  const bk = s.backup && typeof s.backup === 'object' && !Array.isArray(s.backup) ? s.backup : {};
+  const bkp = bk.products && typeof bk.products === 'object' && !Array.isArray(bk.products) ? bk.products : {};
+  const backup = { kinds: kindList(bk.kinds, BACKUP_DEFAULTS.kinds), products: Object.fromEntries(BK_PRODUCTS.map((p) => [p, bkp[p] !== false])), ledger: bk.ledger !== false,
+    keepDays: intIn(bk.keepDays, LEDGER_KEEP.min, LEDGER_KEEP.max) ?? LEDGER_KEEP.def };
   return {
     kinds, items,
     mail: { enabled: typeof m.enabled === 'boolean' ? m.enabled : D.mail.enabled, includeAdmin: m.includeAdmin !== false, to: (Array.isArray(m.to) ? m.to : []).filter(isEmail).slice(0, MAIL_LIST_MAX),
@@ -110,7 +121,7 @@ export function settingsOf(raw) {
     chat: { enabled: typeof c.enabled === 'boolean' ? c.enabled : D.chat.enabled, kinds: kindList(c.kinds, D.chat.kinds) },
     notice: { enabled: typeof n.enabled === 'boolean' ? n.enabled : D.notice.enabled, kinds: kindList(n.kinds, D.notice.kinds) },
     issues: { enabled: is.enabled === true, dailyMax: intIn(is.dailyMax, 1, 50) ?? D.issues.dailyMax },
-    retainDays,
+    retainDays, backup,
     updatedAt: numOrNull(s.updatedAt), updatedBy: typeof s.updatedBy === 'string' ? s.updatedBy.slice(0, 64) : null,
   };
 }
@@ -212,6 +223,28 @@ export function normalizeSettings(input, prev, { now = Date.now(), by = null, kn
       const n = intIn(v, RETAIN[k].min, RETAIN[k].max);
       if (n == null) return { error: `${KIND_LABEL[k]} 보관 기간은 ${RETAIN[k].min}~${RETAIN[k].max}일입니다.`, field: `retainDays.${k}` };
       out.retainDays[k] = n;
+    }
+  }
+  if (input.backup != null) {
+    const v = input.backup;
+    if (typeof v !== 'object' || Array.isArray(v)) return { error: '백업 성공 · 실패 현황 설정 형식이 잘못됐습니다.', field: 'backup' };
+    if (v.kinds != null) {
+      if (!Array.isArray(v.kinds) || v.kinds.some((x) => !KINDS.includes(String(x)))) return { error: '백업 현황을 실을 주기는 일일 · 주간 · 월간 · 분기 중에서 고릅니다.', field: 'backup.kinds' };
+      out.backup.kinds = kindList(v.kinds, []);
+    }
+    if (v.products != null) {
+      if (typeof v.products !== 'object' || Array.isArray(v.products)) return { error: '백업 대상 형식이 잘못됐습니다.', field: 'backup.products' };
+      for (const p of BK_PRODUCTS) {
+        if (v.products[p] == null) continue;
+        if (typeof v.products[p] !== 'boolean') return { error: `백업 대상(${p}) 값은 켬 · 끔입니다.`, field: `backup.products.${p}` };
+        out.backup.products[p] = v.products[p];
+      }
+    }
+    if (v.ledger != null) { if (typeof v.ledger !== 'boolean') return { error: '하루 치 적재 값은 켬 · 끔입니다.', field: 'backup.ledger' }; out.backup.ledger = v.ledger; }
+    if (v.keepDays != null) {
+      const n = intIn(v.keepDays, LEDGER_KEEP.min, LEDGER_KEEP.max);
+      if (n == null) return { error: `백업 적재 보관 기간은 ${LEDGER_KEEP.min}~${LEDGER_KEEP.max}일입니다.`, field: 'backup.keepDays' };
+      out.backup.keepDays = n;
     }
   }
   out.updatedAt = now; out.updatedBy = by ? String(by).slice(0, 64) : null;
@@ -386,7 +419,8 @@ export function matrixOf(doc) {
   });
   const out = {};
   for (const [k, arr] of Object.entries(vc)) out[k] = arr.join('');
-  return { keys, vc: out };
+  const bk = doc?.backup ? backupMatrixOf(doc.backup) : null;   // v3.59 3절 — 보관함 '백업 실패' 열(범위로 다시 센다)
+  return { keys, vc: out, ...(bk ? { bk } : {}) };
 }
 /** 행렬 + 보이는 vCenter 집합 → 판정별 개수 · 종합(범위 계정의 목록용). */
 export function scopedCountsFromMatrix(matrix, allowed) {
@@ -417,7 +451,7 @@ export function scopeCutDoc(doc, allowed) {
   }
   const corps = (doc.corps || []).filter((c) => allowed.has(String(c.vc)));
   return {
-    ...doc, items, corps, counts: countsOf(items), overall: overallOf(items),
+    ...doc, items, corps, counts: countsOf(items), overall: overallOf(items), ...(doc.backup ? { backup: scopeCutBackup(doc.backup, allowed) } : {}),
     corpsTotal: corps.length, corpsReported: corps.filter((c) => c.reported).length, scoped: true,
   };
 }

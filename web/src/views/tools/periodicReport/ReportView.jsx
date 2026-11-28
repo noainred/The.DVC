@@ -1,5 +1,6 @@
 /**
  * ReportView — ④ 보고서 열람(설계 시안 ④): 1 종합 · 2 조치 필요 · 3 법인별 현황 · 4~6 축별 항목(법인 행 펼치기) · 7 확인하지 못한 것 · 8 전달 기록.
+ *   v3.59: 회차에 백업 절이 있으면 3 이 '백업 성공 · 실패 현황'(BackupSection — 시안 §9 ⑧ ⑨)이고 뒤 절 번호가 하나씩 밀린다(HTML 보고서와 같은 번호).
  * id 로 서버에서 받거나(보관된 회차), run 을 직접 받는다(미리보기 — 보관 · 전달 안 함). 서버가 이미 범위로 자른 문서다.
  */
 import React, { useState } from 'react';
@@ -7,6 +8,7 @@ import { STable } from '../../../components/STable.jsx';
 import { postJson, downloadFile, canCsv } from '../../../api.js';
 import { ErrorBox } from '../../../components/primitives.jsx';
 import { StatusChip, useLoad } from './parts.jsx';
+import BackupSection from './BackupSection.jsx';
 import { AXES, AXIS_LABEL, KIND_LABEL, CHANNEL_LABEL, DELIVERY_STATE, numText, kstText, countsLine, itemsByAxis, axisWorst, corpLabel } from './periodicReportText.js';
 
 /** 항목 하나의 법인 행(표 아래 펼침 칸 — 정렬 표 안에 하위 행을 끼우지 않는다). */
@@ -40,6 +42,7 @@ export default function ReportView({ id = '', run: given = null, previewId = nul
   if (!run) return <div className="prr-muted">{ld.busy ? '보고서를 불러오는 중…' : '보고서를 찾지 못했습니다.'}</div>;
   const corpName = (vc) => { const c = (run.corps || []).find((x) => x.vc === vc); return vc == null ? '법인 미지정' : corpLabel(c) || vc; };
   const byAxis = itemsByAxis(run.items);
+  const off = run.backup ? 1 : 0;   // 3절(백업)이 있으면 뒤 절 번호가 하나씩 밀린다
   const keep = async () => {
     setAct({ busy: true, msg: null });
     try { const r = await postJson(`/tools/periodic-report/preview/${encodeURIComponent(previewId)}/keep`, {}); if (r?.ok) onKept?.(r.id); else setAct({ busy: false, msg: { ok: false, text: r?.reason || '보관하지 못했습니다' } }); }
@@ -102,7 +105,9 @@ export default function ReportView({ id = '', run: given = null, previewId = nul
         <div className="prr-bar"><button type="button" className="prr-rowbtn" onClick={() => setAllActs((x) => !x)} aria-expanded={allActs}>{allActs ? '처음 30건만 보기' : `전부 보기(${numText(run.actions.length)}건)`}</button><span className="prr-muted">제목을 누르면 정렬한 뒤 자릅니다.</span></div>
       )}
 
-      <h3 className="prr-h">3. 법인별 현황 <span className="prr-muted">칸은 그 축에서 가장 나쁜 판정</span></h3>
+      {run.backup && <BackupSection bk={run.backup} items={run.items} corpName={corpName} no={3} />}
+
+      <h3 className="prr-h">{3 + off}. 법인별 현황 <span className="prr-muted">칸은 그 축에서 가장 나쁜 판정</span></h3>
       <div className="prr-tablewrap">
         <STable minWidth={860}>
           <thead><tr><th>법인</th><th>vCenter</th>{AXES.map((a) => <th key={a}>{AXIS_LABEL[a]}</th>)}<th style={{ textAlign: 'right' }}>확인 불가</th><th style={{ textAlign: 'right' }}>조치</th><th>데이터 기준</th><th>수집</th></tr></thead>
@@ -122,7 +127,7 @@ export default function ReportView({ id = '', run: given = null, previewId = nul
         const opened = its.find((x) => x.key === openKey) || null;
         return (
           <React.Fragment key={a}>
-            <h3 className="prr-h">{4 + i}. {AXIS_LABEL[a]} <span className="prr-muted">{its.length}항목</span></h3>
+            <h3 className="prr-h">{4 + off + i}. {AXIS_LABEL[a]} <span className="prr-muted">{its.length}항목</span></h3>
             <div className="prr-tablewrap">
               <STable minWidth={820}>
                 <thead><tr><th>항목</th><th>판정</th><th>근거</th><th>직전 회차</th><th data-nosort="1">법인 행</th></tr></thead>
@@ -142,7 +147,7 @@ export default function ReportView({ id = '', run: given = null, previewId = nul
         );
       })}
 
-      <h3 className="prr-h">7. 확인하지 못한 것 <span className="prr-muted">{numText((run.unknowns || []).length)}건 — 정상으로도 이상으로도 세지 않았습니다</span></h3>
+      <h3 className="prr-h">{7 + off}. 확인하지 못한 것 <span className="prr-muted">{numText((run.unknowns || []).length)}건 — 정상으로도 이상으로도 세지 않았습니다</span></h3>
       {(run.unknowns || []).length ? (
         <div className="prr-tablewrap">
           <STable minWidth={760}>
@@ -154,7 +159,7 @@ export default function ReportView({ id = '', run: given = null, previewId = nul
 
       {!previewId && !scoped && (
         <>
-          <h3 className="prr-h">8. 전달 기록</h3>
+          <h3 className="prr-h">{8 + off}. 전달 기록</h3>
           {deliveries.length ? (
             <div className="prr-tablewrap">
               <STable minWidth={720}>

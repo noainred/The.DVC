@@ -3,6 +3,7 @@
  * 설정 조회는 전체 범위만(서버 fullScopeOnly — 범위 계정은 403 권한 안내) · 저장 · 만들기는 관리자 · 전체 범위만(서버 fullRwOnly).
  * 비관리자에게 서버는 받는 사람 주소를 수로만 준다(toHidden) — 화면은 그 사실을 말하고 입력을 잠근다. 조회 실패 상태로는 저장 버튼을 열지 않는다.
  * 설정 › 알림 · 연동 › 정기 점검 보고 도 이 화면을 쓴다(standalone).
+ * v3.59(시안 §9): '백업 성공 · 실패 현황' 카드 — 실을 주기 · 백업 고르기 · 하루 치 적재 켜기 · 적재 보관 · 적재 상태(서버 status.backup 값 — 주기 · 상한 숫자를 화면에 박지 않는다).
  */
 import React, { useEffect, useState } from 'react';
 import { STable } from '../../../components/STable.jsx';
@@ -10,7 +11,7 @@ import { putJson, postJson, hasRole } from '../../../api.js';
 import { ErrorBox } from '../../../components/primitives.jsx';
 import Select from '../../../components/Select.jsx';
 import { useLoad } from './parts.jsx';
-import { KINDS, KIND_LABEL, WEEKDAYS, numText, kstText, scheduleLine, nextText, mailList, statusText } from './periodicReportText.js';
+import { KINDS, KIND_LABEL, WEEKDAYS, numText, kstText, scheduleLine, nextText, mailList, statusText, BK_PRODUCTS, BK_PRODUCT_LABEL } from './periodicReportText.js';
 
 const formOf = (s) => ({
   kinds: Object.fromEntries(KINDS.map((k) => [k, { ...(s?.kinds?.[k] || {}) }])),
@@ -20,6 +21,8 @@ const formOf = (s) => ({
   notice: { enabled: !!s?.notice?.enabled, kinds: [...(s?.notice?.kinds || [])] },
   issues: { enabled: !!s?.issues?.enabled, dailyMax: s?.issues?.dailyMax ?? 10 },
   retainDays: { ...(s?.retainDays || {}) },
+  backup: { kinds: [...(s?.backup?.kinds || [])], products: Object.fromEntries(BK_PRODUCTS.map((p) => [p, s?.backup?.products?.[p] !== false])),
+    ledger: s?.backup?.ledger !== false, keepDays: s?.backup?.keepDays ?? '' },
 });
 const toggleIn = (arr, k) => (arr.includes(k) ? arr.filter((x) => x !== k) : [...arr, k]);
 
@@ -50,7 +53,8 @@ export default function ScheduleTab({ status: given = null, isAdmin = hasRole('a
         mail: { enabled: f.mail.enabled, includeAdmin: f.mail.includeAdmin, to: mailList(f.mail.to), kinds: f.mail.kinds, attach: f.mail.attach,
           corpTo: Object.fromEntries(Object.entries(f.mail.corpTo).map(([k, v]) => [k, mailList(v)]).filter(([, v]) => v.length)) },
         chat: f.chat, notice: f.notice, issues: { enabled: f.issues.enabled, dailyMax: Number(f.issues.dailyMax) },
-        retainDays: Object.fromEntries(KINDS.map((k) => [k, Number(f.retainDays[k])])) };
+        retainDays: Object.fromEntries(KINDS.map((k) => [k, Number(f.retainDays[k])])),
+        backup: { kinds: f.backup.kinds, products: f.backup.products, ledger: f.backup.ledger, keepDays: Number(f.backup.keepDays) } };
       const r = await putJson('/tools/periodic-report/settings', body);
       if (r?.ok === false) setMsg({ ok: false, text: `${r.reason || '저장하지 못했습니다'}${r.field ? ` (${r.field})` : ''}` });
       else { setMsg({ ok: true, text: '저장했습니다 — 켜거나 시각을 바꾼 주기는 지금 이후 회차부터 만듭니다(지난 회차를 소급하지 않습니다).' }); set.reload(); onChanged?.(); }
@@ -69,6 +73,8 @@ export default function ScheduleTab({ status: given = null, isAdmin = hasRole('a
   };
   const vcList = Array.isArray(vcs.data) ? vcs.data : (vcs.data?.vcenters || []);
   const db = status?.db;
+  const bks = status?.backup || null;   // 적재 상태(서버 ledgerStatus — 관측 주기 · 보관 상한도 서버 값)
+  const bkSet = (patch) => setF({ ...f, backup: { ...f.backup, ...patch } });
   return (
     <div className="prr-sched">
       {standalone && <div className="prr-muted">특수 기능 › 리포트 · 점검 › 정기 점검 보고 의 ‘일정 · 전달’ 과 같은 화면입니다 — 보관함 · 보고서는 <a href="#/tools/periodic-report">그 도구</a>에서 봅니다.</div>}
@@ -129,6 +135,24 @@ export default function ScheduleTab({ status: given = null, isAdmin = hasRole('a
             <div className="prr-checks">{KINDS.map((k) => <label key={k} className="prr-check"><input type="checkbox" checked={f.notice.kinds.includes(k)} onChange={() => setF({ ...f, notice: { ...f.notice, kinds: toggleIn(f.notice.kinds, k) } })} disabled={!canSave} />{KIND_LABEL[k]}</label>)}</div>
             <label className="prr-check"><input type="checkbox" checked={f.issues.enabled} onChange={(e) => setF({ ...f, issues: { ...f.issues, enabled: e.target.checked } })} disabled={!canSave} />이상 항목을 이슈로 자동 등록(같은 항목 · 법인은 한 번 · 하루 상한)</label>
             <label className="prr-lab">이슈 하루 상한<input type="number" min="1" max="50" value={f.issues.dailyMax} onChange={(e) => setF({ ...f, issues: { ...f.issues, dailyMax: e.target.value } })} disabled={!canSave} /></label>
+          </div>
+          <div className="prr-panel">
+            <div className="prr-card-h"><b>백업 성공 · 실패 현황(보고서 3절)</b><label className="prr-check"><input type="checkbox" checked={f.backup.ledger} onChange={(e) => bkSet({ ledger: e.target.checked })} disabled={!canSave} />하루 치 적재</label></div>
+            <div className="prr-lab">실을 주기</div>
+            <div className="prr-checks">{KINDS.map((k) => <label key={k} className="prr-check"><input type="checkbox" checked={f.backup.kinds.includes(k)} onChange={() => bkSet({ kinds: toggleIn(f.backup.kinds, k) })} disabled={!canSave} />{KIND_LABEL[k]}</label>)}</div>
+            <div className="prr-lab">실을 백업</div>
+            <div className="prr-checks">{BK_PRODUCTS.map((p) => <label key={p} className="prr-check"><input type="checkbox" checked={!!f.backup.products[p]} onChange={(e) => bkSet({ products: { ...f.backup.products, [p]: e.target.checked } })} disabled={!canSave} />{BK_PRODUCT_LABEL[p]}</label>)}</div>
+            <label className="prr-lab">적재 보관(일{bks?.keep ? ` · ${numText(bks.keep.min)} ~ ${numText(bks.keep.max)}` : ''})<input type="number" min={bks?.keep?.min} max={bks?.keep?.max} value={f.backup.keepDays} onChange={(e) => bkSet({ keepDays: e.target.value })} disabled={!canSave} /></label>
+            <div className="prr-note">
+              적재 상태: {bks ? <>
+                {bks.enabled ? '켜짐' : '꺼짐'}{bks.captureMs ? ` · ${numText(Math.round(bks.captureMs / 60_000))}분마다 관측` : ''}
+                {' · '}마지막 관측 {bks.last ? `${kstText(bks.last.at)} ${bks.last.ok ? '성공' : `실패 — ${bks.last.reason || '사유 미상'}`}` : '아직 없음(포탈 시작 뒤 첫 관측 전)'}
+                {bks.last?.ok ? ` · 새 결과 ${numText(bks.last.inserted)} · 확정 ${numText(bks.last.sealed)} · 다시 확정 ${numText(bks.last.resealed)}` : ''}
+                {bks.busy ? ' · 지금 관측 중' : ''}
+                {bks.db ? ` · 적재 시작 ${bks.db.firstDayAt ? kstText(bks.db.firstDayAt, { withYear: true }).slice(0, 10) : '없음'} · 확정 줄 ${numText(bks.db.days)} · 관측 줄 ${numText(bks.db.obs)}` : ' · 보관 DB 를 열지 못했습니다'}
+              </> : '—'}
+            </div>
+            <div className="prr-note">적재는 포탈이 이미 저장한 결과(Veeam 엣지 push · Bareos 원장 · VM 백업 잡 기록)만 읽습니다 — Veeam · Director · 법인 엣지를 새로 부르지 않습니다. 끈 동안의 날은 ‘적재 전’ 으로 남고 소급해 채우지 않습니다. 백업 고르기는 3절에만 적용됩니다 — 항목 판정은 ‘점검 항목’ 에서 켜고 끕니다.</div>
           </div>
           {canSave && <div className="prr-bar"><button type="button" className="prr-btn primary" onClick={save} disabled={!!busy}>{busy === 'save' ? '저장하는 중…' : '저장'}</button><span className="prr-muted">저장은 감사 로그에 남습니다.</span></div>}
           <div className="prr-panel">

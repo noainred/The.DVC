@@ -26,36 +26,70 @@ export async function svcmon(ctx) {
     basis: `점검 ${n(total)}건 — 이상 ${n(bad)} · 주의 ${n(warn)} · 오래됨 · 대기 ${n(unk)} · 엣지 ${n(e.agents)}곳${e.silent ? `(보고 없음 ${e.silent})` : ''}${e.assignedNoReport ? ` · 배정만 있고 보고 없는 엣지 ${e.assignedNoReport}` : ''} · 회차 시점 상태` };
 }
 
-/** Veeam 백업 판정 — Backup 현황 Summary 의 법인 줄(라우트 공급자 · 시스템 계정). 실패 결과는 이상 · 7일 넘은 백업은 주의 · 결과를 못 읽은 법인은 확인 불가. */
+/** 백업 항목 법인 행 글 — 지금 실패(연속) · 마지막 성공 7일 · 3일 넘음. */
+function backupText(f, { prefix = '', rpo = true, overdue = false } = {}) {
+  const rep = f.fails.filter((x) => x.streak >= 2).length;
+  const parts = [`${prefix}지금 실패 ${n(f.fails.length)}${rep ? `(연속 ${n(rep)})` : ''}`];
+  if (rpo) parts.push(`마지막 성공 7일 넘음 ${n(f.rpo7)}`, `3일 넘음 ${n(f.rpo3)}`);
+  if (overdue) parts.push(`RPO 넘김 ${n(f.overdue)}`, `마지막 성공 7일 넘음 ${n(f.rpo7)}`);
+  if (f.rpoUnknown) parts.push(`마지막 성공 모름 ${n(f.rpoUnknown)}`);
+  return parts.join(' · ');
+}
+const repeatOf = (f) => f.fails.filter((x) => x.streak >= 2).length;
+
+/**
+ * Veeam 백업 판정(컨펌 ④ ⑤ — 2026-11-28) — VM 마다 Backup 현황 Detail 과 같은 결과(라우트 공급자 backup-observe — 시스템 계정).
+ *   연속 2회 이상 실패(백업 적재로 센다) · 마지막 성공 7일 넘음은 이상 · 한 번 실패 · 3일 넘음은 주의 · 결과를 못 읽었거나 일부만 읽은 법인은 확인 불가.
+ */
 export async function veeam(ctx) {
-  const p = periodicProvider('veeam-summary');
-  if (!p) return { status: 'unknown', unknownReason: 'Backup 현황 계산을 쓸 수 없습니다(라우트 공급자 미등록)', rows: [] };
-  const sm = await p();
+  const { backupFacts } = await import('../backupService.js');
+  const { backupJudge } = await import('../backupLedger.js');
+  const f = await backupFacts(ctx);
+  if (!f.provider.ok) return { status: 'unknown', unknownReason: `Veeam 결과를 읽지 못했습니다 — ${f.provider.reason}`, rows: [] };
   const rows = [];
-  for (const r of sm?.rows || []) {
-    if (r.veeamState === 'unlinked') continue;   // Veeam 연동이 없는 법인은 이 항목 대상이 아니다
-    if (r.veeamState !== 'ok' && r.veeamState !== 'partial') { rows.push(vcRow(r.id, 'unknown', null, `Veeam 결과를 읽지 못함(${r.veeamReason || r.veeamState})`)); continue; }
-    const failed = numOrNull(r.results?.failed) ?? 0; const d7 = numOrNull(r.rpo?.d7) ?? 0; const d3 = numOrNull(r.rpo?.d3) ?? 0;
-    const unk = (r.veeamStale || 0) + (r.veeamAuth || 0) + (r.veeamState === 'partial' ? 1 : 0);
-    rows.push(vcRow(r.id, judge({ crit: failed, warn: d7, unknown: unk }), failed + d7, `백업 VM ${n(r.veeam)} · 실패 ${n(failed)} · 7일 넘음 ${n(d7)} · 3일 넘음 ${n(d3)}${r.veeamState === 'partial' ? ' · 일부 서버만 읽음' : ''}${r.veeamStale ? ` · 오래된 서버 ${r.veeamStale}` : ''}`));
+  for (const [vc, x] of f.vcs) {
+    const v = x.veeam;
+    if (!v) continue;   // Veeam 연동이 없는 법인은 이 항목 대상이 아니다
+    const st = backupJudge({ failNow: v.fails.length, failRepeat: repeatOf(v), rpo7: v.rpo7, rpo3: v.rpo3, unknown: v.unknown });
+    const text = v.unknown && !v.vms ? `Veeam 결과를 읽지 못함(${v.state})` : `백업 VM ${n(v.vms)} · ${backupText(v)}${v.unknown ? ` · 결과 일부 모름(${v.state})` : ''}`;
+    rows.push(vcRow(vc, st, v.fails.length + v.rpo7, text));
   }
   if (!rows.length) return { na: true, basis: 'Veeam 이 연동된 법인이 없습니다' };
-  return { rows, basis: `${rowsBasis(rows)} · 판정은 Backup 현황 Summary 의 결과 · RPO 그대로`, asOf: numOrNull(sm?.at) };
+  return { rows, basis: `${rowsBasis(rows)} · VM 마다 Backup 현황 Detail 과 같은 결과 · 연속 실패는 백업 적재 기준(보고서 백업 절)`, asOf: numOrNull(f.at) };
 }
 
-/** Bareos 사전 점검 — 상태 파일(healthView)의 법인 판정(Director 호출 없음). */
+/**
+ * Bareos 백업 · 사전 점검 — 사전 점검 상태 파일(healthView)의 법인 판정과 백업 결과(원장 — 끝난 실행 · 마지막 성공) 중 나쁜 쪽(컨펌 ④).
+ *   Director 호출 없음. 조회하지 못한 법인(인증 정지 · 조회 실패 · 미설정)의 백업 결과는 확인 불가.
+ */
 export async function bareos(ctx) {
   const { healthView } = await import('../../bareos/health.js');
+  const { backupFacts } = await import('../backupService.js');
+  const { backupJudge } = await import('../backupLedger.js');
+  const { worstOf } = await import('../rules.js');
   const v = healthView(() => true);
-  const corps = v?.corps || [];
-  if (!corps.length) return { na: true, basis: 'Bareos 사전 점검 대상 법인이 없습니다' };
+  const pre = new Map((v?.corps || []).map((c) => [String(c.vcenterId), c]));
+  const f = await backupFacts(ctx);
+  const ids = new Set([...pre.keys(), ...[...f.vcs].filter(([, x]) => x.bareos).map(([id]) => id)]);
+  if (!ids.size) return f.provider.ok ? { na: true, basis: 'Bareos 사전 점검 · 백업 대상 법인이 없습니다' } : { status: 'unknown', unknownReason: `Bareos 백업 결과를 읽지 못했습니다 — ${f.provider.reason}`, rows: [] };
   const MAP = { ok: 'ok', warn: 'warn', bad: 'crit', unknown: 'unknown' };
-  const rows = corps.map((c) => {
-    const st = c.stale ? 'unknown' : (MAP[c.verdict] || 'unknown');
-    const bad = (c.items || []).filter((x) => x.status === 'bad' || x.status === 'warn').map((x) => x.key);
-    return vcRow(c.vcenterId, st, st === 'ok' ? 0 : 1, `${c.directorName || ''} 사전 점검 ${c.verdict || '모름'}${c.stale ? '(오래된 기록)' : ''}${bad.length ? ` · ${bad.join(', ')}` : ''}`);
-  });
-  return { rows, basis: `${rowsBasis(rows)} · 마지막 사전 점검 ${v.last?.at ? 'O' : '기록 없음'}`, asOf: numOrNull(v.last?.at) };
+  const rows = [];
+  for (const id of ids) {
+    const c = pre.get(id);
+    const preSt = c ? (c.stale ? 'unknown' : (MAP[c.verdict] || 'unknown')) : null;
+    const bad = c ? (c.items || []).filter((x) => x.status === 'bad' || x.status === 'warn').map((x) => x.key) : [];
+    const b = f.vcs.get(id)?.bareos || null;
+    let bkSt = null; let bkText = '';
+    if (!f.provider.ok) { bkSt = 'unknown'; bkText = '백업 결과 모름(공급자 없음)'; }
+    else if (b) {
+      if (!b.known) { bkSt = 'unknown'; bkText = `백업 결과 모름(Director ${b.state})`; }
+      else { bkSt = backupJudge({ failNow: b.fails.length, failRepeat: repeatOf(b), rpo7: b.rpo7, rpo3: b.rpo3 }); bkText = `잡 ${n(b.jobs)} · ${backupText(b)}`; }
+    }
+    const st = worstOf([preSt, bkSt].filter(Boolean)) || 'unknown';
+    const preText = c ? `${c.directorName || ''} 사전 점검 ${c.verdict || '모름'}${c.stale ? '(오래된 기록)' : ''}${bad.length ? ` · ${bad.join(', ')}` : ''}` : '사전 점검 기록 없음';
+    rows.push(vcRow(id, st, (b?.fails.length || 0) + (b?.rpo7 || 0) + (preSt && preSt !== 'ok' ? 1 : 0), `${preText}${bkText ? ` · ${bkText}` : ''}`));
+  }
+  return { rows, basis: `${rowsBasis(rows)} · 마지막 사전 점검 ${v?.last?.at ? 'O' : '기록 없음'} · 백업 결과는 원장(Director 호출 없음)`, asOf: numOrNull(v?.last?.at) };
 }
 
 /** 미보호 VM — 미보호 VM 리포트 계산(라우트 공급자). 이벤트를 모으지 않는 vCenter 는 확인 불가. */
@@ -80,26 +114,26 @@ export async function unprotected(ctx) {
   return { rows, basis: `${rowsBasis(rows)} · 조회 ${days}일 · 보호 ${n(s.protectedCount)} · 미보호 ${n(s.unprotectedCount)} · 판정 불가 ${n(s.undeterminedCount)}${s.eventsTruncated ? ' · 이벤트 상한에서 잘림' : ''}` };
 }
 
-/** VM 복제(백업식) RPO — 잡마다 rpoOf(VM 백업 실패 메일과 같은 기준). */
+/**
+ * VM 복제(백업식) 실패 · RPO(컨펌 ④) — 잡마다 실행 기록(위임 잡은 엣지 보고). 연속 2회 이상 실패 · 마지막 성공 7일 넘음은 이상 ·
+ *   한 번 실패 · RPO 넘김(rpoOf — 기대 주기의 2배 + 1시간 · VM 백업 실패 메일과 같은 기준)은 주의. 켜진 잡이 없으면 해당 없음.
+ */
 export async function vmClone(ctx) {
-  const { sourcesOf } = await import('../../vmclone/notify.js');
-  const { listJobs } = await import('../../vmclone/store.js');
-  const { listEdgeStates } = await import('../../vmclone/dispatch.js');
-  const { rpoOf } = await import('../../vmclone/rpo.js');
-  const src = sourcesOf(listJobs(), listEdgeStates());
-  const acc = new Map();
-  let judged = 0;
-  for (const s of src) {
-    const r = rpoOf({ ...s.job, history: s.history, lastRun: s.lastRun }, ctx.now);
-    if (!r) continue;
-    judged++;
-    const a = acc.get(String(s.vcenterId || '')) || { warn: 0, jobs: 0, names: [] };
-    a.jobs++; if (r.overdue) { a.warn++; if (a.names.length < 3) a.names.push(s.vmName); }
-    acc.set(String(s.vcenterId || ''), a);
+  const { backupFacts } = await import('../backupService.js');
+  const { backupJudge } = await import('../backupLedger.js');
+  const f = await backupFacts(ctx);
+  if (!f.cloneOk) return { status: 'unknown', unknownReason: 'VM 복제 잡 원장을 읽지 못했습니다', rows: [] };
+  const rows = [];
+  let jobs = 0;
+  for (const [vc, x] of f.vcs) {
+    const c = x.clone;
+    if (!c) continue;
+    jobs += c.jobs;
+    const st = backupJudge({ failNow: c.fails.length, failRepeat: repeatOf(c), rpo7: c.rpo7, rpo3: c.overdue });
+    rows.push(vcRow(vc, st, c.fails.length + c.overdue, `잡 ${n(c.jobs)} · ${backupText(c, { rpo: false, overdue: true })}`));
   }
-  if (!judged) return { na: true, basis: '예약으로 도는 VM 복제 잡이 없습니다' };
-  const rows = [...acc.entries()].map(([vc, a]) => ({ ...(vc ? { vc } : {}), status: a.warn ? 'warn' : 'ok', count: a.warn, text: `잡 ${a.jobs} · RPO 넘김 ${a.warn}${a.names.length ? ` — ${a.names.join(', ')}` : ''}` }));
-  return { rows, basis: `잡 ${judged}개 · ${rowsBasis(rows)}` };
+  if (!jobs) return { na: true, basis: '켜진 VM 복제 잡이 없습니다' };
+  return { rows, basis: `잡 ${n(jobs)}개 · ${rowsBasis(rows)}` };
 }
 
 /** 중앙 ↔ 엣지 · vCenter 통신 점검 — 마지막 판정(link_latest). 기능이 꺼져 있으면 확인 불가. */

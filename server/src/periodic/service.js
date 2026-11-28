@@ -29,6 +29,10 @@ import { assembleRun } from './assemble.js';
 import { renderMail, renderReportHtml, renderChat, renderNotice, attachmentName, corpNamer } from './render.js';
 import * as db from './db.js';
 import { READERS } from './readers/index.js';
+import { CAPTURE_MS } from './backupLedger.js';
+import { captureBackups, backupSectionFor, ledgerStatus } from './backupService.js';
+import { publicBackup } from './backupLedger.js';
+import { pruneBackup } from './backupStore.js';
 
 export const MAIL_KIND = 'periodic-report';
 export const TICK_MS = 60_000;
@@ -158,8 +162,10 @@ export async function generateRun({ kind, slot = null, manual = false, preview =
     const mock = vcs.length > 0 && vcs.every((v) => isMockVcenter(v));
     const prev = await db.previousRun(kind, period.from);
     const { dcOfVc, dcName } = dcHelpers();
+    const withBackup = s.backup?.kinds?.includes(kind);
     const doc = await assembleRun({ kind, slot: slot ?? null, period, id, items, readers: READERS, snap, now, by: manual || preview ? (by || 'admin') : 'schedule', manual: manual || preview,
-      prev, dcOfVc, dcName, mock, onProgress: (p) => { if (_busy) _busy.done = p.done; } });
+      prev, dcOfVc, dcName, mock, onProgress: (p) => { if (_busy) _busy.done = p.done; },
+      ...(withBackup ? { backup: (ctx) => backupSectionFor({ from: period.from, to: period.to, now, settings: s, ctx }) } : {}) });
     if (preview) {
       for (const [k, v] of _previews) if (now - v.at > PREVIEW_TTL_MS) _previews.delete(k);
       while (_previews.size >= PREVIEW_MAX) _previews.delete(_previews.keys().next().value);
@@ -212,7 +218,9 @@ const linkOf = (doc) => `#/tools/periodic-report/r/${encodeURIComponent(doc.id)}
 /** 메일 한 통(전체판 target='overall' · 법인판 target=vcId). */
 async function sendMailFor(doc, s, target) {
   const corp = target === 'overall' ? null : String(target);
-  const view = corp ? scopeCutDoc(doc, new Set([corp])) : doc;
+  const cut = corp ? scopeCutDoc(doc, new Set([corp])) : doc;
+  // v3.59 3절 — 메일 · 첨부는 실패 사유 공개 문구 판본(받는 사람이 포탈 관리자가 아닐 수 있다 — 화면의 비관리자 판본과 같다)
+  const view = cut.backup && !cut.backup.off && !cut.backup.error ? { ...cut, backup: publicBackup(cut.backup) } : cut;
   const to = corp ? (s.mail.corpTo?.[corp] || []) : overallRecipients(s);
   if (!to.length) return { state: 'skipped', reason: corp ? '이 법인의 받는 사람이 없습니다.' : "받는 사람이 없습니다 — '통합 관리자'(메일 기본 받는 사람)를 고르거나 주소를 넣으세요.", recipients: 0 };
   const corpLabel = corp ? corpNamer(doc)(corp) : '';
@@ -375,7 +383,14 @@ export async function tick(now = Date.now()) {
     }
   }
   try { await retryDue(now); } catch (e) { _lastError = { at: Date.now(), message: `재시도 실패: ${String(e?.message || e).slice(0, 200)}` }; }
-  if (_tickN > 1 && _tickN % PRUNE_EVERY_TICKS === 0) { try { await db.prunePeriodic(s.retainDays, now); } catch (e) { console.warn(`[periodic-report] 정리 실패: ${e?.message || e}`); } }
+  // v3.59 백업 적재 — 관측 주기마다(첫 틱 포함 — 기동 직후에도 한 번 본다 · 관측 실패는 적재 상태에 남는다). 적재를 끈 설정이면 멈춘다.
+  if (s.backup?.ledger !== false && (_tickN === 1 || _tickN % Math.max(1, Math.round(CAPTURE_MS / TICK_MS)) === 0)) {
+    try { await captureBackups({ now }); } catch (e) { console.warn(`[periodic-report] 백업 적재 실패: ${e?.message || e}`); }
+  }
+  if (_tickN > 1 && _tickN % PRUNE_EVERY_TICKS === 0) {
+    try { await db.prunePeriodic(s.retainDays, now); } catch (e) { console.warn(`[periodic-report] 정리 실패: ${e?.message || e}`); }
+    try { await pruneBackup(s.backup?.keepDays, now); } catch (e) { console.warn(`[periodic-report] 백업 적재 정리 실패: ${e?.message || e}`); }
+  }
   return { action: 'ok', results };
 }
 
@@ -397,7 +412,7 @@ export async function status(now = Date.now()) {
   }
   return {
     edge: isEdge(), kinds, busy: _busy ? { ..._busy } : null, lastTick: _lastTick, lastError: _lastError, settingsError: _settingsErr,
-    history: st.history.slice(0, 30), retry: await db.retryCount(), db: await db.periodicDbInfo(),
+    history: st.history.slice(0, 30), retry: await db.retryCount(), db: await db.periodicDbInfo(), backup: { ...(await ledgerStatus()), enabled: s?.backup?.ledger !== false },
     recipients: s ? { overall: overallRecipients(s).length, corps: Object.keys(s.mail.corpTo || {}).length } : null,
   };
 }
