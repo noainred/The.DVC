@@ -7,7 +7,8 @@
 import { toolsAtLeast } from './guestDetail.js';
 
 // 2: 점검 1회차 — samples 의 distroAddlVersion · cpeString · buildNumber 가 값별 개수 목록으로 · architecture 가 묶음 키 · vCenter 행 collectSource.
-export const PROBE_SCHEMA = 2;
+// 3: 점검 2회차 — 값별 개수 목록마다 <칸>Omitted · appliances[].fullVersions(값별 개수) · total.cfgRead · unparsedVms · 엣지 수집 행 status 없음.
+export const PROBE_SCHEMA = 3;
 const SAMPLE_MAX = 300;
 const RAW_MAX = 50;
 const VAPP_MAX = 100;
@@ -39,9 +40,13 @@ function topList(map, max, shape) {
   return { items: all.slice(0, max).map(shape), omitted: Math.max(0, all.length - max) };
 }
 function bump(map, key, val) { map.set(key, (map.get(key) || 0) + val); }
-function topCounts(map) {
-  return [...map.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).slice(0, TOP_MAX).map(([value, count]) => ({ value, count }));
+// 점검 2회차: 값별 개수 목록도 상위 TOP_MAX 개에서 자른다 — 잘라낸 종류 수를 함께 돌려준다(조용히 자르지 않는다). 받는 쪽이 `<칸>Omitted` 로 싣는다.
+function topCountsOf(map) {
+  const all = [...map.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+  return { items: all.slice(0, TOP_MAX).map(([value, count]) => ({ value, count })), omitted: Math.max(0, all.length - TOP_MAX) };
 }
+/** obj 에 field(목록)와 fieldOmitted(잘라낸 종류 수)를 싣는다. */
+function putTop(obj, field, map) { const t = topCountsOf(map); obj[field] = t.items; obj[`${field}Omitted`] = t.omitted; return obj; }
 
 /**
  * @param {object[]} vms       스냅샷 VM(이미 범위 · 요청 필터 적용)
@@ -57,7 +62,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
       r = {
         id, name: null, version: null, build: null, collectSource: null,
         vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0,
-        read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0,
+        read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0,
         noDetail: Object.fromEntries(NO_DETAIL_REASONS.map((k) => [k, 0])),
         status: null,
       };
@@ -79,7 +84,9 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
   const extras = new Map();
   const vapps = new Map();
   const managed = new Map();
-  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0 };
+  // cfgRead(점검 2회차): 시스템 VM(managedBy)은 vm.cfg 를 읽은 VM 에서만 셀 수 있다 — 못 읽은 VM 을 0 으로 섞지 않게 분모를 함께 싣는다.
+  // unparsedVms: 형식을 못 읽은 원문(raw)이 있는 VM 수(가짓수 상한과 무관한 전체 — 화면이 목록 합으로 세지 않게).
+  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0, unparsedVms: 0 };
   const noDetail = Object.fromEntries(NO_DETAIL_REASONS.map((k) => [k, 0]));
 
   for (const vm of Array.isArray(vms) ? vms : []) {
@@ -94,7 +101,9 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     if (t != null) add('toolsKnown');
     if (t === true) add('tools112');
     const g = vm.gos && typeof vm.gos === 'object' ? vm.gos : null;
-    const mb = vm.cfg?.managedBy;
+    const cfgOk = vm.cfg != null && typeof vm.cfg === 'object' && !Array.isArray(vm.cfg);
+    if (cfgOk) add('cfgRead');
+    const mb = cfgOk ? vm.cfg.managedBy : null;
     if (mb && (mb.extensionKey || mb.type)) {
       add('managed');
       const key = JSON.stringify([mb.extensionKey || '', mb.type || '']);   // 값에 구분자가 들어가도 다른 항목이 합쳐지지 않게
@@ -108,8 +117,10 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
         add('vapp');
         const v = g.vapp;
         const key = JSON.stringify([v.name || '', v.vendor || '', v.version || '']);
-        const e = vapps.get(key) || { key, name: v.name || null, vendor: v.vendor || null, version: v.version || null, fullVersion: v.fullVersion || null, count: 0, os: new Map() };
+        // 점검 2회차: fullVersion 은 묶음 키가 아니라 갈릴 수 있다 — 첫 VM 값으로 덮지 않고 값별 개수로.
+        const e = vapps.get(key) || { key, name: v.name || null, vendor: v.vendor || null, version: v.version || null, full: new Map(), count: 0, os: new Map() };
         e.count += 1;
+        if (v.fullVersion) bump(e.full, v.fullVersion, 1);
         if (g.detailed?.prettyName) bump(e.os, g.detailed.prettyName, 1);
         vapps.set(key, e);
       }
@@ -122,6 +133,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
       if (typeof g.raw === 'string' && g.raw) {
         const e = raws.get(g.raw) || { key: g.raw, raw: g.raw, count: 0 };
         e.count += 1; raws.set(g.raw, e);
+        total.unparsedVms += 1;
       }
     }
     const d = g?.detailed && typeof g.detailed === 'object' ? g.detailed : null;
@@ -160,7 +172,8 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
   }
 
   for (const r of rowBy.values()) {
-    const s = stBy.get(r.id);
+    // 점검 2회차: 엣지 수집(site) vCenter 에는 이 포탈의 상태를 붙이지 않는다 — 직접 수집하다 엣지로 바꾸면 낡은 오류 · 시각이 '지금 상태' 처럼 보였다.
+    const s = r.collectSource === 'site' ? null : stBy.get(r.id);
     r.status = s ? {
       osAt: Number.isFinite(s.osAt) ? s.osAt : null, osError: typeof s.osError === 'string' ? s.osError : null,
       osAsked: typeof s.osAsked === 'boolean' ? s.osAsked : null, apiVersion: typeof s.osApiVersion === 'string' ? s.osApiVersion : null,
@@ -169,14 +182,17 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     } : null;
   }
 
-  const sampleList = topList(samples, SAMPLE_MAX, (e) => ({
-    familyName: e.familyName, distroName: e.distroName, distroVersion: e.distroVersion,
-    prettyName: e.prettyName, bitness: e.bitness, architecture: e.architecture,
-    distroAddlVersion: topCounts(e.addl), cpeString: topCounts(e.cpe), buildNumber: topCounts(e.build),
-    count: e.count, poweredOn: e.poweredOn, vcenters: e.vcenters.size, appliance: e.appliance, managed: e.managed,
-    kernels: topCounts(e.kernels), configOs: topCounts(e.configOs), toolsGuestId: topCounts(e.toolsGuestId),
-  }));
-  const vappList = topList(vapps, VAPP_MAX, (e) => ({ name: e.name, vendor: e.vendor, version: e.version, fullVersion: e.fullVersion, count: e.count, os: topCounts(e.os) }));
+  const sampleList = topList(samples, SAMPLE_MAX, (e) => {
+    const o = {
+      familyName: e.familyName, distroName: e.distroName, distroVersion: e.distroVersion,
+      prettyName: e.prettyName, bitness: e.bitness, architecture: e.architecture,
+      count: e.count, poweredOn: e.poweredOn, vcenters: e.vcenters.size, appliance: e.appliance, managed: e.managed,
+    };
+    putTop(o, 'distroAddlVersion', e.addl); putTop(o, 'cpeString', e.cpe); putTop(o, 'buildNumber', e.build);
+    putTop(o, 'kernels', e.kernels); putTop(o, 'configOs', e.configOs); putTop(o, 'toolsGuestId', e.toolsGuestId);
+    return o;
+  });
+  const vappList = topList(vapps, VAPP_MAX, (e) => putTop(putTop({ name: e.name, vendor: e.vendor, version: e.version, count: e.count }, 'fullVersions', e.full), 'os', e.os));
   const rawList = topList(raws, RAW_MAX, (e) => ({ raw: e.raw, count: e.count }));
   const extraList = topList(extras, 50, (e) => ({ key: e.key, count: e.count, example: e.example }));
   const managedList = topList(managed, MANAGED_MAX, (e) => ({ extensionKey: e.extensionKey, type: e.type, count: e.count }));

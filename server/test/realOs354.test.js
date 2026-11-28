@@ -16,7 +16,7 @@ import { _resetVmCfgCache, get as cacheGet, statusOf, vmCfgStatus, setStatus } f
 import { sanitizeInventoryList } from '../src/routes/central.js';
 import { scopedOsProbe } from '../src/routes/admin/opsSettings.js';
 import { VimSoapClient } from '../src/vcenter/soapClient.js';
-import { REASON_TEXT, pct, n as numText, statusText, periodText } from '../../web/src/views/tools/realOsProbeText.js';
+import { REASON_TEXT, pct, n as numText, statusText, periodText, topText, managedText, archText } from '../../web/src/views/tools/realOsProbeText.js';
 
 const ROCKY = "architecture='X86' bitness='64' distroName='Rocky Linux' distroVersion='9.4' familyName='Linux' kernelVersion='5.14.0-427.13.1.el9_4.x86_64' prettyName='Rocky Linux 9.4 (Blue Onyx)'";
 
@@ -406,7 +406,7 @@ test('R1 샘플 — 아키텍처는 다른 줄 · addl · cpe · build 는 첫 �
     vm('vm-1', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }), vm('vm-2', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:2') }),
     vm('vm-3', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:3') }), vm('vm-4', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }),
   ], [{ id: 'vc1' }], [], { now: 1 });
-  assert.equal(p.schema, 2);
+  assert.equal(p.schema, 3);
   const x86 = p.samples.find((s) => s.architecture === 'X86');
   const arm = p.samples.find((s) => s.architecture === 'Arm');
   assert.equal(x86.count, 2); assert.equal(arm.count, 2);
@@ -446,7 +446,9 @@ test('R1 점검 라우트 본문 — 상태는 vCenter 마다(64개 상한 없�
   for (const vc of vcs) setStatus(vc.id, { osAt: 5, osAsked: true });
   const p = scopedOsProbe({ username: 'a', role: 'admin' }, { vcenters: vcs, vms: [] }, { now: 10, settings: { vmCfgScan: true, vmOsScan: true, vmOsRefreshMs: 3_600_000, vmOsPerCycle: 500 }, demo: false });
   assert.equal(p.vcenters.length, 70);
-  assert.ok(p.vcenters.every((r) => r.status && r.status.osAt === 5), '65번째 이후도 상태가 있다');
+  assert.ok(p.vcenters.filter((r) => r.collectSource === 'direct').every((r) => r.status && r.status.osAt === 5), '65번째 이후도 상태가 있다(직접 수집)');
+  assert.ok(p.vcenters.filter((r) => r.collectSource === 'site').every((r) => r.status === null), '엣지 수집 행에는 이 포탈 상태를 붙이지 않는다(2회차)');
+  assert.ok(p.vcenters.some((r) => r.id === 'vc68' && r.status), '65번째 이후 직접 수집 vCenter');
   assert.deepEqual(p.collect, { cfgEnabled: true, osEnabled: true, refreshMs: 3_600_000, perCycle: 500 });
   assert.equal(p.demo, undefined);
   assert.equal(p.vcenters.find((r) => r.id === 'vc1').collectSource, 'site');
@@ -469,4 +471,68 @@ test('R1 화면 문구 — 상태가 없는 이유를 단정하지 않는다 · 
   const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
   assert.equal(/\d+\s*시간 주기/.test(jsx), false, '주기 숫자를 화면에 박지 않는다');
   assert.match(jsx, /useEffect\(\(\) => \{ setData\(null\); setErr\(null\); load\(\); \}, \[scope\]\)/, '범위가 바뀌면 이전 오류를 지운다');
+});
+
+/* ---------------------------- 점검 2회차(반증 재현) 회귀 ---------------------------- */
+
+test('R2 값별 개수 목록 — 잘라낸 종류 수를 싣는다 · fullVersion 은 값별 개수', () => {
+  const vms = Array.from({ length: 9 }, (_, i) => vm(`vm-${i}`, 'vc1', {
+    guestOS: `cfg-${i}`,
+    gos: { ...rocky, detailed: { ...rocky.detailed, kernelVersion: i < 8 ? `k${i}` : undefined }, vapp: { name: 'VMware vCenter Server', vendor: 'VMware Inc.', version: '8.0.3', fullVersion: `8.0.3 Build 2400000${i % 8}` } },
+  }));
+  const p = buildOsProbe(vms, [{ id: 'vc1' }], [], { now: 1 });
+  const rk = p.samples[0];
+  assert.equal(rk.kernels.length, 5); assert.equal(rk.kernelsOmitted, 3, '커널 8종 중 5종만 싣고 3종 생략을 밝힌다');
+  assert.equal(rk.configOs.length, 5); assert.equal(rk.configOsOmitted, 4);
+  for (const k of ['distroAddlVersion', 'cpeString', 'buildNumber', 'toolsGuestId']) assert.equal(rk[`${k}Omitted`], 0, k);
+  const ap = p.appliances[0];
+  assert.equal(ap.count, 9); assert.equal(Object.hasOwn(ap, 'fullVersion'), false);
+  assert.equal(ap.fullVersions.length, 5); assert.equal(ap.fullVersionsOmitted, 3);
+  assert.equal(ap.fullVersions.reduce((a, x) => a + x.count, 0), 6, '상위 5종(8.0.3 Build 24000000 은 2대)');
+  assert.equal(ap.osOmitted, 0);
+  assert.equal(topText(rk.kernels, 2, rk.kernelsOmitted), 'k0 1 · k1 1 외 6가지');
+  assert.equal(topText([], 3, 4), '—');
+});
+
+test('R2 형식 못 읽은 보고 수 — 가짓수 상한과 무관한 전체 VM 수', () => {
+  const vms = Array.from({ length: 60 }, (_, i) => vm(`vm-${i}`, 'vc1', { gos: { ...rocky, detailed: null, raw: `weird-${i}` } }));
+  const p = buildOsProbe(vms, [{ id: 'vc1' }], [], { now: 1 });
+  assert.equal(p.unparsed.length, 50); assert.equal(p.unparsedOmitted, 10);
+  assert.equal(p.total.unparsedVms, 60);
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.match(jsx, /t\.unparsedVms/, '화면은 목록 합이 아니라 전체 수를 쓴다');
+  assert.match(jsx, /data\.unparsedOmitted/); assert.match(jsx, /data\.appliancesOmitted/); assert.match(jsx, /data\.extraKeysOmitted/);
+  assert.match(jsx, /<th>아키텍처<\/th>/);
+});
+
+test('R2 서로게이트 — 상한 경계에서 짝 잃은 글자를 남기지 않는다', () => {
+  const r = parseGuestDetailedData(`prettyName='a${'😀'.repeat(200)}'`);
+  assert.equal(r.fields.prettyName.isWellFormed(), true);
+  assert.ok(r.fields.prettyName.length <= 256);
+  const g = sanitizeVmGos({ asked: true, detailed: { prettyName: `a${'😀'.repeat(200)}` } }, 1);
+  assert.equal(g.detailed.prettyName.isWellFormed(), true);
+  assert.equal(parseVappProduct(`<VAppProductInfo><name>a${'😀'.repeat(100)}</name></VAppProductInfo>`).name.isWellFormed(), true);
+});
+
+test('R2 엣지 수집 행에는 이 포탈의 상태를 붙이지 않는다 · 시스템 VM 은 구성을 읽은 VM 이 분모', () => {
+  const p = buildOsProbe([
+    vm('vm-1', 'vcS', { cfg: { managedBy: { extensionKey: 'x', type: 'y' } } }), vm('vm-2', 'vcS', {}),
+    vm('vm-3', 'vcD', {}),
+  ], [{ id: 'vcS', collectSource: 'site' }, { id: 'vcD' }], [{ vcenterId: 'vcS', osAt: 5, osError: '낡은 오류' }, { vcenterId: 'vcD', osAt: 7 }], { now: 10 });
+  const s = p.vcenters.find((r) => r.id === 'vcS'); const d = p.vcenters.find((r) => r.id === 'vcD');
+  assert.equal(s.status, null, '직접 수집 시절의 낡은 상태가 엣지 수집 행에 남지 않는다');
+  assert.equal(d.status.osAt, 7);
+  assert.equal(s.cfgRead, 1); assert.equal(s.managed, 1); assert.equal(d.cfgRead, 0); assert.equal(p.total.cfgRead, 1);
+  assert.equal(managedText(0, 0, 5), '—', '구성을 하나도 못 읽었으면 0 이 아니라 —');
+  assert.equal(managedText(1, 1, 2), '읽은 1대 중 1');
+  assert.equal(managedText(2, 5, 5), '2');
+  assert.equal(archText({ architecture: 'X86', bitness: '64' }), 'X86 · 64bit'); assert.equal(archText({}), '—');
+});
+
+test('R2 엣지 시각 원본 — 수신 시각으로 잘랐을 때만 edgeAt', () => {
+  const NOW2 = 2_000_000_000_000;
+  const f = sanitizeVmGos({ at: NOW2 + 5000.7, asked: true }, NOW2);
+  assert.equal(f.at, NOW2); assert.equal(f.edgeAt, NOW2 + 5000);
+  const past = sanitizeVmGos({ at: NOW2 - 5000, asked: true }, NOW2);
+  assert.equal(past.at, NOW2 - 5000); assert.equal(Object.hasOwn(past, 'edgeAt'), false);
 });

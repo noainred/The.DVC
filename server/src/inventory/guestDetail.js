@@ -34,10 +34,17 @@ const EXTRA_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 const VAPP_IN_MAX = 16_384;
 const VAPP_ITEMS_MAX = 8;
 
+// 점검 2회차: 자른 자리가 서로게이트 쌍의 앞 반쪽이면 그 반쪽도 뺀다(짝 잃은 글자가 JSON · 화면에 남지 않게 — rack/layout.js · vmDist.js 와 같은 규칙).
 const cap = (s, n) => {
   if (typeof s !== 'string') return null;
-  const t = s.trim();
-  return t ? (t.length > n ? t.slice(0, n) : t) : null;
+  let t = s.trim();
+  if (t.length > n) {
+    t = t.slice(0, n);
+    const last = t.charCodeAt(t.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) t = t.slice(0, -1);
+    t = t.trimEnd();
+  }
+  return t || null;
 };
 const isKeyChar = (code) => (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
 const isSpace = (ch) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
@@ -193,6 +200,8 @@ export function sanitizeVmGos(g, now = Date.now()) {
   } : null;
   return {
     at,
+    // 점검 2회차: 엣지 시각을 수신 시각으로 잘랐으면 원본은 따로 남긴다(루트 규약 '엣지 시각은 수신 시각으로 자르고 원본은 따로' — storpath 의 edgeAt 과 같은 이름).
+    ...(typeof g.at === 'number' && Number.isFinite(g.at) && g.at > now ? { edgeAt: Math.trunc(g.at) } : {}),
     asked,
     detailed,
     extra,

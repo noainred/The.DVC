@@ -55,10 +55,25 @@ export function periodText(ms) {
   return min >= 1 ? `${min}분` : null;
 }
 
-/** {value,count}[] → 'A 3 · B 1' (상위 몇 개). */
-export function topText(list, max = 3) {
+/** {value,count}[] → 'A 3 · B 1' (상위 몇 개) — 보여 주지 않은 종류가 있으면 '외 N가지'(서버가 자른 수 omitted 포함 · 조용히 자르지 않는다). */
+export function topText(list, max = 3, omitted = 0) {
   if (!Array.isArray(list) || !list.length) return '—';
-  return list.slice(0, max).map((x) => `${x.value} ${x.count}`).join(' · ');
+  const hidden = Math.max(0, list.length - max) + (Number.isFinite(omitted) && omitted > 0 ? omitted : 0);
+  return list.slice(0, max).map((x) => `${x.value} ${x.count}`).join(' · ') + (hidden ? ` 외 ${hidden}가지` : '');
+}
+
+/** 시스템 VM 수 — 구성(vm.cfg)을 읽은 VM 에서만 셀 수 있다(점검 2회차: 못 읽은 VM 을 0 으로 섞지 않는다). 다 읽었으면 숫자만, 일부면 '읽은 N대 중 M', 하나도 못 읽었으면 '—'. */
+export function managedText(managed, cfgRead, total) {
+  if (!(typeof cfgRead === 'number' && cfgRead > 0)) return '—';
+  if (typeof total === 'number' && cfgRead < total) return `읽은 ${n(cfgRead)}대 중 ${n(managed)}`;
+  return n(managed);
+}
+
+/** 아키텍처 칸 — 'X86 · 64bit'. 둘 다 없으면 '—'. */
+export function archText(r) {
+  const a = r?.architecture || '';
+  const b = r?.bitness ? `${r.bitness}bit` : '';
+  return [a, b].filter(Boolean).join(' · ') || '—';
 }
 
 /** 내려받을 파일 이름 — real-os-probe-YYYYMMDD-HHmm.json */

@@ -6,7 +6,7 @@ import { fetchJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { saveText } from '../../util/saveBlob.js';
 import { Card } from './shared.jsx';
-import { REASON_TEXT, n, pct, at, statusText, periodText, topText, probeFileName } from './realOsProbeText.js';
+import { REASON_TEXT, n, pct, at, statusText, periodText, topText, managedText, archText, probeFileName } from './realOsProbeText.js';
 
 export function RealOsProbe({ scope }) {
   const [data, setData] = useState(null);
@@ -52,7 +52,7 @@ export function RealOsProbe({ scope }) {
             <Card label="VM · 템플릿" value={n(all)} meta={`켜짐 ${n(t.poweredOn)}`} />
             <Card label="Tools 보고 있음" value={n(t.detailed)} meta={`${pct(t.detailed, all)} · 꺼진 VM ${n(t.detailedOff)}`} />
             <Card label="Tools 11.2 이상" value={n(t.tools112)} meta={`판을 아는 VM ${n(t.toolsKnown)}`} />
-            <Card label="어플라이언스 제품 정보" value={n(t.vapp)} meta={`시스템 VM ${n(t.managed)}`} />
+            <Card label="어플라이언스 제품 정보" value={n(t.vapp)} meta={`시스템 VM ${managedText(t.managed, t.cfgRead, all)}`} />
           </div>
           {reasons.length > 0 && (
             <div className="flex gap wrap" style={{ marginBottom: 10, fontSize: 12, alignItems: 'center' }}>
@@ -83,7 +83,7 @@ export function RealOsProbe({ scope }) {
                       <td className="right tabular" data-sort={r.detailed}><b>{n(r.detailed)}</b></td>
                       <td className="right tabular" data-sort={total ? r.detailed / total : ''}>{pct(r.detailed, total)}</td>
                       <td className="right tabular" data-sort={r.vapp}>{n(r.vapp)}</td>
-                      <td className="right tabular" data-sort={r.managed}>{n(r.managed)}</td>
+                      <td className="right tabular" data-sort={r.cfgRead ? r.managed : ''}>{managedText(r.managed, r.cfgRead, total)}</td>
                       <td style={{ whiteSpace: 'normal', minWidth: 180, fontSize: 12, color: s.tone === 'amber' ? 'var(--amber)' : undefined }} className={s.tone === 'muted' ? 'muted' : ''}>{s.text}</td>
                     </tr>
                   );
@@ -96,23 +96,24 @@ export function RealOsProbe({ scope }) {
             Tools 가 보고한 OS 종류 · 버전 <span className="muted" style={{ fontWeight: 500 }}>{n((data.samples || []).length)}가지{data.samplesOmitted ? ` · 상한으로 ${n(data.samplesOmitted)}가지 생략(파일에도 없음)` : ''}</span>
           </div>
           <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-            <STable className="v3-table" minWidth={1060} limit={50}>
+            <STable className="v3-table" minWidth={1140} limit={50}>
               <thead><tr>
-                <th>보고된 이름</th><th>계열</th><th>배포판</th><th>버전</th><th className="right">VM</th><th className="right">켜짐</th><th className="right">법인</th>
+                <th>보고된 이름</th><th>계열</th><th>배포판</th><th>버전</th><th>아키텍처</th><th className="right">VM</th><th className="right">켜짐</th><th className="right">법인</th>
                 <th data-nosort>vCenter 설정값(상위)</th><th data-nosort>커널 · 빌드(상위)</th>
               </tr></thead>
               <tbody>
                 {(data.samples || []).map((r, i) => (
-                  <tr key={`${r.prettyName}-${r.distroVersion}-${i}`}>
+                  <tr key={`${r.prettyName}-${r.distroVersion}-${r.architecture}-${r.bitness}-${i}`}>
                     <td style={{ whiteSpace: 'normal', minWidth: 220 }}><b>{r.prettyName || '—'}</b>{r.appliance ? <span className="badge gray" style={{ marginLeft: 6 }} title="OVF 제품 정보가 있는 VM">어플라이언스 {n(r.appliance)}</span> : null}{r.managed ? <span className="badge gray" style={{ marginLeft: 6 }} title="vSphere 확장이 관리하는 VM(복제본 · vCLS 등)">확장 관리 {n(r.managed)}</span> : null}</td>
                     <td>{r.familyName || '—'}</td>
                     <td>{r.distroName || '—'}</td>
                     <td className="tabular">{r.distroVersion || '—'}</td>
+                    <td className="muted" style={{ whiteSpace: 'nowrap' }}>{archText(r)}</td>
                     <td className="right tabular" data-sort={r.count}>{n(r.count)}</td>
                     <td className="right tabular" data-sort={r.poweredOn}>{n(r.poweredOn)}</td>
                     <td className="right tabular" data-sort={r.vcenters}>{n(r.vcenters)}</td>
-                    <td style={{ whiteSpace: 'normal', fontSize: 12, minWidth: 200 }} className="muted">{topText(r.configOs)}</td>
-                    <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', fontSize: 11.5, minWidth: 180, fontFamily: 'monospace' }} className="muted">{topText(r.kernels, 2)}</td>
+                    <td style={{ whiteSpace: 'normal', fontSize: 12, minWidth: 200 }} className="muted">{topText(r.configOs, 3, r.configOsOmitted)}</td>
+                    <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', fontSize: 11.5, minWidth: 180, fontFamily: 'monospace' }} className="muted">{topText(r.kernels, 2, r.kernelsOmitted)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -121,7 +122,9 @@ export function RealOsProbe({ scope }) {
 
           {(data.appliances || []).length > 0 && (
             <>
-              <div style={{ fontSize: 12.5, fontWeight: 700, margin: '6px 0' }}>어플라이언스 제품 정보(OVF 배포)</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, margin: '6px 0' }}>
+                어플라이언스 제품 정보(OVF 배포) <span className="muted" style={{ fontWeight: 500 }}>{n(data.appliances.length)}가지{data.appliancesOmitted ? ` · 상한으로 ${n(data.appliancesOmitted)}가지 생략(파일에도 없음)` : ''}</span>
+              </div>
               <div style={{ overflowX: 'auto', marginBottom: 12 }}>
                 <STable className="v3-table" minWidth={760}>
                   <thead><tr><th>제품</th><th>제조사</th><th>판</th><th className="right">VM</th><th data-nosort>Tools 보고 OS</th></tr></thead>
@@ -132,7 +135,7 @@ export function RealOsProbe({ scope }) {
                         <td>{r.vendor || '—'}</td>
                         <td className="tabular">{r.version || '—'}</td>
                         <td className="right tabular" data-sort={r.count}>{n(r.count)}</td>
-                        <td className="muted" style={{ whiteSpace: 'normal', fontSize: 12 }}>{topText(r.os)}</td>
+                        <td className="muted" style={{ whiteSpace: 'normal', fontSize: 12 }}>{topText(r.os, 3, r.osOmitted)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -143,8 +146,14 @@ export function RealOsProbe({ scope }) {
 
           {((data.extraKeys || []).length > 0 || (data.unparsed || []).length > 0) && (
             <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'normal' }}>
-              {(data.extraKeys || []).length > 0 && <div>문서에 없는 키: {data.extraKeys.map((x) => `${x.key}(${n(x.count)})`).join(' · ')}</div>}
-              {(data.unparsed || []).length > 0 && <div>형식을 읽지 못한 보고 {n(data.unparsed.reduce((a, x) => a + x.count, 0))}건 — 원문은 내려받은 파일에 있습니다.</div>}
+              {(data.extraKeys || []).length > 0 && <div>문서에 없는 키: {data.extraKeys.map((x) => `${x.key}(${n(x.count)})`).join(' · ')}{data.extraKeysOmitted ? ` · 상한으로 ${n(data.extraKeysOmitted)}가지 생략` : ''}</div>}
+              {(data.unparsed || []).length > 0 && (
+                <div>
+                  형식을 읽지 못한 보고 {n(t.unparsedVms ?? data.unparsed.reduce((a, x) => a + x.count, 0))}건 — {data.unparsedOmitted
+                    ? `원문 ${n(data.unparsed.length)}가지는 내려받은 파일에 있고, 상한으로 ${n(data.unparsedOmitted)}가지는 파일에도 없습니다.`
+                    : '원문은 내려받은 파일에 있습니다.'}
+                </div>
+              )}
             </div>
           )}
           <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>기준 시각 {at(data.generatedAt)}{data.scoped ? ' · 조회 범위 안 vCenter 만' : ''}</div>
