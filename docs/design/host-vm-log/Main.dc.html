@@ -43,7 +43,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .tc.sel{background:#3b82f6;border-color:#3b82f6;color:#fff}
 .tc.sel .h{color:#dbeafe}
 .tc.none{border-style:dashed;background:transparent;color:#8b9bb4}
-.tc.chg{box-shadow:inset 0 -3px 0 #22d3ee}
+.tc.chg{box-shadow:inset 0 -3px 0 #aebbd0}
 .tile{flex:1 1 150px;min-width:0;padding:12px 14px;border-radius:10px;border:1px solid #243049;background:#0f1626;display:flex;flex-direction:column;gap:4px;text-align:left;font:inherit;color:#e6edf6}
 .tile .k{font-size:11.5px;color:#8b9bb4;font-weight:600}
 .tile .v{font-size:24px;font-weight:800;line-height:1.1}
@@ -87,10 +87,10 @@ tr.need td{background:rgba(239,68,68,.06)}
       </header>
 
       <nav class="vtabs" aria-label="보기">
-        <a class="on" href="Main.dc.html">장애 대응 <span class="tag crit">1</span></a>
+        <a class="on" href="Main.dc.html" aria-current="page">장애 대응 <span class="tag crit">1</span></a>
         <a href="Ready.dc.html">대비 점검 <span class="tag warn">5</span></a>
         <a href="Ready.dc.html#after">복귀 뒤 대조</a>
-        <a href="#">호스트 전체 <span class="muted" style="font-weight:500">658</span></a>
+        <a href="Hosts.dc.html">호스트 전체 <span class="muted" style="font-weight:500">658</span></a>
       </nav>
 
       <!-- 장애 띠 -->
@@ -115,15 +115,16 @@ tr.need td{background:rgba(239,68,68,.06)}
           <span style="flex:1"></span>
           <button class="btn sm" type="button">◀ 이전 24시간</button>
           <button class="btn sm" type="button">날짜로 이동</button>
+          <button class="btn sm" type="button">지금 다시 조회</button>
           <a href="#" style="font-size:12.5px">호스트 개체 보기 ›</a>
         </div>
         <div style="display:flex;gap:8px;align-items:stretch">
           <div class="tl" role="group" aria-label="정각 기록 24칸">
             <sc-for list="{{ slots }}" as="c" hint-placeholder-count="24">
-              <button type="button" class="tc {{ c.cls }}" aria-label="{{ c.aria }}"><span class="n mono">{{ c.n }}</span><span class="h mono">{{ c.h }}</span></button>
+              <button type="button" class="tc {{ c.cls }}" aria-label="{{ c.aria }}" aria-pressed="false"><span class="n mono">{{ c.n }}</span><span class="h mono">{{ c.h }}</span></button>
             </sc-for>
           </div>
-          <button type="button" class="tc sel" style="flex:0 0 112px" aria-label="끊김 직전 기록 14시 36분 구동 VM 17대 선택됨"><span class="n mono">17</span><span class="h">끊김 직전 <span class="mono">14:36</span></span></button>
+          <button type="button" class="tc sel" style="flex:0 0 112px" aria-label="끊김 직전 기록 14시 36분 구동 VM 17대" aria-pressed="true"><span class="n mono">17</span><span class="h">끊김 직전 <span class="mono">14:36</span></span></button>
         </div>
         <div class="muted" style="font-size:12px">칸의 숫자 = 그 시각 구동 VM 수 · 밑줄 = 직전 기록과 달라진 시각 · 점선 ‘—’ = vCenter 를 읽지 못해 기록 없음(0대가 아님) · 오른쪽 칸 = 끊김을 본 바로 앞 수집의 목록(정각 기록 14:00 의 18대에서 14:21 에 1대가 나갔습니다)</div>
       </section>
@@ -191,9 +192,9 @@ tr.need td{background:rgba(239,68,68,.06)}
           <h2 style="margin:0;font-size:14px;font-weight:700">장애 타임라인</h2>
           <span class="muted" style="font-size:12px">기록 · vCenter 이벤트를 시간순으로 · 장애 보고서의 첫 장과 같은 내용</span>
         </div>
-        <div class="ev"><span class="t mono">11-26 14:00</span><span class="tag blue">정각 기록</span><span>구동 VM 18대</span></div>
+        <div class="ev"><span class="t mono">11-26 14:00</span><span class="tag gray">정각 기록</span><span>구동 VM 18대</span></div>
         <div class="ev"><span class="t mono">14:21</span><span class="tag gray">이동</span><span><span class="mono">scm-pl1-git01</span> → esx-pl1-03 <span class="muted">(장애 전 · HA 아님)</span></span></div>
-        <div class="ev"><span class="t mono">14:36</span><span class="tag blue">끊김 직전 기록</span><span>구동 VM 17대 · 마지막으로 정상 수집한 목록</span></div>
+        <div class="ev"><span class="t mono">14:36</span><span class="tag gray">끊김 직전 기록</span><span>구동 VM 17대 · 마지막으로 정상 수집한 목록</span></div>
         <div class="ev"><span class="t mono">14:37</span><span class="tag crit">연결 끊김</span><span>그 전에 유지보수 모드 진입 · 종료 요청이 없었습니다 → <b>예기치 않은 정지 후보</b> <span class="muted">(ESXi 호스트 구성 점검 ‘최근 재부팅’ 과 같은 판정)</span></span></div>
         <div class="ev"><span class="t mono">14:38 ~ 14:41</span><span class="tag ok">HA 재시작</span><span>10대 다시 켜짐(우선순위 높음 → 보통 → 낮음 순) · 켜기 실패 1대</span></div>
         <div class="ev"><span class="t mono">14:52 지금</span><span class="tag crit">남은 것</span><span>응답 없음 5 · 꺼짐 1 · 인벤토리에 없음 1</span></div>
@@ -218,13 +219,13 @@ renderVals() {
   var NEED = ['crit', '이 호스트 · 응답 없음', 'need'], ON = ['ok', '구동 중', ''], OFF = ['warn', '꺼짐', ''], GONE = ['gray', '인벤토리에 없음', ''];
   var NOHA = '재시작 기록 없음';
   var raw = [
-    ['db-pl1-ora01', 'Oracle Linux 8', '[PL-DS-07] db-pl1-ora01/db-pl1-ora01.vmx', 'Oracle DB', '높음', '10.48.12.21', '16 · 128 GB', 'purple', '호스트 필수 · 분리', 'ORA-LICENSE(esx-pl1-03 · 04) · ORA-SEPARATE — 그때 위반', NOHA, '단서: 필수 규칙의 남은 호스트는 esx-pl1-03 한 대', NEED],
-    ['db-pl1-ora02', 'Oracle Linux 8', '[PL-DS-07] db-pl1-ora02/db-pl1-ora02.vmx', 'Oracle DB', '높음', '10.48.12.22', '16 · 128 GB', 'purple', '호스트 필수 · 분리', 'ORA-LICENSE(esx-pl1-03 · 04) · ORA-SEPARATE — 그때 위반', NOHA, '단서: 필수 규칙 + ora01 과 분리 규칙', NEED],
+    ['db-pl1-ora01', 'Oracle Linux 8', '[PL-DS-07] db-pl1-ora01/db-pl1-ora01.vmx', 'Oracle DB', '높음', '10.48.12.21', '16 · 128 GB', 'purple', '호스트 필수 · 분리', 'ORA-LICENSE(esx-pl1-03 · 04) 지킴 · ORA-SEPARATE 그때 위반', NOHA, '단서: 필수 규칙의 남은 호스트는 esx-pl1-03 한 대', NEED],
+    ['db-pl1-ora02', 'Oracle Linux 8', '[PL-DS-07] db-pl1-ora02/db-pl1-ora02.vmx', 'Oracle DB', '높음', '10.48.12.22', '16 · 128 GB', 'purple', '호스트 필수 · 분리', 'ORA-LICENSE(esx-pl1-03 · 04) 지킴 · ORA-SEPARATE 그때 위반', NOHA, '단서: 필수 규칙 + ora01 과 분리 규칙', NEED],
     ['mes-pl1-db01', 'Red Hat Enterprise Linux 8', '[PL-DS-03] mes-pl1-db01/mes-pl1-db01.vmx', 'MES', '사용 안 함', '10.48.12.43', '8 · 64 GB', 'cyan', '함께', 'MES-TOGETHER(mes-pl1-web01) — 지금 떨어짐', NOHA, '단서: 재시작 우선순위 ‘사용 안 함’', NEED],
     ['bkp-pl1-proxy01', 'Rocky Linux 9', '[PL-DS-05] bkp-pl1-proxy01/bkp-pl1-proxy01.vmx', '백업', '낮음', '10.48.30.21', '8 · 16 GB', 'gray', '없음', '', NOHA, '단서 없음', NEED],
     ['plc-pl1-gw01', 'Windows 10', '[PL-DS-05] plc-pl1-gw01/plc-pl1-gw01.vmx', '설비 연동', '보통', '10.48.50.11', '4 · 8 GB', 'gray', '없음', '', NOHA, '단서 없음', NEED],
     ['print-pl1-01', 'Windows Server 2016', '[PL-DS-02] print-pl1-01/print-pl1-01.vmx', '출력', '낮음', '10.48.20.31', '2 · 8 GB', 'gray', '없음', '', '14:41 켜기 실패 → esx-pl1-05', '전원 켜기 실패 이벤트 · 등록은 옮겨짐', OFF],
-    ['lab-pl1-test07', 'Ubuntu 20.04', '[PL-DS-02] lab-pl1-test07/lab-pl1-test07.vmx', '(소속 없음)', '보통', '—', '2 · 4 GB', 'gray', '없음', '', NOHA, '지금 위치 —', GONE],
+    ['lab-pl1-test07', 'Ubuntu 20.04', '[PL-DS-02] lab-pl1-test07/lab-pl1-test07.vmx', '(소속 없음)', '— (인벤토리에 없어 읽지 못함)', '—', '2 · 4 GB', 'gray', '없음', '', NOHA, '지금 위치 —', GONE],
     ['ad-pl1-dc02', 'Windows Server 2022', '', 'AD', '높음', '10.48.1.12', '4 · 16 GB', 'blue', '분리', 'DC-SEPARATE(ad-pl1-dc01) — 지킴', '14:38 HA 재시작 → esx-pl1-06', '', ON],
     ['erp-pl1-app01', 'Windows Server 2019', '', 'ERP', '높음', '10.48.10.31', '8 · 32 GB', 'blue', '분리', 'ERP-APP-SEPARATE(app02) — 그때 위반 · 지금 지킴', '14:39 HA 재시작 → esx-pl1-02', '', ON],
     ['erp-pl1-app02', 'Windows Server 2019', '', 'ERP', '높음', '10.48.10.32', '8 · 32 GB', 'blue', '분리', 'ERP-APP-SEPARATE(app01) — 그때 위반 · 지금 지킴', '14:39 HA 재시작 → esx-pl1-03', '', ON],

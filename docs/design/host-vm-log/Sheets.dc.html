@@ -118,8 +118,8 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
         <sc-if value="{{ isHost }}" hint-placeholder-val="{{ true }}">
           <div class="nav">
             <button type="button" class="lnk" onClick="{{ goList }}">← 호스트 목록</button>
-            <button type="button" class="lnk {{ prevCls }}" onClick="{{ goPrev }}">◀ 이전 {{ prevLabel }}</button>
-            <button type="button" class="lnk {{ nextCls }}" onClick="{{ goNext }}">다음 {{ nextLabel }} ▶</button>
+            <button type="button" class="lnk {{ prevCls }}" onClick="{{ goPrev }}" disabled="{{ prevDis }}">◀ 이전 {{ prevLabel }}</button>
+            <button type="button" class="lnk {{ nextCls }}" onClick="{{ goNext }}" disabled="{{ nextDis }}">다음 {{ nextLabel }} ▶</button>
           </div>
           <div>
             <div class="ttl mono">{{ hostName }}</div>
@@ -204,7 +204,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
             <tbody>
               <tr><th>시트</th><td>요약 · 호스트 목록 · 호스트마다 한 장 · 전체 목록 · 장애 보고(멈춘 호스트가 있을 때) · 읽는 법</td></tr>
               <tr><th>규칙</th><td>분리 = 서로 다른 호스트에 두는 규칙 · 함께 = 같은 호스트에 두는 규칙 · 호스트 필수 = 정해진 호스트에서만 도는 규칙. 괄호 = 그때 · 지금 지켜졌는지</td></tr>
-              <tr><th>HA 결과</th><td>vCenter 의 HA 재시작 이벤트가 있으면 시각 → 다시 켜진 호스트 · 없으면 ‘재시작 기록 없음’(까닭은 적지 않습니다) · — = 호스트가 멈추지 않아 해당 없음</td></tr>
+              <tr><th>HA 결과</th><td>vCenter 의 HA 재시작 이벤트가 있으면 시각 → 다시 켜진 호스트 · 없으면 ‘재시작 기록 없음’(까닭은 적지 않습니다) · 그 시간대 이벤트를 받지 못했으면 ‘HA 결과 모름’ · ‘꺼져 있던 VM — HA 대상 아님’ = 그때 꺼져 있어 HA 가 켤 대상이 아님 · ‘이동(장애 전 · HA 아님)’ = 끊김 전에 다른 호스트로 옮겨 간 VM · — = 호스트가 멈추지 않아 해당 없음</td></tr>
               <tr><th>시트 이름</th><td>호스트 이름의 첫 마디(esx-pl1-04.corp.example → esx-pl1-04) · 겹치면 전체 이름 · 31자까지</td></tr>
               <tr><th>이동</th><td>호스트 목록의 호스트 이름 · 요약 ‘확인할 것’ 의 호스트 = 그 시트로 · 호스트 시트 맨 위 ‘← 호스트 목록’ · ‘◀ 이전 / 다음 ▶’</td></tr>
               <tr><th>기록 시각</th><td>매시 정각에 남긴 기록입니다. 정각과 정각 사이에 들어왔다 나간 VM 은 담기지 않습니다 · 끊김 직전 기록(멈춘 호스트만)은 ‘장애 보고’ 시트에 있습니다</td></tr>
@@ -212,7 +212,8 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
               <tr><th>지금 상태</th><td>구동 중 · 꺼짐 · 응답 없음(호스트가 끊긴 채 그 호스트에 남음) · 인벤토리에 없음 · 모름(vCenter 를 읽지 못함)</td></tr>
               <tr><th>—</th><td>값을 읽지 못했습니다(0 으로 쓰지 않습니다)</td></tr>
               <tr><th>기록 없는 호스트</th><td>그 시각 vCenter 를 읽지 못한 호스트는 시트를 만들되 ‘이 시각 기록 없음’ 한 줄만 적습니다(빈 표 = VM 0대 로 읽히지 않게)</td></tr>
-              <tr><th>색</th><td>빨강 글자 = 응답 없음 · 연결 끊김 / 회색 줄 = 그때 꺼져 있던 VM. 값은 그대로 두고 색만 입혔습니다</td></tr>
+              <tr><th>색</th><td>빨강 글자 = 그때 구동 중이던 VM 이 지금 응답 없음 · 호스트 연결 끊김 / 갈색 글자 = 꺼짐 · 인벤토리에 없음(확인할 VM) / 회색 줄 = 그때 꺼져 있던 VM(지금 ‘응답 없음’ 이어도 빨강으로 칠하지 않습니다 — 돌고 있지 않던 VM 이라). 값은 그대로 두고 색만 입혔습니다</td></tr>
+              <tr><th>이 호스트에 온 시각</th><td>‘기록 시작 전부터’ = 기록을 처음 남긴 11-02 09:00 에 이미 있었음 — 실제로 온 시각은 모릅니다</td></tr>
             </tbody>
           </table>
         </sc-if>
@@ -221,7 +222,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 
       <div class="tabs" role="group" aria-label="시트 탭">
         <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="10">
-          <button type="button" class="tab {{ t.cls }}" onClick="{{ t.pick }}">{{ t.label }}</button>
+          <button type="button" class="tab {{ t.cls }}" onClick="{{ t.pick }}" aria-pressed="{{ t.pressed }}">{{ t.label }}</button>
         </sc-for>
       </div>
     </div>
@@ -333,6 +334,7 @@ renderVals() {
   hosts.forEach(function (h) {
     h.on = 0; h.off = 0; h.cpu = 0; h.mem = 0;
     h.rows.forEach(function (r) {
+      if (r.since === '2026-11-02 09:00') r.since = '기록 시작 전부터';
       if (r.power === '켜짐') { h.on += 1; h.cpu += r.cpu; h.mem += r.mem; } else { h.off += 1; }
       all.push({ host: h.name, name: r.name, power: r.power, ip: r.ip, os: r.os, cpu: r.cpu, mem: r.mem, since: r.since, nowHost: r.nowHost, now: r.now, nowCls: r.nowCls, cls: r.cls, svc: r.svc, rule: r.rule, ha: r.ha, vmx: r.vmx });
     });
@@ -349,7 +351,7 @@ renderVals() {
   defs.push(['all', '전체 목록', 'VM 1대(호스트 열 포함)', String(all.length)]);
   defs.push(['incident', '장애 보고', '멈춘 호스트 1건 — 타임라인 · 멈춘 서비스 · 영향 VM', '17']);
   defs.push(['guide', '읽는 법', '표기 · 기준 시각 · 색', '—']);
-  var tabs = defs.map(function (d) { return { label: d[1], cls: d[0] === tab ? 'on' : '', pick: go(d[0]) }; });
+  var tabs = defs.map(function (d) { return { label: d[1], cls: d[0] === tab ? 'on' : '', pressed: d[0] === tab ? 'true' : 'false', pick: go(d[0]) }; });
   var tocRows = defs.map(function (d) { return { label: d[1], desc: d[2], n: d[3], cls: d[0] === tab ? 'on' : '', pick: go(d[0]) }; });
   var checkRows = h4.filter(function (r) { return r.power === '켜짐' && r.now !== '구동 중'; }).map(function (r) {
     return { name: r.name, ip: r.ip, cpu: r.cpu, mem: r.mem, nowHost: r.nowHost, now: r.now, nowCls: r.nowCls, pick: go('esx-pl1-04') };
@@ -363,7 +365,7 @@ renderVals() {
     hostName: cur.name, hostOn: cur.on, hostOff: cur.off, hostCpu: cur.cpu, hostMem: cur.mem, hostNow: cur.now, hostNowCls: cur.nowCls, hostRows: cur.rows,
     goList: go('list'),
     prevLabel: prev ? prev.name : '없음', prevCls: prev ? '' : 'dis', goPrev: prev ? go(prev.name) : noop,
-    nextLabel: next ? next.name : '없음', nextCls: next ? '' : 'dis', goNext: next ? go(next.name) : noop,
+    nextLabel: next ? next.name : '없음', nextCls: next ? '' : 'dis', goNext: next ? go(next.name) : noop, prevDis: !prev, nextDis: !next,
     allRows: all.slice(0, 16), allMore: all.length - 16, allTotal: all.length
   };
 }

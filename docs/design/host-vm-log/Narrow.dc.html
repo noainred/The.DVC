@@ -34,7 +34,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .tc .h{font-size:10.5px;color:#8b9bb4}
 .tc.sel{background:#3b82f6;border-color:#3b82f6;color:#fff;flex-basis:92px}
 .tc.sel .h{color:#dbeafe}
-.tc.chg{box-shadow:inset 0 -3px 0 #22d3ee}
+.tc.chg{box-shadow:inset 0 -3px 0 #aebbd0}
 .tile{min-width:0;padding:10px 12px;border-radius:10px;border:1px solid #243049;background:#0f1626;display:flex;flex-direction:column;gap:3px;text-align:left;font:inherit;color:#e6edf6;min-height:44px}
 .tile .k{font-size:11.5px;color:#8b9bb4;font-weight:600}
 .tile .v{font-size:22px;font-weight:800;line-height:1.1}
@@ -57,10 +57,12 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
   </header>
 
   <nav class="vtabs" aria-label="보기">
-    <a class="on" href="Main.dc.html">장애 대응 <span class="tag crit">1</span></a>
+    <a class="on" href="Main.dc.html" aria-current="page">장애 대응 <span class="tag crit">1</span></a>
     <a href="Ready.dc.html">대비 점검 <span class="tag warn">5</span></a>
     <a href="Ready.dc.html#after">복귀 뒤 대조</a>
+    <a href="Hosts.dc.html">호스트 전체</a>
   </nav>
+  <div class="muted" style="font-size:11.5px">다른 탭은 1440 시안으로 연결됩니다(400px 판은 이 보드만 그렸습니다 — 같은 내용을 카드로 쌓습니다).</div>
 
   <section class="card" aria-label="지금 연결이 끊긴 호스트" style="border-color:#7f1d1d;background:rgba(239,68,68,.07);padding:12px;display:flex;flex-direction:column;gap:8px">
     <div style="font-weight:700"><span class="mono">esx-pl1-04</span> 연결 끊김</div>
@@ -71,15 +73,19 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
   </section>
 
   <section class="card" style="padding:12px;display:flex;flex-direction:column;gap:10px">
+    <label class="muted" style="font-size:11.5px;font-weight:700;display:flex;flex-direction:column;gap:6px">호스트
+      <select style="height:44px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;padding:0 10px;font:inherit;font-size:13px"><option>esx-pl1-04 · VC-PL1 › PL-PROD-A</option></select>
+    </label>
     <div style="display:flex;align-items:center;gap:8px">
       <b style="font-size:12.5px;flex:1">기록 시각</b>
       <span class="muted" style="font-size:11.5px">옆으로 밀어 이전 시각</span>
+      <button class="btn" type="button" style="min-height:36px">다시 조회</button>
     </div>
     <div class="tl" role="group" aria-label="시각별 기록">
       <sc-for list="{{ slots }}" as="c" hint-placeholder-count="6">
-        <button type="button" class="tc {{ c.cls }}" aria-label="{{ c.aria }}"><span class="n mono">{{ c.n }}</span><span class="h mono">{{ c.h }}</span></button>
+        <button type="button" class="tc {{ c.cls }}" aria-label="{{ c.aria }}" aria-pressed="false"><span class="n mono">{{ c.n }}</span><span class="h mono">{{ c.h }}</span></button>
       </sc-for>
-      <button type="button" class="tc sel" aria-label="끊김 직전 기록 14시 36분 구동 VM 17대 선택됨"><span class="n mono">17</span><span class="h">끊김 직전 <span class="mono">14:36</span></span></button>
+      <button type="button" class="tc sel" aria-label="끊김 직전 기록 14시 36분 구동 VM 17대" aria-pressed="true"><span class="n mono">17</span><span class="h">끊김 직전 <span class="mono">14:36</span></span></button>
     </div>
   </section>
 
@@ -144,7 +150,7 @@ renderVals() {
     var n = (h === '13' || h === '14') ? '18' : '17';
     return { h: h + ':00', n: n, cls: h === '13' ? 'chg' : '', aria: h + '시 기록 구동 VM ' + n + '대' };
   });
-  var NEED = ['crit', '응답 없음', 'need'], ON = ['ok', '구동 중', ''], OFF = ['warn', '꺼짐', ''], GONE = ['gray', '없음', ''];
+  var NEED = ['crit', '응답 없음', 'need'], ON = ['ok', '구동 중', ''], OFF = ['warn', '꺼짐', ''], GONE = ['gray', '인벤토리에 없음', ''];
   var raw = [
     ['db-pl1-ora01', 'Oracle DB · 높음', '10.48.12.21 · 16 vCPU · 128 GB', 'purple', '호스트 필수 · 분리', 'ORA-LICENSE · ORA-SEPARATE(그때 위반)', '재시작 기록 없음', '· 단서: 필수 규칙의 남은 호스트 1대', '[PL-DS-07] db-pl1-ora01/db-pl1-ora01.vmx', NEED],
     ['db-pl1-ora02', 'Oracle DB · 높음', '10.48.12.22 · 16 vCPU · 128 GB', 'purple', '호스트 필수 · 분리', 'ORA-LICENSE · ORA-SEPARATE(그때 위반)', '재시작 기록 없음', '· 단서: 필수 + 분리 규칙', '[PL-DS-07] db-pl1-ora02/db-pl1-ora02.vmx', NEED],
@@ -152,7 +158,7 @@ renderVals() {
     ['bkp-pl1-proxy01', '백업 · 낮음', '10.48.30.21 · 8 vCPU · 16 GB', 'gray', '규칙 없음', '', '재시작 기록 없음', '· 단서 없음', '[PL-DS-05] bkp-pl1-proxy01/bkp-pl1-proxy01.vmx', NEED],
     ['plc-pl1-gw01', '설비 연동 · 보통', '10.48.50.11 · 4 vCPU · 8 GB', 'gray', '규칙 없음', '', '재시작 기록 없음', '· 단서 없음', '[PL-DS-05] plc-pl1-gw01/plc-pl1-gw01.vmx', NEED],
     ['print-pl1-01', '출력 · 낮음', '10.48.20.31 · 2 vCPU · 8 GB', 'gray', '규칙 없음', '', '14:41 켜기 실패 → esx-pl1-05', '', '[PL-DS-02] print-pl1-01/print-pl1-01.vmx', OFF],
-    ['lab-pl1-test07', '(소속 없음) · 보통', 'IP — · 2 vCPU · 4 GB', 'gray', '규칙 없음', '', '재시작 기록 없음', '', '[PL-DS-02] lab-pl1-test07/lab-pl1-test07.vmx', GONE],
+    ['lab-pl1-test07', '(소속 없음) · 우선순위 —', 'IP — · 2 vCPU · 4 GB', 'gray', '규칙 없음', '', '재시작 기록 없음', '', '[PL-DS-02] lab-pl1-test07/lab-pl1-test07.vmx', GONE],
     ['ad-pl1-dc02', 'AD · 높음', '10.48.1.12 · 4 vCPU · 16 GB', 'blue', '분리', 'DC-SEPARATE — 지킴', '14:38 HA 재시작 → esx-pl1-06', '', '', ON],
     ['erp-pl1-app01', 'ERP · 높음', '10.48.10.31 · 8 vCPU · 32 GB', 'blue', '분리', 'ERP-APP-SEPARATE — 그때 위반 · 지금 지킴', '14:39 HA 재시작 → esx-pl1-02', '', '', ON]
   ];

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트별 VM 기록 — 호스트 전체</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.crit{background:rgba(239,68,68,.18);color:#fca5a5}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12px;cursor:pointer}
+.chip.on{border-color:#3b82f6;background:rgba(59,130,246,.14)}
+.vtabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #243049}
+.vtabs a{padding:8px 14px;font-size:13px;font-weight:600;color:#8b9bb4;text-decoration:none;border-bottom:2px solid transparent}
+.vtabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+table{border-collapse:collapse;width:100%;min-width:980px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;background:#0f1626;padding:8px 10px;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-align:middle}
+td.num,th.num{text-align:right}
+tr.grp td{background:#0f1626;font-size:11.5px;font-weight:700;color:#8b9bb4}
+tr.down td{background:rgba(239,68,68,.06)}
+</style>
+</helmet>
+<div style="box-sizing:border-box;width:1440px;min-height:1120px;padding:24px 28px 32px;background:#0a0e17;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <div class="muted" style="font-size:12px">서버 › Hypervisor › 호스트별 VM 기록</div>
+    <h1 style="margin:0;font-size:20px;font-weight:800">호스트별 VM 기록</h1>
+  </div>
+  <nav class="vtabs" aria-label="보기">
+    <a href="Main.dc.html">장애 대응 <span class="tag crit">1</span></a>
+    <a href="Ready.dc.html">대비 점검 <span class="tag warn">5</span></a>
+    <a href="Ready.dc.html#after">복귀 뒤 대조</a>
+    <a class="on" href="Hosts.dc.html" aria-current="page">호스트 전체 <span class="muted" style="font-weight:500">658</span></a>
+  </nav>
+
+  <section class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+      <label class="muted" style="font-size:12px;display:inline-flex;align-items:center;gap:8px">호스트 찾기
+        <input type="search" placeholder="호스트 · 클러스터 · vCenter 이름" style="width:280px;height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;padding:0 10px;font:inherit;font-size:12.5px">
+      </label>
+      <button type="button" class="chip on" aria-pressed="true">전체 658</button>
+      <button type="button" class="chip" aria-pressed="false">지금 끊김 1</button>
+      <button type="button" class="chip" aria-pressed="false">유지보수 2</button>
+      <button type="button" class="chip" aria-pressed="false">최근 24시간에 VM 이 들고 난 호스트 37</button>
+      <span style="flex:1"></span>
+      <span class="muted" style="font-size:12px">마지막 기록 <span class="mono" style="color:#e6edf6">11-26 14:00</span> 기준 · 지금 상태는 <span class="mono" style="color:#e6edf6">14:52</span></span>
+    </div>
+    <div style="overflow-x:auto;border:1px solid #243049;border-radius:10px">
+      <table>
+        <thead><tr><th scope="col"><span class="muted">내보내기에 넣기</span></th><th scope="col">호스트</th><th scope="col">지금 상태</th><th scope="col" class="num">마지막 기록의 구동 VM</th><th scope="col" class="num">24시간 동안 들고 난 VM</th><th scope="col" class="num">규칙이 걸린 VM</th><th scope="col">끊김 직전 기록</th></tr></thead>
+        <tbody>
+          <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+            <tr class="grp"><td colspan="7">{{ g.name }}</td></tr>
+            <sc-for list="{{ g.hosts }}" as="h" hint-placeholder-count="6">
+              <tr class="{{ h.trCls }}">
+                <td><input type="checkbox" checked="{{ h.checked }}" aria-label="{{ h.aria }}"></td>
+                <td><a href="Main.dc.html" class="mono">{{ h.name }}</a></td>
+                <td><span class="tag {{ h.stCls }}">{{ h.st }}</span></td>
+                <td class="num mono">{{ h.vm }}</td>
+                <td class="num mono">{{ h.moved }}</td>
+                <td class="num mono">{{ h.rules }}</td>
+                <td class="mono">{{ h.drop }}</td>
+              </tr>
+            </sc-for>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+    <div class="muted" style="font-size:12px">숫자는 마지막 정각 기록(11-26 14:00) 기준이고 ‘들고 난 VM’ 은 그 앞 24시간(11-25 15:00 ~ 11-26 14:00) 동안 들어오거나 나간 VM 수입니다. … 그 밖 26개 vCenter · 644대(찾기로 좁힙니다). 호스트 이름을 누르면 그 호스트의 기록(장애 대응 화면과 같은 틀)이 열립니다. ‘끊김 직전 기록’ 은 최근 보관 기간 안에 끊긴 적이 있는 호스트에만 있습니다.</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;border-top:1px solid #1f2a40;padding-top:10px">
+      <b>3대 고름</b><span class="muted" style="font-size:12.5px">esx-pl1-01 · esx-pl1-02 · esx-pl1-03</span>
+      <span style="flex:1"></span>
+      <button class="btn" type="button">고른 것 지우기</button>
+      <a class="btn primary" href="Export.dc.html">고른 호스트 내보내기</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1120}}'>
+class Component extends DCLogic {
+renderVals() {
+  var H = function (name, st, vm, moved, rules, drop, checked) {
+    var cls = st === '연결 끊김' ? 'crit' : (st === '유지보수' ? 'warn' : 'ok');
+    return { name: name, st: st, stCls: cls, vm: vm, moved: moved, rules: rules, drop: drop, checked: checked, trCls: st === '연결 끊김' ? 'down' : '', aria: name + ' 내보내기에 넣기' };
+  };
+  var groups = [
+    { name: 'VC-PL1 · 폴란드 › PL-PROD-A · 6대', hosts: [
+      H('esx-pl1-01', '연결됨', '16', '1', '1', '—', true),
+      H('esx-pl1-02', '연결됨', '19', '0', '0', '—', true),
+      H('esx-pl1-03', '연결됨', '17', '0', '1', '—', true),
+      H('esx-pl1-04', '연결 끊김', '18', '4', '8', '11-26 14:36 · 17대', false),
+      H('esx-pl1-05', '연결됨', '15', '1', '0', '—', false),
+      H('esx-pl1-06', '연결됨', '14', '1', '0', '—', false)
+    ] },
+    { name: 'VC-PL1 · 폴란드 › PL-VDI · 3대', hosts: [
+      H('esx-pl1-11', '연결됨', '42', '0', '0', '—', false),
+      H('esx-pl1-12', '연결됨', '40', '0', '0', '—', false),
+      H('esx-pl1-13', '유지보수', '0', '0', '0', '—', false)
+    ] },
+    { name: 'VC-KR1 · 한국 › KR-PROD-A · 5대', hosts: [
+      H('esx-kr1-01', '연결됨', '21', '0', '0', '—', false),
+      H('esx-kr1-02', '연결됨', '23', '2', '0', '—', false),
+      H('esx-kr1-03', '연결됨', '20', '0', '0', '—', false),
+      H('esx-kr1-04', '연결됨', '22', '2', '0', '—', false),
+      H('esx-kr1-05', '유지보수', '0', '0', '0', '—', false)
+    ] }
+  ];
+  return { groups: groups };
+}
+}
+</script>
+</body>
+</html>
