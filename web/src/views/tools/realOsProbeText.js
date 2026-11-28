@@ -97,6 +97,12 @@ export function managedText(managed, cfgRead, total) {
   return n(managed);
 }
 
+/** 판 정렬 키 — 숫자 마디는 자리를 맞춘다('8.10' 이 '8.4' 앞에 오지 않게 · 7회차). 없으면 '' (정렬 맨 뒤). */
+export function versionSortKey(v) {
+  if (typeof v !== 'string' || !v.trim()) return '';
+  return v.trim().slice(0, 64).split(/([.\-_ ])/).map((p) => (/^\d{1,12}$/.test(p) ? p.padStart(12, '0') : p)).join('');
+}
+
 /** 아키텍처 칸 — 'X86 · 64bit'. 둘 다 없으면 '—'. */
 export function archText(r) {
   const a = r?.architecture || '';

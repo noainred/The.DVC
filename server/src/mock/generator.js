@@ -8,6 +8,7 @@
  */
 
 import { mockServiceTag } from './serviceTag.js';
+import { normalizeGos, parseVmGosProps } from '../inventory/guestDetail.js';   // 7회차: 데모 vm.gos 도 수집기와 같은 코어를 지난다
 
 /**
  * mock 데이터 식별(v2.443, 사용자 신고 '신규 배포 엣지가 live 인데 east us 목업이 올라옴').
@@ -415,7 +416,13 @@ function mkVmGos(vm, powered, toolsVersion) {
   const vapp = appliance ? (i % 106 === 0
     ? { name: 'VMware vCenter Server', vendor: 'VMware Inc.', version: '8.0.3.00300', fullVersion: '8.0.3.00300 Build 24322831' }
     : { name: 'NSX Manager', vendor: 'VMware Inc.', version: '4.1.2.3.0', fullVersion: '4.1.2.3.0.22667789' }) : null;
-  if (!tools112 || i % 13 === 0) return { at, asked: true, detailed: null, extra: null, raw: null, vapp };
+  if (!tools112 || i % 13 === 0) return normalizeGos({ at, asked: true, detailed: null, extra: null, raw: null, vapp });
+  // 7회차: 판정 갈래(값이 모두 빔 · 일부만 읽음 · 형식 못 읽음)가 데모 화면에도 나오게 — 원문을 수집기와 같은 파서(parseVmGosProps)로 읽는다.
+  //   ⚠ 아래 원문은 그림용 가정이다(실측 전 — 실제 Tools 가 이런 글자를 보내는지는 1단계 점검이 모은다).
+  const odd = i % 97 === 5 ? "prettyName='' distroName='' familyName=''"
+    : i % 97 === 6 ? "prettyName='Rocky Linux 9.4 (Blue Onyx)' distroName='Rocky Linux' distroVersion='9.4' familyName='Linux' kernelVersion==bad"
+      : i % 97 === 7 ? 'OS=Rocky;Version=9.4' : null;
+  if (odd) return normalizeGos({ ...parseVmGosProps({ 'guest.guestDetailedData': odd }, at, { asked: true }), vapp });
   const g = String(vm.guestOS || '');
   let k;
   if (appliance) k = 'photon4';
@@ -427,7 +434,7 @@ function mkVmGos(vm, powered, toolsVersion) {
   else if (/2019/.test(g)) k = 'win2019';
   else k = 'win2022';
   const d = DEMO_LINUX_OS[k];
-  return { at, asked: true, detailed: { architecture: 'X86', bitness: '64', ...d }, extra: null, raw: null, vapp };
+  return normalizeGos({ at, asked: true, parse: 'ok', detailed: { architecture: 'X86', bitness: '64', ...d }, extra: null, raw: null, vapp });
 }
 // v2.862: 디스크의 데이터스토어는 그 사이트의 실제 데이터스토어 이름(데모 — Bareos 복원 검증이 홈 데이터스토어 여유를 인벤토리로 본다). 이름을 모르면 예전 값.
 /** v2.898 데모 스냅샷 트리 — n 개를 한 줄기(+ 넷째는 둘째의 형제 가지)로. 현재 위치는 마지막 노드. 시각은 오래된 것부터. */

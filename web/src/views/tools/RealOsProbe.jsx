@@ -6,7 +6,7 @@ import { fetchJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { saveText } from '../../util/saveBlob.js';
 import { Card } from './shared.jsx';
-import { REASON_TEXT, n, pct, at, statusText, periodText, topText, managedText, archText, probeFileName } from './realOsProbeText.js';
+import { REASON_TEXT, n, pct, at, statusText, periodText, topText, managedText, archText, versionSortKey, probeFileName } from './realOsProbeText.js';
 
 const SAMPLE_VIEW = 50;   // 표본 표가 처음에 그리는 행 수 — 넘으면 제목이 밝히고 '모두 보기' 로 펼친다
 
@@ -29,8 +29,8 @@ export function RealOsProbe({ scope }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load 는 scope 만 읽는다(범위가 바뀔 때 1회)
   useEffect(() => { setData(null); setErr(null); load(); }, [scope]);
 
-  const t = data?.total || null;
-  const all = t ? t.vms + t.templates : null;
+  const t = data?.total || {};   // 7회차 반박분(방어): total 이 빠진 응답이어도 렌더가 던지지 않게 — 칸은 '—' 로
+  const all = Number.isFinite(t.vms) && Number.isFinite(t.templates) ? t.vms + t.templates : null;
   const reasons = data ? Object.entries(data.noDetail || {}).filter(([, c]) => c > 0) : [];
   const period = periodText(data?.collect?.refreshMs);
   const save = () => { if (data) saveText(JSON.stringify(data, null, 2), probeFileName(), { type: 'application/json;charset=utf-8' }); };
@@ -115,7 +115,7 @@ export function RealOsProbe({ scope }) {
                     <td style={{ whiteSpace: 'normal', minWidth: 220 }}><b>{r.prettyName || '—'}</b>{r.appliance ? <span className="badge gray" style={{ marginLeft: 6 }} title="OVF 제품 정보가 있는 VM">어플라이언스 {n(r.appliance)}</span> : null}{r.managed ? <span className="badge gray" style={{ marginLeft: 6 }} title="vSphere 확장이 관리하는 VM(복제본 · vCLS 등)">확장 관리 {n(r.managed)}</span> : null}</td>
                     <td>{r.familyName || '—'}</td>
                     <td>{r.distroName || '—'}</td>
-                    <td className="tabular">{r.distroVersion || '—'}</td>
+                    <td className="tabular" data-sort={versionSortKey(r.distroVersion)}>{r.distroVersion || '—'}</td>
                     <td className="muted" style={{ whiteSpace: 'nowrap' }}>{archText(r)}</td>
                     <td className="right tabular" data-sort={r.count}>{n(r.count)}</td>
                     <td className="right tabular" data-sort={r.poweredOn}>{n(r.poweredOn)}</td>
@@ -141,7 +141,7 @@ export function RealOsProbe({ scope }) {
                       <tr key={`${r.name}-${r.version}-${i}`}>
                         <td><b>{r.name || '—'}</b></td>
                         <td>{r.vendor || '—'}</td>
-                        <td className="tabular">{r.version || '—'}</td>
+                        <td className="tabular" data-sort={versionSortKey(r.version)}>{r.version || '—'}</td>
                         <td className="right tabular" data-sort={r.count}>{n(r.count)}</td>
                         <td className="muted" style={{ whiteSpace: 'normal', fontSize: 12 }}>{topText(r.os, 3, r.osOmitted)}</td>
                       </tr>
@@ -164,7 +164,7 @@ export function RealOsProbe({ scope }) {
               {((data.unparsed || []).length > 0 || t.unparsedVms > 0 || t.partialVms > 0) && (
                 <div>
                   {[t.unparsedVms > 0 ? `형식을 읽지 못한 보고 ${n(t.unparsedVms)}건` : '', t.partialVms > 0 ? `일부만 읽은 보고 ${n(t.partialVms)}건` : ''].filter(Boolean).join(' · ')} — {data.unparsedOmitted
-                    ? `원문 ${n(data.unparsed.length)}가지는 내려받은 파일에 있고, 상한으로 ${n(data.unparsedOmitted)}가지는 파일에도 없습니다.`
+                    ? `원문 ${n((data.unparsed || []).length)}가지는 내려받은 파일에 있고, 상한으로 ${n(data.unparsedOmitted)}가지는 파일에도 없습니다.`
                     : '원문은 내려받은 파일에 있습니다.'}
                 </div>
               )}

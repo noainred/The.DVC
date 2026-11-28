@@ -16,7 +16,7 @@ import { _resetVmCfgCache, get as cacheGet, statusOf, vmCfgStatus, setStatus } f
 import { sanitizeInventoryList } from '../src/routes/central.js';
 import { scopedOsProbe } from '../src/routes/admin/opsSettings.js';
 import { VimSoapClient } from '../src/vcenter/soapClient.js';
-import { REASON_TEXT, pct, n as numText, statusText, periodText, topText, managedText, archText, notAskedText } from '../../web/src/views/tools/realOsProbeText.js';
+import { REASON_TEXT, pct, n as numText, statusText, periodText, topText, managedText, archText, notAskedText, versionSortKey } from '../../web/src/views/tools/realOsProbeText.js';
 
 const ROCKY = "architecture='X86' bitness='64' distroName='Rocky Linux' distroVersion='9.4' familyName='Linux' kernelVersion='5.14.0-427.13.1.el9_4.x86_64' prettyName='Rocky Linux 9.4 (Blue Onyx)'";
 
@@ -688,6 +688,7 @@ test('R5 정규화 하나 — 어떤 조합이 와도 묶음 규칙이 선다(�
       else assert.ok(g.parse === null || g.parse === 'empty' || g.parse === 'malformed', msg);
       if (g.raw) assert.ok(g.parse === 'partial' || g.parse === 'malformed', msg);
       if (g.parse === 'ok' || g.parse === 'empty') assert.equal(g.raw, null, msg);
+      if (g.parse === 'partial' || g.parse === 'malformed') assert.ok(g.raw, `원문 없는 ${g.parse}: ${msg}`);
       assert.ok(g.parse === null || PARSE_OUTCOMES.includes(g.parse), msg);
     }
   }
@@ -745,7 +746,8 @@ test('R6 같은 아는 키 중복 — 처음 값 + partial(원문 남김)', () =
   const b = P("prettyName='A' prettyName=''");
   assert.equal(b.detailed.prettyName, 'A'); assert.equal(b.parse, 'partial');
   const c = P("prettyName='' prettyName='B'");
-  assert.equal(c.detailed, null); assert.equal(c.parse, 'malformed', '처음 값(빈 값)으로 고정 — 중복 흔적이 있어 empty 가 아니다');
+  assert.equal(c.detailed.prettyName, 'B', '7회차: 첫 값이 비면 뒤의 값이 있는 것으로'); assert.equal(c.parse, 'partial');
+  assert.equal(P("prettyName='' prettyName=''").parse, 'empty', '값이 모두 비면 중복이어도 empty');
 });
 
 test('R6 partial 은 원문이 있을 때만 — 엣지가 원문 없이 보내면 ok', () => {
@@ -802,4 +804,47 @@ test('R6 화면 문구 — 나이 구간 · 버린 키 · 파일 내용', () => 
   assert.match(jsx, /1~7일 \{n\(data\.detailedAge\.d7\)\}/); assert.equal(/7일 안 \{/.test(jsx), false);
   assert.match(jsx, /\{t\.extraDropped > 0 && <div>상한 · 이름 형식으로 버린 모르는 키/);
   assert.match(jsx, /문서에 없는 키의 이름 · 개수와 예시 값/);
+});
+
+/* ---------------------------- 점검 7회차(반증 재현) 회귀 ---------------------------- */
+
+test('R7 원문 없는 malformed(엣지)는 보고 없음 — 화면 수와 원문 목록이 맞는다', () => {
+  const g = sanitizeVmGos({ asked: true, parse: 'malformed', detailed: null, raw: null }, 1);
+  assert.equal(g.parse, null);
+  const p = buildOsProbe([vm('a', 'v', { gos: g }), vm('b', 'v', { gos: sanitizeVmGos({ asked: true, raw: 'zz' }, 1) })], [{ id: 'v' }], [], { now: 2 });
+  assert.equal(p.total.unparsedVms, p.unparsed.reduce((a, x) => a + (x.parse === 'malformed' ? x.count : 0), 0));
+});
+
+test('R7 옛 엣지가 512자로 자른 빈 값 보고도 empty', () => {
+  const long = "prettyName='' distroName='' familyName='' " + Array.from({ length: 40 }, (_, i) => `extraKey${i}='${'x'.repeat(10)}'`).join(' ');
+  assert.ok(long.length > 512);
+  assert.equal(parseVmGosProps({ 'guest.guestDetailedData': long }, 1, { asked: true }).parse, 'empty', '직접 수집');
+  const oldEdge = { at: 1, asked: true, detailed: null, extra: null, raw: long.slice(0, 512), vapp: null };   // 3.54.0 엣지는 cap(원문, 512)
+  assert.equal(sanitizeVmGos(oldEdge, 5).parse, 'empty', '옛 엣지 → 중앙');
+  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' junk" }, 5).parse, 'malformed', '형식 밖 조각이 있으면 그대로 malformed');
+});
+
+test('R7 버전 정렬 키 — 8.4 < 8.9 < 8.10 · 15.5 < 15.10 · 없음은 맨 뒤', () => {
+  const vs = ['8.10', '8.4', '15.10', '8.9', '15.5', '9', '22.04'];
+  const sorted = [...vs].sort((a, b) => versionSortKey(a).localeCompare(versionSortKey(b)));
+  assert.deepEqual(sorted, ['8.4', '8.9', '8.10', '9', '15.5', '15.10', '22.04']);
+  assert.equal(versionSortKey(null), ''); assert.equal(versionSortKey('  '), '');
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.match(jsx, /data-sort=\{versionSortKey\(r\.distroVersion\)\}/); assert.match(jsx, /data-sort=\{versionSortKey\(r\.version\)\}/);
+  assert.match(jsx, /const t = data\?\.total \|\| \{\};/, 'total 이 빠져도 던지지 않는다');
+});
+
+test('R7 데모 vm.gos 도 같은 코어 — 정제해도 그대로(고정점) · 판정 갈래가 모두 나온다', async () => {
+  const { generateSnapshot } = await import('../src/mock/generator.js');
+  const snap = generateSnapshot();
+  const seen = new Set();
+  let n = 0;
+  for (const v of snap.vms) {
+    if (!v.gos) continue;
+    n += 1;
+    seen.add(v.gos.parse);
+    assert.deepEqual(sanitizeVmGos(v.gos, Number.MAX_SAFE_INTEGER), v.gos, v.id);
+  }
+  assert.ok(n > 1000);
+  for (const k of [null, 'ok', 'partial', 'empty', 'malformed']) assert.ok(seen.has(k), `데모에 parse ${k} 가 있다`);
 });
