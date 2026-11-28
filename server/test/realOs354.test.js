@@ -816,10 +816,12 @@ test('R7 원문 없는 malformed(엣지)는 보고 없음 — 화면 수와 원�
 });
 
 test('R7 옛 엣지가 512자로 자른 빈 값 보고도 empty', () => {
-  const long = "prettyName='' distroName='' familyName='' " + Array.from({ length: 40 }, (_, i) => `extraKey${i}='${'x'.repeat(10)}'`).join(' ');
+  const long = "prettyName='' distroName='' familyName='' " + Array.from({ length: 40 }, (_, i) => `extraKey${i}='${'x'.repeat(13)}'`).join(' ');
   assert.ok(long.length > 512);
   assert.equal(parseVmGosProps({ 'guest.guestDetailedData': long }, 1, { asked: true }).parse, 'empty', '직접 수집');
-  const oldEdge = { at: 1, asked: true, detailed: null, extra: null, raw: long.slice(0, 512), vapp: null };   // 3.54.0 엣지는 cap(원문, 512)
+  const cut = long.slice(0, 512);
+  assert.equal(parseGuestDetailedData(cut).truncated, true, '시험 전제: 512자에서 따옴표 안이 잘린다');
+  const oldEdge = { at: 1, asked: true, detailed: null, extra: null, raw: cut, vapp: null };   // 3.54.0 엣지는 cap(원문, 512)
   assert.equal(sanitizeVmGos(oldEdge, 5).parse, 'empty', '옛 엣지 → 중앙');
   assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' junk" }, 5).parse, 'malformed', '형식 밖 조각이 있으면 그대로 malformed');
 });
