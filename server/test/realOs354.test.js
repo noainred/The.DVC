@@ -269,7 +269,7 @@ test('⑧ 점검 집계 — 법인별 개수 · 종류 · 사유 · 어플라이
   const p = buildOsProbe(vms, [{ id: 'vc1', name: 'OC1', version: '8.0.3' }, { id: 'vc2', name: 'OC2' }], [{ vcenterId: 'vc1', osAt: 5, osAsked: true, osApiVersion: '8.0.3.0' }], { now: 10 });
   assert.equal(p.total.vms, 11); assert.equal(p.total.templates, 1);
   assert.equal(p.total.detailed, 3); assert.equal(p.total.detailedOff, 1);
-  assert.deepEqual(p.noDetail, { notRead: 1, notAsked: 1, emptyValues: 0, unparsed: 1, template: 1, toolsOld: 1, toolsNotRunning: 1, poweredOff: 1, toolsUnknown: 1, other: 1 },
+  assert.deepEqual(p.noDetail, { notRead: 1, notAsked: 1, legacyEdge: 0, emptyValues: 0, unparsed: 1, template: 1, toolsOld: 1, toolsNotRunning: 1, poweredOff: 1, toolsUnknown: 1, other: 1 },
     '형식을 못 읽은 보고(raw · extra)는 Tools 미보고(other)와 섞지 않는다');
   const oc1 = p.vcenters.find((r) => r.id === 'vc1');
   assert.equal(oc1.name, 'OC1'); assert.equal(oc1.detailed, 2); assert.equal(oc1.status.apiVersion, '8.0.3.0');
@@ -407,7 +407,7 @@ test('R1 샘플 — 아키텍처는 다른 줄 · addl · cpe · build 는 첫 �
     vm('vm-1', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }), vm('vm-2', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:2') }),
     vm('vm-3', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:3') }), vm('vm-4', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }),
   ], [{ id: 'vc1' }], [], { now: 1 });
-  assert.equal(p.schema, 5);
+  assert.equal(p.schema, 6);
   const x86 = p.samples.find((s) => s.architecture === 'X86');
   const arm = p.samples.find((s) => s.architecture === 'Arm');
   assert.equal(x86.count, 2); assert.equal(arm.count, 2);
@@ -687,10 +687,10 @@ test('R5 정규화 하나 — 어떤 조합이 와도 묶음 규칙이 선다(�
       const msg = JSON.stringify(input);
       if (!g.asked) { assert.equal(g.parse, null, msg); assert.equal(g.detailed, null, msg); assert.equal(g.raw, null, msg); assert.equal(g.extra, null, msg); assert.equal(Object.hasOwn(g, 'extraDropped'), false, msg); }
       if (g.detailed) assert.ok(g.parse === 'ok' || g.parse === 'partial', msg);
-      else assert.ok(g.parse === null || g.parse === 'empty' || g.parse === 'malformed', msg);
-      if (g.raw) assert.ok(g.parse === 'partial' || g.parse === 'malformed', msg);
+      else assert.ok(g.parse === null || g.parse === 'empty' || g.parse === 'malformed' || g.parse === 'legacy', msg);
+      if (g.raw) assert.ok(g.parse === 'partial' || g.parse === 'malformed' || g.parse === 'legacy', msg);
       if (g.parse === 'ok' || g.parse === 'empty') assert.equal(g.raw, null, msg);
-      if (g.parse === 'partial' || g.parse === 'malformed') assert.ok(g.raw, `원문 없는 ${g.parse}: ${msg}`);
+      if (g.parse === 'partial' || g.parse === 'malformed' || g.parse === 'legacy') assert.ok(g.raw, `원문 없는 ${g.parse}: ${msg}`);
       assert.ok(g.parse === null || PARSE_OUTCOMES.includes(g.parse), msg);
     }
   }
@@ -763,19 +763,6 @@ test('R6 partial 은 원문이 있을 때만 — 엣지가 원문 없이 보내�
   assert.match(jsx, /t\.unparsedVms > 0 \|\| t\.partialVms > 0\) && \(/, '원문 목록이 비어도 수는 보인다');
 });
 
-test('R6 옛 엣지(3.54 ~ 3.58 모양 — parse 칸 없음) 호환: 빈 값 보고는 empty, 형식 밖은 malformed', () => {
-  // 3.54.0 엣지는 아는 키를 못 읽으면 원문을 raw 로, 읽었으면 detailed 만 보냈다(emptyValues · parse 칸 없음).
-  const empty = sanitizeVmGos({ at: 1, asked: true, detailed: null, extra: null, raw: "prettyName='' distroName=''", vapp: null }, 5);
-  assert.equal(empty.parse, 'empty'); assert.equal(empty.raw, null);
-  const bad = sanitizeVmGos({ at: 1, asked: true, detailed: null, extra: null, raw: 'zz', vapp: null }, 5);
-  assert.equal(bad.parse, 'malformed'); assert.equal(bad.raw, 'zz');
-  const ok = sanitizeVmGos({ at: 1, asked: true, detailed: { prettyName: 'R' }, extra: null, raw: null, vapp: null }, 5);
-  assert.equal(ok.parse, 'ok');
-  const notAsked = sanitizeVmGos({ at: 1, asked: false, detailed: null, raw: "prettyName=''" }, 5);
-  assert.equal(notAsked.parse, null);
-  const p = buildOsProbe([vm('a', 'v', { gos: empty }), vm('b', 'v', { gos: bad })], [{ id: 'v' }], [], { now: 9 });
-  assert.equal(p.noDetail.emptyValues, 1); assert.equal(p.noDetail.unparsed, 1);
-});
 
 test('R6 예산 공정성 — dev 에 읽을 VM 이 있으면 os 는 남은 예산의 절반까지만 · dev 건너뜀 사유', async () => {
   _resetVmCfgCache(); _resetVmCfgRetry();
@@ -817,16 +804,6 @@ test('R7 원문 없는 malformed(엣지)는 보고 없음 — 화면 수와 원�
   assert.equal(p.total.unparsedVms, p.unparsed.reduce((a, x) => a + (x.parse === 'malformed' ? x.count : 0), 0));
 });
 
-test('R7 옛 엣지가 512자로 자른 빈 값 보고도 empty', () => {
-  const long = "prettyName='' distroName='' familyName='' " + Array.from({ length: 40 }, (_, i) => `extraKey${i}='${'x'.repeat(13)}'`).join(' ');
-  assert.ok(long.length > 512);
-  assert.equal(parseVmGosProps({ 'guest.guestDetailedData': long }, 1, { asked: true }).parse, 'empty', '직접 수집');
-  const cut = long.slice(0, 512);
-  assert.equal(parseGuestDetailedData(cut).truncated, true, '시험 전제: 512자에서 따옴표 안이 잘린다');
-  const oldEdge = { at: 1, asked: true, detailed: null, extra: null, raw: cut, vapp: null };   // 3.54.0 엣지는 cap(원문, 512)
-  assert.equal(sanitizeVmGos(oldEdge, 5).parse, 'empty', '옛 엣지 → 중앙');
-  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' junk" }, 5).parse, 'malformed', '형식 밖 조각이 있으면 그대로 malformed');
-});
 
 test('R7 · R8 버전 정렬 키 — 실제 STable 비교기(sortKeyOf + compareKeys)로 · 마디 수가 섞여도', async () => {
   const { sortKeyOf, compareKeys } = await import('../../web/src/components/sortableText.js');
@@ -859,41 +836,9 @@ test('R7 데모 vm.gos 도 같은 코어 — 정제해도 그대로(고정점) �
 
 /* ---------------------------- 점검 8회차(반증 재현) 회귀 ---------------------------- */
 
-test('R8 옛 엣지 512자 잘림 — 잘린 자리가 어디든(따옴표 안 · 키 이름 가운데 · key= 뒤) 빈 값 보고는 empty', () => {
-  const outcomes = new Map();
-  for (let pad = 0; pad <= 40; pad++) {
-    const long = "prettyName='' distroName='' familyName='' " + Array.from({ length: 40 }, (_, i) => `extraKey${i}='${'x'.repeat(pad)}'`).join(' ');
-    if (long.length <= 512) continue;
-    assert.equal(parseVmGosProps({ 'guest.guestDetailedData': long }, 1, { asked: true }).parse, 'empty', `직접 수집 pad ${pad}`);
-    const got = sanitizeVmGos({ at: 1, asked: true, detailed: null, extra: null, raw: long.slice(0, 512), vapp: null }, 5).parse;
-    outcomes.set(got, (outcomes.get(got) || 0) + 1);
-    assert.equal(got, 'empty', `옛 엣지 → 중앙 pad ${pad} · 꼬리 ${JSON.stringify(long.slice(500, 512))}`);
-  }
-  assert.ok((outcomes.get('empty') || 0) >= 30);
-  // 512자에 닿지 않은 옛 원문에서 형식 밖 조각은 그대로 malformed
-  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' extr" }, 5).parse, 'malformed');
-});
 
 /* ---------------------------- 점검 9회차(반증 재현) 회귀 ---------------------------- */
 
-test('R9 옛 엣지 512자 — 파서가 알린 끝 조각으로만 판정(온전한 마지막 토큰을 버리지 않는다 · 토큰 앞부분이 될 수 없는 조각은 malformed)', () => {
-  const fill = (head, tail) => { const pad = 512 - head.length - tail.length - 1; return `${head}${'x'.repeat(Math.max(0, pad))} ${tail}`; };
-  // A: 유일한 아는 키가 512자째에서 끝나는 온전한 마지막 토큰 — empty
-  const a = fill("extraKey0='", "' prettyName=''");
-  assert.equal(a.length, 512);
-  assert.equal(parseVmGosProps({ 'guest.guestDetailedData': a }, 1, { asked: true }).parse, 'empty', '직접 수집');
-  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: a }, 5).parse, 'empty', '옛 엣지 → 중앙');
-  // B: 마지막 조각이 어떤 토큰의 앞부분도 될 수 없는 형식 밖 조각 — malformed + 원문
-  const b = fill("prettyName='' extraKey0='", "' kernelVersion==bad");
-  assert.equal(b.length, 512);
-  const gb = sanitizeVmGos({ at: 1, asked: true, raw: b }, 5);
-  assert.equal(gb.parse, 'malformed'); assert.ok(gb.raw);
-  // C: 키 이름 가운데 · key= 뒤에서 잘림 — empty
-  for (const tail of ["' extr", "' extraKey9=", "' extraKey9='xx"]) {
-    const c = fill("prettyName='' extraKey0='", tail);
-    assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: c }, 5).parse, 'empty', JSON.stringify(tail));
-  }
-});
 
 test('R9 잘린 VM 이 사라지면 osCut 을 지운다 · 수집을 끄면 상태도 꺼짐으로', async () => {
   _resetVmCfgCache(); _resetVmCfgRetry();
@@ -930,7 +875,7 @@ test('R9 옛 중앙이 저장한 인벤토리(vm.gos 옛 모양)도 기동 때 �
     { id: 'vc1:vm-4' },
   ] } } } });
   const vms = parseInventoryFile(text).vc1.data.vms;
-  assert.equal(vms[0].gos.parse, 'empty'); assert.equal(vms[0].gos.raw, null);
+  assert.equal(vms[0].gos.parse, 'legacy', '10회차: 옛 모양 원문은 판정 보류'); assert.ok(vms[0].gos.raw);
   assert.equal(vms[1].gos.parse, 'ok');
   assert.equal(vms[2].gos, null);
   assert.equal(Object.hasOwn(vms[3], 'gos'), false);
@@ -958,19 +903,23 @@ test('R10 재정제는 고정점 — 엣지 원본 시각(edgeAt)이 다시 읽�
   assert.equal(sanitizeVmGos({ at: now - 10, asked: true, edgeAt: String(now + 5) }, now).edgeAt, now + 5, '숫자 글자는 수로');
 });
 
-test('R10 옛 중앙(3.54)이 끝 공백을 다듬어 511자 이하로 저장한 잘린 원문도 empty', () => {
-  // 옛 엣지 원문: 512자째가 모르는 키 값 안의 공백 → 옛 중앙 cap 이 trim 해 511자 이하로 저장
-  let trimmedCases = 0;
-  for (let pad = 0; pad < 40; pad++) {
-    let orig = `prettyName='' distroName='' padKey='${'y'.repeat(pad)}' `;
-    let i = 0;
-    while (orig.length < 600) orig += `fooKey${i++}='v w v w x' `;
-    orig = orig.trim();
-    assert.equal(parseVmGosProps({ 'guest.guestDetailedData': orig }, 1, { asked: true }).parse, 'empty');
-    const stored = orig.slice(0, 512).trim();   // 옛 엣지 cap(512) → 옛 중앙 cap = trim
-    if (stored.length < 512 && parseGuestDetailedData(stored).truncated) trimmedCases += 1;
-    assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: stored }, 5).parse, 'empty', `pad ${pad} · 저장 길이 ${stored.length}`);
+test('R10 옛 엣지(3.54 ~ 3.58 — parse 칸 없음) 원문은 추측하지 않고 판정 보류(legacy) · 원문 유지 · 따로 센다', () => {
+  // 6 ~ 9회차에 덧댄 추측 규칙이 매 회차 새 경계 사례를 만들었다(따옴표 안 · 키 이름 가운데 · 온전한 끝 토큰 · 옛 중앙의 끝 공백 다듬기) — 10회차 결정.
+  const raws = ["prettyName='' distroName=''", 'zz', "prettyName='' extr", ("prettyName='' " + "k='v w' ".repeat(80)).slice(0, 512), ("prettyName='' " + "k='v w' ".repeat(80)).slice(0, 512).trim()];
+  for (const raw of raws) {
+    const g = sanitizeVmGos({ at: 1, asked: true, detailed: null, extra: null, raw, vapp: null }, 5);
+    assert.equal(g.parse, 'legacy', JSON.stringify(raw.slice(0, 40))); assert.equal(g.raw, raw.trim().slice(0, 512).trim() || null);
+    assert.deepEqual(sanitizeVmGos(g, 5), g, '고정점');
   }
-  assert.ok(trimmedCases > 0, `시험 전제: 다듬어져 512자 미만인 잘린 원문이 있어야 한다(${trimmedCases})`);
-  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' x" }, 5).parse, 'malformed', '형식 밖 조각은 그대로');
+  // 옛 엣지가 detailed 를 보낸 경우(ok)는 그대로 ok · 묻지 않았으면 판정 없음 · 원문 없는 legacy 는 보고 없음
+  assert.equal(sanitizeVmGos({ at: 1, asked: true, detailed: { prettyName: 'R' }, raw: null }, 5).parse, 'ok');
+  assert.equal(sanitizeVmGos({ at: 1, asked: false, raw: 'zz' }, 5).parse, null);
+  assert.equal(sanitizeVmGos({ at: 1, asked: true, parse: 'legacy', raw: null }, 5).parse, null);
+  // 수집기는 legacy 를 만들지 않는다
+  for (const x of ["prettyName='' distroName=''", 'zz', "prettyName='R'"]) assert.notEqual(parseVmGosProps({ 'guest.guestDetailedData': x }, 1, { asked: true }).parse, 'legacy');
+  // 점검: 사유 legacyEdge · total.legacyVms · 원문 목록(unparsed)에는 넣지 않는다(파서 결함이 아니다)
+  const lg = sanitizeVmGos({ at: 1, asked: true, raw: 'zz' }, 5);
+  const p = buildOsProbe([vm('a', 'v', { gos: lg })], [{ id: 'v' }], [], { now: 9 });
+  assert.equal(p.noDetail.legacyEdge, 1); assert.equal(p.total.legacyVms, 1); assert.equal(p.total.unparsedVms, 0); assert.deepEqual(p.unparsed, []);
+  assert.ok(REASON_TEXT.legacyEdge);
 });

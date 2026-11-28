@@ -10,7 +10,8 @@ import { toolsAtLeast } from './guestDetail.js';
 // 3: 점검 2회차 — 값별 개수 목록마다 <칸>Omitted · appliances[].fullVersions(값별 개수) · total.cfgRead · unparsedVms · 엣지 수집 행 status 없음.
 // 4: 점검 4회차 — 사유 emptyValues · total.extraDropped · status.osErrorAt.
 // 5: 점검 5회차 구조 재설계 — 사유는 vm.gos.parse 로 · unparsed[].parse · total.partialVms · detailedAge · collectSource 'rest' · collectMethod.
-export const PROBE_SCHEMA = 5;
+// 6: 점검 10회차 — 사유 legacyEdge · total.legacyVms(옛 엣지 원문은 판정 보류).
+export const PROBE_SCHEMA = 6;
 const SAMPLE_MAX = 300;
 const RAW_MAX = 50;
 const VAPP_MAX = 100;
@@ -18,13 +19,14 @@ const MANAGED_MAX = 50;
 const TOP_MAX = 5;
 
 /** 보고가 없는 VM 의 사유 — 앞의 것부터 처음 맞는 하나. 화면 문구는 웹 realOsProbeText.js 가 같은 키로 소유한다. */
-export const NO_DETAIL_REASONS = Object.freeze(['notRead', 'notAsked', 'emptyValues', 'unparsed', 'template', 'toolsOld', 'toolsNotRunning', 'poweredOff', 'toolsUnknown', 'other']);
+export const NO_DETAIL_REASONS = Object.freeze(['notRead', 'notAsked', 'legacyEdge', 'emptyValues', 'unparsed', 'template', 'toolsOld', 'toolsNotRunning', 'poweredOff', 'toolsUnknown', 'other']);
 
 export function noDetailReason(vm) {
   const g = vm?.gos;
   if (!g || typeof g !== 'object') return 'notRead';
   if (!g.asked) return 'notAsked';
   // 점검 5회차 구조 재설계: 보고를 읽은 결과는 vm.gos.parse 한 값이다(guestDetail.js normalizeGos) — 여기서 raw · extra 로 다시 짐작하지 않는다.
+  if (g.parse === 'legacy') return 'legacyEdge';     // 10회차: 옛 엣지 원문 — 판정 보류(추측하지 않는다)
   if (g.parse === 'empty') return 'emptyValues';     // 형식은 맞고 값만 빈 보고
   if (g.parse === 'malformed') return 'unparsed';    // 보고는 왔는데 아는 키를 못 읽음 — 파서가 틀린 것
   if (vm.template) return 'template';
@@ -91,7 +93,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
   const managed = new Map();
   // cfgRead(점검 2회차): 시스템 VM(managedBy)은 vm.cfg 를 읽은 VM 에서만 셀 수 있다 — 못 읽은 VM 을 0 으로 섞지 않게 분모를 함께 싣는다.
   // unparsedVms: 형식을 못 읽은 원문(raw)이 있는 VM 수(가짓수 상한과 무관한 전체 — 화면이 목록 합으로 세지 않게).
-  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0, unparsedVms: 0, partialVms: 0, extraDropped: 0 };
+  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0, unparsedVms: 0, partialVms: 0, legacyVms: 0, extraDropped: 0 };
   // 점검 5회차: 보고를 **읽은 시각** 기준 나이(루트 규칙 '오래됨은 따로 센다' — 판정 문턱을 지어내지 않고 구간만 센다). 보고 있음(detailed)만.
   const detailedAge = { d1: 0, d7: 0, older: 0, unknown: 0 };
   const noDetail = Object.fromEntries(NO_DETAIL_REASONS.map((k) => [k, 0]));
@@ -145,6 +147,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
       }
       if (g.parse === 'malformed') total.unparsedVms += 1;
       if (g.parse === 'partial') total.partialVms += 1;
+      if (g.parse === 'legacy') total.legacyVms += 1;
     }
     const d = g?.detailed && typeof g.detailed === 'object' ? g.detailed : null;
     if (d) {

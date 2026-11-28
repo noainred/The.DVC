@@ -118,7 +118,7 @@
 | `idrac/` | 47 | 10,239 | `idrac/registry.js` (32) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
 | `insights/` | 29 | 11,206 | `insights/analysisServers.js` (18) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
-| `inventory/` | 15 | 2,516 | `inventory/guestDetail.js` (4) | inventory/guestDetail.js — VM 의 '실제 설치 OS' 1차 출처(VMware Tools 보고) · 어플라이언스 제품 정보 — 순수 파서 · 정제(v3.54 · 실제 OS 1단계). |
+| `inventory/` | 15 | 2,504 | `inventory/guestDetail.js` (4) | inventory/guestDetail.js — VM 의 '실제 설치 OS' 1차 출처(VMware Tools 보고) · 어플라이언스 제품 정보 — 순수 파서 · 정제(v3.54 · 실제 OS 1단계). |
 | `ipam/` | 49 | 9,289 | `ipam/ledger.js` (11) | IPAM ledger builder — turns a snapshot into a per-center IP record list. |
 | `isidu/` | 21 | 4,832 | `isidu/digestRules.js` (8) | isidu/digestRules.js — 아이실론 디렉터리 사용량 **종합 메일**의 순수 규칙(v2.742). 파일·타이머·메일 발송 없음. |
 | `issues/` | 17 | 5,031 | `issues/store.js` (6) | issues/store.js — 이슈 트래커 저장소(v2.864). 포탈 공용 이슈(장애·작업·요청·개선)를 등록하고 담당자에게 할당해 끝날 때까지 추적한다. |
@@ -186,7 +186,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 109개 · 파일 1615개 · 376,001줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 109개 · 파일 1615개 · 375,989줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

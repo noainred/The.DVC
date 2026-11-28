@@ -13,6 +13,7 @@
 //       'partial'  아는 키를 읽었지만 형식 밖 조각 · 잘린 값이 있다(detailed 와 raw 둘 다)
 //       'empty'    형식대로 읽었는데 아는 키의 값이 모두 비었다
 //       'malformed' 아는 키를 하나도 읽지 못했다(raw)
+//       'legacy'   옛 엣지(3.54 ~ 3.58)가 보낸 원문 — 판정 보류(raw · 엣지가 업그레이드되면 새 모양으로 다시 올라온다 · 점검 10회차)
 //   - detailed: 아는 키만(DETAIL_KEYS) — parse 가 'ok' · 'partial' 일 때만.
 //   - extra: 문서에 없는 키(이름 · 값 상한) · extraDropped: 상한 · 이름 형식으로 버린 모르는 키 수(조용히 버리지 않는다).
 //   - raw: parse 가 'partial' · 'malformed' 일 때만 원문(512자) — 형식이 문서와 다를 때 실측으로 고치기 위해서다(정상 보고는 싣지 않는다 — 스냅샷 크기).
@@ -81,7 +82,6 @@ export function parseGuestDetailedData(raw) {
   let dups = 0;           // 같은 아는 키가 다시 나온 수(점검 6 · 7회차 — 값이 있는 첫 값으로 정하고 흔적은 partial · raw 로 남긴다)
   const seenKnown = new Set();
   let truncated = raw.length > RAW_IN_MAX;
-  let tailFragment = null;   // 입력 끝까지 이어진 형식 밖 조각(있으면)
   const n = s.length;
   let i = 0;
   while (i < n) {
@@ -95,11 +95,8 @@ export function parseGuestDetailedData(raw) {
       skipped += 1;
       if (i === ks) i += 1;
       while (i < n && !isSpace(s[i])) i += 1;
-      // 9회차: 입력 끝까지 이어진 조각은 따로 알린다 — 잘린 원문에서는 이 조각이 잘림 흔적일 수 있다(oldEdgeOutcome 이 판정).
-      tailFragment = i >= n ? s.slice(ks, n) : null;
       continue;
     }
-    tailFragment = null;
     i += 2;
     const parts = [];
     let segStart = i;
@@ -126,11 +123,11 @@ export function parseGuestDetailedData(raw) {
       if (EXTRA_KEY_RE.test(key) && nExtra < EXTRA_MAX) { extra[key] = cap(val, 128); nExtra += 1; } else extraDropped += 1;
     }
   }
-  return { fields, extra, ok, knownKeys, extraDropped, skipped, dups, truncated, tailFragment };
+  return { fields, extra, ok, knownKeys, extraDropped, skipped, dups, truncated };
 }
 
 /** 보고를 읽은 결과의 종류(모듈 머리말 parse 참고). */
-export const PARSE_OUTCOMES = Object.freeze(['ok', 'partial', 'empty', 'malformed']);
+export const PARSE_OUTCOMES = Object.freeze(['ok', 'partial', 'empty', 'malformed', 'legacy']);   // legacy: 옛 엣지 원문 — 판정 보류(수집기는 만들지 않는다)
 const PARSE_SET = new Set(PARSE_OUTCOMES);
 /** parseGuestDetailedData 결과 → parse 값. null 이면 보고 없음. */
 export function outcomeOf(p) {
@@ -201,6 +198,7 @@ export function normalizeGos({ at = null, edgeAt = null, asked = false, parse = 
   // partial 은 근거 원문(raw)이 있을 때만 — 엣지가 원문 없이 partial 이라 하면 ok 로 낮춘다(점검 6회차: 화면에 '일부만 읽음' 이 세어지는데 원문 목록은 비었다).
   // 7회차: malformed 도 원문이 있을 때만(엣지가 원문 없이 malformed 라 하면 보고 없음) — partial 과 같은 규칙. 화면 '형식 못 읽음 N건' 과 원문 목록이 어긋나지 않게.
   if (d) { p = p === 'partial' && r0 ? 'partial' : 'ok'; } else if (p === 'ok' || p === 'partial' || p === 'malformed') p = r0 ? 'malformed' : null;
+  else if (p === 'legacy') p = r0 ? 'legacy' : null;   // 10회차: 옛 엣지 원문은 판정 보류(원문이 있을 때만)
   if (a && !d && p == null && r0) p = 'malformed';
   const e = a && extra && typeof extra === 'object' && Object.keys(extra).length ? extra : null;
   const drop = a && Number.isSafeInteger(extraDropped) && extraDropped > 0 ? extraDropped : 0;
@@ -212,7 +210,7 @@ export function normalizeGos({ at = null, edgeAt = null, asked = false, parse = 
     detailed: d,
     extra: e,
     ...(drop ? { extraDropped: drop } : {}),
-    raw: p === 'partial' || p === 'malformed' ? r0 : null,
+    raw: p === 'partial' || p === 'malformed' || p === 'legacy' ? r0 : null,
     vapp: vapp && (vapp.name || vapp.vendor) ? vapp : null,
   };
 }
@@ -236,36 +234,12 @@ export function toolsAtLeast(v, major, minor = 0) {
 
 /* ------------------------- 엣지 수신 정제(routes/central.js sanitizeInventoryList) ------------------------- */
 
-/**
- * 옛 엣지(3.54 ~ 3.58 — parse 칸 없음)의 raw 를 다시 판정한다(점검 6 · 7회차 호환). 옛 엣지는 **아는 키의 값을 하나도 못 읽었을 때만** raw 를 보냈고
- * 512자로 잘랐다 — 그래서 형식 밖 조각 없이 아는 키만 있었다면 원래 보고는 '값이 모두 빈' 보고다(끝이 잘려 닫는 따옴표가 없어도 — 7회차 재현).
+/*
+ * 옛 엣지(3.54 ~ 3.58 — parse 칸 없음)가 보낸 raw 는 **다시 판정하지 않는다**(점검 10회차 결정).
+ *   6 ~ 10회차에 잘린 원문(512자 · 옛 중앙의 끝 공백 다듬기)에서 원래 보고를 추측하는 규칙을 덧댈 때마다 새 경계 사례가 나왔다(따옴표 안 · 키 이름 가운데 ·
+ *   온전한 마지막 토큰 · 다듬어진 511자). 추측 대신 'legacy'(판정 보류)로 따로 센다 — 못 읽은 값은 0 도 정상도 아니다(루트 규칙).
+ *   일시적이다: 엣지가 자동 업그레이드되면 다음 수집 주기에 parse 칸이 있는 새 모양으로 다시 올라온다.
  */
-function oldEdgeOutcome(raw) {
-  // 9회차(8회차 꼬리 떼기가 온전한 마지막 토큰까지 버림 — 재현): 추측으로 꼬리를 떼지 않고 **파서가 알린 끝 조각**만 본다.
-  //   원문이 512자에 닿았을 때만 잘림이 있을 수 있다 — 그때 ① 따옴표 안에서 끝났으면(truncated) 잘림 흔적이고
-  //   ② 입력 끝까지 이어진 형식 밖 조각은 **올바른 토큰의 앞부분일 수 있을 때만**(key · key= · key=' …) 잘림 흔적이다.
-  //   'kernelVersion==bad' 처럼 어떤 토큰의 앞부분도 될 수 없는 조각은 원래 형식 밖이다(malformed 그대로).
-  //   한계: 원래 보고가 정확히 512자에서 그런 앞부분 모양으로 끝났다면 잘림과 가를 수 없다(드묾 — 추정).
-  //   10회차(재현): 옛 **중앙**(3.54)은 저장할 때 원문 끝 공백을 다듬어(trim) 512자 잘림이 511자 이하로 남을 수 있다 — 그래서 '따옴표 안에서 끝남'(truncated)은
-  //   길이와 무관하게 잘림 흔적으로 본다. 가정(추정): Tools 는 값의 따옴표를 닫는다 — 끝의 열린 따옴표는 잘림이 만든다.
-  const body = raw.slice(0, RAW_KEEP_MAX);
-  const p = parseGuestDetailedData(body);
-  if (!p) return null;
-  const atLimit = raw.length >= RAW_KEEP_MAX;
-  const tailIsCut = atLimit && p.tailFragment != null && isTokenPrefix(p.tailFragment);
-  const skipped = p.skipped - (tailIsCut ? 1 : 0);
-  const truncated = false;
-  // 옛 엣지 raw 에 값이 있는 아는 키가 있을 수 없다 — 있으면 모양이 어긋난 것(malformed).
-  return !p.ok && p.knownKeys > 0 && skipped === 0 && !truncated ? 'empty' : 'malformed';
-}
-/** 'key' · 'key=' · "key='…" 처럼 올바른 토큰의 앞부분일 수 있는 조각인가(키 글자 뒤 '=' 뒤에는 따옴표만). */
-function isTokenPrefix(frag) {
-  let i = 0;
-  while (i < frag.length && isKeyChar(frag.charCodeAt(i))) i += 1;
-  if (i === frag.length) return i > 0;
-  if (frag[i] !== '=' || i === 0) return false;
-  return i + 1 === frag.length || frag[i + 1] === "'";
-}
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 /** 이어받을 edgeAt — 양의 정수 · 결과 at 보다 뒤 · now + 10년 이하. 아니면 null. */
@@ -327,7 +301,7 @@ export function sanitizeVmGos(g, now = Date.now()) {
     asked: g.asked === true,
     // 점검 6회차(호환): 이미 릴리스된 엣지(3.54 ~ 3.58)는 parse 칸 없이 '아는 키를 못 읽은 원문' 을 raw 로 보낸다(값만 빈 보고 포함).
     //   parse 가 없고 detailed 도 없으면 원문을 같은 파서로 다시 판정한다(원문은 512자 상한 — 비용이 작다). 옛 엣지의 partial 은 원문이 오지 않아 되살릴 수 없다(ok 로 남는다).
-    parse: typeof g.parse === 'string' ? g.parse : (!detailed && typeof g.raw === 'string' && g.asked === true ? oldEdgeOutcome(g.raw) : null),
+    parse: typeof g.parse === 'string' ? g.parse : (!detailed && typeof g.raw === 'string' && g.asked === true ? 'legacy' : null),
     detailed, extra, extraDropped,
     raw: typeof g.raw === 'string' ? g.raw : null,
     vapp,

@@ -6,6 +6,7 @@ import { EMPTY_TOKENS } from '../../components/sortableText.js';
 export const REASON_TEXT = Object.freeze({
   notRead: '아직 읽지 않음(수집 전 · 꺼짐 · 엣지 미업그레이드 등)',
   notAsked: '묻지 않음(vCenter API 8.0.2 미만 또는 판 미상)',
+  legacyEdge: '옛 엣지 보고 — 판정 보류(엣지 업그레이드 뒤 다시 읽음)',
   emptyValues: '보고는 왔으나 값이 모두 빔',
   unparsed: '보고는 왔으나 형식을 못 읽음',
   template: '템플릿',
