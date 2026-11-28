@@ -97,10 +97,14 @@ export function managedText(managed, cfgRead, total) {
   return n(managed);
 }
 
-/** 판 정렬 키 — 숫자 마디는 자리를 맞춘다('8.10' 이 '8.4' 앞에 오지 않게 · 7회차). 없으면 '' (정렬 맨 뒤). */
+/**
+ * 판 정렬 키 — 숫자 마디는 자리를 맞춘다('8.10' 이 '8.4' 앞에 오지 않게 · 7회차). 없으면 '' (정렬 맨 뒤).
+ * 8회차(반증 재현): 앞에 글자 'v' 를 붙여 STable(sortableText.sortKeyOf)이 **늘 글자로** 읽게 한다 — 마디 1~2개 키는 수로, 3개 이상은 글자로 읽혀
+ *   compareKeys 가 수를 늘 앞에 두는 탓에 '22.04' 가 '8.10.1' 앞에 왔다. 시험은 실제 비교기(sortKeyOf + compareKeys)로 한다.
+ */
 export function versionSortKey(v) {
   if (typeof v !== 'string' || !v.trim()) return '';
-  return v.trim().slice(0, 64).split(/([.\-_ ])/).map((p) => (/^\d{1,12}$/.test(p) ? p.padStart(12, '0') : p)).join('');
+  return `v${v.trim().slice(0, 64).split(/([.\-_ ])/).map((p) => (/^\d{1,12}$/.test(p) ? p.padStart(12, '0') : p)).join('')}`;
 }
 
 /** 아키텍처 칸 — 'X86 · 64bit'. 둘 다 없으면 '—'. */

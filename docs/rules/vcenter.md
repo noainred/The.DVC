@@ -618,6 +618,8 @@
   장치 목록(dev)에 읽을 VM 이 있으면 os 는 남은 예산의 절반까지만 · dev 도 예산으로 건너뛰면 `devSkipReason`.
   7회차: 중복 키는 **값이 있는 첫 값**(값이 모두 비면 empty) · **malformed 도 원문이 있을 때만**(partial 과 대칭) · 옛 엣지 원문 재판정은 '형식 밖 조각 없이 아는 키만' 이면 512자 잘림과 무관하게 empty(`oldEdgeOutcome`) ·
   버전 열 정렬 키 `versionSortKey`(8.10 > 8.4) · **데모 vm.gos 도 `normalizeGos` · `parseVmGosProps` 를 지난다**(정제 고정점 시험 · 판정 갈래 표본 — 원문은 그림용 가정).
+  8회차(7회차 수정의 결함 2건): 정렬 키는 **늘 글자**('v' 접두 — STable 이 마디 1~2개 키를 수로 읽어 섞인 열이 틀렸다 · 시험은 실제 `sortKeyOf + compareKeys` 로) ·
+  옛 엣지 원문이 512자에 닿았으면 마지막 공백 뒤 꼬리(잘림 조각)를 떼고 재판정(잘린 자리 0~40칸 전수 시험). 교훈: **정렬 · 판정 시험은 실제 경로로** — 대용 함수(localeCompare)로 고정한 시험이 결함을 놓쳤다.
   **형식을 못 읽은 보고(raw · extra)는 사유 'unparsed' 로 따로** — 'Tools 정상인데 보고 없음'(other)과 섞으면 파서 결함이 Tools 미보고로 읽힌다(반증 지적).
   **어플라이언스 = OVF 제품 정보(vapp)가 있는 VM 만** — 확장이 관리하는 VM(managedBy: 복제본 · vCLS)은 '확장 관리' 로 따로 센다. 묶음 키는 `JSON.stringify([…])`(값 안 구분자로 합쳐지지 않게).
 - 남긴 것(다음 단계): 판정 코어(종류 · 버전 · Windows 빌드 → 릴리스) · Summary OS 합계 전환 · VM 성격(일반 / 어플라이언스 / 시스템 VM)과 수동 지정 · EOL · SQLite 저장 · 게스트 조회 스캐너를 '보고 없는 VM 만' 으로.

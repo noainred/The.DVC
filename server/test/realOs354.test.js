@@ -826,10 +826,14 @@ test('R7 옛 엣지가 512자로 자른 빈 값 보고도 empty', () => {
   assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' junk" }, 5).parse, 'malformed', '형식 밖 조각이 있으면 그대로 malformed');
 });
 
-test('R7 버전 정렬 키 — 8.4 < 8.9 < 8.10 · 15.5 < 15.10 · 없음은 맨 뒤', () => {
-  const vs = ['8.10', '8.4', '15.10', '8.9', '15.5', '9', '22.04'];
-  const sorted = [...vs].sort((a, b) => versionSortKey(a).localeCompare(versionSortKey(b)));
-  assert.deepEqual(sorted, ['8.4', '8.9', '8.10', '9', '15.5', '15.10', '22.04']);
+test('R7 · R8 버전 정렬 키 — 실제 STable 비교기(sortKeyOf + compareKeys)로 · 마디 수가 섞여도', async () => {
+  const { sortKeyOf, compareKeys } = await import('../../web/src/components/sortableText.js');
+  const sortBy = (vs) => [...vs].sort((a, b) => compareKeys(sortKeyOf(versionSortKey(a)), sortKeyOf(versionSortKey(b))));
+  assert.deepEqual(sortBy(['8.10', '8.4', '15.10', '8.9', '15.5', '9', '22.04']), ['8.4', '8.9', '8.10', '9', '15.5', '15.10', '22.04']);
+  assert.deepEqual(sortBy(['24.04', '8.10.1', '9.4', '8.9.2', '20348.1', '20348', '7.9.2009', '3.19.1', '8.4', '22.04.3']),
+    ['3.19.1', '7.9.2009', '8.4', '8.9.2', '8.10.1', '9.4', '22.04.3', '24.04', '20348', '20348.1'], '8회차: 마디 1~2개(수)와 3개 이상(글자)이 섞인 열');
+  assert.deepEqual(sortBy(['10.1', '7.0.3.01000', '4.1.2.3.0', '8.0']), ['4.1.2.3.0', '7.0.3.01000', '8.0', '10.1']);
+  for (const v of ['9', '22.04', '8.10.1', '15-SP5']) assert.equal(sortKeyOf(versionSortKey(v)).kind, 'str', v);
   assert.equal(versionSortKey(null), ''); assert.equal(versionSortKey('  '), '');
   const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
   assert.match(jsx, /data-sort=\{versionSortKey\(r\.distroVersion\)\}/); assert.match(jsx, /data-sort=\{versionSortKey\(r\.version\)\}/);
@@ -849,4 +853,21 @@ test('R7 데모 vm.gos 도 같은 코어 — 정제해도 그대로(고정점) �
   }
   assert.ok(n > 1000);
   for (const k of [null, 'ok', 'partial', 'empty', 'malformed']) assert.ok(seen.has(k), `데모에 parse ${k} 가 있다`);
+});
+
+/* ---------------------------- 점검 8회차(반증 재현) 회귀 ---------------------------- */
+
+test('R8 옛 엣지 512자 잘림 — 잘린 자리가 어디든(따옴표 안 · 키 이름 가운데 · key= 뒤) 빈 값 보고는 empty', () => {
+  const outcomes = new Map();
+  for (let pad = 0; pad <= 40; pad++) {
+    const long = "prettyName='' distroName='' familyName='' " + Array.from({ length: 40 }, (_, i) => `extraKey${i}='${'x'.repeat(pad)}'`).join(' ');
+    if (long.length <= 512) continue;
+    assert.equal(parseVmGosProps({ 'guest.guestDetailedData': long }, 1, { asked: true }).parse, 'empty', `직접 수집 pad ${pad}`);
+    const got = sanitizeVmGos({ at: 1, asked: true, detailed: null, extra: null, raw: long.slice(0, 512), vapp: null }, 5).parse;
+    outcomes.set(got, (outcomes.get(got) || 0) + 1);
+    assert.equal(got, 'empty', `옛 엣지 → 중앙 pad ${pad} · 꼬리 ${JSON.stringify(long.slice(500, 512))}`);
+  }
+  assert.ok((outcomes.get('empty') || 0) >= 30);
+  // 512자에 닿지 않은 옛 원문에서 형식 밖 조각은 그대로 malformed
+  assert.equal(sanitizeVmGos({ at: 1, asked: true, raw: "prettyName='' extr" }, 5).parse, 'malformed');
 });

@@ -237,7 +237,15 @@ export function toolsAtLeast(v, major, minor = 0) {
  * 512자로 잘랐다 — 그래서 형식 밖 조각 없이 아는 키만 있었다면 원래 보고는 '값이 모두 빈' 보고다(끝이 잘려 닫는 따옴표가 없어도 — 7회차 재현).
  */
 function oldEdgeOutcome(raw) {
-  const p = parseGuestDetailedData(raw.slice(0, RAW_KEEP_MAX));
+  // 8회차(반증 재현): 512자에 닿았으면 마지막 공백 뒤 꼬리는 잘림이 만든 조각이다(키 이름 가운데 · 'key=' 뒤에서 잘리면 형식 밖 조각으로 세어 malformed 가 됐다).
+  //   꼬리를 떼고 판정한다(공백이 없으면 그대로). 따옴표 안에서 잘린 경우는 원래대로 truncated 로만 남는다.
+  let body = raw.slice(0, RAW_KEEP_MAX);
+  if (raw.length >= RAW_KEEP_MAX) {
+    let j = body.length - 1;
+    while (j >= 0 && !isSpace(body[j])) j -= 1;
+    if (j > 0) body = body.slice(0, j);
+  }
+  const p = parseGuestDetailedData(body);
   if (!p) return null;
   if (!p.ok && p.knownKeys > 0 && p.skipped === 0) return 'empty';
   return p.ok ? 'malformed' : outcomeOf(p);   // 옛 엣지 raw 에 값이 있는 아는 키가 있을 수 없다 — 있으면 모양이 어긋난 것(malformed)
