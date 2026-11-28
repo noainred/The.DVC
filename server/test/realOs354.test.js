@@ -452,6 +452,8 @@ test('R1 점검 라우트 본문 — 상태는 vCenter 마다(64개 상한 없�
   assert.equal(p.vcenters.find((r) => r.id === 'vc1').collectSource, 'site');
   assert.equal(p.vcenters.find((r) => r.id === 'vc0').collectSource, 'direct');
   assert.equal(scopedOsProbe({ role: 'admin' }, { vcenters: [], vms: [] }, { now: 1, demo: true }).demo, true);
+  assert.deepEqual(scopedOsProbe({ role: 'admin' }, { vcenters: [], vms: [] }, { now: 1, demo: false, settings: { vmCfgScan: false, vmOsScan: false } }).collect,
+    { cfgEnabled: false, osEnabled: false, refreshMs: null, perCycle: null }, '꺼짐 · 주기 미상은 그대로 말한다(숫자를 지어내지 않는다)');
   _resetVmCfgCache();
 });
 
