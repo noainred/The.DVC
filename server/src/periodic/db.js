@@ -16,6 +16,61 @@ import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { KINDS } from './rules.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'periodic.db');
+/**
+ * v3.59 백업 적재(3절 — backupLedger.js · backupStore.js). 날은 포탈 시각의 dayIndex(util/dayKey.js) — 정리는 날 단독 인덱스 + 청크.
+ *  · pr_bk_obs    끝난 실행 관측(백업 · VM · 끝난 시각이 키 — 같은 실행을 두 번 넣지 않는다) — RAW_KEEP_DAYS 보관
+ *  · pr_bk_seen   법인 · 백업 · 날의 관측 범위(신선한 관측 첫 · 마지막 데이터 시각 · 그날에 걸친 가장 긴 틈 · 그날 걸친 틈이 잃은 것이 있는가(lossy) · 그날 대상 목록) — RAW_KEEP_DAYS
+ *  · pr_bk_cursor 법인 · 백업의 마지막 데이터 시각 · 적재 시작 날 · 확정한 마지막 날 · 마지막으로 본 시각 · 결과 출처(복제 — 바뀌면 그 틈은 잃은 틈)
+ *  · pr_bk_day    날의 확정 결과(법인 · 백업 한 줄 — 확인 불가면 수 칸은 NULL) — 설정 보관 일수
+ *  · pr_bk_vmday  그날 마지막 결과가 실패인 VM(목록 · 되풀이 실패) — 설정 보관 일수
+ *  pr_bk_day · pr_bk_vmday 는 기본 키가 day 로 시작해 정리 · 기간 조회가 그 키를 탄다(따로 날 인덱스를 두지 않는다 — 성능 축 P8 EXPLAIN 확인).
+ */
+const BACKUP_SCHEMA = `CREATE TABLE IF NOT EXISTS pr_bk_obs (
+    product TEXT NOT NULL, vm TEXT NOT NULL, ended_at INTEGER NOT NULL, vc TEXT NOT NULL, day INTEGER NOT NULL, state TEXT NOT NULL,
+    started_at INTEGER, name TEXT, reason TEXT, reason_pub TEXT, run_id TEXT, seen_at INTEGER NOT NULL, PRIMARY KEY (product, vm, ended_at)
+  );
+  CREATE INDEX IF NOT EXISTS pr_bk_obs_day ON pr_bk_obs(day);
+  CREATE INDEX IF NOT EXISTS pr_bk_obs_pvd ON pr_bk_obs(product, vc, day);
+  CREATE TABLE IF NOT EXISTS pr_bk_seen (
+    product TEXT NOT NULL, vc TEXT NOT NULL, day INTEGER NOT NULL, first_at INTEGER, last_at INTEGER, max_gap INTEGER NOT NULL DEFAULT 0, lossy INTEGER NOT NULL DEFAULT 0,
+    n_fresh INTEGER NOT NULL DEFAULT 0, n_stale INTEGER NOT NULL DEFAULT 0, targets TEXT, PRIMARY KEY (product, vc, day)
+  );
+  CREATE INDEX IF NOT EXISTS pr_bk_seen_day ON pr_bk_seen(day);
+  CREATE TABLE IF NOT EXISTS pr_bk_cursor (
+    product TEXT NOT NULL, vc TEXT NOT NULL, last_at INTEGER, first_day INTEGER, sealed_to INTEGER, active_at INTEGER, src TEXT, PRIMARY KEY (product, vc)
+  );
+  CREATE TABLE IF NOT EXISTS pr_bk_day (
+    day INTEGER NOT NULL, product TEXT NOT NULL, vc TEXT NOT NULL, status TEXT NOT NULL, targets INTEGER, ended INTEGER, ok INTEGER, warn INTEGER,
+    fail INTEGER, norun INTEGER, sealed_at INTEGER NOT NULL, late INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, product, vc)
+  );
+  CREATE TABLE IF NOT EXISTS pr_bk_vmday (
+    day INTEGER NOT NULL, product TEXT NOT NULL, vm TEXT NOT NULL, vc TEXT NOT NULL, state TEXT NOT NULL, name TEXT, ended_at INTEGER,
+    reason TEXT, reason_pub TEXT, PRIMARY KEY (day, product, vm)
+  );
+`;
+/** 나중에 더한 칸(표 · 칸 · 정의) — CREATE TABLE IF NOT EXISTS 는 있는 표에 칸을 더하지 않는다. */
+const BACKUP_COLUMNS = Object.freeze([
+  // 옛 줄은 잃은 것이 있었는지 모른다 — 잃은 틈으로 본다(다시 확정해도 '다 봤다' 로 뒤집히지 않게 · 반증 3회차 N5)
+  ['pr_bk_seen', 'lossy', 'INTEGER NOT NULL DEFAULT 0', 'UPDATE pr_bk_seen SET lossy = 1'],
+  ['pr_bk_cursor', 'src', 'TEXT', null],
+]);
+/**
+ * 나중에 더한 칸을 앞 판 표에 더한다(순수 — conn 만 쓴다 · 시험이 경합을 흉내 낸 conn 으로 부른다).
+ *   두 프로세스가 같은 순간 처음 열면 진 쪽의 ALTER 가 'duplicate column' — 이미 더해졌으니 그대로 간다(반증 3회차 N1 — 아니면 periodic.db 전체가 닫혔다).
+ */
+export function addBackupColumns(conn) {
+  for (const [table, col, ddl, after] of BACKUP_COLUMNS) {
+    const has = conn.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+    if (has) continue;
+    try {
+      conn.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+    } catch (e) {
+      if (!/duplicate column/i.test(String(e?.message || e))) throw e;
+      continue;   // 다른 프로세스가 더했다 — 옛 줄 고치기도 그쪽이 했다
+    }
+    if (after) conn.exec(after);   // 더한 순간의 옛 줄만 고친다(그 뒤 새 줄은 정의의 기본값)
+  }
+}
 const lockRetry = createLockRetry();
 const DAY = 86_400_000;
 
@@ -55,6 +110,9 @@ async function openDb() {
       CREATE INDEX IF NOT EXISTS pr_deliv_run ON pr_deliveries(run_id);
       CREATE INDEX IF NOT EXISTS pr_deliv_next ON pr_deliveries(state, next_at);
       CREATE INDEX IF NOT EXISTS pr_deliv_kind_at ON pr_deliveries(kind, at);`);
+    conn.exec(BACKUP_SCHEMA);
+    // 칸 더하기 — 앞 판(릴리스 전 빌드 포함)이 만든 표에 새 칸이 없으면 더한다(반증 R5 — 'no such column' 으로 3절 전체가 읽히지 않았다). 다음 칸도 여기에.
+    addBackupColumns(conn);
     lockRetry.ok();
     _db = conn; _err = '';
   } catch (e) {

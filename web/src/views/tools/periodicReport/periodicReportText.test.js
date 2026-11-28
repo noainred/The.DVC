@@ -47,6 +47,60 @@ describe('정기 점검 보고 문구', () => {
     const cat = raw('../../../../../server/src/periodic/catalog.js');
     for (const [k, v] of Object.entries(T.AXIS_LABEL)) expect(cat).toContain(`key: '${k}', label: '${v}'`);
   });
+  it('v3.59 백업 3절 — 서버와 같은 백업 이름 · 기호 · 항목 키', () => {
+    const led = raw('../../../../../server/src/periodic/backupLedger.js');
+    expect(led).toContain(`PRODUCTS = Object.freeze([${T.BK_PRODUCTS.map((p) => `'${p}'`).join(', ')}])`);
+    for (const [k, v] of Object.entries(T.BK_PRODUCT_LABEL)) expect(led).toContain(`${k}: '${v}'`);
+    expect(led).toContain("if (!s?.prev?.days || !s.cmp) return null;\n  if (!s.cmp.pairs) return 'none';\n  return s.cmp.pairs === s.cmp.of ? 'all' : 'some';");
+    expect(raw('periodicReportText.js')).toContain("if (!s?.prev?.days || !s.cmp) return null;\n  if (!s.cmp.pairs) return 'none';\n  return s.cmp.pairs === s.cmp.of ? 'all' : 'some';");
+    const ren = raw('../../../../../server/src/periodic/render.js');
+    for (const [k, v] of Object.entries(T.BK_STRIP)) expect(ren).toMatch(new RegExp(`${k}: \\['${v}'`));
+    const cat = raw('../../../../../server/src/periodic/catalog.js');
+    for (const key of Object.values(T.BK_ITEM_KEY)) expect(cat).toContain(`key: '${key}', axis: 'service'`);
+  });
+  it('v3.59 백업 3절 — 못 읽은 값 · 확정 없는 수는 0 이 아니다', () => {
+    expect(T.pctText(null)).toBe('—');
+    expect(T.pctText('')).toBe('—');
+    expect(T.pctText(99.754)).toBe('99.75%');
+    expect(T.pctText(100)).toBe('100.00%');
+    expect(T.bkNum({ kd: 0, e: 0 }, 0)).toBe('—');
+    expect(T.bkNum(null, 5)).toBe('—');
+    expect(T.bkNum({ kd: 2 }, 0)).toBe('0');
+    expect(T.deltaText(12, 9)).toBe('+3');
+    expect(T.deltaText(60, 103)).toBe('−43');
+    expect(T.deltaText(5, 5)).toBe('±0');
+    expect(T.deltaText(5, 5, false)).toBe('');
+    expect(T.backupCellText(null)).toBe('—');
+    expect(T.backupCellText({ sealed: 0, known: 0, fail: 0, unknown: 0 })).toBe('—');
+    expect(T.backupCellText({ sealed: 1, known: 0, fail: 0, unknown: 2 })).toBe('— · ? 2', '전부 확인 불가인 회차는 0 이 아니다(화면 축 M5)');
+    expect(T.backupCellText({ sealed: 1, known: 3, fail: 12, unknown: 0 })).toBe('12');
+    expect(T.backupCellText({ sealed: 1, known: 3, fail: 0, unknown: 2 })).toBe('0 · ? 2');
+    expect(T.backupCellText({ off: true })).toBe('꺼짐');
+    expect(T.backupCellText({ error: true })).toBe('오류');
+    // 앞 기간은 두 기간 모든 날을 안 (법인, 백업) 쌍끼리만 견준다(서버 prevMode 와 같은 판정 — 반증 R7)
+    expect(T.prevMode({ prev: { days: 0 }, cmp: { pairs: 1, of: 1 } })).toBe(null);
+    expect(T.prevMode({ prev: { days: 7 }, cmp: { pairs: 0, of: 3 } })).toBe('none');
+    expect(T.prevMode({ prev: { days: 7 }, cmp: { pairs: 2, of: 3 } })).toBe('some');
+    expect(T.prevMode({ prev: { days: 7 }, cmp: { pairs: 3, of: 3 } })).toBe('all');
+    expect(T.prevComparable({ prev: { days: 7 }, cmp: { pairs: 3, of: 3 } })).toBe(true);
+    expect(T.bkAtLeast({ kd: 2, tu: 1 }, 17)).toBe('≥ 17', '대상을 모르는 날이 있으면 적어도');
+    expect(T.bkAtLeast({ kd: 2, tu: 0 }, 17)).toBe('17');
+    expect(T.bkAtLeast({ kd: 0, tu: 0 }, 0)).toBe('—');
+    expect(T.bkAtLeast({ kd: 2, tu: 2 }, 0)).toBe('—', '모든 알았음 줄이 대상을 모르면 ≥ 0 이 아니라 모름(반증 3회차 N3)');
+  });
+  it('v3.59 백업 3절 — 법인 판정 칸은 백업 항목 행의 가장 나쁜 것(새 판정 없음)', () => {
+    const items = [
+      { key: 'veeam', rows: [{ vc: 'a', status: 'warn' }, { vc: 'b', status: 'ok' }] },
+      { key: 'bareos', rows: [{ vc: 'a', status: 'crit' }, { vc: 'b', status: 'unknown' }] },
+      { key: 'vm-clone', rows: [{ vc: 'c', status: 'ok' }] },
+      { key: 'cpu', rows: [{ vc: 'c', status: 'crit' }] },
+    ];
+    expect(T.backupCorpStatus(items, 'a')).toBe('crit');
+    expect(T.backupCorpStatus(items, 'b')).toBe('unknown');
+    expect(T.backupCorpStatus(items, 'c')).toBe('ok');   // 백업 밖 항목(cpu)은 넣지 않는다
+    expect(T.backupCorpStatus(items, 'a', ['veeam'])).toBe('warn');   // 고른 백업만
+    expect(T.backupCorpStatus(items, 'z')).toBe(null);
+  });
   it('도구 · 메뉴 연결 — 목록 · 특수 기능 · 설정 · 카테고리 · 접근 매핑', () => {
     expect(raw('../../specialToolsList.js')).toMatch(/k: 'periodic-report'/);
     expect(raw('../../SpecialTools.jsx')).toMatch(/tool === 'periodic-report' && <PeriodicReport \/>/);
@@ -55,7 +109,7 @@ describe('정기 점검 보고 문구', () => {
     expect(raw('../../../../../server/src/auth/toolAccess.js')).toMatch(/'periodic-report': 'periodic-report'/);
   });
   it('화면 문구에 백틱 · uppercase 없음', () => {
-    for (const f of ['PeriodicReport.jsx', 'periodicReport/Archive.jsx', 'periodicReport/ReportView.jsx', 'periodicReport/CatalogTab.jsx', 'periodicReport/ScheduleTab.jsx'].map((x) => `../${x}`)) {
+    for (const f of ['PeriodicReport.jsx', 'periodicReport/Archive.jsx', 'periodicReport/ReportView.jsx', 'periodicReport/CatalogTab.jsx', 'periodicReport/ScheduleTab.jsx', 'periodicReport/BackupSection.jsx'].map((x) => `../${x}`)) {
       const s = raw(f);
       const strs = s.match(/'[^'\n]*'/g) || [];
       expect(strs.some((x) => x.includes('`'))).toBe(false);

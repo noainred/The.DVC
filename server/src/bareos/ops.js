@@ -14,7 +14,7 @@ import {
 import { CONFIG_CMDS, CONFIG_NORMALIZE } from './manage/showParse.js';
 import { pruneSelection } from './groupRetention.js';
 import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
-import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
+import { jobNameFor, isFinalStatus, isResourceName, RECONCILE_RECENT_DAYS } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
 import { firstErrorLine } from './logFirstError.js';
 import { checkVcs, checkDisks, isThisHost } from './healthProbe.js';
@@ -518,7 +518,7 @@ export const OPS = Object.freeze({
     if (reconcile && !signal?.aborted) {
       try {
         states = await jobStates(s);
-        recentRows = recent ? await recentJobs(s, 2) : [];
+        recentRows = recent ? await recentJobs(s, RECONCILE_RECENT_DAYS) : [];
         reconciled = true;
       } catch (e) { stop(e); }
       if (reconciled) {

@@ -22,6 +22,7 @@ import { AXES } from '../../periodic/catalog.js';
 import { renderReportHtml, corpNamer, corpMatrix, stamp, attachmentName } from '../../periodic/render.js';
 import * as svc from '../../periodic/service.js';
 import * as pdb from '../../periodic/db.js';
+import { backupSummary, backupCorpRow, publicBackup, backupFromMatrix, PRODUCT_LABEL } from '../../periodic/backupLedger.js';
 import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const toolsPerm = requirePerm('tools');
@@ -47,12 +48,21 @@ function statusView(st, admin) {
   if (admin || !st) return st;
   return { ...st, history: (st.history || []).map((h) => ({ ...h, ...(h.reason ? { reason: scrubMail(h.reason) } : {}) })), lastError: st.lastError ? { ...st.lastError, message: scrubMail(st.lastError.message) } : null };
 }
-/** 회차 문서를 요청자 범위로 자르고 화면이 쓸 묶음(조치 · 확인 불가 · 법인 표)을 붙인다. */
+/**
+ * v3.59 3절 판본 — 실패 사유 원문은 관리자 판본만(그 밖은 공개 문구 — Veeam 상세 화면과 같은 가림) · 합계 · 법인 줄은 자른 뒤 같은 함수로 다시 낸다.
+ *   메일 · HTML 첨부도 공개 문구 판본을 쓴다(받는 사람이 포탈 관리자가 아닐 수 있다 — renderReportHtml 은 이 함수를 거친 문서를 받는다).
+ */
+export function backupView(bk, admin) {
+  if (!bk || bk.off || bk.error) return bk || null;
+  const v = admin ? bk : publicBackup(bk);
+  return { ...v, summary: backupSummary(v), corpRows: (v.corps || []).map((c) => backupCorpRow(c, v.products, v.nowOk)) };
+}
+/** 회차 문서를 요청자 범위로 자르고 화면이 쓸 묶음(조치 · 확인 불가 · 법인 표 · 3절 합계)을 붙인다. */
 function docFor(req, doc) {
   const allowed = allowedOf(req);
   const view = allowed ? scopeCutDoc(doc, allowed) : doc;
   const name = corpNamer(view);
-  const out = { ...view, actions: actionsOf(view, name), unknowns: unknownsOf(view, name), corpTable: corpMatrix(view) };
+  const out = { ...view, actions: actionsOf(view, name), unknowns: unknownsOf(view, name), corpTable: corpMatrix(view), ...(view.backup ? { backup: backupView(view.backup, isAdminReq(req)) } : {}) };
   if (!isAdminReq(req) && out.manual) out.by = '(수동)';   // 만든 계정명은 관리자 판본만
   return out;
 }
@@ -64,7 +74,7 @@ export function registerPeriodicReport(api) {
     const allowed = allowedOf(req);
     // 범위 계정 — 주기별 마지막 회차의 종합 · 판정 수는 전 법인 값이라 싣지 않는다(회차 ID · 시각만 · 수는 보관함이 범위로 다시 센다).
     const kinds = allowed ? Object.fromEntries(Object.entries(st.kinds || {}).map(([k, v]) => [k, { ...v, last: v.last ? { id: v.last.id, kind: v.last.kind, generatedAt: v.last.generatedAt, manual: v.last.manual } : null }])) : st.kinds;
-    res.json({ ok: true, ...statusView(st, isAdminReq(req)), kinds, scoped: !!allowed, ...(allowed ? { history: [], recipients: null, lastError: null } : {}) });
+    res.json({ ok: true, ...statusView(st, isAdminReq(req)), kinds, scoped: !!allowed, ...(allowed ? { history: [], recipients: null, lastError: null, backup: st.backup ? { enabled: st.backup.enabled, captureMs: st.backup.captureMs } : null } : {}) });
   });
 
   /** 점검 항목 카탈로그(재정의 반영). */
@@ -84,10 +94,11 @@ export function registerPeriodicReport(api) {
     const allowed = allowedOf(req);
     const admin = isAdminReq(req);
     const runs = r.runs.map(({ matrix, ...row }) => {
-      if (!allowed) return { ...row, ...(admin ? {} : { by: row.manual ? '(수동)' : row.by }) };
+      const backup = backupFromMatrix(matrix?.bk, allowed);   // v3.59 '백업 실패' 열 — 범위 계정은 자기 법인만 다시 센다
+      if (!allowed) return { ...row, ...(admin ? {} : { by: row.manual ? '(수동)' : row.by }), ...(backup ? { backup } : {}) };
       const sc = scopedCountsFromMatrix(matrix, allowed);
       const corps = Object.keys(matrix?.vc || {}).filter((v) => allowed.has(v)).length;
-      return { ...row, by: row.manual ? '(수동)' : row.by, counts: sc.counts, overall: sc.overall, corpsTotal: corps, corpsReported: null, scoped: true };
+      return { ...row, by: row.manual ? '(수동)' : row.by, counts: sc.counts, overall: sc.overall, corpsTotal: corps, corpsReported: null, scoped: true, ...(backup ? { backup } : {}) };
     });
     res.json({ ok: true, runs, total: r.total, days, kind });
   });
@@ -114,8 +125,9 @@ export function registerPeriodicReport(api) {
     if (got == null) return res.status(503).json({ ok: false, code: 'db-unavailable' });
     if (!got.run?.doc) return res.status(404).json({ ok: false, reason: '회차를 찾지 못했습니다' });
     const allowed = allowedOf(req);
-    const view = allowed ? scopeCutDoc(got.run.doc, allowed) : got.run.doc;
-    if (allowed && !view.items.length) return res.status(404).json({ ok: false, reason: '회차를 찾지 못했습니다' });
+    const cut = allowed ? scopeCutDoc(got.run.doc, allowed) : got.run.doc;
+    if (allowed && !cut.items.length) return res.status(404).json({ ok: false, reason: '회차를 찾지 못했습니다' });
+    const view = cut.backup ? { ...cut, backup: backupView(cut.backup, isAdminReq(req)) } : cut;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${attachmentName(got.run.doc)}"`);
     res.send(renderReportHtml(view, { scopedNote: allowed ? '내 범위(법인) 판 — 볼 수 있는 법인 행만 담았습니다.' : '' }));
@@ -147,6 +159,19 @@ export function registerPeriodicReport(api) {
       }
       add('항목', [['축', 10], ['항목', 30], ['법인', 18], ['판정', 10], ['근거', 80], ['확인 불가 사유', 40]], itemRows);
       add('확인하지 못한 것', [['항목', 30], ['범위', 30], ['사유', 60], ['확인하려면', 60]], doc.unknowns.map((u) => [u.label, u.where, u.reason, u.fix || '']));
+      // v3.59 3절 — 법인별 백업 성공 · 실패 · 실패한 백업(문서에 실린 것 전부 — 화면의 30건 상한 없이 · 문서 상한은 backupLedger FAIL_ROWS_MAX · 사유는 이 계정의 판본)
+      const bk = doc.backup;
+      if (bk && !bk.off && !bk.error) {
+        const nOr = (v) => (v == null ? '' : v);
+        const kq = (c, v) => (Number(c?.kd) > 0 ? v : '');   // 확정된 날이 없는 법인의 수는 빈칸(0 을 지어내지 않는다)
+        add('백업 법인별', [['법인', 20], ['대상', 10], ['끝난 백업', 12], ['성공', 10], ['경고', 10], ['실패', 10], ['성공률(%)', 10], ['실행 없음', 10], ['확인 불가(백업 · 날)', 14], ['실패한 날', 10], ['되풀이 VM', 10], ['지금 실패', 10], ['앞 기간 실패', 12]],
+          (bk.corpRows || []).map((c) => [name(c.vc), c.tu > 0 ? '' : kq(c, c.t), kq(c, c.e), kq(c, c.ok), kq(c, c.w), kq(c, c.f), nOr(c.rate), c.tu > 0 ? '' : kq(c, c.n), c.unknownDays, c.failDays, c.repeatVms, nOr(c.failNow),
+            c.prev?.cmp ? c.prev.f : '']));   // 앞 기간은 그 법인의 모든 (법인, 백업) 쌍을 견줄 수 있을 때만(화면 · HTML 과 같은 판정 — 반증 R2)
+        add('백업 실패', [['법인', 18], ['백업', 14], ['VM', 30], ['실패한 날', 10], ['마지막 실패', 18], ['연속 실패(회)', 12], ['마지막 성공', 18], ['사유', 80]],
+          [...(bk.fails || []).map((x) => [name(x.vc), PRODUCT_LABEL[x.product] || x.product, x.name || x.vm, x.failDays, stamp(x.endedAt), nOr(x.streak), stamp(x.lastOkAt), x.reason || '']),
+            // 문서 상한으로 잘렸으면 그 사실을 마지막 줄로 말한다(조용한 상한 금지)
+            ...((bk.failsTotal ?? 0) > (bk.fails || []).length ? [[`… 상위 ${(bk.fails || []).length}건만 실었습니다(전체 ${bk.failsTotal}건)`, '', '', '', '', '', '', '']] : [])]);
+      }
       const buf = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${attachmentName(got.run.doc).replace(/\.html$/, '.xlsx')}"`);
@@ -166,7 +191,7 @@ export function registerPeriodicReport(api) {
     if (r.error) return res.status(r.code === 'settings-unreadable' ? 409 : 400).json({ ok: false, reason: r.error, field: r.field, ...(r.code ? { code: r.code } : {}) });
     const s = r.settings;
     logAudit({ user: req.user?.username, action: '정기 점검 보고 설정 변경', target: 'periodic-report.json',
-      detail: `${KINDS.map((k) => `${KIND_LABEL[k]} ${s.kinds[k].enabled ? s.kinds[k].time : '끔'}`).join(' · ')} · 메일 ${s.mail.enabled ? `켬(추가 ${s.mail.to.length} · 법인판 ${Object.keys(s.mail.corpTo).length})` : '끔'} · 채널 ${s.chat.enabled ? '켬' : '끔'} · 공지 ${s.notice.enabled ? '켬' : '끔'} · 이슈 ${s.issues.enabled ? '켬' : '끔'} · 항목 재정의 ${Object.keys(s.items).length}` });
+      detail: `${KINDS.map((k) => `${KIND_LABEL[k]} ${s.kinds[k].enabled ? s.kinds[k].time : '끔'}`).join(' · ')} · 백업 현황 ${s.backup.kinds.map((k) => KIND_LABEL[k]).join('·') || '없음'}(적재 ${s.backup.ledger ? `켬 ${s.backup.keepDays}일` : '끔'}) · 메일 ${s.mail.enabled ? `켬(추가 ${s.mail.to.length} · 법인판 ${Object.keys(s.mail.corpTo).length})` : '끔'} · 채널 ${s.chat.enabled ? '켬' : '끔'} · 공지 ${s.notice.enabled ? '켬' : '끔'} · 이슈 ${s.issues.enabled ? '켬' : '끔'} · 항목 재정의 ${Object.keys(s.items).length}` });
     res.json({ ok: true, settings: s });
   });
 

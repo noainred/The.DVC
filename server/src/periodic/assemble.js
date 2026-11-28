@@ -122,11 +122,17 @@ export async function assembleRun(a) {
     a.onProgress?.({ done, total: a.items.length, axis: def.axis });
     await yieldNow();
   }
+  // v3.59 보고서 3절 '백업 성공 · 실패 현황' — 항목이 아니라 절이다(판정은 서비스 축의 백업 항목 것 · 새 판정을 만들지 않는다). 던지거나 시한을 넘기면 절에 사유만 싣는다.
+  let backup;
+  if (typeof a.backup === 'function') {
+    const r = await runReader(a.backup, ctx, a.timeoutMs ?? READER_TIMEOUT_MS);
+    backup = r.ok ? r.value : { v: 1, error: true, reason: r.error?.code === 'reader-timeout' ? '백업 적재를 읽는 데 시한을 넘겨 멈췄습니다' : `백업 적재를 읽지 못했습니다: ${clip(r.error?.message || r.error, 160)}` };
+  }
   const counts = countsOf(items);
   return {
     id: a.id, kind: a.kind, kindLabel: KIND_LABEL[a.kind], slot: a.slot ?? null, periodFrom: a.period.from, periodTo: a.period.to, periodLabel: a.period.label,
     generatedAt: a.now, by: a.by || 'schedule', manual: !!a.manual, status: 'done', asOf: a.now, durationMs: Date.now() - t0,
     items, corps, counts, overall: overallOf(items), corpsTotal: corps.length, corpsReported: corps.filter((c) => c.reported).length,
-    prevId: a.prev?.id || null, mock: !!a.mock,
+    prevId: a.prev?.id || null, mock: !!a.mock, ...(backup ? { backup } : {}),
   };
 }

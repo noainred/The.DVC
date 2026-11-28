@@ -58,6 +58,25 @@
 .prr .prr-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .prr .prr-report { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .prr a { color: #7cc4ff; }
+/* v3.59 3절 백업 성공 · 실패 — 날짜별 막대 · 칸 · 되풀이 줄(숫자 · 기호가 값이고 색은 보조) */
+.prr .prr-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr)); gap: 8px; }
+.prr .prr-day { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-deep); font-size: 12px; }
+.prr .prr-day.pre { border-style: dashed; background: transparent; }
+.prr .prr-plot { display: flex; align-items: flex-end; height: 56px; border-bottom: 1px solid var(--border-soft); }
+.prr .prr-plot i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: rgba(255,154,157,.75); }
+.prr .prr-daycells { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 4px; }
+.prr .prr-dc { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 38px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-deep); font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.prr .prr-dc small { font-size: 10px; font-weight: 400; color: var(--text-dim); }
+.prr .prr-dc.pre { border-style: dashed; background: transparent; color: var(--text-dim); }
+.prr .prr-dc.f { color: #ffc2c4; border-color: rgba(255,154,157,.4); background: rgba(255,154,157,.10); }
+.prr .prr-dc.hot { color: #ffe4e5; border-color: rgba(255,154,157,.65); background: rgba(255,154,157,.28); }
+.prr .prr-strip { display: inline-flex; gap: 3px; white-space: nowrap; }
+.prr .prr-sc { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; border: 1px solid var(--border-soft); background: var(--panel-deep); font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text-dim); }
+.prr .prr-sc.ok { color: #4fd1a5; }
+.prr .prr-sc.warn { color: #fcd34d; }
+.prr .prr-sc.fail { color: #ff9a9d; border-color: rgba(255,154,157,.5); background: rgba(255,154,157,.12); }
+.prr .prr-sc.pre { border-style: dashed; background: transparent; }
+.prr tr.prr-sum td { font-weight: 700; background: var(--panel-deep); }
 @media (max-width: 640px) {
   .prr .prr-seg button { min-height: 40px; }
   .prr .prr-btn { min-height: 40px; }

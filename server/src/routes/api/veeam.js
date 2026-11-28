@@ -2,6 +2,7 @@
 // 조회 전용·로그인 사용자(트리를 볼 수 있는 계정이면 배지도 본다 — 어떤 VM 이 백업 대상인지·작업 이름뿐, 계정 없음 · 오류 원문(주소)은 관리자만).
 // scope: id 를 직접 받는 단건 라우트라 범위 밖 vCenter 는 404(존재 은닉 — server/CLAUDE.md). 체크박스를 켰을 때만 60초 폴링한다.
 import { setPeriodicProvider, SYSTEM_REQ } from '../../periodic/providers.js';   // v3.32 정기 점검 보고 공급자
+import { bareosJobView } from '../../periodic/backupLedger.js';   // v3.59 백업 적재 — Bareos 관측용 잡(순수)
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { serversForVcenter, registryLoadError, listServers } from '../../veeam/registry.js';
@@ -714,7 +715,7 @@ export function veeamMatchFor(vc, vms, req) {
   return { known, match, views: r.views, host: r.host, results: br.length, ...(truncated ? { truncated: true } : {}) };
 }
 
-async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
+async function vcBackup(vc, vms, req, { initial = false, scope = null, snapEvents = true } = {}) {
   const admin = isAdminDetailUser(req.user);
   const linked = !registryBroken() && veeamLinked(vc.id);
   // v2.781(점검 G3 C-B1): VM 목록이 없으면(재시작 직후 골격 · 아직 수집 전 · 그 vCenter 인벤토리 0대) 대조 결과 0 은 사실이 아니다 — 모름.
@@ -741,8 +742,9 @@ async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const isLinked = linked || (isMockMode() && !!match) || registryBroken();
   // ⚠ v2.780: 매칭·스냅샷 요약은 늘 vCenter **전체** VM 으로 — cachedSnapEvents 는 vCenter 별 캐시라 부분 목록으로 부르면 다른 화면의 값이 바뀐다.
   //   범위(전원·템플릿 제외)는 backupRow 에 넘기는 목록으로만 정한다.
-  const ev = await cachedSnapEvents(vc.id, vms, { initial, wait: false });
-  const sc = snapCount({ ev, vms });
+  // v3.59: 정기 점검 보고 백업 적재(backupObserveData)는 스냅샷 칸을 쓰지 않는다 — 10분마다 로그 DB 요약을 다시 만들지 않게 snapEvents:false(스냅샷 칸 '모름')
+  const ev = snapEvents ? await cachedSnapEvents(vc.id, vms, { initial, wait: false }) : null;
+  const sc = snapEvents ? snapCount({ ev, vms }) : null;
   const sv = vmScope(vms, scope || {});
   const row = { ...backupRow({ vms: sv.vms, linked: isLinked, vcnt, match, sc, ev, runningStale, noInventory }), excluded: sv.excluded, powerUnknown: sv.powerUnknown };
   // v2.784: 사람이 정한 표시의 수 — 같은 범위(전원·제외) 목록. 연동 없는 vCenter 는 Veeam '없음' 확정이라 백업 필요 표시가 모두 미백업이다.
@@ -1283,8 +1285,49 @@ export function _resetEmDetailForTest() { _emDetailCache.clear(); _emDetailBusy.
 const _emDetailBusy = new Set();    // EM 당 동시 1건
 const EM_DETAIL_TTL_MS = 5 * 60_000;
 
+/**
+ * v3.59 정기 점검 보고 백업 적재(periodic/backupService.js → backupLedger.observeOf) — 법인마다 VM 단위 Veeam 마지막 결과 · Bareos 원장 실행.
+ *   Detail · Summary 와 **같은 VM 행 코어**(vcBackup → backupVmRows — 판정 코어 하나)를 시스템 계정(전체 범위 · 전원 전체 · 템플릿 · vCLS 제외)으로 돈다.
+ *   스냅샷 이벤트는 읽지 않는다(snapEvents:false — 10분마다 로그 DB 요약을 다시 만들지 않게). Director · B&R 에 접속하지 않는다(저장된 결과 · 원장만).
+ *   Veeam task 메시지는 원문과 공개 문구(publicTaskMessage — 상세 화면과 같은 가림)를 같이 싣는다 — 판본은 보고서 응답 · 메일이 고른다.
+ *   재시작 직후 골격 스냅샷(initial · VM 0대)이면 notReady — 0대로 쌓지 않는다(staleProvider 9회차 V-21 과 같은 판단).
+ */
+async function backupObserveData(snap) {
+  if (snap?.initial === true || !(Array.isArray(snap?.vms) && snap.vms.length)) return { notReady: true, reason: '인벤토리 첫 수집이 끝나지 않았습니다(재시작 직후)' };
+  const vmsBy = new Map();
+  for (const vm of snap.vms) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
+  const maybeYield = createYielder(15);
+  const now = Date.now(); const marks = getMarks(); const unreadable = marksUnreadable();
+  const vcs = [];
+  for (const vc of snap.vcenters || []) {
+    if (!vc || vc.status === 'disabled') continue;
+    await maybeYield();
+    const b = await vcBackup(vc, vmsBy.get(vc.id) || [], SYSTEM_REQ, { initial: false, scope: { power: 'all', excl: true }, snapEvents: false });
+    const vr = backupVmRows(vc, b, { now, marks, unreadable, withClone: false });
+    const msgOf = taskMsgOf(b.match?.byVm, true);
+    const veeam = {
+      state: b.row.veeamState, at: Number.isFinite(b.vcnt?.basisTs) ? b.vcnt.basisTs : null,
+      vms: vr.vms.filter((r) => r.v).map((r) => {
+        const m = /^(fail|warn)/i.test(String(r.v.lr || '')) ? msgOf(r) : '';
+        return { id: r.id, name: r.name, lr: r.v.lr || '', lrt: r.v.lrt ?? null, lrs: r.v.lrs ?? null, lb: r.v.lb ?? null, msg: m, msgPub: m ? publicTaskMessage(m, { vmName: r.name }) : '' };
+      }),
+    };
+    const dir = bareosDirInfoOf(vc.id);
+    const bmsg = vr.ledger ? new Map(bareosRows(vr.ledger, null, { id: vc.id, name: vc.name || vc.id }, 0).map((x) => [String(x.jobid), x.msg])) : new Map();
+    const bareos = {
+      mapped: !!dir && dir.state !== 'unset', state: dir?.state || 'unset', resultsKnown: !!dir?.resultsKnown && !!vr.ledger, partial: !!dir?.partial, at: dir?.at ?? null,
+      // v3.59 관측용 잡 — 판정 · 중복 제거 · 완결 근거는 backupLedger.bareosJobView 하나(시험이 실제 보기 모양으로 부른다)
+      jobs: vr.ledger ? [...vr.ledger.values()].filter((j) => !j.demo || bareosIsDemoActive()).map((j) => bareosJobView(j, (id) => bmsg.get(String(id)))) : [],
+    };
+    vcs.push({ id: vc.id, name: vc.name || vc.id, veeam, bareos });
+  }
+  return { at: now, vcs };
+}
+
 export function registerBackupStatus(api) {
   const toolsPerm = requirePerm('tools');
+  // v3.59 정기 점검 보고 백업 적재 · 백업 항목 판정 — VM 단위 결과(위 backupObserveData)
+  setPeriodicProvider('backup-observe', () => backupObserveData(store.get()));
   // v3.32 정기 점검 보고 — Veeam 판정은 Summary 계산 하나(시스템 계정 = 전체 범위 · 전원 전체 · 제외 목록 적용)를 리더가 공급자로 부른다(periodic/providers.js).
   setPeriodicProvider('veeam-summary', () => summaryData(SYSTEM_REQ, store.get(), { power: 'all', excl: true }, ''));
   // v2.838 일일 메일 계산기 — 전 법인 · 시스템 계정(화면 찾기와 같은 staleData · 범위 옵션 = 전체 VM · 템플릿·vCLS 제외)

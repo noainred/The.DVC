@@ -73,3 +73,58 @@ export const nextText = (k) => (k?.enabled ? (k.next?.[0] ? kstText(k.next[0], {
 export const busyText = (b) => (b ? `${KIND_LABEL[b.kind] || ''} ${b.id || ''} 만드는 중 — ${numText(b.done)}/${numText(b.total)}` : '');
 /** 주소 문자열 → 목록(쉼표 · 공백 · 줄바꿈). 형식 검사는 서버가 한다(400). */
 export const mailList = (s) => String(s || '').split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+
+/* ── v3.59 백업 성공 · 실패 현황(보고서 3절) — 판정 · 합계는 서버(backupLedger.js)가 낸다 ── */
+/** 서버 backupLedger.js PRODUCTS · PRODUCT_LABEL 과 같은 글자(테스트가 대조한다). */
+export const BK_PRODUCTS = Object.freeze(['veeam', 'bareos', 'clone']);
+export const BK_PRODUCT_LABEL = Object.freeze({ veeam: 'Veeam', bareos: 'Bareos', clone: 'VM 백업(복제)' });
+/** 백업 → 판정을 내는 서비스 축 항목 키(3절은 새 판정을 만들지 않는다 — 판정 칸은 이 항목 것). */
+export const BK_ITEM_KEY = Object.freeze({ veeam: 'veeam', bareos: 'bareos', clone: 'vm-clone' });
+/** 날마다의 결과 기호(되풀이 실패 줄) — 서버 render.js STRIP 과 같은 기호. 경고는 복원 지점이 생긴 실행이라 성공 기호. */
+export const BK_STRIP = Object.freeze({ ok: '✓', warn: '✓', fail: '×', none: '–', unknown: '?', pre: '·' });
+export const BK_STRIP_LABEL = Object.freeze({ ok: '성공', warn: '경고(성공으로 셈)', fail: '실패', none: '실행 없음', unknown: '확인 불가', pre: '적재 전' });
+/** 성공률 '99.75%'(소수 둘째 자리) · 끝난 백업이 없으면 '—'. */
+export function pctText(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  return Number.isFinite(n) ? `${n.toFixed(2)}%` : '—';
+}
+/** 확정된 날(kd)이 없는 묶음의 수는 '—' — 못 읽은 값을 0 으로 적지 않는다(합계 · 법인 줄 · 백업 줄 공통). */
+export const bkNum = (c, v) => (c && Number(c.kd) > 0 ? numText(v) : '—');
+/** 앞 기간과의 차이 '+3' · '−43' · '±0'. 앞 기간을 모르면 ''. */
+export function deltaText(cur, prev, known = true) {
+  if (!known || cur == null || prev == null) return '';
+  const d = Number(cur) - Number(prev);
+  if (!Number.isFinite(d)) return '';
+  return d > 0 ? `+${numText(d)}` : d < 0 ? `−${numText(-d)}` : '±0';
+}
+/** 확정 범위 한 줄 — '적재 18 / 31일'. 다 확정됐으면 '적재 7 / 7일'. */
+export const coverageText = (cov) => (cov ? `적재 ${numText(cov.sealed)} / ${numText(cov.days)}일` : '');
+/** 보관함 '백업 실패' 칸 — 알았음 줄이 없으면(적재 전 · 전부 확인 불가) '—' · 확인 불가가 있으면 '· ? n' · 꺼짐 · 오류는 그 글자. */
+export function backupCellText(b) {
+  if (!b) return '—';
+  if (b.off) return '꺼짐';
+  if (b.error) return '오류';
+  if (!(Number(b.known) > 0)) return Number(b.unknown) > 0 ? `— · ? ${numText(b.unknown)}` : '—';
+  return `${numText(b.fail)}${Number(b.unknown) > 0 ? ` · ? ${numText(b.unknown)}` : ''}`;
+}
+/** 앞 기간 견주기 — 서버 backupLedger.js prevMode 와 같은 판정(두 기간 모든 날을 안 (법인, 백업) 쌍끼리만 · 'all' · 'some' · 'none' · null). */
+export function prevMode(s) {
+  if (!s?.prev?.days || !s.cmp) return null;
+  if (!s.cmp.pairs) return 'none';
+  return s.cmp.pairs === s.cmp.of ? 'all' : 'some';
+}
+export const prevComparable = (s) => prevMode(s) === 'all';
+/** 대상 · 실행 없음 — 대상 목록을 모르는 날(tu)이 있으면 '≥ n'(아는 날의 합 — 적어도). 알았음 줄이 없으면 '—'. */
+export const bkAtLeast = (c, v) => (c && Number(c.kd) > 0 && Number(c.tu || 0) < Number(c.kd) ? `${Number(c.tu) > 0 ? '≥ ' : ''}${numText(v)}` : '—');   // 모든 알았음 줄이 대상을 모르면 '—'(서버 render.js kt 와 같다)
+/** 백업 항목들(run.items)에서 법인(vc) 하나의 가장 나쁜 판정 — 항목이 없거나 그 법인 행이 없으면 null. */
+export function backupCorpStatus(items, vc, products = BK_PRODUCTS) {
+  const rank = { ok: 0, unknown: 1, warn: 2, crit: 3 };
+  const keys = new Set(products.map((p) => BK_ITEM_KEY[p]).filter(Boolean));
+  let w = null;
+  for (const it of items || []) {
+    if (!keys.has(it.key)) continue;
+    for (const r of it.rows || []) if (r.vc === vc && r.status in rank && (w == null || rank[r.status] > rank[w])) w = r.status;
+  }
+  return w;
+}

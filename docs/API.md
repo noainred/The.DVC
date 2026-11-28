@@ -976,11 +976,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:167](../server/src/routes/api/inventory.js#L167) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:721](../server/src/routes/api/inventory.js#L721) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:717](../server/src/routes/api/inventory.js#L717) |
-| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:1464](../server/src/routes/api/veeam.js#L1464) |
-| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1536](../server/src/routes/api/veeam.js#L1536) |
-| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` · `textFields` | [server/src/routes/api/veeam.js:1479](../server/src/routes/api/veeam.js#L1479) |
-| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1425](../server/src/routes/api/veeam.js#L1425) |
-| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1434](../server/src/routes/api/veeam.js#L1434) |
+| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:1507](../server/src/routes/api/veeam.js#L1507) |
+| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1579](../server/src/routes/api/veeam.js#L1579) |
+| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` · `textFields` | [server/src/routes/api/veeam.js:1522](../server/src/routes/api/veeam.js#L1522) |
+| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1468](../server/src/routes/api/veeam.js#L1468) |
+| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1477](../server/src/routes/api/veeam.js#L1477) |
 | POST | `/tools/backup-run/backup` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupRun.js:169](../server/src/routes/api/backupRun.js#L169) |
 | POST | `/tools/backup-run/plan` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:161](../server/src/routes/api/backupRun.js#L161) |
 | GET | `/tools/backup-run/portal-vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:93](../server/src/routes/api/backupManage.js#L93) |
@@ -996,15 +996,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/backup-run/vm/:vmId/points` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:129](../server/src/routes/api/backupManage.js#L129) |
 | POST | `/tools/backup-run/vm/:vmId/restore` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:140](../server/src/routes/api/backupManage.js#L140) |
 | GET | `/tools/backup-run/vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:130](../server/src/routes/api/backupRun.js#L130) |
-| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:1300](../server/src/routes/api/veeam.js#L1300) |
-| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1512](../server/src/routes/api/veeam.js#L1512) |
-| GET | `/tools/backup-summary/alert` | 권한 `tools` | [server/src/routes/api/veeam.js:1359](../server/src/routes/api/veeam.js#L1359) |
-| PUT | `/tools/backup-summary/alert` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1367](../server/src/routes/api/veeam.js#L1367) |
-| POST | `/tools/backup-summary/alert/send` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1379](../server/src/routes/api/veeam.js#L1379) |
-| GET | `/tools/backup-summary/errors` | 권한 `tools` | [server/src/routes/api/veeam.js:1337](../server/src/routes/api/veeam.js#L1337) |
-| GET | `/tools/backup-summary/schedule` | 권한 `tools` | [server/src/routes/api/veeam.js:1329](../server/src/routes/api/veeam.js#L1329) |
-| GET | `/tools/backup-summary/stale` | 권한 `tools` | [server/src/routes/api/veeam.js:1313](../server/src/routes/api/veeam.js#L1313) |
-| GET | `/tools/backup-summary/stale.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1391](../server/src/routes/api/veeam.js#L1391) |
+| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:1343](../server/src/routes/api/veeam.js#L1343) |
+| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1555](../server/src/routes/api/veeam.js#L1555) |
+| GET | `/tools/backup-summary/alert` | 권한 `tools` | [server/src/routes/api/veeam.js:1402](../server/src/routes/api/veeam.js#L1402) |
+| PUT | `/tools/backup-summary/alert` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1410](../server/src/routes/api/veeam.js#L1410) |
+| POST | `/tools/backup-summary/alert/send` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1422](../server/src/routes/api/veeam.js#L1422) |
+| GET | `/tools/backup-summary/errors` | 권한 `tools` | [server/src/routes/api/veeam.js:1380](../server/src/routes/api/veeam.js#L1380) |
+| GET | `/tools/backup-summary/schedule` | 권한 `tools` | [server/src/routes/api/veeam.js:1372](../server/src/routes/api/veeam.js#L1372) |
+| GET | `/tools/backup-summary/stale` | 권한 `tools` | [server/src/routes/api/veeam.js:1356](../server/src/routes/api/veeam.js#L1356) |
+| GET | `/tools/backup-summary/stale.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1434](../server/src/routes/api/veeam.js#L1434) |
 | GET | `/tools/bareos-backup` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:441](../server/src/routes/api/bareosBackup.js#L441) |
 | GET | `/tools/bareos-backup/badges` | 권한 `tools` | [server/src/routes/api/bareosBackup.js:1785](../server/src/routes/api/bareosBackup.js#L1785) |
 | GET | `/tools/bareos-backup/digest` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bareosBackup.js:1744](../server/src/routes/api/bareosBackup.js#L1744) |
@@ -1466,17 +1466,17 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/pdu/series/power` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/pdu.js:180](../server/src/routes/api/pdu.js#L180) |
 | POST | `/tools/pdu/test` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/pdu.js:278](../server/src/routes/api/pdu.js#L278) |
 | POST | `/tools/pdu/thresholds` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/pdu.js:147](../server/src/routes/api/pdu.js#L147) |
-| GET | `/tools/periodic-report/catalog` | 권한 `tools` | [server/src/routes/api/periodicReport.js:71](../server/src/routes/api/periodicReport.js#L71) |
-| POST | `/tools/periodic-report/preview/:pid/keep` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/periodicReport.js:184](../server/src/routes/api/periodicReport.js#L184) |
-| POST | `/tools/periodic-report/run` | 역할 `admin` · `fullRwOnly` · `textFields` | [server/src/routes/api/periodicReport.js:174](../server/src/routes/api/periodicReport.js#L174) |
-| GET | `/tools/periodic-report/runs` | 권한 `tools` | [server/src/routes/api/periodicReport.js:76](../server/src/routes/api/periodicReport.js#L76) |
-| GET | `/tools/periodic-report/runs/:id` | 권한 `tools` | [server/src/routes/api/periodicReport.js:96](../server/src/routes/api/periodicReport.js#L96) |
-| POST | `/tools/periodic-report/runs/:id/deliver` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/periodicReport.js:192](../server/src/routes/api/periodicReport.js#L192) |
-| GET | `/tools/periodic-report/runs/:id/export.xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/periodicReport.js:125](../server/src/routes/api/periodicReport.js#L125) |
-| GET | `/tools/periodic-report/runs/:id/report.html` | 권한 `tools` | [server/src/routes/api/periodicReport.js:110](../server/src/routes/api/periodicReport.js#L110) |
-| GET | `/tools/periodic-report/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/periodicReport.js:158](../server/src/routes/api/periodicReport.js#L158) |
-| PUT | `/tools/periodic-report/settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/periodicReport.js:164](../server/src/routes/api/periodicReport.js#L164) |
-| GET | `/tools/periodic-report/status` | 권한 `tools` | [server/src/routes/api/periodicReport.js:62](../server/src/routes/api/periodicReport.js#L62) |
+| GET | `/tools/periodic-report/catalog` | 권한 `tools` | [server/src/routes/api/periodicReport.js:81](../server/src/routes/api/periodicReport.js#L81) |
+| POST | `/tools/periodic-report/preview/:pid/keep` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/periodicReport.js:209](../server/src/routes/api/periodicReport.js#L209) |
+| POST | `/tools/periodic-report/run` | 역할 `admin` · `fullRwOnly` · `textFields` | [server/src/routes/api/periodicReport.js:199](../server/src/routes/api/periodicReport.js#L199) |
+| GET | `/tools/periodic-report/runs` | 권한 `tools` | [server/src/routes/api/periodicReport.js:86](../server/src/routes/api/periodicReport.js#L86) |
+| GET | `/tools/periodic-report/runs/:id` | 권한 `tools` | [server/src/routes/api/periodicReport.js:107](../server/src/routes/api/periodicReport.js#L107) |
+| POST | `/tools/periodic-report/runs/:id/deliver` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/periodicReport.js:217](../server/src/routes/api/periodicReport.js#L217) |
+| GET | `/tools/periodic-report/runs/:id/export.xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/periodicReport.js:137](../server/src/routes/api/periodicReport.js#L137) |
+| GET | `/tools/periodic-report/runs/:id/report.html` | 권한 `tools` | [server/src/routes/api/periodicReport.js:121](../server/src/routes/api/periodicReport.js#L121) |
+| GET | `/tools/periodic-report/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/periodicReport.js:183](../server/src/routes/api/periodicReport.js#L183) |
+| PUT | `/tools/periodic-report/settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/periodicReport.js:189](../server/src/routes/api/periodicReport.js#L189) |
+| GET | `/tools/periodic-report/status` | 권한 `tools` | [server/src/routes/api/periodicReport.js:72](../server/src/routes/api/periodicReport.js#L72) |
 | GET | `/tools/portal-check/arch` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/portalCheck.js:371](../server/src/routes/api/portalCheck.js#L371) |
 | POST | `/tools/portal-check/arch/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/portalCheck.js:372](../server/src/routes/api/portalCheck.js#L372) |
 | GET | `/tools/portal-check/common` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/portalCheck.js:394](../server/src/routes/api/portalCheck.js#L394) |
@@ -1780,17 +1780,17 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/vcenter-info/:kind` | — | [server/src/routes/api/vcInfo.js:123](../server/src/routes/api/vcInfo.js#L123) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:44](../server/src/routes/api/vcTools.js#L44) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:928](../server/src/routes/api/toolsCapacity.js#L928) |
-| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:405](../server/src/routes/api/veeam.js#L405) |
-| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:297](../server/src/routes/api/veeam.js#L297) |
-| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:316](../server/src/routes/api/veeam.js#L316) |
-| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:455](../server/src/routes/api/veeam.js#L455) |
-| POST | `/veeam/vm-list.csv` | 권한 `data.csv` | [server/src/routes/api/veeam.js:338](../server/src/routes/api/veeam.js#L338) |
-| POST | `/veeam/vm-list.xlsx` | 권한 `data.csv` | [server/src/routes/api/veeam.js:344](../server/src/routes/api/veeam.js#L344) |
-| GET | `/veeam/vm-list/catalog` | 권한 `data.csv` | [server/src/routes/api/veeam.js:354](../server/src/routes/api/veeam.js#L354) |
-| DELETE | `/veeam/vm-list/prefs` | 역할 `admin/operator` · 권한 `data.csv` · `prefsWrite` | [server/src/routes/api/veeam.js:400](../server/src/routes/api/veeam.js#L400) |
-| GET | `/veeam/vm-list/prefs` | 권한 `data.csv` | [server/src/routes/api/veeam.js:388](../server/src/routes/api/veeam.js#L388) |
-| PUT | `/veeam/vm-list/prefs` | 역할 `admin/operator` · 권한 `data.csv` · `textFields` · `prefsWrite` | [server/src/routes/api/veeam.js:396](../server/src/routes/api/veeam.js#L396) |
-| POST | `/veeam/vm-list/preview` | 권한 `data.csv` | [server/src/routes/api/veeam.js:367](../server/src/routes/api/veeam.js#L367) |
+| GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:406](../server/src/routes/api/veeam.js#L406) |
+| GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:298](../server/src/routes/api/veeam.js#L298) |
+| GET | `/veeam/snap-events` | — | [server/src/routes/api/veeam.js:317](../server/src/routes/api/veeam.js#L317) |
+| GET | `/veeam/vm-detail` | — | [server/src/routes/api/veeam.js:456](../server/src/routes/api/veeam.js#L456) |
+| POST | `/veeam/vm-list.csv` | 권한 `data.csv` | [server/src/routes/api/veeam.js:339](../server/src/routes/api/veeam.js#L339) |
+| POST | `/veeam/vm-list.xlsx` | 권한 `data.csv` | [server/src/routes/api/veeam.js:345](../server/src/routes/api/veeam.js#L345) |
+| GET | `/veeam/vm-list/catalog` | 권한 `data.csv` | [server/src/routes/api/veeam.js:355](../server/src/routes/api/veeam.js#L355) |
+| DELETE | `/veeam/vm-list/prefs` | 역할 `admin/operator` · 권한 `data.csv` · `prefsWrite` | [server/src/routes/api/veeam.js:401](../server/src/routes/api/veeam.js#L401) |
+| GET | `/veeam/vm-list/prefs` | 권한 `data.csv` | [server/src/routes/api/veeam.js:389](../server/src/routes/api/veeam.js#L389) |
+| PUT | `/veeam/vm-list/prefs` | 역할 `admin/operator` · 권한 `data.csv` · `textFields` · `prefsWrite` | [server/src/routes/api/veeam.js:397](../server/src/routes/api/veeam.js#L397) |
+| POST | `/veeam/vm-list/preview` | 권한 `data.csv` | [server/src/routes/api/veeam.js:368](../server/src/routes/api/veeam.js#L368) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:429](../server/src/routes/api/inventory.js#L429) |
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:257](../server/src/routes/api/vmMetrics.js#L257) |
 | POST | `/vms/:id/endpoint-locate` | 권한 `inv.vms` | [server/src/routes/api/hostSan.js:414](../server/src/routes/api/hostSan.js#L414) |
