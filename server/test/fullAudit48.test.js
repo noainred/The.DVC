@@ -3,6 +3,7 @@
  *  F1 RDP 화면 크기는 정수 · 범위만(guacd 인자로 그대로 간다)
  *  F3 전역 레이트리밋 skip 은 경로를 소문자로 본다(express 라우팅은 대소문자를 가리지 않는다 — '/API/...' 우회)
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

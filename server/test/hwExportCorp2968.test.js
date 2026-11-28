@@ -1,5 +1,6 @@
 // v2.968 서버 하드웨어 정보 내보내기 — 법인 = 법인(DataCenter). 사용자 신고(2026-11-11): 서버 분석 › 상태 보드는 베어메탈이 법인으로 나뉘는데
 //   내보내기 창의 법인 칩은 전부 0대(미지정)였다 — v2.967 이 법인을 vCenter id 로 나눴기 때문(물리 전용 서버는 vCenter 가 없다).
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

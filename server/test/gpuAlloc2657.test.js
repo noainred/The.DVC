@@ -1,6 +1,7 @@
 // v2.657 — GPU 할당률 분모(명목 용량) · 배너의 '무엇을 못 읽었나' 집계.
 // 사용자 캡처: A40 1장(vCenter 보고 45GB)에 24Q×2 가 '48 GB / 45 GB (107%)' 호박색 '초과' 로 보였다 —
 // vGPU 프로파일은 명목 단위(24Q = 24GB)라 카드 최대 구성이다. 분모를 모델 명목 용량(48GB)으로 바꿨다.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { summarizeHostGpu } from '../src/gpu/hostGpu.js';

@@ -5,6 +5,7 @@
  *  · 남이 쓴 주석의 본문 주소(IPv4 · 등록부 주소)는 대상 이름과 같은 판정기로 가린다 — 집중 시작 자동 주석(auto focus)의 사유 IPv4 가 그대로 나갔다.
  *  · 본인 주석의 본문은 원문(고칠 수 있는 유일한 주석 — 가린 본문을 고쳐 저장하면 원문이 덮인다) · 관리자는 전부 원문.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

@@ -1,5 +1,6 @@
 // v2.974 시리얼 조회 UUID 는 관리자 판본만(사용자 요청 2026-11-11 'R3 시리얼 조회 UUID 도 관리자만 보이게').
 //   하드웨어 내보내기(UUID adminOnly) · 서버 상세 인벤토리(maskInventoryForViewer)와 같은 기준. 행 · 개수 · CSV 모두.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

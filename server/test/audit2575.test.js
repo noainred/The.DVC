@@ -4,6 +4,7 @@
  * 각 테스트는 '되돌리면 깨지는' 지점을 하나씩 고정한다. 소스를 문자열로 검사하는 것은
  * **주석을 먼저 제거**한 뒤에 한다(규칙을 설명하는 주석이 통과 근거가 되면 안 된다 — v2.535 규약).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

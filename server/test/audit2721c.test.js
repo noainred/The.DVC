@@ -1,4 +1,5 @@
 // v2.721(감사 R1-02·R2-02) — SAN 스토리지 사용량 법인 소계: 계열이 전부 측정 없음이면 0 이 아니라 null.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sanStorageDcSubtotals } from '../src/routes/api/sanSwitch.js';

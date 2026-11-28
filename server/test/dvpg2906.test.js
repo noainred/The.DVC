@@ -6,6 +6,7 @@
  *  ④ 수집: 받은 포트그룹 moref 만 · LAG 를 못 읽으면 이름만 다시 읽는다(lagError) · moref 를 받지 않으면 이 종류를 건드리지 않는다
  *  ⑤ 라우트 종류 · 권한(inv.hosts) · 상한 · 데모 · 선형(비율)
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 

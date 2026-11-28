@@ -4,6 +4,7 @@
  *  P2 용량: 대상 데이터스토어 실시간 여유 < 필요량 + 하한이면 스냅샷 전에 멈춘다 · 못 읽으면 검사하지 않는다 · 접근 불가면 멈춘다.
  *  P3 같은 데이터스토어면 성공 결과에 ⚠ 경고 · NFS 는 마운트 지점 여유(statfs)로 같은 검사.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

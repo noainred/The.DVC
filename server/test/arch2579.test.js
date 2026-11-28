@@ -12,6 +12,7 @@
  *
  * ⚠ 주석을 먼저 제거하고 검사한다(v2.535 규약) — 규칙을 설명하는 주석이 통과 근거가 되면 안 된다.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

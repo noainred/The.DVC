@@ -4,6 +4,7 @@
  *  - soapClient 가 Datacenter.parent 를 받고 VM 레코드에 펼친다(소스 고정) · 엣지 정제는 글자만 통과(객체 → null)
  *  - 목업 VM 도 두 필드를 갖는다(데모에서 등록 가능)
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

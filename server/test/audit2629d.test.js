@@ -10,6 +10,7 @@
  *  ⑥ A6-08: prune 중(busy) 인 vmperf 핸들은 LRU 가 닫지 않는다
  * 기준 시각은 고정값(Date.now() 를 기준으로 쓰지 않는다 — CLAUDE.md v2.517).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

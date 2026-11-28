@@ -3,6 +3,7 @@
  * main 의 bmUsageMinEdgeVersion2933.test.js 와 같은 꼴: 릴리스 노트(사실의 원천)에서 그 기능을 처음 실은 번호를 찾아 대조한다.
  * 다른 점: 이 값은 손으로 맞추는 상수가 아니라 perfOpsMinEdgeVersion() 이 노트에서 읽는다 — 노트에 아직 없으면(개발 중 · 릴리스 직전) 지금 package.json 번호.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

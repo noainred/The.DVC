@@ -1,4 +1,5 @@
 // v3.6.0 IP 관리 재설계 묶음 다 — 서버 보기(서비스 태그) · 호스트명 대조 · vmk 전체 파싱 · 스캔 대역 후보(ESXi).
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

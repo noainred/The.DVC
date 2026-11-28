@@ -3,6 +3,7 @@
  *  ⓐ-1 연결된 vCenter: 범위 계정에는 조회 범위 안 등록 vCenter 와 짝지은 노드만 이름을 보인다(파트너 · 복제 이름도)
  *  ⓐ-2 데모: VM 스냅샷 개수 · 트리가 생성할 때마다 바뀌지 않는다
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

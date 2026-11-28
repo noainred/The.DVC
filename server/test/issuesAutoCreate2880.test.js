@@ -5,6 +5,7 @@
  * ② 실제 저장소 경로 — 자식 프로세스에서 CONFIG_DIR 을 갈아 끼우고 applyPartFaultIssues 를 실제로 부른다(진입 함수를 실제로 호출 — common.md).
  * ③ 라우트 문지기 — 실제 api 라우터(관리자 + 전체 범위 · 저장은 쓰기 범위 무제한).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

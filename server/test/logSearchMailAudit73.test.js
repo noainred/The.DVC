@@ -9,6 +9,7 @@
  * F4 메일 설정 저장이 형식이 틀린 받는 사람 주소를 조용히 버리고 200 '저장되었습니다' 였다.
  * 자식 프로세스인 이유: config.js 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다(bulletin2722 와 같은 틀).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

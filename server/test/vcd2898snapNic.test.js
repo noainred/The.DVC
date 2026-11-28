@@ -3,6 +3,7 @@
  * 엣지 수신 정제(central sanitizeInventoryList → sanitizeSnapTree · sanitizeVmDev). 새 vCenter 호출 없이 이미 받던 XML 을 넓혀 읽는다.
  * 시간 비율 테스트는 docs/rules/common.md 규칙대로 8배 크기 · 기준 24배 · 번갈아 5회 최솟값.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { snapshotInfo, snapshotTreeNodes, sanitizeSnapTree, SNAP_TREE_MAX } from '../src/vcenter/soapParse.js';

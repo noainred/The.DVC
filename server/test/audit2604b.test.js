@@ -12,6 +12,7 @@
  * ⚠ 검증 방식: 실제 라우터를 express 에 띄워(자식 프로세스 — config 싱글턴) 역할·키별 응답으로 본다.
  *   in-flight 는 **실제 수집을 매달아** 만든다(응답하지 않는 로컬 TLS 포트 — 시간에 기대지 않고 상태를 폴링한다).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
