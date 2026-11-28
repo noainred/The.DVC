@@ -380,6 +380,15 @@ test('⑦-2 큰 첫 관측(조각 트랜잭션) · 복제 30회 보기(끊긴 �
   await run(T0 + 33 * DAY + 8 * H);   // 44시간 끊긴 뒤 첫 보고(최근 30회만)
   for (let t2 = T0 + 33 * DAY + 9 * H; t2 <= T0 + 33 * DAY + 12 * H; t2 += H) await run(t2);
   const g = await S.ledgerFor({ p0: D + 31, d0: D + 31, d1: D + 31, now: T0 + 34 * DAY });
+  // 밀린 확정 — 포탈이 5일 꺼졌다 켜진 뒤 관측 한 번에 밀린 날을 한꺼번에(한 번에 SEAL_BATCH_DAYS 까지) 확정한다(줄을 잃지 않고 · 다음 관측까지 미루지 않게)
+  const z = (t3) => L.observeOf({ now: t3, vcs: [{ id: 'vz', veeam: { state: 'ok', at: t3, vms: [{ id: 'z1', lr: 'Success', lrt: t3 - H }] } }] });
+  const z0 = T0 + 40 * DAY + 0.5 * H; const z1 = T0 + 45 * DAY + 4 * H;
+  assert.ok((await S.recordCapture({ ...z(z0), now: z0 })).ok);
+  const zr = await S.recordCapture({ ...z(z1), now: z1 });
+  const zs = await S.sealDue({ now: z1, dirty: zr.dirty });
+  assert.ok(zs.sealed >= 5, `밀린 5일을 한 번에 확정(${zs.sealed})`);
+  const zg = await S.ledgerFor({ p0: D + 40, d0: D + 40, d1: D + 44, now: z1 });
+  assert.deepEqual(zg.dayRows.filter((x) => x.vc === 'vz').map((x) => [x.day - D, x.status]).sort((x, y) => x[0] - y[0]), [[40, 'unknown'], [41, 'unknown'], [42, 'unknown'], [43, 'unknown'], [44, 'unknown']], '꺼진 동안의 Veeam 날은 확인 불가로 · 줄은 다 있다');
   assert.equal(g.dayRows.find((x) => x.vc === 'cs')?.status, 'unknown', '그날 마지막 실패(23:30)가 밀려났을 수 있는 날 — 성공으로 뒤집지 않는다(판정 축 F2 재현 B)');
 });
 
@@ -451,6 +460,12 @@ test('⑨-2 복제 — 실행 위치는 Detail 과 같은 판정 · 엣지 미�
   const mk = (vcenterId, vmId) => store.saveJob({ vcenterId, vmId, vmName: vmId, dest: { type: 'datastore', datastoreName: 'ds1' }, schedule: { mode: 'daily', time: '01:00' } });
   const jl = mk('vcL', 'vm-local');
   const js = mk('vcS', 'vm-site');
+  // 위임 잡은 9일 전에 만들었다(모르는 동안 '만든 시각부터 7일 넘음' 을 지어내는지 보려고 — 엣지 축 E1 둘째)
+  const vf = path.join(TMP, 'vm-clone.json');
+  const raw = JSON.parse(fs.readFileSync(vf, 'utf8'));
+  for (const j of raw.jobs) if (j.id === js.id) j.createdAt = Date.now() - 9 * DAY;
+  fs.writeFileSync(vf, JSON.stringify(raw));
+  store._resetForTest();
   store.recordRun(jl.id, { ok: true, detail: '' });
   await new Promise((r) => setTimeout(r, 3));
   store.recordRun(jl.id, { ok: false, detail: 'nfs full' });
@@ -468,8 +483,10 @@ test('⑨-2 복제 — 실행 위치는 Detail 과 같은 판정 · 엣지 미�
   assert.equal(c.rows.find((r) => r.vc === 'vcS').status, 'unknown');
   const targets = dispatch.execTargets(loadVcenterConfig().vcenters, []);
   const ahead = now + 15 * 60_000;   // 엣지 시계가 15분 앞섬(E3) — 관측은 원래 시각으로, 미래인 동안은 받지 않는다
-  // 옛 담당 엣지(edge-old)의 보고는 받지 않는다(지금 담당만 — 엣지 축 E2)
-  dispatch.ingestReport('edge-old', dispatch.sanitizeReport({ jobs: [{ id: js.id, lastRun: { at: now - H, ok: false }, history: [{ at: now - H, kind: 'backup', ok: false }] }] }), targets, now);
+  // 옛 담당 엣지(edge-old)가 담당이던 때 올린 보고는 담당이 바뀐 뒤 쓰지 않는다(_edges 는 메모리에 남아 있다 — 엣지 축 E2)
+  const oldTargets = dispatch.execTargets(loadVcenterConfig().vcenters.map((v) => (v.id === 'vcS' ? { ...v, remoteAgent: 'edge-old' } : v)), []);
+  dispatch.ingestReport('edge-old', dispatch.sanitizeReport({ jobs: [{ id: js.id, lastRun: { at: now - H, ok: false }, history: [{ at: now - H, kind: 'backup', ok: false }] }] }), oldTargets, now);
+  assert.ok(dispatch.edgeStateOf('edge-old')?.jobs?.get?.(js.id), '전제 — 옛 엣지 보고가 메모리에 남아 있다');
   f = await SV.backupFacts({ now, cache: new Map() });
   assert.equal(f.vcs.get('vcS').clone.unknown, true, '담당이 아닌 엣지의 보고로 알았다고 하지 않는다');
   dispatch.ingestReport('edge-a', dispatch.sanitizeReport({ jobs: [{ id: js.id, lastRun: { at: now - H, ok: true }, history: [{ at: now - H, kind: 'backup', ok: true }, { at: ahead, kind: 'backup', ok: false }] }] }), targets, now);
