@@ -606,7 +606,10 @@
 - **엣지 수신**: `routes/central.js sanitizeInventoryList` 가 `sanitizeVmGos` 로 다시 좁힌다(아는 키만 · 글자만 · 상한 · 시각은 수신 시각 이하). 수집기가 `vm.gos` 에 필드를 더하면 여기에도.
 - **점검**: `GET /api/admin/os-scan/probe`(관리자 · 조회 범위 먼저 · 요청 필터 뒤) — 집계는 `inventory/osProbe.js buildOsProbe`(O(N) 1회 · 목록마다 상한 + 생략 수). **VM 이름을 싣지 않는다**
   (화면이 응답을 그대로 JSON 파일로 내려받게 한다). 보고 없음 사유 키는 `NO_DETAIL_REASONS` 하나 — 웹 문구 `views/tools/realOsProbeText.js REASON_TEXT` 와 시험이 대조.
-  수집 상태(`vmCfgStatus`)는 이 포탈이 직접 수집하는 vCenter 만 있다 — 엣지 수집분은 '엣지 수집(상태는 엣지에)' 로 말한다(없는 값을 지어내지 않는다).
+  수집 상태(vmcfg `statusOf`)는 이 포탈이 직접 수집하는 vCenter 만 있다. **상태가 없는 이유를 단정하지 않는다**(점검 1회차 정정 — 첫 판은 상태가 없으면 무조건 '엣지 수집' 이라 말했다):
+  행의 `collectSource`('site' 만 엣지 수집) · 응답의 `collect.osEnabled`(꺼짐) · `demo` 로 가른다(`realOsProbeText.js statusText`). 상태는 vCenter 마다 `statusOf` 로 — `vmCfgStatus()` 는 64개로 자른다.
+  주기 문구는 응답 `collect.refreshMs`(숫자를 박지 않는다). `VM_CFG_SCAN` 과 `VM_OS_SCAN` 은 따로 끈다. 경로 오류 판정은 `vmcfg/collect.js isPathFault` 한 벌(cfg · dev · os — 단어 하나로 넓히지 말 것).
+  `sanitizeVmGos` 는 파서 묶음 불변조건을 다시 세운다(묻지 않았으면 detailed · extra · raw 없음 · detailed 가 있으면 raw 없음). 샘플 묶음 키에 아키텍처 · addl/cpe/build 는 값별 개수(schema 2).
   **형식을 못 읽은 보고(raw · extra)는 사유 'unparsed' 로 따로** — 'Tools 정상인데 보고 없음'(other)과 섞으면 파서 결함이 Tools 미보고로 읽힌다(반증 지적).
   **어플라이언스 = OVF 제품 정보(vapp)가 있는 VM 만** — 확장이 관리하는 VM(managedBy: 복제본 · vCLS)은 '확장 관리' 로 따로 센다. 묶음 키는 `JSON.stringify([…])`(값 안 구분자로 합쳐지지 않게).
 - 남긴 것(다음 단계): 판정 코어(종류 · 버전 · Windows 빌드 → 릴리스) · Summary OS 합계 전환 · VM 성격(일반 / 어플라이언스 / 시스템 VM)과 수동 지정 · EOL · SQLite 저장 · 게스트 조회 스캐너를 '보고 없는 VM 만' 으로.

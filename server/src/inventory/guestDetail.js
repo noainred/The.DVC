@@ -183,15 +183,20 @@ export function sanitizeVmGos(g, now = Date.now()) {
     }
     extra = n ? e : null;
   }
+  // 점검 1회차(반증 재현): 키별로 좁히기만 하면 수집기 파서(parseVmGosProps)가 지키는 묶음 불변조건이 엣지에서 깨진 채 들어온다 —
+  //   묻지 않았으면(asked 가 참이 아니면) detailed · extra · raw 는 없고, detailed 가 있으면 raw 는 없다. 어긋나면 점검 집계가
+  //   '보고 있음 > 물은 수' · '보고 있음이면서 형식 못 읽음' 으로 셌다.
+  const asked = g.asked === true;
+  if (!asked) { detailed = null; extra = null; }
   const vapp = isObj(g.vapp) ? {
     name: cap(g.vapp.name, 128), vendor: cap(g.vapp.vendor, 128), version: cap(g.vapp.version, 64), fullVersion: cap(g.vapp.fullVersion, 128),
   } : null;
   return {
     at,
-    asked: g.asked === true,
+    asked,
     detailed,
     extra,
-    raw: cap(g.raw, RAW_KEEP_MAX),
+    raw: asked && !detailed ? cap(g.raw, RAW_KEEP_MAX) : null,
     vapp: vapp && (vapp.name || vapp.vendor) ? vapp : null,
   };
 }

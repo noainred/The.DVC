@@ -6,7 +6,8 @@
 //   O(N) 한 번 순회 · 목록마다 상한 + 잘라낸 개수(조용히 자르지 않는다).
 import { toolsAtLeast } from './guestDetail.js';
 
-export const PROBE_SCHEMA = 1;
+// 2: 점검 1회차 — samples 의 distroAddlVersion · cpeString · buildNumber 가 값별 개수 목록으로 · architecture 가 묶음 키 · vCenter 행 collectSource.
+export const PROBE_SCHEMA = 2;
 const SAMPLE_MAX = 300;
 const RAW_MAX = 50;
 const VAPP_MAX = 100;
@@ -54,7 +55,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     let r = rowBy.get(id);
     if (!r) {
       r = {
-        id, name: null, version: null, build: null,
+        id, name: null, version: null, build: null, collectSource: null,
         vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0,
         read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0,
         noDetail: Object.fromEntries(NO_DETAIL_REASONS.map((k) => [k, 0])),
@@ -70,6 +71,8 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     r.name = typeof vc.name === 'string' ? vc.name : null;
     r.version = typeof vc.version === 'string' ? vc.version : null;
     r.build = typeof vc.build === 'string' ? vc.build : null;
+    // 점검 1회차: 수집 상태가 없는 이유를 단정하지 않게 경로를 싣는다 — 'site'(엣지 수집) · 'direct'(이 포탈이 수집).
+    r.collectSource = vc.collectSource === 'site' ? 'site' : 'direct';
   }
   const samples = new Map();
   const raws = new Map();
@@ -125,13 +128,15 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     if (d) {
       add('detailed');
       if (!on) add('detailedOff');
-      const key = JSON.stringify([d.familyName, d.distroName, d.distroVersion, d.prettyName, d.bitness].map((x) => x || ''));
+      // 점검 1회차: 아키텍처도 묶음 키에(같은 이름 · 다른 아키텍처를 한 줄로 합치지 않는다). 묶음 안에서 갈릴 수 있는 칸(addl · cpe · build)은
+      //   첫 VM 값 하나로 덮지 않고 값별 개수로 센다(kernels 와 같은 방식).
+      const key = JSON.stringify([d.familyName, d.distroName, d.distroVersion, d.prettyName, d.bitness, d.architecture].map((x) => x || ''));
       let e = samples.get(key);
       if (!e) {
         e = {
           key, familyName: d.familyName || null, distroName: d.distroName || null, distroVersion: d.distroVersion || null,
-          distroAddlVersion: d.distroAddlVersion || null, prettyName: d.prettyName || null, bitness: d.bitness || null,
-          architecture: d.architecture || null, cpeString: d.cpeString || null, buildNumber: d.buildNumber || null,
+          prettyName: d.prettyName || null, bitness: d.bitness || null, architecture: d.architecture || null,
+          addl: new Map(), cpe: new Map(), build: new Map(),
           count: 0, poweredOn: 0, vcenters: new Set(), kernels: new Map(), configOs: new Map(), toolsGuestId: new Map(), appliance: 0, managed: 0,
         };
         samples.set(key, e);
@@ -140,6 +145,9 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
       if (on) e.poweredOn += 1;
       e.vcenters.add(String(vm.vcenterId ?? ''));
       if (d.kernelVersion) bump(e.kernels, d.kernelVersion, 1);
+      if (d.distroAddlVersion) bump(e.addl, d.distroAddlVersion, 1);
+      if (d.cpeString) bump(e.cpe, d.cpeString, 1);
+      if (d.buildNumber) bump(e.build, d.buildNumber, 1);
       bump(e.configOs, typeof vm.guestOS === 'string' && vm.guestOS ? vm.guestOS : '—', 1);
       if (vm.cfg?.guestIdTools) bump(e.toolsGuestId, vm.cfg.guestIdTools, 1);
       // 어플라이언스 = 제품 정보(OVF)가 있는 VM 만. 확장이 관리하는 VM(managedBy — 복제본 · vCLS 등)은 따로 센다(복제본을 어플라이언스라 부르지 않는다).
@@ -162,8 +170,9 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
   }
 
   const sampleList = topList(samples, SAMPLE_MAX, (e) => ({
-    familyName: e.familyName, distroName: e.distroName, distroVersion: e.distroVersion, distroAddlVersion: e.distroAddlVersion,
-    prettyName: e.prettyName, bitness: e.bitness, architecture: e.architecture, cpeString: e.cpeString, buildNumber: e.buildNumber,
+    familyName: e.familyName, distroName: e.distroName, distroVersion: e.distroVersion,
+    prettyName: e.prettyName, bitness: e.bitness, architecture: e.architecture,
+    distroAddlVersion: topCounts(e.addl), cpeString: topCounts(e.cpe), buildNumber: topCounts(e.build),
     count: e.count, poweredOn: e.poweredOn, vcenters: e.vcenters.size, appliance: e.appliance, managed: e.managed,
     kernels: topCounts(e.kernels), configOs: topCounts(e.configOs), toolsGuestId: topCounts(e.toolsGuestId),
   }));

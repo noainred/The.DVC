@@ -377,11 +377,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/agent-deploy/targets/sample.csv` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:210](../server/src/routes/admin/deployLlm.js#L210) |
 | GET | `/agent-deploy/targets/sample.txt` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:578](../server/src/routes/admin/deployLlm.js#L578) |
 | POST | `/agent-deploy/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:124](../server/src/routes/admin/deployLlm.js#L124) |
-| GET | `/alerts` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:142](../server/src/routes/admin/opsSettings.js#L142) |
-| PUT | `/alerts` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:143](../server/src/routes/admin/opsSettings.js#L143) |
-| POST | `/alerts/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:157](../server/src/routes/admin/opsSettings.js#L157) |
-| GET | `/anomaly` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:192](../server/src/routes/admin/opsSettings.js#L192) |
-| PUT | `/anomaly` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:193](../server/src/routes/admin/opsSettings.js#L193) |
+| GET | `/alerts` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:153](../server/src/routes/admin/opsSettings.js#L153) |
+| PUT | `/alerts` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:154](../server/src/routes/admin/opsSettings.js#L154) |
+| POST | `/alerts/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:168](../server/src/routes/admin/opsSettings.js#L168) |
+| GET | `/anomaly` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:203](../server/src/routes/admin/opsSettings.js#L203) |
+| PUT | `/anomaly` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:204](../server/src/routes/admin/opsSettings.js#L204) |
 | GET | `/api-keys` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/apiKeys.js:35](../server/src/routes/admin/apiKeys.js#L35) |
 | POST | `/api-keys` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` · `textFields` | [server/src/routes/admin/apiKeys.js:69](../server/src/routes/admin/apiKeys.js#L69) |
 | DELETE | `/api-keys/:id` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:106](../server/src/routes/admin/apiKeys.js#L106) |
@@ -392,7 +392,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | DELETE | `/assignments/:agent` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:214](../server/src/routes/admin/horizonAssign.js#L214) |
 | PUT | `/assignments/:agent` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:209](../server/src/routes/admin/horizonAssign.js#L209) |
 | POST | `/assignments/import` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:221](../server/src/routes/admin/horizonAssign.js#L221) |
-| GET | `/audit` | 역할 `admin` · `auditFullScope` | [server/src/routes/admin/opsSettings.js:124](../server/src/routes/admin/opsSettings.js#L124) |
+| GET | `/audit` | 역할 `admin` · `auditFullScope` | [server/src/routes/admin/opsSettings.js:135](../server/src/routes/admin/opsSettings.js#L135) |
 | DELETE | `/backup/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:213](../server/src/routes/admin/backupNetSec.js#L213) |
 | GET | `/backup/download/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:181](../server/src/routes/admin/backupNetSec.js#L181) |
 | POST | `/backup/now` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:176](../server/src/routes/admin/backupNetSec.js#L176) |
@@ -429,7 +429,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/central/inventory/owner` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/centralTokens.js:34](../server/src/routes/admin/centralTokens.js#L34) |
 | GET | `/central/token-apply/jobs` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralTokens.js:95](../server/src/routes/admin/centralTokens.js#L95) |
 | GET | `/central/token-apply/jobs/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralTokens.js:99](../server/src/routes/admin/centralTokens.js#L99) |
-| POST | `/certs/refresh` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:175](../server/src/routes/admin/opsSettings.js#L175) |
+| POST | `/certs/refresh` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:186](../server/src/routes/admin/opsSettings.js#L186) |
 | GET | `/codex-check` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:31](../server/src/routes/admin/statusTools.js#L31) |
 | GET | `/codex-check/file` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:34](../server/src/routes/admin/statusTools.js#L34) |
 | POST | `/codex-check/write` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:37](../server/src/routes/admin/statusTools.js#L37) |
@@ -603,7 +603,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/log-analysis/journal` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/admin/logAnalysis.js:47](../server/src/routes/admin/logAnalysis.js#L47) |
 | GET | `/log-analysis/meta` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/admin/logAnalysis.js:41](../server/src/routes/admin/logAnalysis.js#L41) |
 | POST | `/log-analysis/paste` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/admin/logAnalysis.js:56](../server/src/routes/admin/logAnalysis.js#L56) |
-| GET | `/login-history` | 역할 `admin` · `loginHistoryFullScope` | [server/src/routes/admin/opsSettings.js:130](../server/src/routes/admin/opsSettings.js#L130) |
+| GET | `/login-history` | 역할 `admin` · `loginHistoryFullScope` | [server/src/routes/admin/opsSettings.js:141](../server/src/routes/admin/opsSettings.js#L141) |
 | GET | `/logs` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:88](../server/src/routes/admin/statusTools.js#L88) |
 | GET | `/mail` | 역할 `admin` | [server/src/routes/admin/mail.js:61](../server/src/routes/admin/mail.js#L61) |
 | PUT | `/mail` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/mail.js:69](../server/src/routes/admin/mail.js#L69) |
@@ -635,12 +635,12 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/nsx/managers/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:86](../server/src/routes/admin/nsxImport.js#L86) |
 | POST | `/ollama-deploy` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` · `textFields` | [server/src/routes/admin/deployLlm.js:608](../server/src/routes/admin/deployLlm.js#L608) |
 | POST | `/ollama-deploy/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:605](../server/src/routes/admin/deployLlm.js#L605) |
-| GET | `/os-scan` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:304](../server/src/routes/admin/opsSettings.js#L304) |
-| GET | `/os-scan/probe` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:355](../server/src/routes/admin/opsSettings.js#L355) |
-| GET | `/os-scan/results` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:336](../server/src/routes/admin/opsSettings.js#L336) |
-| GET | `/os-scan/results.csv` | 역할 `admin` · `csvPerm` | [server/src/routes/admin/opsSettings.js:340](../server/src/routes/admin/opsSettings.js#L340) |
-| POST | `/os-scan/run` | 역할 `admin` · `textFields` | [server/src/routes/admin/opsSettings.js:315](../server/src/routes/admin/opsSettings.js#L315) |
-| PUT | `/os-scan/settings` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:307](../server/src/routes/admin/opsSettings.js#L307) |
+| GET | `/os-scan` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:315](../server/src/routes/admin/opsSettings.js#L315) |
+| GET | `/os-scan/probe` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:366](../server/src/routes/admin/opsSettings.js#L366) |
+| GET | `/os-scan/results` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:347](../server/src/routes/admin/opsSettings.js#L347) |
+| GET | `/os-scan/results.csv` | 역할 `admin` · `csvPerm` | [server/src/routes/admin/opsSettings.js:351](../server/src/routes/admin/opsSettings.js#L351) |
+| POST | `/os-scan/run` | 역할 `admin` · `textFields` | [server/src/routes/admin/opsSettings.js:326](../server/src/routes/admin/opsSettings.js#L326) |
+| PUT | `/os-scan/settings` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:318](../server/src/routes/admin/opsSettings.js#L318) |
 | GET | `/packages` | 역할 `admin` | [server/src/routes/admin/deployLlm.js:82](../server/src/routes/admin/deployLlm.js#L82) |
 | POST | `/packages/download` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:106](../server/src/routes/admin/deployLlm.js#L106) |
 | PUT | `/packages/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:96](../server/src/routes/admin/deployLlm.js#L96) |
@@ -658,19 +658,19 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/portal-db/location` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:148](../server/src/routes/admin/statusTools.js#L148) |
 | POST | `/portal-db/location/preflight` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/statusTools.js:164](../server/src/routes/admin/statusTools.js#L164) |
 | POST | `/portal-db/location/script` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/statusTools.js:174](../server/src/routes/admin/statusTools.js#L174) |
-| POST | `/provision/jobs` | 역할 `admin` · `textFields` | [server/src/routes/admin/opsSettings.js:361](../server/src/routes/admin/opsSettings.js#L361) |
-| DELETE | `/provision/saved/:id` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:407](../server/src/routes/admin/opsSettings.js#L407) |
-| PUT | `/provision/saved/:id` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:402](../server/src/routes/admin/opsSettings.js#L402) |
+| POST | `/provision/jobs` | 역할 `admin` · `textFields` | [server/src/routes/admin/opsSettings.js:372](../server/src/routes/admin/opsSettings.js#L372) |
+| DELETE | `/provision/saved/:id` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:418](../server/src/routes/admin/opsSettings.js#L418) |
+| PUT | `/provision/saved/:id` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:413](../server/src/routes/admin/opsSettings.js#L413) |
 | POST | `/release-notes` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:624](../server/src/routes/admin/deployLlm.js#L624) |
 | DELETE | `/release-notes/:version` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:628](../server/src/routes/admin/deployLlm.js#L628) |
-| GET | `/report/daily` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:160](../server/src/routes/admin/opsSettings.js#L160) |
-| PUT | `/report/daily` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:161](../server/src/routes/admin/opsSettings.js#L161) |
-| POST | `/report/daily/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:167](../server/src/routes/admin/opsSettings.js#L167) |
+| GET | `/report/daily` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:171](../server/src/routes/admin/opsSettings.js#L171) |
+| PUT | `/report/daily` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:172](../server/src/routes/admin/opsSettings.js#L172) |
+| POST | `/report/daily/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:178](../server/src/routes/admin/opsSettings.js#L178) |
 | GET | `/room-temp` | 역할 `admin` | [server/src/routes/admin/idracCore.js:152](../server/src/routes/admin/idracCore.js#L152) |
 | GET | `/room-temp/history` | 역할 `admin` | [server/src/routes/admin/idracCore.js:115](../server/src/routes/admin/idracCore.js#L115) |
 | GET | `/room-temp/spark` | 역할 `admin` | [server/src/routes/admin/idracCore.js:137](../server/src/routes/admin/idracCore.js#L137) |
-| GET | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:215](../server/src/routes/admin/opsSettings.js#L215) |
-| PUT | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:218](../server/src/routes/admin/opsSettings.js#L218) |
+| GET | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:226](../server/src/routes/admin/opsSettings.js#L226) |
+| PUT | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:229](../server/src/routes/admin/opsSettings.js#L229) |
 | GET | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:445](../server/src/routes/admin/backupNetSec.js#L445) |
 | PUT | `/security/guest-scans` | 역할 `admin` · `textFields` | [server/src/routes/admin/backupNetSec.js:456](../server/src/routes/admin/backupNetSec.js#L456) |
 | DELETE | `/security/guest-scans/:id` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:479](../server/src/routes/admin/backupNetSec.js#L479) |
@@ -687,8 +687,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/security/peer-trust/reject` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/peerTrust.js:118](../server/src/routes/admin/peerTrust.js#L118) |
 | POST | `/security/peer-trust/remove` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/peerTrust.js:130](../server/src/routes/admin/peerTrust.js#L130) |
 | GET | `/security/self-check` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/securityCheck.js:22](../server/src/routes/admin/securityCheck.js#L22) |
-| GET | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:244](../server/src/routes/admin/opsSettings.js#L244) |
-| PUT | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:250](../server/src/routes/admin/opsSettings.js#L250) |
+| GET | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:255](../server/src/routes/admin/opsSettings.js#L255) |
+| PUT | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:261](../server/src/routes/admin/opsSettings.js#L261) |
 | GET | `/settings/status` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/settingsStatus.js:27](../server/src/routes/admin/settingsStatus.js#L27) |
 | GET | `/status` | 역할 `admin` | [server/src/routes/admin/statusTools.js:212](../server/src/routes/admin/statusTools.js#L212) |
 | GET | `/tool-categories` | — | [server/src/routes/admin/toolCategories.js:20](../server/src/routes/admin/toolCategories.js#L20) |

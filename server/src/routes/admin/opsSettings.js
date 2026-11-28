@@ -6,7 +6,8 @@ import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES 
 import { saveOsScanSettings, runOsScanNow, osScanStatus, osScanWriteRefusal } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { buildOsProbe } from '../../inventory/osProbe.js';   // v3.54(실제 OS 1단계 실측)
-import { vmCfgStatus } from '../../vmcfg/cache.js';
+import { statusOf as vmCfgStatusOf } from '../../vmcfg/cache.js';
+import { isMockMode } from '../../mock/demo/flags.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 import { alertStatus, saveAlertConfig, alertConfigWriteRefusal, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
@@ -39,13 +40,23 @@ const csvPerm = requireCsvPerm('data.csv');
  *   편집 폼에 원문이 필요하므로 그대로다.
  */
 /** v3.54(실제 OS 1단계 실측) — 아래 GET /os-scan/probe 의 본문(범위 · 요청 필터 · 집계). 테스트가 직접 부른다. */
-export function scopedOsProbe(user, snap, { vcenterId = '', statuses = vmCfgStatus().vcenters, now = Date.now() } = {}) {
+//   점검 1회차: 수집 상태는 vCenter 마다 statusOf 로 — vmCfgStatus() 는 64개로 자르므로 65번째부터 상태가 '없음' 이 됐다(재현).
+//   이 포탈의 수집 설정(collect)과 데모 여부를 함께 싣는다 — 화면이 주기 숫자를 박지 않고, 꺼짐 · 데모를 '수집 전' · '엣지 수집' 으로 단정하지 않게.
+//   collect 는 **이 포탈이 직접 수집하는 vCenter** 의 설정이다(엣지 수집 vCenter 는 그 엣지의 설정을 따른다 — 화면이 그렇게 말한다).
+export function scopedOsProbe(user, snap, { vcenterId = '', statuses = null, now = Date.now(), settings = config, demo = isMockMode() } = {}) {
   const allowed = scopedVcenterIds(user, snap);
   const okVc = (id) => (!allowed || allowed.has(String(id))) && (!vcenterId || String(id) === vcenterId);
   const vms = (snap?.vms || []).filter((v) => okVc(v.vcenterId));
   const vcenters = (snap?.vcenters || []).filter((vc) => okVc(vc.id));
-  const st = (Array.isArray(statuses) ? statuses : []).filter((x) => okVc(x?.vcenterId));
-  return { ...buildOsProbe(vms, vcenters, st, { now }), ...(allowed ? { scoped: true } : {}) };
+  const src = Array.isArray(statuses) ? statuses : vcenters.map((vc) => { const s = vmCfgStatusOf(vc.id); return s ? { vcenterId: vc.id, ...s } : null; });
+  const st = src.filter((x) => x && okVc(x.vcenterId));
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    ...buildOsProbe(vms, vcenters, st, { now }),
+    collect: { cfgEnabled: !!settings.vmCfgScan, osEnabled: !!settings.vmOsScan, refreshMs: num(settings.vmOsRefreshMs), perCycle: num(settings.vmOsPerCycle) },
+    ...(demo ? { demo: true } : {}),
+    ...(allowed ? { scoped: true } : {}),
+  };
 }
 export function alertVcenterOf(a, allowed) {
   if (!a || typeof a !== 'object') return null;

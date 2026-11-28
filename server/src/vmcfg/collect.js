@@ -20,6 +20,17 @@ export function vmCfgRetrySummary(vcId) { return { cfg: _retry.cfg.summary(vcId)
 export function dropVcRetry(vcId) { _retry.cfg.drop(vcId); _retry.dev.drop(vcId); _retry.os.drop(vcId); }
 export function _resetVmCfgRetry() { _retry.cfg.reset(); _retry.dev.reset(); _retry.os.reset(); }
 
+/**
+ * 경로 오류(같은 요청을 다시 해도 결과가 같다 — 그 종류만 갱신 주기만큼 쉰다) 판정 — cfg · dev · os 가 한 벌을 쓴다(점검 1회차).
+ * SOAP fault 상세 타입(soapClient #call 의 err.fault)을 먼저 보고, 없으면 메시지에서 타입 이름만 찾는다.
+ * ⚠ v3.54 첫 판은 os 에만 'version' 단어를 더해 일시 장애 메시지까지 6시간 쉬게 했다(반증 재현) — 단어 하나로 넓히지 말 것.
+ */
+const PATH_FAULTS = new Set(['InvalidProperty', 'InvalidArgument', 'InvalidRequest']);
+export function isPathFault(err) {
+  if (PATH_FAULTS.has(err?.fault)) return true;
+  return /Invalid(?:Property|Argument|Request)/.test(String(err?.message ?? err ?? '').slice(0, 300));
+}
+
 async function fetchKind(c, vcId, refs, { kind, paths, chunk, parse, now, budgetEnd, track = {}, retrieveOpts = undefined }) {
   let fetched = 0;
   for (let i = 0; i < refs.length; i += chunk) {
@@ -46,7 +57,10 @@ async function fetchKind(c, vcId, refs, { kind, paths, chunk, parse, now, budget
  * @param {string[]} vmRefs 이번 인벤토리의 VM moref 전부
  */
 export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs = VM_CFG_BUDGET_MS, settings = config } = {}) {
-  if (!settings.vmCfgScan) return { skipped: 'off' };
+  // 점검 1회차: VM_CFG_SCAN(구성 · 장치)과 VM_OS_SCAN(실제 OS)은 따로 끈다 — 예전에는 앞의 것이 꺼지면 os 도 조용히 꺼졌다.
+  const cfgOn = !!settings.vmCfgScan;
+  const osOn = !!settings.vmOsScan;
+  if (!cfgOn && !osOn) return { skipped: 'off' };
   const live = new Set(vmRefs);
   prune(vcId, live);
   _retry.cfg.prune(vcId, live); _retry.dev.prune(vcId, live); _retry.os.prune(vcId, live);
@@ -54,7 +68,7 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
   const st = statusOf(vcId) || {};
   const out = { cfg: null, dev: null, os: null };
   // 경로 오류(InvalidProperty 등)는 같은 요청을 반복해도 결과가 같다 — 그 종류만 갱신 주기만큼 쉰다.
-  if (!(st.cfgBackoffUntil > now)) {
+  if (cfgOn && !(st.cfgBackoffUntil > now)) {
     const due = pickDue(vcId, vmRefs.filter((r) => !_retry.cfg.resting(vcId, r, now)), 'cfg', { now, periodMs: settings.vmCfgRefreshMs, max: settings.vmCfgPerCycle });
     if (due.length) {
       const track = {};
@@ -65,7 +79,7 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
       } catch (err) {
         const msg = String(err?.message || err).slice(0, 300);
         if (isRequestTimeout(err, c?.signal) && track.slice) _retry.cfg.note(vcId, track.slice, { now, periodMs: settings.vmCfgRefreshMs });
-        setStatus(vcId, { cfgError: msg, cfgErrorAt: now, cfgBackoffUntil: /InvalidProperty|InvalidArgument/i.test(msg) ? now + settings.vmCfgRefreshMs : 0, cfgBackoffVms: _retry.cfg.summary(vcId).backoffTargets });
+        setStatus(vcId, { cfgError: msg, cfgErrorAt: now, cfgBackoffUntil: isPathFault(err) ? now + settings.vmCfgRefreshMs : 0, cfgBackoffVms: _retry.cfg.summary(vcId).backoffTargets });
         console.warn(`[vmcfg] ${vcId} VM 구성 속성 갱신 실패: ${msg}`);
         out.cfg = { error: msg };
       }
@@ -76,7 +90,7 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
   //   guestDetailedData 는 API 8.0.2.0 속성이라 **이 요청만** SOAPAction 을 그 판으로 보낸다(포탈 기본 8.0.0.1). 판이 8.0.2 미만이거나
   //   못 읽은 vCenter 에는 묻지 않는다(asked:false — 화면이 'Tools 가 보고하지 않음' 과 '묻지 않음' 을 가른다).
   //   settings.vmOsScan 이 없는 설정 객체(옛 호출·테스트)는 끈 것으로 본다 — 운영 설정(config.js)은 기본 켜짐.
-  if (settings.vmOsScan && !(st.osBackoffUntil > now) && Date.now() < budgetEnd) {
+  if (osOn && !(st.osBackoffUntil > now) && Date.now() < budgetEnd) {
     const asked = detailedApiOk(c?.sc?.apiVersion);
     const periodMs = settings.vmOsRefreshMs || 21_600_000;
     const due = pickDue(vcId, vmRefs.filter((r) => !_retry.os.resting(vcId, r, now)), 'os', { now, periodMs, max: settings.vmOsPerCycle || 1_000 });
@@ -93,13 +107,13 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
       } catch (err) {
         const msg = String(err?.message || err).slice(0, 300);
         if (isRequestTimeout(err, c?.signal) && track.slice) _retry.os.note(vcId, track.slice, { now, periodMs });
-        setStatus(vcId, { osError: msg, osErrorAt: now, osAsked: asked, osBackoffUntil: /InvalidProperty|InvalidArgument|InvalidRequest|version/i.test(msg) ? now + periodMs : 0, osBackoffVms: _retry.os.summary(vcId).backoffTargets });
+        setStatus(vcId, { osError: msg, osErrorAt: now, osAsked: asked, osBackoffUntil: isPathFault(err) ? now + periodMs : 0, osBackoffVms: _retry.os.summary(vcId).backoffTargets });
         console.warn(`[vmcfg] ${vcId} 실제 OS(Tools 보고) 갱신 실패: ${msg}`);
         out.os = { error: msg };
       }
     }
   }
-  if (!(st.devBackoffUntil > now) && Date.now() < budgetEnd) {
+  if (cfgOn && !(st.devBackoffUntil > now) && Date.now() < budgetEnd) {
     const due = pickDue(vcId, vmRefs.filter((r) => !_retry.dev.resting(vcId, r, now)), 'dev', { now, periodMs: settings.vmDevRefreshMs, max: settings.vmDevPerCycle });
     if (due.length) {
       const track = {};
@@ -113,7 +127,7 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
       } catch (err) {
         const msg = String(err?.message || err).slice(0, 300);
         if (isRequestTimeout(err, c?.signal) && track.slice) _retry.dev.note(vcId, track.slice, { now, periodMs: settings.vmDevRefreshMs });
-        setStatus(vcId, { devError: msg, devErrorAt: now, devBackoffUntil: /InvalidProperty|InvalidArgument/i.test(msg) ? now + settings.vmDevRefreshMs : 0, devBackoffVms: _retry.dev.summary(vcId).backoffTargets });
+        setStatus(vcId, { devError: msg, devErrorAt: now, devBackoffUntil: isPathFault(err) ? now + settings.vmDevRefreshMs : 0, devBackoffVms: _retry.dev.summary(vcId).backoffTargets });
         console.warn(`[vmcfg] ${vcId} VM 장치 목록 갱신 실패: ${msg}`);
         out.dev = { error: msg };
       }

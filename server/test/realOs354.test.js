@@ -11,12 +11,12 @@ import {
   sanitizeVmGos, DETAIL_KEYS, GOS_SOAP_VERSION,
 } from '../src/inventory/guestDetail.js';
 import { buildOsProbe, noDetailReason, NO_DETAIL_REASONS } from '../src/inventory/osProbe.js';
-import { refreshVmCfg, _resetVmCfgRetry } from '../src/vmcfg/collect.js';
-import { _resetVmCfgCache, get as cacheGet, statusOf, vmCfgStatus } from '../src/vmcfg/cache.js';
+import { refreshVmCfg, _resetVmCfgRetry, isPathFault } from '../src/vmcfg/collect.js';
+import { _resetVmCfgCache, get as cacheGet, statusOf, vmCfgStatus, setStatus } from '../src/vmcfg/cache.js';
 import { sanitizeInventoryList } from '../src/routes/central.js';
 import { scopedOsProbe } from '../src/routes/admin/opsSettings.js';
 import { VimSoapClient } from '../src/vcenter/soapClient.js';
-import { REASON_TEXT, pct, n as numText, statusText } from '../../web/src/views/tools/realOsProbeText.js';
+import { REASON_TEXT, pct, n as numText, statusText, periodText } from '../../web/src/views/tools/realOsProbeText.js';
 
 const ROCKY = "architecture='X86' bitness='64' distroName='Rocky Linux' distroVersion='9.4' familyName='Linux' kernelVersion='5.14.0-427.13.1.el9_4.x86_64' prettyName='Rocky Linux 9.4 (Blue Onyx)'";
 
@@ -113,10 +113,14 @@ test('⑤ 엣지 수신 정제 — 아는 키만 · 글자만 · 상한 · 엣�
   }, NOW);
   assert.equal(g.at, NOW, '미래 시각은 수신 시각으로 자른다');
   assert.equal(g.asked, false, "'true' 글자는 참이 아니다");
-  assert.deepEqual(Object.keys(g.detailed).sort(), ['distroName', 'kernelVersion']);
-  assert.equal(g.detailed.kernelVersion.length, 256);
-  assert.deepEqual(g.extra, { newKey: 'v' }, '아는 키 · 형식 밖 이름 · 객체 값은 extra 로 받지 않는다');
+  assert.equal(g.detailed, null, '묻지 않았으면 detailed 는 없다(파서 불변조건 — 점검 1회차)');
+  assert.equal(g.extra, null);
   assert.equal(g.raw, null);
+  const g2 = sanitizeVmGos({ asked: true, detailed: { distroName: 'Rocky', prettyName: { x: 1 }, evil: 'x', kernelVersion: 'k'.repeat(999) },
+    extra: { newKey: 'v', distroName: 'dup', 'bad key': 'x', obj: { a: 1 } } }, NOW);
+  assert.deepEqual(Object.keys(g2.detailed).sort(), ['distroName', 'kernelVersion']);
+  assert.equal(g2.detailed.kernelVersion.length, 256);
+  assert.deepEqual(g2.extra, { newKey: 'v' }, '아는 키 · 형식 밖 이름 · 객체 값은 extra 로 받지 않는다');
   assert.deepEqual(g.vapp, { name: null, vendor: 'V', version: null, fullVersion: null });
   assert.equal(Object.hasOwn(g, 'more'), false);
   for (const x of [null, 'x', [], 3]) assert.equal(sanitizeVmGos(x), null);
@@ -317,7 +321,6 @@ test('⑨ 배선 — 수집기가 vm.gos 를 싣고 · 라우트가 관리자 �
   assert.ok(DETAIL_KEYS.includes('prettyName'));
   // 웹 숫자 표기 — 못 읽은 값은 '—', 분모 0 은 0% 가 아니라 '—'
   assert.equal(numText(null), '—'); assert.equal(pct(0, 0), '—'); assert.equal(pct(1, 4), '25%');
-  assert.equal(statusText(null).text, '엣지 수집(상태는 엣지에)');
   assert.match(statusText({ osError: 'x' }).text, /^오류/);
 });
 
@@ -378,4 +381,90 @@ test('⑦ 가짜 vCenter — 예전 방식(RetrieveProperties) · 중간 실패 
     assert.ok(seen.every((x) => x.action === '"urn:vim25/8.0.2.0"'), '취소 요청도 같은 판');
     assert.equal(mode, 'paged');
   } finally { config.vcPropsPaging = saved; await new Promise((r) => srv.close(r)); }
+});
+
+/* ---------------------------- 점검 1회차(반증 재현) 회귀 ---------------------------- */
+
+test('R1 정제 불변조건 — 엣지의 모순된 조합을 파서 모양으로 되돌린다', () => {
+  const NOW2 = 2_000_000_000_000;
+  const a = sanitizeVmGos({ asked: false, detailed: { prettyName: 'X' }, raw: 'zz', extra: { a: 'b' } }, NOW2);
+  assert.deepEqual([a.detailed, a.extra, a.raw], [null, null, null], '묻지 않았으면 detailed · extra · raw 없음');
+  const b = sanitizeVmGos({ asked: true, detailed: { prettyName: 'X' }, raw: 'zz' }, NOW2);
+  assert.equal(b.raw, null, 'detailed 가 있으면 raw 없음');
+  const c = sanitizeVmGos({ detailed: { prettyName: 'X' } }, NOW2);
+  assert.equal(c.asked, false); assert.equal(c.detailed, null, 'asked 생략 = 묻지 않음');
+  const d = sanitizeVmGos({ asked: true, raw: 'zz' }, NOW2);
+  assert.equal(d.raw, 'zz', '물었고 못 읽은 원문은 남긴다');
+  const p = buildOsProbe([vm('vm-1', 'vc1', { gos: a }), vm('vm-2', 'vc1', { gos: b })], [{ id: 'vc1' }], [], { now: 1 });
+  assert.ok(p.total.detailed <= p.total.asked, '보고 있음은 물은 수를 넘지 않는다');
+  assert.deepEqual(p.unparsed, []);
+});
+
+test('R1 샘플 — 아키텍처는 다른 줄 · addl · cpe · build 는 첫 값으로 덮지 않고 값별 개수', () => {
+  const mk = (arch, addl, cpe) => ({ ...rocky, detailed: { familyName: 'Linux', distroName: 'Ubuntu', distroVersion: '22.04', prettyName: 'Ubuntu 22.04.3 LTS', bitness: '64', architecture: arch, distroAddlVersion: addl, cpeString: cpe } });
+  const p = buildOsProbe([
+    vm('vm-1', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }), vm('vm-2', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:2') }),
+    vm('vm-3', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:3') }), vm('vm-4', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }),
+  ], [{ id: 'vc1' }], [], { now: 1 });
+  assert.equal(p.schema, 2);
+  const x86 = p.samples.find((s) => s.architecture === 'X86');
+  const arm = p.samples.find((s) => s.architecture === 'Arm');
+  assert.equal(x86.count, 2); assert.equal(arm.count, 2);
+  assert.deepEqual(arm.cpeString, [{ value: 'cpe:2', count: 1 }, { value: 'cpe:3', count: 1 }]);
+  assert.deepEqual(arm.distroAddlVersion, [{ value: 'jammy-arm', count: 2 }]);
+  assert.deepEqual(x86.buildNumber, []);
+});
+
+test('R1 수집 스위치 — VM_CFG_SCAN 을 꺼도 os 는 돌고, os 만 끄면 cfg · dev 는 돈다', async () => {
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  const c = fakeClient();
+  const r = await refreshVmCfg(c, 'vcA', ['vm-1'], { now: NOW, settings: { ...SET, vmCfgScan: false } });
+  assert.equal(r.os.fetched, 1);
+  assert.equal(r.cfg, null); assert.equal(r.dev, null);
+  assert.ok(c.calls.every((x) => x.paths.includes('config.vAppConfig.product')), 'cfg · dev 요청은 없다');
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  const c2 = fakeClient();
+  const r2 = await refreshVmCfg(c2, 'vcA', ['vm-1'], { now: NOW, settings: { ...SET, vmOsScan: false } });
+  assert.equal(r2.os, null); assert.equal(r2.cfg.fetched, 1); assert.equal(r2.dev.fetched, 1);
+  assert.deepEqual(await refreshVmCfg(c2, 'vcB', ['vm-1'], { now: NOW, settings: { ...SET, vmCfgScan: false, vmOsScan: false } }), { skipped: 'off' });
+});
+
+test('R1 경로 오류 판정 — fault 타입 · 타입 이름만 · \'version\' 단어 같은 일시 장애는 쉬지 않는다', async () => {
+  assert.equal(isPathFault(Object.assign(new Error('SOAP 500: boom'), { fault: 'InvalidProperty' })), true);
+  assert.equal(isPathFault(new Error('SOAP 500: ServerFaultCode InvalidPropertyFault guest.x')), true);
+  assert.equal(isPathFault(new Error('SOAP 500: InvalidRequest')), true);
+  for (const m of ['SOAP 503: Service version mismatch — retry later', 'request timed out', 'fetch failed', 'vCenter 수집 데드라인']) assert.equal(isPathFault(new Error(m)), false, m);
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  const bad = fakeClient({ failOs: 'SOAP 503: Service version mismatch — retry later' });
+  await refreshVmCfg(bad, 'vcA', ['vm-1'], { now: NOW, settings: SET });
+  assert.equal(statusOf('vcA').osBackoffUntil, 0, '일시 장애로 6시간 쉬지 않는다');
+});
+
+test('R1 점검 라우트 본문 — 상태는 vCenter 마다(64개 상한 없음) · 수집 설정 · 데모 · 행의 수집 경로', () => {
+  _resetVmCfgCache();
+  const vcs = Array.from({ length: 70 }, (_, i) => ({ id: `vc${i}`, name: `VC${i}`, ...(i % 2 ? { collectSource: 'site' } : {}) }));
+  for (const vc of vcs) setStatus(vc.id, { osAt: 5, osAsked: true });
+  const p = scopedOsProbe({ username: 'a', role: 'admin' }, { vcenters: vcs, vms: [] }, { now: 10, settings: { vmCfgScan: true, vmOsScan: true, vmOsRefreshMs: 3_600_000, vmOsPerCycle: 500 }, demo: false });
+  assert.equal(p.vcenters.length, 70);
+  assert.ok(p.vcenters.every((r) => r.status && r.status.osAt === 5), '65번째 이후도 상태가 있다');
+  assert.deepEqual(p.collect, { cfgEnabled: true, osEnabled: true, refreshMs: 3_600_000, perCycle: 500 });
+  assert.equal(p.demo, undefined);
+  assert.equal(p.vcenters.find((r) => r.id === 'vc1').collectSource, 'site');
+  assert.equal(p.vcenters.find((r) => r.id === 'vc0').collectSource, 'direct');
+  assert.equal(scopedOsProbe({ role: 'admin' }, { vcenters: [], vms: [] }, { now: 1, demo: true }).demo, true);
+  _resetVmCfgCache();
+});
+
+test('R1 화면 문구 — 상태가 없는 이유를 단정하지 않는다 · 주기는 응답 값', () => {
+  const ok = { collect: { osEnabled: true } };
+  assert.equal(statusText(null, { collectSource: 'site' }, ok).text, '엣지 수집(상태는 엣지에)');
+  assert.equal(statusText(null, { collectSource: 'direct' }, ok).text, '이 포탈 수집 기록 없음(수집 전 · 접속 실패 등)');
+  assert.equal(statusText(null, { collectSource: 'direct' }, { collect: { osEnabled: false } }).text, '이 포탈의 실제 OS 수집 꺼짐');
+  assert.equal(statusText(null, { collectSource: 'site' }, { demo: true }).text, '데모 데이터(수집 상태 없음)');
+  assert.match(statusText({ osAt: 1, osAsked: true }, { collectSource: 'direct' }, ok).text, /Tools 보고 요청/);
+  assert.equal(periodText(21_600_000), '6시간'); assert.equal(periodText(300_000), '5분'); assert.equal(periodText(5_400_000), '90분');
+  for (const x of [null, undefined, 0, -1, NaN, '6h']) assert.equal(periodText(x), null);
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.equal(/\d+\s*시간 주기/.test(jsx), false, '주기 숫자를 화면에 박지 않는다');
+  assert.match(jsx, /useEffect\(\(\) => \{ setData\(null\); setErr\(null\); load\(\); \}, \[scope\]\)/, '범위가 바뀌면 이전 오류를 지운다');
 });

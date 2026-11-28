@@ -6,7 +6,7 @@ import { fetchJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { saveText } from '../../util/saveBlob.js';
 import { Card } from './shared.jsx';
-import { REASON_TEXT, n, pct, at, statusText, topText, probeFileName } from './realOsProbeText.js';
+import { REASON_TEXT, n, pct, at, statusText, periodText, topText, probeFileName } from './realOsProbeText.js';
 
 export function RealOsProbe({ scope }) {
   const [data, setData] = useState(null);
@@ -22,12 +22,14 @@ export function RealOsProbe({ scope }) {
       .catch((e) => { if (g !== gen.current) return; setErr(e?.message || String(e)); })
       .finally(() => { if (g === gen.current) setBusy(false); });
   };
+  // 점검 1회차: 범위가 바뀌면 이전 범위의 오류 배너도 지운다(새 범위를 읽는 동안 남아 '읽는 중' 을 가렸다).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load 는 scope 만 읽는다(범위가 바뀔 때 1회)
-  useEffect(() => { setData(null); load(); }, [scope]);
+  useEffect(() => { setData(null); setErr(null); load(); }, [scope]);
 
   const t = data?.total || null;
   const all = t ? t.vms + t.templates : null;
   const reasons = data ? Object.entries(data.noDetail || {}).filter(([, c]) => c > 0) : [];
+  const period = periodText(data?.collect?.refreshMs);
   const save = () => { if (data) saveText(JSON.stringify(data, null, 2), probeFileName(), { type: 'application/json;charset=utf-8' }); };
 
   return (
@@ -38,9 +40,11 @@ export function RealOsProbe({ scope }) {
         <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!data} onClick={save}>JSON 내려받기</button>
       </div>
       <p className="muted" style={{ fontSize: 12, margin: '0 0 10px', lineHeight: 1.6, whiteSpace: 'normal' }}>
-        게스트 계정 없이 VMware Tools 가 스스로 보고한 실제 설치 OS(vCenter 8.0.2 이상 · Tools 11.2 이상)를 6시간 주기로 모읍니다.
+        게스트 계정 없이 VMware Tools 가 스스로 보고한 실제 설치 OS(vCenter 8.0.2 이상 · Tools 11.2 이상)를 {period ? `${period} 주기로` : '주기적으로'} 모읍니다(엣지가 수집하는 법인은 그 엣지의 설정을 따릅니다).
         이 카드는 그 값이 법인별로 얼마나 채워지는지와 실제로 어떤 글자로 오는지를 보여 줍니다. 내려받은 파일에는 VM 이름이 없고 종류 · 버전 · 개수만 있습니다.
       </p>
+      {data?.collect?.osEnabled === false && <div className="banner warn" style={{ marginBottom: 8 }}>이 포탈의 실제 OS 수집이 꺼져 있습니다(VM_OS_SCAN=false). 이 포탈이 직접 수집하는 법인은 새 값이 들어오지 않습니다.</div>}
+      {data?.demo && <div className="banner" style={{ marginBottom: 8 }}>데모 데이터입니다 — 종류 · 버전 · 개수는 실제 현장 값이 아닙니다.</div>}
       {err && <div className="banner warn" style={{ marginBottom: 8 }}>점검 결과를 읽지 못했습니다: {err}{data ? ' — 아래는 직전에 받은 결과입니다.' : ''}</div>}
       {!data ? (!err && <div className="muted" style={{ fontSize: 12 }}>읽는 중…</div>) : (
         <>
@@ -67,7 +71,7 @@ export function RealOsProbe({ scope }) {
               <tbody>
                 {(data.vcenters || []).map((r) => {
                   const total = r.vms + r.templates;
-                  const s = statusText(r.status);
+                  const s = statusText(r.status, r, data);
                   return (
                     <tr key={r.id}>
                       <td><b>{r.name || r.id}</b></td>
