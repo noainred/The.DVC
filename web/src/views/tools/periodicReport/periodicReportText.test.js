@@ -51,7 +51,8 @@ describe('정기 점검 보고 문구', () => {
     const led = raw('../../../../../server/src/periodic/backupLedger.js');
     expect(led).toContain(`PRODUCTS = Object.freeze([${T.BK_PRODUCTS.map((p) => `'${p}'`).join(', ')}])`);
     for (const [k, v] of Object.entries(T.BK_PRODUCT_LABEL)) expect(led).toContain(`${k}: '${v}'`);
-    expect(led).toContain('export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0 && !(s.prev?.ud > 0) && !(s.total?.ud > 0));');
+    expect(led).toContain("if (!s?.prev?.days || !s.cmp) return null;\n  if (!s.cmp.pairs) return 'none';\n  return s.cmp.pairs === s.cmp.of ? 'all' : 'some';");
+    expect(raw('periodicReportText.js')).toContain("if (!s?.prev?.days || !s.cmp) return null;\n  if (!s.cmp.pairs) return 'none';\n  return s.cmp.pairs === s.cmp.of ? 'all' : 'some';");
     const ren = raw('../../../../../server/src/periodic/render.js');
     for (const [k, v] of Object.entries(T.BK_STRIP)) expect(ren).toMatch(new RegExp(`${k}: \\['${v}'`));
     const cat = raw('../../../../../server/src/periodic/catalog.js');
@@ -76,15 +77,15 @@ describe('정기 점검 보고 문구', () => {
     expect(T.backupCellText({ sealed: 1, known: 3, fail: 0, unknown: 2 })).toBe('0 · ? 2');
     expect(T.backupCellText({ off: true })).toBe('꺼짐');
     expect(T.backupCellText({ error: true })).toBe('오류');
-    // 앞 기간은 두 기간 다 확정 · 알았음 줄이 있을 때만 견준다(부분 합끼리 견주지 않는다 — F6)
-    const full = { prev: { full: true, known: true }, coverage: { full: true }, total: { kd: 3 } };
-    expect(T.prevComparable(full)).toBe(true);
-    expect(T.prevComparable({ ...full, prev: { full: false, known: true } })).toBe(false);
-    expect(T.prevComparable({ ...full, coverage: { full: false } })).toBe(false);
-    expect(T.prevComparable({ ...full, total: { kd: 0 } })).toBe(false);
-    expect(T.prevComparable({ ...full, prev: { full: true, known: true, ud: 2 } })).toBe(false, '앞 기간에 확인 불가가 있으면 견주지 않는다');
-    expect(T.prevComparable({ ...full, total: { kd: 3, ud: 1 } })).toBe(false);
-    expect(T.coverageText({ sealed: 18, days: 31 })).toBe('적재 18 / 31일');
+    // 앞 기간은 두 기간 모든 날을 안 (법인, 백업) 쌍끼리만 견준다(서버 prevMode 와 같은 판정 — 반증 R7)
+    expect(T.prevMode({ prev: { days: 0 }, cmp: { pairs: 1, of: 1 } })).toBe(null);
+    expect(T.prevMode({ prev: { days: 7 }, cmp: { pairs: 0, of: 3 } })).toBe('none');
+    expect(T.prevMode({ prev: { days: 7 }, cmp: { pairs: 2, of: 3 } })).toBe('some');
+    expect(T.prevMode({ prev: { days: 7 }, cmp: { pairs: 3, of: 3 } })).toBe('all');
+    expect(T.prevComparable({ prev: { days: 7 }, cmp: { pairs: 3, of: 3 } })).toBe(true);
+    expect(T.bkAtLeast({ kd: 2, tu: 1 }, 17)).toBe('≥ 17', '대상을 모르는 날이 있으면 적어도');
+    expect(T.bkAtLeast({ kd: 2, tu: 0 }, 17)).toBe('17');
+    expect(T.bkAtLeast({ kd: 0, tu: 0 }, 0)).toBe('—');
   });
   it('v3.59 백업 3절 — 법인 판정 칸은 백업 항목 행의 가장 나쁜 것(새 판정 없음)', () => {
     const items = [

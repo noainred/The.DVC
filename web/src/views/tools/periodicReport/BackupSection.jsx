@@ -8,7 +8,7 @@ import React, { useState } from 'react';
 import { STable } from '../../../components/STable.jsx';
 import { StatusChip } from './parts.jsx';
 import {
-  BK_PRODUCT_LABEL, BK_ITEM_KEY, BK_STRIP, BK_STRIP_LABEL, numText, kstText, pctText, bkNum, deltaText, coverageText, backupCorpStatus, prevComparable,
+  BK_PRODUCT_LABEL, BK_ITEM_KEY, BK_STRIP, BK_STRIP_LABEL, numText, kstText, pctText, bkNum, bkAtLeast, deltaText, coverageText, backupCorpStatus, prevComparable, prevMode,
 } from './periodicReportText.js';
 
 const FAIL_ROWS = 30;
@@ -75,6 +75,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
   const cov = s.coverage || { sealed: 0, days: 0 };
   const multi = (s.days || []).length > 1;
   const cmp = prevComparable(s);
+  const mode = prevMode(s);
   const products = bk.products || [];
   const itemOf = (p) => (items || []).find((x) => x.key === BK_ITEM_KEY[p]) || null;
   const rows = [...(bk.corpRows || [])].sort((a, b) => ((b.kd > 0 ? b.f : -1) - (a.kd > 0 ? a.f : -1)) || (b.unknownDays - a.unknownDays) || String(corpName(a.vc)).localeCompare(String(corpName(b.vc)), 'ko'));
@@ -86,11 +87,13 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
   const repeat = bk.repeat || [];
   const hasStrip = repeat.some((x) => Array.isArray(x.strip));
   const toolOf = (p) => itemOf(p)?.tool || null;
-  const prevF = (c) => (cmp && c.prev?.kd > 0 ? c.prev.f : null);
+  const prevF = (c) => (c.prev?.cmp ? c.prev.f : null);   // 그 법인의 모든 (법인, 백업) 쌍을 두 기간 다 알 때만(반증 R7)
   const periodSub = multi
     ? `${s.days[0]?.label} ~ ${s.days[s.days.length - 1]?.label} · 하루에 VM 하나당 한 건(그날 마지막 결과) · ${coverageText(cov)}`
     : `${s.days[0]?.label || ''} 하루 동안 끝난 백업 · VM 단위(하루에 여러 번 돌았으면 그 VM 의 마지막 결과) · 저장된 결과만 읽습니다`;
-  const prevSub = !s.prev?.days ? '' : cmp ? '' : s.prev.full ? '확인 불가가 있어 앞 기간과 견주지 않음' : s.prev.sealed ? `앞 기간은 ${coverageText({ sealed: s.prev.sealed, days: s.prev.days })} — 견주지 않음` : '앞 기간 적재 없음';
+  const prevSub = !mode || mode === 'all' ? '' : mode === 'some'
+    ? `두 기간을 다 안 ${numText(s.cmp.pairs)} / ${numText(s.cmp.of)} 법인 · 백업만 견주면 ${numText(s.cmp.cur.f)} · 앞 기간 ${numText(s.cmp.prev.f)}(${deltaText(s.cmp.cur.f, s.cmp.prev.f)})`
+    : '두 기간을 다 안 법인 · 백업이 없어 견주지 않음';
   return (
     <>
       {head(periodSub)}
@@ -103,11 +106,11 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
       )}
       {s.pending > 0 && <div className="prr-banner">확정 대기 {numText(s.pending)}(법인 · 백업 · 날) — 그 법인을 날이 끝난 뒤 아직 보지 못했습니다. 확인 불가에 넣어 셌고, 돌아오면 다음 회차부터 채웁니다.</div>}
       <div className="prr-tiles">
-        <div className="prr-tile"><span className="prr-lab">끝난 백업</span><b>{bkNum(t, t.e)}</b><span className="prr-muted">{multi ? `확정 ${numText(cov.sealed)}일 합` : known ? `대상 ${numText(t.t)}(VM · 잡)` : '확정된 결과 없음'}</span></div>
+        <div className="prr-tile"><span className="prr-lab">끝난 백업</span><b>{bkNum(t, t.e)}</b><span className="prr-muted">{multi ? `확정 ${numText(cov.sealed)}일 합` : known ? `대상 ${bkAtLeast(t, t.t)}(VM · 잡)` : '확정된 결과 없음'}</span></div>
         <div className="prr-tile"><span className="prr-lab">성공</span><b>{bkNum(t, t.ok)}</b><span className="prr-muted">성공률 {pctText(t.rate)}{cmp ? ` · 앞 기간 ${pctText(s.prev.rate)}` : ''}</span></div>
         <div className="prr-tile"><span className="prr-lab">경고</span><b>{bkNum(t, t.w)}</b><span className="prr-muted">복원 지점은 생김 — 성공률에 포함</span></div>
         <div className="prr-tile"><span className="prr-lab">실패</span><b>{bkNum(t, t.f)}</b><span className="prr-muted">{cmp ? `앞 기간 ${numText(s.prev.f)} · ${deltaText(t.f, s.prev.f)}` : prevSub || '—'}{known && failCorps ? ` · 법인 ${numText(failCorps)}곳` : ''}</span></div>
-        <div className="prr-tile"><span className="prr-lab">실행 없음</span><b>{bkNum(t, t.n)}</b><span className="prr-muted">그날 끝난 실행이 없음 — RPO 로 판정</span></div>
+        <div className="prr-tile"><span className="prr-lab">실행 없음</span><b>{bkAtLeast(t, t.n)}</b><span className="prr-muted">{t.tu > 0 ? `대상 목록을 모르는 날 ${numText(t.tu)}(법인 · 백업 · 날)은 빼고 셈 — RPO 로 판정` : '그날 끝난 실행이 없음 — RPO 로 판정'}</span></div>
         {multi
           ? <div className="prr-tile"><span className="prr-lab">실패한 VM</span><b>{known ? numText(s.fails) : '—'}</b><span className="prr-muted">{known ? `2일 이상 되풀이 ${numText(s.repeatVms)}대` : '확정된 결과 없음'}</span></div>
           : (
@@ -124,8 +127,8 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
           const it = itemOf(p);
           return (
             <div key={p} className="prr-axis">
-              <div className="prr-card-h"><b>{BK_PRODUCT_LABEL[p] || p}</b>{!multi && x.kd > 0 && <span className="prr-muted">대상 {numText(x.t)}{p === 'clone' ? ' 잡' : ' VM'}</span>}<span className="prr-grow" /><b className="prr-mono">{pctText(x.rate)}</b></div>
-              <div className="prr-muted">성공 {bkNum(x, x.ok)} · 경고 {p === 'clone' ? '—(구분 없음)' : bkNum(x, x.w)} · 실패 {bkNum(x, x.f)} · 실행 없음 {bkNum(x, x.n)} · 확인 불가 {numText(x.ud)}</div>
+              <div className="prr-card-h"><b>{BK_PRODUCT_LABEL[p] || p}</b>{!multi && x.kd > 0 && <span className="prr-muted">대상 {bkAtLeast(x, x.t)}{p === 'clone' ? ' 잡' : ' VM'}</span>}<span className="prr-grow" /><b className="prr-mono">{pctText(x.rate)}</b></div>
+              <div className="prr-muted">성공 {bkNum(x, x.ok)} · 경고 {p === 'clone' ? '—(구분 없음)' : bkNum(x, x.w)} · 실패 {bkNum(x, x.f)} · 실행 없음 {bkAtLeast(x, x.n)} · 확인 불가 {numText(x.ud)}</div>
               <div className="prr-note">판정 {it ? <StatusChip s={it.status} /> : '—'} {it ? (it.basis || it.value || (it.unknownReason ? `확인 불가: ${it.unknownReason}` : '')) : scoped ? '내 범위에 이 항목의 법인 행이 없습니다' : '이 주기에 실리지 않는 항목입니다'}</div>
             </div>
           );
@@ -139,7 +142,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
         </>
       )}
 
-      <div className="prr-bar"><b className="prr-lab">법인별</b><span className="prr-muted">실패 많은 순 · 제목을 누르면 정렬 · ‘앞 기간’ 은 앞 기간의 실패 · ‘확인 불가’ 는 백업 · 날 수 · 판정 칸은 서비스 축의 백업 항목 것{s.prev?.days && !cmp ? (s.prev.full ? ' · 확인 불가가 있어 앞 기간은 비움' : ' · 앞 기간은 다 확정되지 않아 비움') : ''}</span></div>
+      <div className="prr-bar"><b className="prr-lab">법인별</b><span className="prr-muted">실패 많은 순 · 제목을 누르면 정렬 · ‘앞 기간’ 은 앞 기간의 실패 · ‘확인 불가’ 는 백업 · 날 수 · 판정 칸은 서비스 축의 백업 항목 것{mode && mode !== 'all' ? ' · 앞 기간 칸은 두 기간 모든 날을 안 법인만' : ''}</span></div>
       <div className="prr-tablewrap">
         <STable minWidth={multi ? 1000 : 960}>
           <thead><tr>
@@ -159,7 +162,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
                   <td className="prr-num" data-sort={k ? c.e : null}>{bkNum(c, c.e)}</td><td className="prr-num" data-sort={k ? c.ok : null}>{bkNum(c, c.ok)}</td>
                   <td className="prr-num" data-sort={k ? c.w : null}>{bkNum(c, c.w)}</td><td className="prr-num" data-sort={k ? c.f : null}>{bkNum(c, c.f)}</td>
                   <td className="prr-num" data-sort={c.rate}>{pctText(c.rate)}</td><td className="prr-num" data-sort={pf}>{pf == null ? '—' : numText(pf)}</td>
-                  <td className="prr-num" data-sort={k ? c.n : null}>{bkNum(c, c.n)}</td><td className="prr-num">{numText(c.unknownDays)}</td>
+                  <td className="prr-num" data-sort={k ? c.n : null}>{bkAtLeast(c, c.n)}</td><td className="prr-num">{numText(c.unknownDays)}</td>
                   {multi && <td className="prr-num" title={k && c.repeatVms ? `2일 이상 되풀이 ${numText(c.repeatVms)}대` : undefined}>{k ? numText(c.failDays) : '—'}</td>}
                   <td className="prr-num" data-sort={c.failNow}>{c.failNow == null ? '—' : numText(c.failNow)}</td>
                   <td data-sort={st ? STATUS_ORDER.indexOf(st) : null}>{st ? <StatusChip s={st} /> : '—'}</td>
@@ -169,7 +172,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
             {rows.length > 0 && (
               <tr data-pin="1" className="prr-sum">
                 <td>합계</td><td className="prr-num">{bkNum(t, t.e)}</td><td className="prr-num">{bkNum(t, t.ok)}</td><td className="prr-num">{bkNum(t, t.w)}</td><td className="prr-num">{bkNum(t, t.f)}</td>
-                <td className="prr-num">{pctText(t.rate)}</td><td className="prr-num">{cmp ? numText(s.prev.f) : '—'}</td><td className="prr-num">{bkNum(t, t.n)}</td><td className="prr-num">{numText(t.ud)}</td>
+                <td className="prr-num">{pctText(t.rate)}</td><td className="prr-num">{cmp ? numText(s.prev.f) : '—'}</td><td className="prr-num">{bkAtLeast(t, t.n)}</td><td className="prr-num">{numText(t.ud)}</td>
                 {multi && <td className="prr-num">—</td>}
                 <td className="prr-num">{s.failNow == null ? '—' : numText(s.failNow)}</td><td>—</td>
               </tr>

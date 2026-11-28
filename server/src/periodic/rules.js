@@ -462,6 +462,12 @@ export function scopeCutDoc(doc, allowed) {
     // 범위 판본에는 전 법인 글(근거 · 값 · 세부 · 직전 판정)을 싣지 않는다 — 행이 전부 범위 안이어도 근거가 전 법인 수(예 '점검 서버 412대')일 수 있다
     //   (2026-11-28 보안 축 E-1 · 반증 F8 — 기존 결함). 보이는 행으로 다시 낸다.
     const prevSt = worstOf(rows.map((r) => r.prev).filter(Boolean));
+    if (it.status === 'info') {
+      // 정보 항목 — 판정 분포가 없다('정상 0곳' 이 되던 것 · 반증 R3). 수는 보이는 행의 수만(전 법인 수를 싣지 않는다 — 행에 수가 없으면 모름)
+      const rc = rows.map((r) => numOrNull(r.count)).filter((x) => x != null);
+      items.push({ ...it, rows, status, count: rc.length ? rc.reduce((a, x) => a + x, 0) : null, basis: `내 범위 법인 ${rows.length}곳 — 법인별 값은 법인 행에`, value: undefined, detail: undefined, prev: null });
+      continue;
+    }
     items.push({ ...it, rows, status, count, basis: `내 범위 ${scopedRowsText(rows)}`, value: undefined, detail: undefined, prev: prevSt ? { status: prevSt } : null });
   }
   const corps = (doc.corps || []).filter((c) => allowed.has(String(c.vc)));

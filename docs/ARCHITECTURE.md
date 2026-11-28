@@ -136,7 +136,7 @@
 | `partfault/` | 17 | 4,009 | `partfault/db.js` (10) | partfault/db.js — 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |
 | `pdu/` | 11 | 2,181 | `pdu/poller.js` (6) | pdu/poller.js — PDU 주기 수집. |
 | `perf/` | 6 | 1,242 | `perf/monitor.js` (13) | perf/monitor.js — 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** |
-| `periodic/` | 16 | 3,907 | `periodic/providers.js` (3) | periodic/providers.js — 라우트 안에만 있는 조립(백업 Summary · 미보호 VM · VM DNS)을 정기 점검 리더가 **그대로** 쓰게 하는 등록부. |
+| `periodic/` | 16 | 3,952 | `periodic/providers.js` (3) | periodic/providers.js — 라우트 안에만 있는 조립(백업 Summary · 미보호 VM · VM DNS)을 정기 점검 리더가 **그대로** 쓰게 하는 등록부. |
 | `ping/` | 5 | 1,374 | `ping/store.js` (5) | Ping 모니터링 대상 레지스트리 — CONFIG_DIR/ping-targets.json. |
 | `portalcheck/` | 8 | 2,641 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
 | `power/` | 1 | 181 | `power/total.js` (2) | power/total.js — 전체 소비 전력 합산(v2.664, **순수 모듈** — 테스트로 고정). |
@@ -186,7 +186,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 109개 · 파일 1618개 · 377,148줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 109개 · 파일 1618개 · 377,193줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

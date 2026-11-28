@@ -239,7 +239,8 @@ export const refillable = (product) => HISTORY_PRODUCTS.has(product);
 /**
  * 그날 관측 → VM 마다 마지막 결과 · 수(순수).
  * @param {Array<{vm,endedAt,state}>} obsRows 그날 그 법인 · 백업의 관측
- * @param {string[]|null} targets 그날 대상(마지막 신선 관측 때의 목록)
+ * @param {string[]|null} targets 그날 대상(그날 신선 관측 때의 목록). null 이면 대상 · 실행 없음은 모름(null) — 다른 날 목록으로 지어내지 않는다
+ *   (반증 F3 · R1 — 뒤 날 목록은 그사이 생긴 잡을 대상으로 지어내 '실행 없음' 을, 교집합은 죽은 동안의 날을 '대상 0 · 실행 없음 0' 으로 지어냈다).
  */
 export function sealCounts(obsRows, targets) {
   const last = new Map();
@@ -248,10 +249,11 @@ export function sealCounts(obsRows, targets) {
     const cur = last.get(o.vm);
     if (!cur || o.endedAt > cur.endedAt) last.set(o.vm, o);
   }
-  const T = new Set([...(Array.isArray(targets) ? targets : []), ...last.keys()]);
-  const c = { targets: T.size, ended: last.size, ok: 0, warn: 0, fail: 0, norun: 0 };
+  const known = Array.isArray(targets);
+  const T = known ? new Set([...targets, ...last.keys()]) : null;
+  const c = { targets: known ? T.size : null, ended: last.size, ok: 0, warn: 0, fail: 0, norun: known ? 0 : null };
   for (const o of last.values()) c[o.state] += 1;
-  for (const vm of T) if (!last.has(vm)) c.norun += 1;
+  if (known) for (const vm of T) if (!last.has(vm)) c.norun += 1;
   return { counts: c, last: [...last.values()] };
 }
 
@@ -284,7 +286,9 @@ export function backupJudge({ failNow = 0, failRepeat = 0, rpo7 = 0, rpo3 = 0, u
 
 /* ───────────────────────── 보고서 3절 ───────────────────────── */
 
-const zero = () => ({ t: 0, e: 0, ok: 0, w: 0, f: 0, n: 0, kd: 0, ud: 0 });
+/** 묶음 합 — t · n(대상 · 실행 없음)은 대상을 안 줄(kd - tu)만의 합이고 tu = 대상을 모르는 알았음 줄 수(화면 '≥ n'). */
+const zero = () => ({ t: 0, e: 0, ok: 0, w: 0, f: 0, n: 0, kd: 0, ud: 0, tu: 0 });
+const pz = () => ({ e: 0, f: 0, ok: 0, w: 0, kd: 0, ud: 0 });
 const addInto = (a, b) => { for (const k of Object.keys(a)) a[k] += Number(b?.[k]) || 0; return a; };
 /** 성공률(%) — 끝난 백업 중 성공 + 경고. 끝난 백업이 없으면 null('—'). 소수 둘째 자리. */
 export const rateOf = (c) => (c && c.e > 0 ? Math.round(((c.ok + c.w) / c.e) * 10_000) / 100 : null);
@@ -332,7 +336,7 @@ export function buildBackupSection(a) {
     if (!c) {
       c = { vc, p: Object.fromEntries(products.map((p) => [p, zero()])), d: days.map(() => [0, 0, 0, 0, 0, 0]),
         s: Object.fromEntries(products.map((p) => [p, days.map(() => '-')])), prev: { e: 0, f: 0, ok: 0, w: 0, kd: 0, ud: 0, m: prevDays.map(() => 0) },
-        rv: 0, fv: 0, fn: 0, fnu: false, pn: 0 };
+        pp: Object.fromEntries(products.map((p) => [p, pz()])), rv: 0, fv: 0, fn: 0, fnu: false, pn: 0 };
       corps.set(vc, c);
     }
     return c;
@@ -349,7 +353,8 @@ export function buildBackupSection(a) {
     c.s[r.product][i] = r.status === 'known' ? 'k' : 'u';
     if (r.status !== 'known') { p.ud += 1; di[4] += 1; continue; }
     p.kd += 1; di[5] += 1;
-    p.t += Number(r.targets) || 0; p.e += Number(r.ended) || 0; p.ok += Number(r.ok) || 0; p.w += Number(r.warn) || 0; p.f += Number(r.fail) || 0; p.n += Number(r.norun) || 0;
+    p.e += Number(r.ended) || 0; p.ok += Number(r.ok) || 0; p.w += Number(r.warn) || 0; p.f += Number(r.fail) || 0;
+    if (r.targets == null) p.tu += 1; else { p.t += Number(r.targets) || 0; p.n += Number(r.norun) || 0; }
     di[0] += Number(r.ended) || 0; di[1] += Number(r.ok) || 0; di[2] += Number(r.warn) || 0; di[3] += Number(r.fail) || 0;
   }
   for (const r of Array.isArray(a.pending) ? a.pending : []) {
@@ -362,8 +367,10 @@ export function buildBackupSection(a) {
     if (!r || !pset.has(r.product) || !pIdx.has(r.day)) continue;
     const c = corpOf(String(r.vc));
     c.prev.m[pIdx.get(r.day)] = 1;
-    if (r.status !== 'known') { c.prev.ud += 1; continue; }
+    const pp = c.pp[r.product];
+    if (r.status !== 'known') { c.prev.ud += 1; pp.ud += 1; continue; }
     c.prev.kd += 1; c.prev.e += Number(r.ended) || 0; c.prev.f += Number(r.fail) || 0; c.prev.ok += Number(r.ok) || 0; c.prev.w += Number(r.warn) || 0;
+    pp.kd += 1; pp.e += Number(r.ended) || 0; pp.f += Number(r.fail) || 0; pp.ok += Number(r.ok) || 0; pp.w += Number(r.warn) || 0;
   }
   // 실패 VM — (백업, VM) 하나에 한 줄(기간 안 실패한 날 수 · 마지막 실패). 경고는 세지만 목록에 넣지 않는다(실패만 조치 대상).
   const byVm = new Map();
@@ -407,7 +414,10 @@ export function buildBackupSection(a) {
     v: 2, products, days: days.map((d) => ({ day: d, label: a.dayLabel ? a.dayLabel(d) : String(d) })), prevDays: prevDays.length,
     firstDay: numOrNull(a.firstDay), sealedDays: sealedMask.filter(Boolean).length, asOf: numOrNull(a.asOf), nowOk,
     corps: [...corps.values()].map((c) => ({ vc: c.vc, p: c.p, d: c.d, s: Object.fromEntries(Object.entries(c.s).map(([k, v]) => [k, v.join('')])),
-      prev: { e: c.prev.e, f: c.prev.f, ok: c.prev.ok, w: c.prev.w, kd: c.prev.kd, ud: c.prev.ud, m: maskOf(c.prev.m) }, rv: c.rv, fv: c.fv, fn: c.fn, fnu: c.fnu, pn: c.pn })),
+      prev: { e: c.prev.e, f: c.prev.f, ok: c.prev.ok, w: c.prev.w, kd: c.prev.kd, ud: c.prev.ud, m: maskOf(c.prev.m) }, pp: c.pp,
+      // 견줄 수 있는 (법인, 백업) 쌍 — 두 기간 모든 날이 알았음(확인 불가 · 확정 대기 · 적재 전 없음) — 앞 기간은 이 쌍끼리만 견준다(반증 R7)
+      pc: Object.fromEntries(products.map((p) => [p, c.p[p].kd === days.length && c.p[p].ud === 0 && c.pp[p].kd === prevDays.length && c.pp[p].ud === 0 && prevDays.length > 0 ? 1 : 0])),
+      rv: c.rv, fv: c.fv, fn: c.fn, fnu: c.fnu, pn: c.pn })),
     fails: capFair(failList, FAIL_ROWS_MAX, FAIL_ROWS_PER_CORP), failsTotal: failList.length,
     repeat, repeatTotal: repeatAll.length,
     now: nowList.slice(0, FAIL_ROWS_MAX).map((x) => ({ vc: String(x.vc), product: x.product, vm: str(x.vm), name: str(x.name) })),
@@ -428,7 +438,14 @@ export function backupSummary(sec) {
   const days = (sec.days || []).map((d) => ({ day: d.day, label: d.label, e: 0, ok: 0, w: 0, f: 0, u: 0, k: 0 }));
   const prevLen = Number(sec.prevDays) || 0;
   let corpsWithUnknown = 0; let failNow = 0; let nowPartial = 0; let repeatVms = 0; let pending = 0;
+  const cmp = { cur: pz(), prev: pz(), pairs: 0, of: 0 };
   for (const c of sec.corps) {
+    for (const p of products) {
+      const has = (c.p?.[p]?.kd || 0) + (c.p?.[p]?.ud || 0) + (c.pp?.[p]?.kd || 0) + (c.pp?.[p]?.ud || 0) > 0;
+      if (!has) continue;
+      cmp.of += 1;
+      if (c.pc?.[p] === 1) { cmp.pairs += 1; addInto(cmp.cur, c.p[p]); addInto(cmp.prev, c.pp[p]); }
+    }
     let unk = false;
     for (const p of products) { addInto(byP[p], c.p?.[p]); addInto(total, c.p?.[p]); if ((c.p?.[p]?.ud || 0) > 0) unk = true; }
     if (unk) corpsWithUnknown += 1;
@@ -442,6 +459,7 @@ export function backupSummary(sec) {
   return {
     total: { ...total, rate: rateOf(total) }, products: Object.fromEntries(products.map((p) => [p, { ...byP[p], rate: rateOf(byP[p]) }])),
     prev: { ...prev, rate: rateOf(prev), known: prev.kd > 0, sealed: prevSealed, days: prevLen, full: prevLen > 0 && prevSealed === prevLen },
+    cmp: { ...cmp, cur: { ...cmp.cur, rate: rateOf(cmp.cur) }, prev: { ...cmp.prev, rate: rateOf(cmp.prev) } },
     days, unknownCorpDays: total.ud, corpsWithUnknown, pending,
     failNow: sec.nowOk === false ? null : failNow, nowPartial: sec.nowOk === false ? null : nowPartial,
     repeatVms, fails: sec.failsTotal ?? (sec.fails || []).length,
@@ -449,16 +467,28 @@ export function backupSummary(sec) {
   };
 }
 
-/** 앞 기간과 견줄 수 있는가 — 두 기간 모두 다 확정됐고 알았음 줄이 있고 확인 불가 줄이 없을 때만(어느 쪽이든 부분 합이면 견주지 않는다 · 판정 F6 · 반증 F6). */
-export const prevComparable = (s) => !!(s && s.prev?.full && s.prev?.known && s.coverage?.full && s.total?.kd > 0 && !(s.prev?.ud > 0) && !(s.total?.ud > 0));
+/**
+ * 앞 기간 견주기 — 두 기간 모든 날을 안 (법인, 백업) 쌍끼리만(반증 R7: 한 법인의 확인 불가 하루가 전체 견주기를 막지 않게 · 부분 합끼리는 견주지 않는다 — 판정 F6).
+ *   'all' = 모든 쌍이 견줄 수 있다(합계 그대로) · 'some' = 일부 쌍만(그 쌍의 합으로 · 몇 쌍인지 함께) · 'none' = 견줄 쌍이 없다 · null = 앞 기간이 없는 회차.
+ */
+export function prevMode(s) {
+  if (!s?.prev?.days || !s.cmp) return null;
+  if (!s.cmp.pairs) return 'none';
+  return s.cmp.pairs === s.cmp.of ? 'all' : 'some';
+}
+/** 합계 그대로 견줄 수 있는가(모든 쌍). 웹 periodicReportText.js 와 같은 판정. */
+export const prevComparable = (s) => prevMode(s) === 'all';
 
 /** 법인 하나의 3절 한 줄(표) — 합계 · 성공률 · 실패한 날 수 · 확인 불가 줄 수 · 앞 기간(그 법인의 알았음 줄 kd 와 함께 — 모르면 화면이 '—'). */
 export function backupCorpRow(c, products, nowOk = true) {
   const t = zero();
   for (const p of products || PRODUCTS) addInto(t, c.p?.[p]);
   const failDays = (c.d || []).filter((x) => x[3] > 0).length;
+  const ps = products || PRODUCTS;
+  const pairs = ps.filter((p) => (c.p?.[p]?.kd || 0) + (c.p?.[p]?.ud || 0) + (c.pp?.[p]?.kd || 0) + (c.pp?.[p]?.ud || 0) > 0);
+  const cmp = pairs.length > 0 && pairs.every((p) => c.pc?.[p] === 1);   // 그 법인의 모든 쌍을 견줄 수 있을 때만 앞 기간 칸을 낸다
   return { vc: c.vc, ...t, rate: rateOf(t), failDays, repeatVms: c.rv || 0, failNow: nowOk === false || c.fnu ? null : (c.fn || 0), unknownDays: t.ud, pending: c.pn || 0,
-    prev: { e: c.prev?.e || 0, f: c.prev?.f || 0, kd: c.prev?.kd || 0, rate: rateOf(c.prev) } };
+    prev: { e: c.prev?.e || 0, f: c.prev?.f || 0, kd: c.prev?.kd || 0, rate: rateOf(c.prev), cmp } };
 }
 
 /** 3절을 보이는 vCenter 로 자른다(범위 계정 — 법인 행 · 실패 목록 · 지금 실패 · 확정 날 수 · 전체 수는 법인별 수로 다시). allowed 가 null 이면 그대로. */

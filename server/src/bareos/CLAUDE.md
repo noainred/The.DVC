@@ -71,4 +71,3 @@
 - **v2.892 사전 점검**(`health.js` · `bareosHealth2892`): 판정 `judgeCorp` 하나 · vCenter 접속은 엣지 시점만 판정(중앙 = 참고) · 디스크는 엣지 + Director 가 그 서버일 때만 · timer · 지문 기준은 라우트로만 — audits.md.
 - **v2.844 완전 설치**: 전문 `install/CLAUDE.md`(엣지 노드 안 러너 · 그 단계만 되돌림 · 볼륨 삭제 세 겹 · 번들 서명 · OTP 코드 없음).
 - **v2.845 법인별 설정 · 계정 통합**: 전문 `manage/CLAUDE.md`(표지 파일만 · 재시작 직전 재확인 · 등록부 SSH 는 담당 엣지 것만).
-- **v3.59 정기 점검 보고 백업 적재**(`periodic/backupLedger.js` · `periodicBackup3590`): 원장 대조 창(`names.js RECONCILE_RECENT_DAYS` — `list jobs days=N`)과 보기 상한(`registry.js RECENT_RUNS_VIEW` · `jobDigests.runsEpoch`)이 '그날 실행을 다 봤다' 판정의 근거다 — 창 · 상한 · `runsEpoch` 를 바꾸면 그 판정이 따라 바뀐다(숫자를 따로 박지 말고 이 상수를 쓸 것). `jobDigests` 의 `lastRun` 은 `recentRuns` 에도 같은 jobid 로 들어 있다(연속 실패를 셀 때 jobid 로 한 번만).

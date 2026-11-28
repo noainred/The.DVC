@@ -44,8 +44,6 @@ function stmts(db) {
     staleSeen: db.prepare(`INSERT INTO pr_bk_seen(product, vc, day, n_stale) VALUES (?, ?, ?, 1)
       ON CONFLICT(product, vc, day) DO UPDATE SET n_stale = n_stale + 1`),
     getSeen: db.prepare('SELECT first_at, last_at, max_gap, lossy, n_fresh, n_stale, targets FROM pr_bk_seen WHERE product = ? AND vc = ? AND day = ?'),
-    nextTargets: db.prepare('SELECT targets FROM pr_bk_seen WHERE product = ? AND vc = ? AND day > ? AND day <= ? AND targets IS NOT NULL ORDER BY day LIMIT 1'),
-    prevTargets: db.prepare('SELECT targets FROM pr_bk_seen WHERE product = ? AND vc = ? AND day < ? AND day >= ? AND targets IS NOT NULL ORDER BY day DESC LIMIT 1'),
     obsOfDay: db.prepare('SELECT vm, ended_at, state, name, reason, reason_pub FROM pr_bk_obs WHERE product = ? AND vc = ? AND day = ?'),
     getDay: db.prepare('SELECT status, sealed_at FROM pr_bk_day WHERE day = ? AND product = ? AND vc = ?'),
     putDay: db.prepare(`INSERT INTO pr_bk_day(day, product, vc, status, targets, ended, ok, warn, fail, norun, sealed_at, late) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -159,11 +157,8 @@ function sealOneTx(st, product, vc, day, cursor, now) {
     return 'unknown';
   }
   const rows = st.obsOfDay.all(product, vc, day).map((r) => ({ vm: r.vm, endedAt: r.ended_at, state: r.state, name: r.name, reason: r.reason, reasonPub: r.reason_pub }));
-  // 그날 신선한 관측이 없었는데 확정하는 경우(실행 기록으로 늦게 채움) — 대상은 앞뒤 이틀 안 목록에 **둘 다** 있는 것(실행 없음 수의 근거).
-  //   한쪽 목록만 쓰면 그사이 생긴 잡 · 지운 잡을 그날 대상으로 지어내 '실행 없음' 을 만든다(반증 F3). 둘 중 하나가 없으면 끝난 VM 만 대상으로 센다.
-  const tOf = (row) => jsonOr(row?.targets, null);
-  const after = tOf(st.nextTargets.get(product, vc, day, day + 2)); const before = tOf(st.prevTargets.get(product, vc, day, day - 2));
-  const targets = jsonOr(seen?.targets, null) ?? (Array.isArray(after) && Array.isArray(before) ? after.filter((x) => new Set(before).has(x)) : null);
+  // 대상 목록은 그날 신선한 관측의 것만 — 없으면(그날 내내 못 읽고 늦게 채운 날) 대상 · 실행 없음은 모름(null). 다른 날 목록으로 지어내지 않는다(반증 F3 · R1).
+  const targets = jsonOr(seen?.targets, null);
   const { counts: c, last } = sealCounts(rows, targets);
   st.putDay.run(day, product, vc, 'known', c.targets, c.ended, c.ok, c.warn, c.fail, c.norun, now, late);
   for (const o of last) if (o.state === 'fail') st.insVmDay.run(day, product, o.vm, vc, o.state, o.name || null, o.endedAt, o.reason ?? null, o.reasonPub ?? null);

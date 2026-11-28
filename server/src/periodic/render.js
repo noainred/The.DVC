@@ -9,7 +9,7 @@
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { STATUS_LABEL, KIND_LABEL, actionsOf, unknownsOf, worstOf } from './rules.js';
 import { AXES } from './catalog.js';
-import { backupSummary, backupCorpRow, prevComparable, PRODUCT_LABEL } from './backupLedger.js';
+import { backupSummary, backupCorpRow, prevComparable, prevMode, PRODUCT_LABEL } from './backupLedger.js';
 
 export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const GLYPH = { ok: '✓', warn: '!', crit: '×', unknown: '?', info: 'i' };
@@ -78,18 +78,21 @@ function itemsTable(items, name) {
 const pct = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number(v).toFixed(2)}%`);
 /** 알았음 줄(kd)이 없는 묶음의 수는 '—'(못 읽은 값을 0 으로 적지 않는다). */
 const kn = (x, v) => (x && Number(x.kd) > 0 ? num(v) : '—');
+/** 대상 · 실행 없음 — 대상 목록을 모르는 날(tu)이 있으면 아는 날의 합이라 '≥ n'(적어도). */
+const kt = (x, v) => (x && Number(x.kd) > 0 ? `${Number(x.tu) > 0 ? '≥ ' : ''}${num(v)}` : '—');
 const STRIP = { ok: ['✓', '#15803d'], warn: ['✓', '#b45309'], fail: ['×', '#b91c1c'], none: ['–', '#64748b'], unknown: ['?', '#475569'], pre: ['·', '#94a3b8'] };
 /** 3절 합계 · 법인 줄(라우트가 붙였으면 그것 — 아니면 여기서 같은 함수로). */
 export function backupParts(bk) {
   if (!bk || bk.off || bk.error || !Array.isArray(bk.corps)) return null;
   return { summary: bk.summary || backupSummary(bk), corpRows: bk.corpRows || bk.corps.map((c) => backupCorpRow(c, bk.products, bk.nowOk)) };
 }
-/** 앞 기간 글 — 두 기간 다 확정됐을 때만 수를 견주고, 아니면 '앞 기간 적재 n / m일' 로 말한다(부분 합끼리 견주지 않는다). */
+/** 앞 기간 글 — 두 기간 모든 날을 안 (법인, 백업) 쌍끼리만 견준다(모두면 합계 그대로 · 일부면 그 쌍의 수와 몇 쌍인지 · 없으면 말한다 — 부분 합끼리 견주지 않는다). */
 function prevText(s, key = 'f') {
-  if (!s.prev.days) return '';
-  if (prevComparable(s)) return `(앞 기간 ${num(s.prev[key])})`;
-  if (!s.prev.full) return s.prev.sealed ? `(앞 기간은 적재 ${num(s.prev.sealed)} / ${num(s.prev.days)}일이라 견주지 않음)` : '';
-  return (s.prev.ud > 0 || s.total.ud > 0) ? '(확인 불가가 있어 앞 기간과 견주지 않음)' : '';
+  const mode = prevMode(s);
+  if (!mode) return '';
+  if (mode === 'all') return `(앞 기간 ${num(s.prev[key])})`;
+  if (mode === 'some') return `(두 기간을 다 안 ${num(s.cmp.pairs)} / ${num(s.cmp.of)} 법인 · 백업만 견주면 이번 ${num(s.cmp.cur[key])} · 앞 기간 ${num(s.cmp.prev[key])})`;
+  return '(앞 기간과 견줄 법인 · 백업이 없음 — 두 기간 다 안 곳이 없다)';
 }
 const failNowText = (s) => (s.failNow == null ? ' · 지금 실패 상태 모름(결과를 읽지 못함)' : `${s.failNow ? ` · 지금 실패 상태 ${num(s.failNow)}대` : ''}${s.nowPartial ? `(법인 ${num(s.nowPartial)}곳은 지금 결과를 못 읽어 뺌)` : ''}`);
 /** 3절 한 줄 요약(메일). 실을 것이 없으면 ''. */
@@ -119,14 +122,15 @@ function backupHtml(bk, name, no) {
   const t = s.total;
   const cov = s.coverage;
   const cmp = prevComparable(s);
+  const mode = prevMode(s);
   const tiles = `<p><span class="cnt">끝난 백업 <b>${kn(t, t.e)}</b></span><span class="cnt">성공 <b>${kn(t, t.ok)}</b> · 성공률 <b>${pct(t.rate)}</b>${cmp ? ` (앞 기간 ${pct(s.prev.rate)})` : ''}</span>`
-    + `<span class="cnt">경고 <b>${kn(t, t.w)}</b></span><span class="cnt">실패 <b>${kn(t, t.f)}</b>${cmp ? ` (앞 기간 ${num(s.prev.f)})` : ''}</span><span class="cnt">실행 없음 <b>${kn(t, t.n)}</b></span>`
+    + `<span class="cnt">경고 <b>${kn(t, t.w)}</b></span><span class="cnt">실패 <b>${kn(t, t.f)}</b>${mode && mode !== 'none' ? ` ${prevText(s)}` : ''}</span><span class="cnt">실행 없음 <b>${kt(t, t.n)}</b></span>`
     + `<span class="cnt">지금 실패 상태 <b>${s.failNow == null ? '—' : num(s.failNow)}</b>대${s.nowPartial ? `(법인 ${num(s.nowPartial)}곳 뺌)` : ''}</span><span class="cnt">확인 불가 <b>${num(t.ud)}</b>(법인 · 백업 · 날)</span></p>`
     + `<div class="note">적재 ${num(cov.sealed)} / ${num(cov.days)}일${cov.sealed < cov.days ? ' — 적재 전 · 아직 확정하지 않은 날은 성공으로도 실패로도 세지 않았습니다' : ''}${s.pending ? ` · 확정 대기 ${num(s.pending)}(그 법인을 날 끝 뒤 아직 보지 못함 — 확인 불가에 넣음)` : ''}.`
-    + `${s.prev.days && !cmp ? (s.prev.full ? ' 확인 불가가 있어 앞 기간과 수를 견주지 않았습니다.' : ` 앞 기간은 적재 ${num(s.prev.sealed)} / ${num(s.prev.days)}일이라 수를 견주지 않았습니다.`) : ''} ‘실행 없음’ 은 그날 대상인데 끝난 실행이 없는 VM 입니다(주 1회 잡이면 정상 — RPO 가 판정합니다).</div>`;
+    + `${mode === 'none' ? ' 두 기간 모든 날을 안 법인 · 백업이 없어 앞 기간과 수를 견주지 않았습니다.' : ''}${t.tu > 0 ? ` 대상 · 실행 없음의 ‘≥’ 는 대상 목록을 모르는 날 ${num(t.tu)}(법인 · 백업 · 날)을 빼고 센 수입니다.` : ''} ‘실행 없음’ 은 그날 대상인데 끝난 실행이 없는 VM 입니다(주 1회 잡이면 정상 — RPO 가 판정합니다).</div>`;
   const prod = `<table><thead><tr><th>백업</th><th>대상</th><th>끝난 백업</th><th>성공</th><th>경고</th><th>실패</th><th>성공률</th><th>실행 없음</th><th>확인 불가(법인 · 백업 · 날)</th></tr></thead><tbody>${(bk.products || []).map((p) => {
     const x = s.products[p] || {};
-    return `<tr><td>${esc(PRODUCT_LABEL[p] || p)}</td><td class="n">${kn(x, x.t)}</td><td class="n">${kn(x, x.e)}</td><td class="n">${kn(x, x.ok)}</td><td class="n">${p === 'clone' ? '—' : kn(x, x.w)}</td><td class="n">${kn(x, x.f)}</td><td class="n">${pct(x.rate)}</td><td class="n">${kn(x, x.n)}</td><td class="n">${num(x.ud)}</td></tr>`;
+    return `<tr><td>${esc(PRODUCT_LABEL[p] || p)}</td><td class="n">${kt(x, x.t)}</td><td class="n">${kn(x, x.e)}</td><td class="n">${kn(x, x.ok)}</td><td class="n">${p === 'clone' ? '—' : kn(x, x.w)}</td><td class="n">${kn(x, x.f)}</td><td class="n">${pct(x.rate)}</td><td class="n">${kt(x, x.n)}</td><td class="n">${num(x.ud)}</td></tr>`;
   }).join('')}</tbody></table>`;
   const maxF = Math.max(1, ...s.days.map((d) => d.f));
   const dayRow = (d) => {
@@ -137,7 +141,7 @@ function backupHtml(bk, name, no) {
   };
   const daysT = s.days.length > 1 ? `<table><thead><tr><th>날</th><th>끝난 백업</th><th>실패</th><th></th><th>확인 불가(법인 · 백업)</th></tr></thead><tbody>${s.days.map(dayRow).join('')}</tbody></table>` : '';
   const multi = s.days.length > 1;
-  const corps = `<table><thead><tr><th>법인</th><th>끝난 백업</th><th>성공</th><th>경고</th><th>실패</th><th>성공률</th><th>실행 없음</th><th>확인 불가(백업 · 날)</th>${multi ? '<th>실패한 날</th><th>되풀이 VM</th>' : ''}<th>지금 실패</th></tr></thead><tbody>${[...corpRows].sort((a, b) => ((b.kd > 0 ? b.f : -1) - (a.kd > 0 ? a.f : -1)) || (b.unknownDays - a.unknownDays)).map((c) => `<tr><td>${esc(name(c.vc))}</td><td class="n">${kn(c, c.e)}</td><td class="n">${kn(c, c.ok)}</td><td class="n">${kn(c, c.w)}</td><td class="n">${kn(c, c.f)}</td><td class="n">${pct(c.rate)}</td><td class="n">${kn(c, c.n)}</td><td class="n">${num(c.unknownDays)}</td>${multi ? `<td class="n">${num(c.failDays)}</td><td class="n">${num(c.repeatVms)}</td>` : ''}<td class="n">${c.failNow == null ? '—' : num(c.failNow)}</td></tr>`).join('') || `<tr><td colspan="${multi ? 11 : 9}">적재된 법인이 없습니다.</td></tr>`}</tbody></table>`;
+  const corps = `<table><thead><tr><th>법인</th><th>끝난 백업</th><th>성공</th><th>경고</th><th>실패</th><th>성공률</th><th>실행 없음</th><th>확인 불가(백업 · 날)</th>${multi ? '<th>실패한 날</th><th>되풀이 VM</th>' : ''}<th>지금 실패</th></tr></thead><tbody>${[...corpRows].sort((a, b) => ((b.kd > 0 ? b.f : -1) - (a.kd > 0 ? a.f : -1)) || (b.unknownDays - a.unknownDays)).map((c) => `<tr><td>${esc(name(c.vc))}</td><td class="n">${kn(c, c.e)}</td><td class="n">${kn(c, c.ok)}</td><td class="n">${kn(c, c.w)}</td><td class="n">${kn(c, c.f)}</td><td class="n">${pct(c.rate)}</td><td class="n">${kt(c, c.n)}</td><td class="n">${num(c.unknownDays)}</td>${multi ? `<td class="n">${num(c.failDays)}</td><td class="n">${num(c.repeatVms)}</td>` : ''}<td class="n">${c.failNow == null ? '—' : num(c.failNow)}</td></tr>`).join('') || `<tr><td colspan="${multi ? 11 : 9}">적재된 법인이 없습니다.</td></tr>`}</tbody></table>`;
   const failsTotal = bk.failsTotal ?? bk.fails.length;
   const fails = (bk.fails || []).length ? `<h3 style="font-size:13px;margin:12px 0 4px">실패한 백업 ${num(failsTotal)}${multi ? '대(백업 · VM 하나에 한 줄)' : '건'}${failsTotal > bk.fails.length ? ` — 상위 ${num(bk.fails.length)}` : ''}</h3>`
     + `<table><thead><tr><th>법인</th><th>백업</th><th>VM</th>${multi ? '<th>실패한 날</th>' : ''}<th>마지막 실패</th><th>연속 실패</th><th>마지막 성공</th><th>사유</th></tr></thead><tbody>${bk.fails.map((x) => `<tr><td>${esc(name(x.vc))}</td><td>${esc(PRODUCT_LABEL[x.product] || x.product)}</td><td>${esc(x.name || x.vm)}</td>${multi ? `<td class="n">${num(x.failDays)}</td>` : ''}<td>${esc(stamp(x.endedAt))}</td><td class="n">${x.streak == null ? '—' : `${num(x.streak)}회`}</td><td>${esc(stamp(x.lastOkAt))}</td><td>${esc(x.reason || '—')}</td></tr>`).join('')}</tbody></table>`

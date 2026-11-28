@@ -48,6 +48,11 @@ const BACKUP_SCHEMA = `CREATE TABLE IF NOT EXISTS pr_bk_obs (
     reason TEXT, reason_pub TEXT, PRIMARY KEY (day, product, vm)
   );
 `;
+/** 나중에 더한 칸(표 · 칸 · 정의) — CREATE TABLE IF NOT EXISTS 는 있는 표에 칸을 더하지 않는다. */
+const BACKUP_COLUMNS = Object.freeze([
+  ['pr_bk_seen', 'lossy', 'INTEGER NOT NULL DEFAULT 0'],
+  ['pr_bk_cursor', 'src', 'TEXT'],
+]);
 const lockRetry = createLockRetry();
 const DAY = 86_400_000;
 
@@ -88,6 +93,11 @@ async function openDb() {
       CREATE INDEX IF NOT EXISTS pr_deliv_next ON pr_deliveries(state, next_at);
       CREATE INDEX IF NOT EXISTS pr_deliv_kind_at ON pr_deliveries(kind, at);`);
     conn.exec(BACKUP_SCHEMA);
+    // 칸 더하기 — 앞 판(릴리스 전 빌드 포함)이 만든 표에 새 칸이 없으면 더한다(반증 R5 — 'no such column' 으로 3절 전체가 읽히지 않았다). 다음 칸도 여기에.
+    for (const [table, col, ddl] of BACKUP_COLUMNS) {
+      const has = conn.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+      if (!has) conn.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+    }
     lockRetry.ok();
     _db = conn; _err = '';
   } catch (e) {
