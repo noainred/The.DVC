@@ -114,8 +114,8 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
             <div className="prr-tile"><span className="prr-lab">지금 실패 상태</span><b>{s.failNow == null ? '—' : numText(s.failNow)}</b>
               <span className="prr-muted">{s.failNow == null ? '지금 결과를 읽지 못했습니다' : s.nowPartial ? `법인 ${numText(s.nowPartial)}곳은 지금 결과를 못 읽어 뺐습니다` : '보고서를 만든 시각의 마지막 결과'}</span></div>
           )}
-        <div className="prr-tile"><span className="prr-lab">확인 불가(법인 · 백업 · 날)</span><b>{numText(t.ud)}</b>
-          <span className="prr-muted">{s.corpsWithUnknown ? `${unknownNames.join(' · ')}${s.corpsWithUnknown > unknownNames.length ? ` 외 ${numText(s.corpsWithUnknown - unknownNames.length)}곳` : ''} — 성공에도 실패에도 넣지 않음` : known ? '없음' : '적재 전'}</span></div>
+        <div className="prr-tile"><span className="prr-lab">확인 불가</span><b>{numText(t.ud)}</b>
+          <span className="prr-muted">법인 · 백업 · 날 수{s.corpsWithUnknown ? ` — ${unknownNames.join(' · ')}${s.corpsWithUnknown > unknownNames.length ? ` 외 ${numText(s.corpsWithUnknown - unknownNames.length)}곳` : ''} · 성공에도 실패에도 넣지 않음` : known ? ' — 없음' : ' — 적재 전'}</span></div>
       </div>
 
       <div className="prr-axes">
@@ -139,12 +139,12 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
         </>
       )}
 
-      <div className="prr-bar"><b className="prr-lab">법인별</b><span className="prr-muted">실패 많은 순 · 제목을 누르면 정렬 · 판정 칸은 서비스 축의 백업 항목 것{s.prev?.days && !cmp ? ' · 앞 기간은 다 확정되지 않아 비움' : ''}</span></div>
+      <div className="prr-bar"><b className="prr-lab">법인별</b><span className="prr-muted">실패 많은 순 · 제목을 누르면 정렬 · ‘앞 기간’ 은 앞 기간의 실패 · ‘확인 불가’ 는 백업 · 날 수 · 판정 칸은 서비스 축의 백업 항목 것{s.prev?.days && !cmp ? ' · 앞 기간은 다 확정되지 않아 비움' : ''}</span></div>
       <div className="prr-tablewrap">
-        <STable minWidth={multi ? 1180 : 1040}>
+        <STable minWidth={multi ? 1080 : 960}>
           <thead><tr>
             <th>법인</th><th style={{ textAlign: 'right' }}>끝난 백업</th><th style={{ textAlign: 'right' }}>성공</th><th style={{ textAlign: 'right' }}>경고</th><th style={{ textAlign: 'right' }}>실패</th>
-            <th style={{ textAlign: 'right' }}>성공률</th><th style={{ textAlign: 'right' }}>앞 기간 실패</th><th style={{ textAlign: 'right' }}>실행 없음</th><th style={{ textAlign: 'right' }}>확인 불가(백업 · 날)</th>
+            <th style={{ textAlign: 'right' }}>성공률</th><th style={{ textAlign: 'right' }} title="앞 기간(같은 길이)의 실패 — 두 기간 다 확정됐을 때만">앞 기간</th><th style={{ textAlign: 'right' }}>실행 없음</th><th style={{ textAlign: 'right' }} title="확인 불가 줄 수(백업 · 날)">확인 불가</th>
             {multi && <th style={{ textAlign: 'right' }}>실패한 날</th>}{multi && <th style={{ textAlign: 'right' }}>되풀이 VM</th>}
             <th style={{ textAlign: 'right' }}>지금 실패</th><th>판정</th>
           </tr></thead>
