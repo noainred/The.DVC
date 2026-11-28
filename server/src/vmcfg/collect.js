@@ -4,7 +4,7 @@
 // 인벤토리 수집은 성공이고, 직전 캐시 값은 그대로 남는다(at 으로 낡음이 보인다).
 import { config } from '../config.js';
 import { VM_CFG_PATHS, VM_DEV_PATHS, parseVmCfgProps, parseVmDeviceHygiene } from './parse.js';
-import { pickDue, put, prune, setStatus, statusOf, get as cacheGet } from './cache.js';
+import { pickDue, put, prune, setStatus, statusOf, get as cacheGet, dropKind } from './cache.js';
 import { createRetryTracker, isRequestTimeout } from '../dscfg/collect.js'; // v2.721(감사 S1-03) — 대상별 재시도 백오프(한 벌)
 import { GOS_SOAP_VERSION, detailedApiOk, gosPaths, parseVmGosProps } from '../inventory/guestDetail.js'; // v3.54(실제 OS 1단계)
 
@@ -60,6 +60,8 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
   // 점검 1회차: VM_CFG_SCAN(구성 · 장치)과 VM_OS_SCAN(실제 OS)은 따로 끈다 — 예전에는 앞의 것이 꺼지면 os 도 조용히 꺼졌다.
   const cfgOn = !!settings.vmCfgScan;
   const osOn = !!settings.vmOsScan;
+  // 점검 5회차: 실제 OS 수집을 끄면 캐시의 os 값을 버린다 — 예전에는 끈 뒤에도 몇 주 지난 값이 VM 에 '지금 보고' 처럼 실렸다.
+  if (!osOn) dropKind(vcId, 'os');
   if (!cfgOn && !osOn) return { skipped: 'off' };
   const live = new Set(vmRefs);
   prune(vcId, live);

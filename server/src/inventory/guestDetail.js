@@ -5,12 +5,19 @@
 //   `GuestInfo.guestDetailedData`(vSphere API 8.0.2.0+, Tools 11.2.0+)다. 한 번 기록되면 VM 이 꺼져도 마지막 값이 남는다(Broadcom API 문서).
 //
 // 모양(vm.gos — 없으면 이 수집기가 아직 읽지 않았다 = '미수집'. 0·빈 글자로 채우지 않는다):
-//   { at, asked, detailed:{ prettyName, distroName, distroVersion, … }|null, extra:{키:값}|null, raw:string|null, vapp:{ name, vendor, version, fullVersion }|null }
-//   - asked: 이 vCenter 에 guestDetailedData 를 **물었는가**(API 8.0.2 미만이면 묻지 않는다 — 묻지 않은 것을 'Tools 가 보고하지 않음' 으로 말하지 않는다).
-//   - detailed: 아는 키만(DETAIL_KEYS). 보고가 없으면 null.
-//   - extra: 문서에 없는 키(앞으로 Tools 가 더할 수 있다) — 이름·값 모두 상한. 점검 화면이 '모르는 키' 로 보여 준다.
-//   - raw: 글자는 왔는데 아는 키를 하나도 못 읽었을 때만 원문(512자) — 형식이 문서와 다를 때 실측으로 고치기 위해서다. 평소에는 싣지 않는다(스냅샷 크기).
+//   { at, asked, parse, detailed, extra, extraDropped?, raw, vapp, edgeAt? }
+//   - asked: 이 vCenter 에 guestDetailedData 를 **물었는가**(API 8.0.2 미만 · 판 미상이면 묻지 않는다).
+//   - parse: 보고를 읽은 결과 **한 값**(점검 5회차 구조 재설계 — 그 전에는 raw · emptyValues · extra 를 따로 맞추다 서로 어긋났다):
+//       null       보고 없음(묻지 않았거나 Tools 가 글자를 보내지 않음)
+//       'ok'       아는 키를 읽었고 형식 밖 조각이 없다
+//       'partial'  아는 키를 읽었지만 형식 밖 조각 · 잘린 값이 있다(detailed 와 raw 둘 다)
+//       'empty'    형식대로 읽었는데 아는 키의 값이 모두 비었다
+//       'malformed' 아는 키를 하나도 읽지 못했다(raw)
+//   - detailed: 아는 키만(DETAIL_KEYS) — parse 가 'ok' · 'partial' 일 때만.
+//   - extra: 문서에 없는 키(이름 · 값 상한) · extraDropped: 상한 · 이름 형식으로 버린 모르는 키 수(조용히 버리지 않는다).
+//   - raw: parse 가 'partial' · 'malformed' 일 때만 원문(512자) — 형식이 문서와 다를 때 실측으로 고치기 위해서다(정상 보고는 싣지 않는다 — 스냅샷 크기).
 //   - vapp: OVF 로 배포된 어플라이언스의 제품 정보(config.vAppConfig.product 첫 항목 — 이름이나 제조사가 있는 것). appUrl·vendorUrl 은 주소라 싣지 않는다.
+//   이 묶음 규칙은 **normalizeGos 하나**가 세운다 — 수집기(parseVmGosProps)와 엣지 수신 정제(sanitizeVmGos)가 둘 다 이 함수를 지난다.
 //
 // 외부 입력(장비 출력)이라 정규식에 넣기 전에 길이를 자르고, 키=값 목록은 정규식이 아니라 한 번 훑는 스캐너로 읽는다(루트 CLAUDE.md '정규식' 규약).
 import { xmlUnescape } from '../vcenter/soapParse.js';
@@ -34,10 +41,14 @@ const EXTRA_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 const VAPP_IN_MAX = 16_384;
 const VAPP_ITEMS_MAX = 8;
 
-// 점검 2회차: 자른 자리가 서로게이트 쌍의 앞 반쪽이면 그 반쪽도 뺀다(짝 잃은 글자가 JSON · 화면에 남지 않게 — rack/layout.js · vmDist.js 와 같은 규칙).
-const cap = (s, n) => {
+/**
+ * 글자 위생 한 벌(점검 5회차 — 2회차 수정은 자른 자리만 봐서 입력에 원래 있던 짝 잃은 서로게이트가 엣지 정제 · XML 문자 참조로 그대로 지나갔다).
+ * ① 짝 잃은 서로게이트는 U+FFFD 로(toWellFormed — inventory/vmDist.js 와 같은 방식) ② 앞뒤 공백 ③ 상한으로 자른 자리가 쌍의 앞 반쪽이면 그것도 뺀다.
+ * 비면 null. 이 모듈의 모든 글자 칸이 이 함수를 지난다.
+ */
+export function cleanText(s, n) {
   if (typeof s !== 'string') return null;
-  let t = s.trim();
+  let t = (s.isWellFormed() ? s : s.toWellFormed()).trim();
   if (t.length > n) {
     t = t.slice(0, n);
     const last = t.charCodeAt(t.length - 1);
@@ -45,14 +56,16 @@ const cap = (s, n) => {
     t = t.trimEnd();
   }
   return t || null;
-};
+}
+const cap = cleanText;
 const isKeyChar = (code) => (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
 const isSpace = (ch) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 
 /**
- * "name='value' name='value' …" → { fields, extra, ok }. 값 안의 \' · \\ 는 역슬래시 이스케이프로 읽는다(open-vm-tools 가 그렇게 쓴다고
- * 보고 있으나 **실측 전 추정** — 1단계 점검이 원문을 모은다). 형식이 틀린 조각은 다음 공백까지 건너뛴다. 입력 길이에 선형.
- * @returns {{ fields: object, extra: object, ok: boolean } | null} 글자가 아니거나 비면 null
+ * "name='value' name='value' …" → { fields, extra, ok, knownKeys, extraDropped, skipped, truncated }. 값 안의 \' · \\ 는 역슬래시 이스케이프로 읽는다
+ * (open-vm-tools 가 그렇게 쓴다고 보고 있으나 **실측 전 추정** — 1단계 점검이 원문을 모은다). 형식이 틀린 조각은 다음 공백까지 건너뛰고 **센다**(skipped).
+ * 닫는 따옴표 없이 끝났거나 입력이 상한보다 길었으면 truncated. 입력 길이에 선형. 판정(ok/partial/empty/malformed)은 outcomeOf.
+ * @returns 글자가 아니거나 비면 null
  */
 export function parseGuestDetailedData(raw) {
   if (typeof raw !== 'string') return null;
@@ -62,8 +75,10 @@ export function parseGuestDetailedData(raw) {
   const extra = {};
   let nExtra = 0;
   let ok = false;
-  let knownKeys = 0;      // 점검 4회차: 아는 키를 형식대로 읽은 수(값이 비어도) — '형식은 맞고 값만 빈 보고' 를 '형식을 못 읽음' 과 가른다
-  let extraDropped = 0;   // 점검 4회차: 모르는 키 상한(EXTRA_MAX)으로 버린 수 — 조용히 버리지 않는다
+  let knownKeys = 0;      // 아는 키를 형식대로 읽은 수(값이 비어도)
+  let extraDropped = 0;   // 모르는 키 상한 · 이름 형식으로 버린 수
+  let skipped = 0;        // 형식 밖 조각 수
+  let truncated = raw.length > RAW_IN_MAX;
   const n = s.length;
   let i = 0;
   while (i < n) {
@@ -74,6 +89,7 @@ export function parseGuestDetailedData(raw) {
     const key = s.slice(ks, i);
     if (!key || s[i] !== '=' || s[i + 1] !== "'") {
       // 형식 밖 조각 — 다음 공백까지 건너뛴다(최소 한 글자는 전진).
+      skipped += 1;
       if (i === ks) i += 1;
       while (i < n && !isSpace(s[i])) i += 1;
       continue;
@@ -88,16 +104,28 @@ export function parseGuestDetailedData(raw) {
       if (ch === "'") { parts.push(s.slice(segStart, i)); i += 1; closed = true; break; }
       i += 1;
     }
-    if (!closed) break;   // 닫는 따옴표 없이 끝났다 — 잘린 값은 버린다(지어내지 않는다)
+    if (!closed) { truncated = true; break; }   // 닫는 따옴표 없이 끝났다 — 잘린 값은 버린다(지어내지 않는다)
     const val = cap(parts.join(''), VALUE_MAX);
     if (DETAIL_SET.has(key)) {
       knownKeys += 1;
       if (val != null) { fields[key] = val; ok = true; }
-    } else if (EXTRA_KEY_RE.test(key) && val != null && !Object.hasOwn(extra, key)) {
-      if (nExtra < EXTRA_MAX) { extra[key] = cap(val, 128); nExtra += 1; } else extraDropped += 1;
+    } else if (val != null && !Object.hasOwn(extra, key)) {
+      if (EXTRA_KEY_RE.test(key) && nExtra < EXTRA_MAX) { extra[key] = cap(val, 128); nExtra += 1; } else extraDropped += 1;
     }
   }
-  return { fields, extra, ok, knownKeys, extraDropped };
+  return { fields, extra, ok, knownKeys, extraDropped, skipped, truncated };
+}
+
+/** 보고를 읽은 결과의 종류(모듈 머리말 parse 참고). */
+export const PARSE_OUTCOMES = Object.freeze(['ok', 'partial', 'empty', 'malformed']);
+const PARSE_SET = new Set(PARSE_OUTCOMES);
+/** parseGuestDetailedData 결과 → parse 값. null 이면 보고 없음. */
+export function outcomeOf(p) {
+  if (!p) return null;
+  const clean = p.skipped === 0 && !p.truncated;
+  if (p.ok) return clean ? 'ok' : 'partial';
+  if (p.knownKeys > 0 && clean) return 'empty';
+  return 'malformed';
 }
 
 /** 'config.vAppConfig.product' 원문 XML(ArrayOfVAppProductInfo) → 첫 제품(이름이나 제조사가 있는 것). 없으면 null. */
@@ -131,23 +159,45 @@ export function detailedApiOk(apiVersion) {
 /** 이 vCenter 에 요청할 경로 — 어플라이언스 제품 정보는 어느 판이든, Tools 보고는 8.0.2 이상만(없는 속성은 요청 전체를 InvalidProperty 로 만든다). */
 export function gosPaths(asked) { return asked ? [DETAIL_PATH, VAPP_PATH] : [VAPP_PATH]; }
 
-/** RetrieveProperties 결과(props) → vm.gos. */
+/** RetrieveProperties 결과(props) → vm.gos(normalizeGos 를 지난다). */
 export function parseVmGosProps(props = {}, at = Date.now(), { asked = false } = {}) {
   const p = props || {};
   const rawDetail = typeof p[DETAIL_PATH] === 'string' ? p[DETAIL_PATH] : null;
   const parsed = asked ? parseGuestDetailedData(rawDetail) : null;
-  const hasExtra = parsed && Object.keys(parsed.extra).length > 0;
-  // 점검 4회차: 아는 키를 형식대로 읽었는데 값이 모두 비었으면 '형식을 못 읽음'(파서 결함 · raw)이 아니라 '빈 값 보고' 다.
-  const empty = !!parsed && !parsed.ok && parsed.knownKeys > 0;
+  return normalizeGos({
+    at, asked: !!asked, parse: outcomeOf(parsed),
+    detailed: parsed?.ok ? parsed.fields : null,
+    extra: parsed && Object.keys(parsed.extra).length ? parsed.extra : null,
+    extraDropped: parsed?.extraDropped || 0,
+    raw: rawDetail,
+    vapp: parseVappProduct(typeof p[VAPP_PATH] === 'string' ? p[VAPP_PATH] : ''),
+  });
+}
+
+/**
+ * vm.gos 묶음 규칙을 세우는 **하나뿐인** 함수 — 수집기 출력과 엣지가 보낸 값(이미 칸별로 좁힌 것)이 모두 이 모양으로 나간다.
+ *   묻지 않았으면 parse · detailed · extra · raw · extraDropped 없음 · detailed 가 있으면 parse 는 ok 또는 partial ·
+ *   detailed 가 없으면 ok · partial 일 수 없다(raw 가 있으면 malformed, 없으면 보고 없음) · raw 는 partial · malformed 일 때만.
+ */
+export function normalizeGos({ at = null, edgeAt = null, asked = false, parse = null, detailed = null, extra = null, extraDropped = 0, raw = null, vapp = null } = {}) {
+  const a = asked === true;
+  const d = a && detailed && typeof detailed === 'object' && Object.keys(detailed).length ? detailed : null;
+  const r0 = a ? cap(raw, RAW_KEEP_MAX) : null;
+  let p = a && PARSE_SET.has(parse) ? parse : null;
+  if (d) { if (p !== 'partial') p = 'ok'; } else if (p === 'ok' || p === 'partial') p = r0 ? 'malformed' : null;
+  if (a && !d && p == null && r0) p = 'malformed';
+  const e = a && extra && typeof extra === 'object' && Object.keys(extra).length ? extra : null;
+  const drop = a && Number.isSafeInteger(extraDropped) && extraDropped > 0 ? extraDropped : 0;
   return {
     at,
-    asked: !!asked,
-    detailed: parsed?.ok ? parsed.fields : null,
-    extra: hasExtra ? parsed.extra : null,
-    raw: parsed && !parsed.ok && !empty ? cap(rawDetail, RAW_KEEP_MAX) : null,
-    vapp: parseVappProduct(typeof p[VAPP_PATH] === 'string' ? p[VAPP_PATH] : ''),
-    ...(empty ? { emptyValues: true } : {}),
-    ...(parsed?.extraDropped ? { extraDropped: parsed.extraDropped } : {}),
+    ...(edgeAt != null ? { edgeAt } : {}),
+    asked: a,
+    parse: p,
+    detailed: d,
+    extra: e,
+    ...(drop ? { extraDropped: drop } : {}),
+    raw: p === 'partial' || p === 'malformed' ? r0 : null,
+    vapp: vapp && (vapp.name || vapp.vendor) ? vapp : null,
   };
 }
 
@@ -185,40 +235,32 @@ export function sanitizeVmGos(g, now = Date.now()) {
     for (const k of DETAIL_KEYS) { const v = cap(g.detailed[k], VALUE_MAX); if (v != null) d[k] = v; }
     detailed = Object.keys(d).length ? d : null;
   }
-  let extra = null;
-  // 점검 4회차: 엣지가 보낸 버린 수(extraDropped — 정수 · 상한)에 여기서 상한으로 더 버린 수를 더한다(조용히 버리지 않는다).
+  // 엣지가 보낸 버린 수(정수 · 상한)에 여기서 상한 · 이름 형식으로 더 버린 수를 더한다(조용히 버리지 않는다).
   let extraDropped = Number.isSafeInteger(g.extraDropped) && g.extraDropped > 0 ? Math.min(g.extraDropped, 10_000) : 0;
+  let extra = null;
   if (isObj(g.extra)) {
     const e = {};
     let n = 0;
     for (const k of Object.keys(g.extra).slice(0, 10_000)) {
-      if (!EXTRA_KEY_RE.test(k) || DETAIL_SET.has(k)) continue;
+      if (DETAIL_SET.has(k)) continue;
       const v = cap(g.extra[k], 128);
       if (v == null) continue;
-      if (n >= EXTRA_MAX) { extraDropped += 1; continue; }
+      if (!EXTRA_KEY_RE.test(k) || n >= EXTRA_MAX) { extraDropped += 1; continue; }
       e[k] = v; n += 1;
     }
     extra = n ? e : null;
   }
-  // 점검 1회차(반증 재현): 키별로 좁히기만 하면 수집기 파서(parseVmGosProps)가 지키는 묶음 불변조건이 엣지에서 깨진 채 들어온다 —
-  //   묻지 않았으면(asked 가 참이 아니면) detailed · extra · raw 는 없고, detailed 가 있으면 raw 는 없다. 어긋나면 점검 집계가
-  //   '보고 있음 > 물은 수' · '보고 있음이면서 형식 못 읽음' 으로 셌다.
-  const asked = g.asked === true;
-  if (!asked) { detailed = null; extra = null; extraDropped = 0; }
-  const emptyValues = asked && !detailed && g.emptyValues === true;
   const vapp = isObj(g.vapp) ? {
     name: cap(g.vapp.name, 128), vendor: cap(g.vapp.vendor, 128), version: cap(g.vapp.version, 64), fullVersion: cap(g.vapp.fullVersion, 128),
   } : null;
-  return {
+  // 묶음 규칙(asked · parse · detailed · raw)은 수집기와 같은 normalizeGos 가 세운다. 엣지 시각을 수신 시각으로 잘랐으면 원본은 edgeAt 으로 따로.
+  return normalizeGos({
     at,
-    // 점검 2회차: 엣지 시각을 수신 시각으로 잘랐으면 원본은 따로 남긴다(루트 규약 '엣지 시각은 수신 시각으로 자르고 원본은 따로' — storpath 의 edgeAt 과 같은 이름).
-    ...(typeof g.at === 'number' && Number.isFinite(g.at) && g.at > now ? { edgeAt: Math.trunc(g.at) } : {}),
-    asked,
-    detailed,
-    extra,
-    raw: asked && !detailed && !emptyValues ? cap(g.raw, RAW_KEEP_MAX) : null,
-    vapp: vapp && (vapp.name || vapp.vendor) ? vapp : null,
-    ...(emptyValues ? { emptyValues: true } : {}),
-    ...(extraDropped ? { extraDropped } : {}),
-  };
+    edgeAt: typeof g.at === 'number' && Number.isFinite(g.at) && g.at > now ? Math.trunc(g.at) : null,
+    asked: g.asked === true,
+    parse: typeof g.parse === 'string' ? g.parse : null,
+    detailed, extra, extraDropped,
+    raw: typeof g.raw === 'string' ? g.raw : null,
+    vapp,
+  });
 }

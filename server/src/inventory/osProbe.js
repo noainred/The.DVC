@@ -9,7 +9,8 @@ import { toolsAtLeast } from './guestDetail.js';
 // 2: 점검 1회차 — samples 의 distroAddlVersion · cpeString · buildNumber 가 값별 개수 목록으로 · architecture 가 묶음 키 · vCenter 행 collectSource.
 // 3: 점검 2회차 — 값별 개수 목록마다 <칸>Omitted · appliances[].fullVersions(값별 개수) · total.cfgRead · unparsedVms · 엣지 수집 행 status 없음.
 // 4: 점검 4회차 — 사유 emptyValues · total.extraDropped · status.osErrorAt.
-export const PROBE_SCHEMA = 4;
+// 5: 점검 5회차 구조 재설계 — 사유는 vm.gos.parse 로 · unparsed[].parse · total.partialVms · detailedAge · collectSource 'rest' · collectMethod.
+export const PROBE_SCHEMA = 5;
 const SAMPLE_MAX = 300;
 const RAW_MAX = 50;
 const VAPP_MAX = 100;
@@ -23,9 +24,9 @@ export function noDetailReason(vm) {
   const g = vm?.gos;
   if (!g || typeof g !== 'object') return 'notRead';
   if (!g.asked) return 'notAsked';
-  if (g.emptyValues === true) return 'emptyValues';   // 점검 4회차: 형식은 맞고 값만 빈 보고 — 파서 결함(unparsed)과 섞지 않는다
-  // 보고는 왔는데 아는 키를 못 읽었다(raw) · 모르는 키만 왔다(extra) — 'Tools 미보고' 가 아니라 파서가 틀린 것이다(점검의 목적이 이것을 가르는 것).
-  if ((typeof g.raw === 'string' && g.raw) || (g.extra && typeof g.extra === 'object' && Object.keys(g.extra).length)) return 'unparsed';
+  // 점검 5회차 구조 재설계: 보고를 읽은 결과는 vm.gos.parse 한 값이다(guestDetail.js normalizeGos) — 여기서 raw · extra 로 다시 짐작하지 않는다.
+  if (g.parse === 'empty') return 'emptyValues';     // 형식은 맞고 값만 빈 보고
+  if (g.parse === 'malformed') return 'unparsed';    // 보고는 왔는데 아는 키를 못 읽음 — 파서가 틀린 것
   if (vm.template) return 'template';
   const t = toolsAtLeast(vm.toolsVersion, 11, 2);
   if (t === false) return 'toolsOld';
@@ -62,7 +63,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     let r = rowBy.get(id);
     if (!r) {
       r = {
-        id, name: null, version: null, build: null, collectSource: null,
+        id, name: null, version: null, build: null, collectSource: null, collectMethod: null,
         vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0,
         read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0,
         noDetail: Object.fromEntries(NO_DETAIL_REASONS.map((k) => [k, 0])),
@@ -78,8 +79,10 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     r.name = typeof vc.name === 'string' ? vc.name : null;
     r.version = typeof vc.version === 'string' ? vc.version : null;
     r.build = typeof vc.build === 'string' ? vc.build : null;
-    // 점검 1회차: 수집 상태가 없는 이유를 단정하지 않게 경로를 싣는다 — 'site'(엣지 수집) · 'direct'(이 포탈이 수집).
-    r.collectSource = vc.collectSource === 'site' ? 'site' : 'direct';
+    // 수집 경로(점검 1 · 5회차): 'site'(엣지 수집) · 'rest'(이 포탈이 REST 폴백으로 받음 — Tools 보고 · vmcfg 를 읽지 않는다) · 'direct'(이 포탈이 SOAP 로 수집).
+    //   엣지가 REST 로 받았으면 collectMethod 'rest'(store.js 가 보존한다).
+    r.collectSource = vc.collectSource === 'site' ? 'site' : vc.collectSource === 'rest' ? 'rest' : 'direct';
+    r.collectMethod = vc.collectMethod === 'rest' ? 'rest' : null;
   }
   const samples = new Map();
   const raws = new Map();
@@ -88,7 +91,9 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
   const managed = new Map();
   // cfgRead(점검 2회차): 시스템 VM(managedBy)은 vm.cfg 를 읽은 VM 에서만 셀 수 있다 — 못 읽은 VM 을 0 으로 섞지 않게 분모를 함께 싣는다.
   // unparsedVms: 형식을 못 읽은 원문(raw)이 있는 VM 수(가짓수 상한과 무관한 전체 — 화면이 목록 합으로 세지 않게).
-  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0, unparsedVms: 0, extraDropped: 0 };
+  const total = { vms: 0, templates: 0, poweredOn: 0, toolsRunning: 0, toolsKnown: 0, tools112: 0, read: 0, asked: 0, detailed: 0, detailedOff: 0, vapp: 0, managed: 0, cfgRead: 0, unparsedVms: 0, partialVms: 0, extraDropped: 0 };
+  // 점검 5회차: 보고를 **읽은 시각** 기준 나이(루트 규칙 '오래됨은 따로 센다' — 판정 문턱을 지어내지 않고 구간만 센다). 보고 있음(detailed)만.
+  const detailedAge = { d1: 0, d7: 0, older: 0, unknown: 0 };
   const noDetail = Object.fromEntries(NO_DETAIL_REASONS.map((k) => [k, 0]));
 
   for (const vm of Array.isArray(vms) ? vms : []) {
@@ -133,15 +138,22 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
           e.count += 1; extras.set(k, e);
         }
       }
-      if (typeof g.raw === 'string' && g.raw) {
-        const e = raws.get(g.raw) || { key: g.raw, raw: g.raw, count: 0 };
-        e.count += 1; raws.set(g.raw, e);
-        total.unparsedVms += 1;
+      if (typeof g.raw === 'string' && g.raw && (g.parse === 'malformed' || g.parse === 'partial')) {
+        const key = JSON.stringify([g.parse, g.raw]);
+        const e = raws.get(key) || { key, raw: g.raw, parse: g.parse, count: 0 };
+        e.count += 1; raws.set(key, e);
       }
+      if (g.parse === 'malformed') total.unparsedVms += 1;
+      if (g.parse === 'partial') total.partialVms += 1;
     }
     const d = g?.detailed && typeof g.detailed === 'object' ? g.detailed : null;
     if (d) {
       add('detailed');
+      const age = Number.isFinite(g.at) && g.at > 0 ? now - g.at : null;
+      if (age == null) detailedAge.unknown += 1;
+      else if (age < 86_400_000) detailedAge.d1 += 1;
+      else if (age < 7 * 86_400_000) detailedAge.d7 += 1;
+      else detailedAge.older += 1;
       if (!on) add('detailedOff');
       // 점검 1회차: 아키텍처도 묶음 키에(같은 이름 · 다른 아키텍처를 한 줄로 합치지 않는다). 묶음 안에서 갈릴 수 있는 칸(addl · cpe · build)은
       //   첫 VM 값 하나로 덮지 않고 값별 개수로 센다(kernels 와 같은 방식).
@@ -176,7 +188,8 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
 
   for (const r of rowBy.values()) {
     // 점검 2회차: 엣지 수집(site) vCenter 에는 이 포탈의 상태를 붙이지 않는다 — 직접 수집하다 엣지로 바꾸면 낡은 오류 · 시각이 '지금 상태' 처럼 보였다.
-    const s = r.collectSource === 'site' ? null : stBy.get(r.id);
+    // 이 포탈의 vmcfg 상태는 이 포탈이 SOAP 로 수집하는 vCenter('direct')에만 붙인다 — 엣지 · REST 폴백 행에 붙이면 낡은 성공 기록이 '지금 상태' 처럼 보였다(2 · 5회차).
+    const s = r.collectSource === 'direct' ? stBy.get(r.id) : null;
     r.status = s ? {
       osAt: Number.isFinite(s.osAt) ? s.osAt : null, osError: typeof s.osError === 'string' ? s.osError : null,
       osErrorAt: Number.isFinite(s.osErrorAt) ? s.osErrorAt : null,
@@ -198,13 +211,13 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
     return o;
   });
   const vappList = topList(vapps, VAPP_MAX, (e) => putTop(putTop({ name: e.name, vendor: e.vendor, version: e.version, count: e.count }, 'fullVersions', e.full), 'os', e.os));
-  const rawList = topList(raws, RAW_MAX, (e) => ({ raw: e.raw, count: e.count }));
+  const rawList = topList(raws, RAW_MAX, (e) => ({ raw: e.raw, parse: e.parse, count: e.count }));
   const extraList = topList(extras, 50, (e) => ({ key: e.key, count: e.count, example: e.example }));
   const managedList = topList(managed, MANAGED_MAX, (e) => ({ extensionKey: e.extensionKey, type: e.type, count: e.count }));
   return {
     schema: PROBE_SCHEMA,
     generatedAt: now,
-    total, noDetail,
+    total, noDetail, detailedAge,
     vcenters: [...rowBy.values()].sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id))),
     samples: sampleList.items, samplesOmitted: sampleList.omitted,
     unparsed: rawList.items, unparsedOmitted: rawList.omitted,

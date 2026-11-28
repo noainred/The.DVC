@@ -609,7 +609,11 @@
   수집 상태(vmcfg `statusOf`)는 이 포탈이 직접 수집하는 vCenter 만 있다. **상태가 없는 이유를 단정하지 않는다**(점검 1회차 정정 — 첫 판은 상태가 없으면 무조건 '엣지 수집' 이라 말했다):
   행의 `collectSource`('site' 만 엣지 수집) · 응답의 `collect.osEnabled`(꺼짐) · `demo` 로 가른다(`realOsProbeText.js statusText`). 상태는 vCenter 마다 `statusOf` 로 — `vmCfgStatus()` 는 64개로 자른다.
   주기 문구는 응답 `collect.refreshMs`(숫자를 박지 않는다). `VM_CFG_SCAN` 과 `VM_OS_SCAN` 은 따로 끈다. 경로 오류 판정은 `vmcfg/collect.js isPathFault` 한 벌(cfg · dev · os — 단어 하나로 넓히지 말 것).
-  `sanitizeVmGos` 는 파서 묶음 불변조건을 다시 세운다(묻지 않았으면 detailed · extra · raw 없음 · detailed 가 있으면 raw 없음). 샘플 묶음 키에 아키텍처 · addl/cpe/build 는 값별 개수(schema 2).
+  **점검 5회차 구조 재설계(부분 수정이 회귀를 만들어 — 4회차 빈 값 판정이 형식 밖 보고를 삼킴)**: 보고를 읽은 결과는 `vm.gos.parse` **한 값**
+  (`ok · partial · empty · malformed`, 없으면 null — `guestDetail.js outcomeOf`)이고, 묶음 규칙(묻지 않았으면 없음 · detailed ⇔ ok/partial · raw 는 partial/malformed 만)은
+  **`normalizeGos` 하나**가 세운다 — 수집기(`parseVmGosProps`)와 엣지 정제(`sanitizeVmGos`)가 둘 다 지난다(무작위 2,000조합 시험). 점검의 사유는 parse 만 본다(raw · extra 로 다시 짐작하지 않는다).
+  글자 칸은 전부 `cleanText`(짝 잃은 서로게이트 → U+FFFD · 자른 자리 반쪽 제거). 수집 경로는 세 값(`direct` · `rest` · `site` + 엣지 `collectMethod:'rest'`) — 이 포탈 상태는 `direct` 에만.
+  보고 나이는 구간으로 따로 센다(`detailedAge` — 읽은 시각 기준 · 문턱을 지어내지 않는다). `VM_OS_SCAN=false` 면 캐시의 os 를 버린다(`cache.dropKind`). 모르는 키 버림 수 `extraDropped`. schema 5.
   **형식을 못 읽은 보고(raw · extra)는 사유 'unparsed' 로 따로** — 'Tools 정상인데 보고 없음'(other)과 섞으면 파서 결함이 Tools 미보고로 읽힌다(반증 지적).
   **어플라이언스 = OVF 제품 정보(vapp)가 있는 VM 만** — 확장이 관리하는 VM(managedBy: 복제본 · vCLS)은 '확장 관리' 로 따로 센다. 묶음 키는 `JSON.stringify([…])`(값 안 구분자로 합쳐지지 않게).
 - 남긴 것(다음 단계): 판정 코어(종류 · 버전 · Windows 빌드 → 릴리스) · Summary OS 합계 전환 · VM 성격(일반 / 어플라이언스 / 시스템 VM)과 수동 지정 · EOL · SQLite 저장 · 게스트 조회 스캐너를 '보고 없는 VM 만' 으로.

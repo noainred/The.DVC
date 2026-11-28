@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import {
   parseGuestDetailedData, parseVappProduct, detailedApiOk, gosPaths, parseVmGosProps, toolsVersionParts, toolsAtLeast,
-  sanitizeVmGos, DETAIL_KEYS, GOS_SOAP_VERSION,
+  sanitizeVmGos, DETAIL_KEYS, GOS_SOAP_VERSION, normalizeGos, PARSE_OUTCOMES, cleanText,
 } from '../src/inventory/guestDetail.js';
 import { buildOsProbe, noDetailReason, NO_DETAIL_REASONS } from '../src/inventory/osProbe.js';
 import { refreshVmCfg, _resetVmCfgRetry, isPathFault } from '../src/vmcfg/collect.js';
@@ -102,7 +102,7 @@ test('④ vm.gos 모양 — 묻지 않았으면 detailed 를 읽지 않는다 ·
   assert.equal(c.detailed, null);
   assert.equal(c.raw, '전혀 다른 형식', '형식을 못 읽은 원문은 실측용으로 남긴다');
   const d = parseVmGosProps({}, 1000, { asked: true });
-  assert.deepEqual(d, { at: 1000, asked: true, detailed: null, extra: null, raw: null, vapp: null });
+  assert.deepEqual(d, { at: 1000, asked: true, parse: null, detailed: null, extra: null, raw: null, vapp: null });
 });
 
 test('⑤ 엣지 수신 정제 — 아는 키만 · 글자만 · 상한 · 엣지 시각은 수신 시각 이하 · 실제 진입 함수(sanitizeInventoryList)', () => {
@@ -262,7 +262,7 @@ test('⑧ 점검 집계 — 법인별 개수 · 종류 · 사유 · 어플라이
     vm('vm-10', 'vc2', { gos: { ...rocky, detailed: null } }),
     vm('vm-11', 'vc2', { cfg: { managedBy: { extensionKey: 'com.vmware.vim.eam', type: 'cluster-agent' } },
       gos: { ...rocky, detailed: { familyName: 'Linux', distroName: 'VMware Photon OS', distroVersion: '4.0', prettyName: 'VMware Photon OS/Linux' }, vapp: { name: 'VMware vCenter Server', vendor: 'VMware Inc.', version: '8.0.3' } } }),
-    vm('vm-12', 'vc2', { gos: { ...rocky, detailed: null, raw: '이상한 형식', extra: { newKey: 'v' } } }),
+    vm('vm-12', 'vc2', { gos: { ...rocky, parse: 'malformed', detailed: null, raw: '이상한 형식', extra: { newKey: 'v' } } }),
   ];
   const p = buildOsProbe(vms, [{ id: 'vc1', name: 'OC1', version: '8.0.3' }, { id: 'vc2', name: 'OC2' }], [{ vcenterId: 'vc1', osAt: 5, osAsked: true, osApiVersion: '8.0.3.0' }], { now: 10 });
   assert.equal(p.total.vms, 11); assert.equal(p.total.templates, 1);
@@ -282,7 +282,7 @@ test('⑧ 점검 집계 — 법인별 개수 · 종류 · 사유 · 어플라이
   assert.equal(p.appliances[0].name, 'VMware vCenter Server');
   assert.deepEqual(p.appliances[0].os, [{ value: 'VMware Photon OS/Linux', count: 1 }]);
   assert.deepEqual(p.managedBy, [{ extensionKey: 'com.vmware.vim.eam', type: 'cluster-agent', count: 1 }]);
-  assert.deepEqual(p.unparsed, [{ raw: '이상한 형식', count: 1 }]);
+  assert.deepEqual(p.unparsed, [{ raw: '이상한 형식', parse: 'malformed', count: 1 }]);
   assert.deepEqual(p.extraKeys, [{ key: 'newKey', count: 1, example: 'v' }]);
   assert.equal(JSON.stringify(p).includes('secret-name'), false, '내려받는 파일에 VM 이름을 싣지 않는다');
   for (const k of NO_DETAIL_REASONS) assert.equal(typeof noDetailReason(vms[0]) === 'string', true, k);
@@ -406,7 +406,7 @@ test('R1 샘플 — 아키텍처는 다른 줄 · addl · cpe · build 는 첫 �
     vm('vm-1', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }), vm('vm-2', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:2') }),
     vm('vm-3', 'vc1', { gos: mk('Arm', 'jammy-arm', 'cpe:3') }), vm('vm-4', 'vc1', { gos: mk('X86', 'jammy', 'cpe:1') }),
   ], [{ id: 'vc1' }], [], { now: 1 });
-  assert.equal(p.schema, 4);
+  assert.equal(p.schema, 5);
   const x86 = p.samples.find((s) => s.architecture === 'X86');
   const arm = p.samples.find((s) => s.architecture === 'Arm');
   assert.equal(x86.count, 2); assert.equal(arm.count, 2);
@@ -495,7 +495,7 @@ test('R2 값별 개수 목록 — 잘라낸 종류 수를 싣는다 · fullVersi
 });
 
 test('R2 형식 못 읽은 보고 수 — 가짓수 상한과 무관한 전체 VM 수', () => {
-  const vms = Array.from({ length: 60 }, (_, i) => vm(`vm-${i}`, 'vc1', { gos: { ...rocky, detailed: null, raw: `weird-${i}` } }));
+  const vms = Array.from({ length: 60 }, (_, i) => vm(`vm-${i}`, 'vc1', { gos: { ...rocky, parse: 'malformed', detailed: null, raw: `weird-${i}` } }));
   const p = buildOsProbe(vms, [{ id: 'vc1' }], [], { now: 1 });
   assert.equal(p.unparsed.length, 50); assert.equal(p.unparsedOmitted, 10);
   assert.equal(p.total.unparsedVms, 60);
@@ -591,16 +591,16 @@ test('R3 화면 — vCenter 를 법인이라 부르지 않는다 · 50행 절단
 
 test('R4 빈 값 보고는 형식 못 읽음과 다른 사유 · 엣지에서도 같은 모양', () => {
   const g = parseVmGosProps({ 'guest.guestDetailedData': "prettyName='' distroName='' familyName=''" }, 1, { asked: true });
-  assert.equal(g.emptyValues, true); assert.equal(g.raw, null); assert.equal(g.detailed, null);
+  assert.equal(g.parse, 'empty'); assert.equal(g.raw, null); assert.equal(g.detailed, null);
   const bad = parseVmGosProps({ 'guest.guestDetailedData': '완전히 다른 형식' }, 1, { asked: true });
-  assert.equal(Object.hasOwn(bad, 'emptyValues'), false); assert.equal(bad.raw, '완전히 다른 형식');
+  assert.equal(bad.parse, 'malformed'); assert.equal(bad.raw, '완전히 다른 형식');
   const p = buildOsProbe([vm('vm-1', 'vc1', { gos: g }), vm('vm-2', 'vc1', { gos: bad })], [{ id: 'vc1' }], [], { now: 1 });
   assert.equal(p.noDetail.emptyValues, 1); assert.equal(p.noDetail.unparsed, 1);
-  assert.deepEqual(p.unparsed, [{ raw: '완전히 다른 형식', count: 1 }]);
-  const e = sanitizeVmGos({ asked: true, emptyValues: true, raw: 'x' }, 2);
-  assert.equal(e.emptyValues, true); assert.equal(e.raw, null);
-  assert.equal(Object.hasOwn(sanitizeVmGos({ asked: false, emptyValues: true }, 2), 'emptyValues'), false, '묻지 않았으면 빈 값 보고도 없다');
-  assert.equal(Object.hasOwn(sanitizeVmGos({ asked: true, emptyValues: 'true' }, 2), 'emptyValues'), false);
+  assert.deepEqual(p.unparsed, [{ raw: '완전히 다른 형식', parse: 'malformed', count: 1 }]);
+  const e = sanitizeVmGos({ asked: true, parse: 'empty', raw: 'x' }, 2);
+  assert.equal(e.parse, 'empty'); assert.equal(e.raw, null, '빈 값 보고에는 원문을 싣지 않는다');
+  assert.equal(sanitizeVmGos({ asked: false, parse: 'empty' }, 2).parse, null, '묻지 않았으면 판정도 없다');
+  assert.equal(sanitizeVmGos({ asked: true, parse: 'weird' }, 2).parse, null, '모르는 판정 값은 받지 않는다');
   assert.ok(REASON_TEXT.emptyValues);
 });
 
@@ -645,4 +645,93 @@ test('R4 화면 — 빌드 값도 그린다 · 스캔 상태 조회 실패가 �
   const g = fs.readFileSync(new URL('../../web/src/views/tools/GuestOsTools.jsx', import.meta.url), 'utf8');
   assert.match(g, /if \(err\) return <><RealOsProbe scope=\{scope\} \/><ErrorBox/);
   assert.match(g, /if \(!st\) return <><RealOsProbe scope=\{scope\} \/><Loading/);
+});
+
+/* ---------------------------- 점검 5회차 — 구조 재설계(판정 한 값 · 정규화 하나 · 글자 위생 하나 · 경로 세 값) ---------------------------- */
+
+test('R5 판정 한 값 — ok · partial · empty · malformed (4회차 회귀: 빈 값 하나 + 형식 밖 값이 empty 로 삼켜지던 것)', () => {
+  const P = (x) => parseVmGosProps({ 'guest.guestDetailedData': x }, 1, { asked: true });
+  const cases = [
+    ["prettyName='Rocky' distroName='R'", 'ok', true, false],
+    ["prettyName='Rocky' junk", 'partial', true, true],
+    ["prettyName='Rocky' distroName='R", 'partial', true, true],
+    ["prettyName='' distroName=''", 'empty', false, false],
+    ["prettyName='' distroName=\"Rocky Linux\"", 'malformed', false, true],
+    ['zz', 'malformed', false, true],
+    ["onlyUnknown='x'", 'malformed', false, true],
+  ];
+  for (const [x, want, hasD, hasRaw] of cases) {
+    const g = P(x);
+    assert.equal(g.parse, want, x); assert.equal(!!g.detailed, hasD, x); assert.equal(!!g.raw, hasRaw, x);
+  }
+  assert.equal(P(null).parse, null); assert.equal(parseVmGosProps({ 'guest.guestDetailedData': 'x' }, 1, { asked: false }).parse, null);
+  const p = buildOsProbe([vm('a', 'vc1', { gos: P("prettyName='Rocky' junk") }), vm('b', 'vc1', { gos: P("prettyName='' distroName=\"R\"") })], [{ id: 'vc1' }], [], { now: 2 });
+  assert.equal(p.total.partialVms, 1); assert.equal(p.total.unparsedVms, 1); assert.equal(p.total.detailed, 1);
+  assert.equal(p.noDetail.unparsed, 1); assert.equal(p.noDetail.emptyValues, 0);
+  assert.deepEqual(p.unparsed.map((x) => x.parse).sort(), ['malformed', 'partial']);
+});
+
+test('R5 정규화 하나 — 어떤 조합이 와도 묶음 규칙이 선다(수집기 · 엣지 같은 함수)', () => {
+  let seed = 12345;
+  const rnd = (k) => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return (seed >>> 16) % k; };
+  const pick = (arr) => arr[rnd(arr.length)];
+  for (let i = 0; i < 2000; i++) {
+    const input = {
+      asked: pick([true, false, 'true', undefined]), parse: pick([...PARSE_OUTCOMES, null, 'weird', 5]),
+      detailed: pick([null, { prettyName: 'R' }, {}, { evil: 1 }]), raw: pick([null, 'zz', '', '   ']),
+      extra: pick([null, { a: 'b' }]), extraDropped: pick([0, 3, -1, '2']),
+    };
+    for (const g of [normalizeGos(input), sanitizeVmGos(input, 10)]) {
+      const msg = JSON.stringify(input);
+      if (!g.asked) { assert.equal(g.parse, null, msg); assert.equal(g.detailed, null, msg); assert.equal(g.raw, null, msg); assert.equal(g.extra, null, msg); assert.equal(Object.hasOwn(g, 'extraDropped'), false, msg); }
+      if (g.detailed) assert.ok(g.parse === 'ok' || g.parse === 'partial', msg);
+      else assert.ok(g.parse === null || g.parse === 'empty' || g.parse === 'malformed', msg);
+      if (g.raw) assert.ok(g.parse === 'partial' || g.parse === 'malformed', msg);
+      if (g.parse === 'ok' || g.parse === 'empty') assert.equal(g.raw, null, msg);
+      assert.ok(g.parse === null || PARSE_OUTCOMES.includes(g.parse), msg);
+    }
+  }
+});
+
+test('R5 글자 위생 하나 — 입력에 원래 있던 짝 잃은 서로게이트도 정리', () => {
+  assert.equal(cleanText('\ud800abc', 10).isWellFormed(), true);
+  assert.equal(sanitizeVmGos({ asked: true, detailed: { prettyName: '\ud800abc' } }, 1).detailed.prettyName.isWellFormed(), true);
+  assert.equal(parseVappProduct('<VAppProductInfo><name>&#xD800;x</name></VAppProductInfo>').name.isWellFormed(), true);
+  assert.equal(parseGuestDetailedData("prettyName='\udc00x'").fields.prettyName.isWellFormed(), true);
+});
+
+test('R5 수집 경로 세 값 — REST 폴백 · 엣지 REST 에는 이 포탈의 낡은 상태를 붙이지 않는다', () => {
+  const p = buildOsProbe([], [{ id: 'r', collectSource: 'rest' }, { id: 's', collectSource: 'site', collectMethod: 'rest' }, { id: 'd' }],
+    [{ vcenterId: 'r', osAt: 5, osAsked: true }, { vcenterId: 's', osAt: 5 }, { vcenterId: 'd', osAt: 5, osAsked: true }], { now: 10 });
+  const by = Object.fromEntries(p.vcenters.map((r) => [r.id, r]));
+  assert.equal(by.r.collectSource, 'rest'); assert.equal(by.r.status, null);
+  assert.equal(by.s.collectMethod, 'rest'); assert.equal(by.s.status, null);
+  assert.equal(by.d.collectSource, 'direct'); assert.equal(by.d.status.osAt, 5);
+  assert.deepEqual(statusText(by.r.status, by.r, {}), { text: 'REST 폴백 수집 — Tools 보고를 읽지 않음', tone: 'amber' });
+  assert.equal(statusText(by.s.status, by.s, {}).text, '엣지 수집(REST 폴백 — Tools 보고를 읽지 않음)');
+});
+
+test('R5 오래됨은 따로 센다 · 수집을 끄면 캐시의 os 값을 버린다', async () => {
+  const D = 86_400_000;
+  const now = 100 * D;
+  const mk = (at) => ({ ...rocky, at });
+  const p = buildOsProbe([vm('a', 'v', { gos: mk(now - 1000) }), vm('b', 'v', { gos: mk(now - 3 * D) }), vm('c', 'v', { gos: mk(now - 30 * D) }), vm('d', 'v', { gos: mk(null) })], [{ id: 'v' }], [], { now });
+  assert.deepEqual(p.detailedAge, { d1: 1, d7: 1, older: 1, unknown: 1 });
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  await refreshVmCfg(fakeClient(), 'vcO', ['vm-1'], { now: NOW, settings: SET });
+  assert.ok(cacheGet('vcO', 'vm-1').os);
+  await refreshVmCfg(fakeClient(), 'vcO', ['vm-1'], { now: NOW + 1000, settings: { ...SET, vmOsScan: false } });
+  assert.equal(cacheGet('vcO', 'vm-1').os, undefined, '끈 뒤 옛 값이 VM 에 실리지 않는다');
+  assert.ok(cacheGet('vcO', 'vm-1').cfg, 'cfg 는 그대로');
+  await refreshVmCfg(fakeClient(), 'vcO', ['vm-1'], { now: NOW + 2000, settings: { ...SET, vmCfgScan: false, vmOsScan: false } });
+  assert.equal(cacheGet('vcO', 'vm-1').os, undefined, '둘 다 꺼도 os 는 버린다');
+});
+
+test('R5 문구 — 3.54.0 릴리스 노트 · 배너가 vCenter 를 법인이라 부르지 않는다', () => {
+  const notes = JSON.parse(fs.readFileSync(new URL('../src/release-notes.json', import.meta.url), 'utf8')).notes;
+  const n354 = notes.find((x) => x.version === '3.54.0').notes.join(' ');
+  assert.equal(/법인별로 Tools/.test(n354), false); assert.equal(/종류 · 버전 · 개수만 들어갑니다/.test(n354), false);
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.equal(/직접 수집하는 법인/.test(jsx), false);
+  assert.match(jsx, /data\.detailedAge/); assert.match(jsx, /t\.partialVms/);
 });

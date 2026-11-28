@@ -40,6 +40,15 @@ export function put(vcId, ref, kind, value) {
 
 export function get(vcId, ref) { return _byVc.get(vcId)?.get(ref) || null; }
 
+/** 그 vCenter 캐시에서 한 종류(kind)만 버린다 — 그 종류의 수집을 끈 뒤 옛 값이 지금 값처럼 실리지 않게(점검 5회차 · os). 버린 수. */
+export function dropKind(vcId, kind) {
+  const m = _byVc.get(vcId);
+  if (!m) return 0;
+  let n = 0;
+  for (const e of m.values()) if (e[kind] !== undefined) { delete e[kind]; n += 1; }
+  return n;
+}
+
 /** 인벤토리에서 사라진 VM 의 항목을 버린다(누수 방지 — v2.550.3 '대상 목록 기준 정리' 규약). */
 export function prune(vcId, liveRefs) {
   const m = _byVc.get(vcId);

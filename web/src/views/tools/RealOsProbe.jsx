@@ -44,9 +44,9 @@ export function RealOsProbe({ scope }) {
       </div>
       <p className="muted" style={{ fontSize: 12, margin: '0 0 10px', lineHeight: 1.6, whiteSpace: 'normal' }}>
         게스트 계정 없이 VMware Tools 가 스스로 보고한 실제 설치 OS(vCenter 8.0.2 이상 · Tools 11.2 이상)를 {period ? `${period} 주기로` : '주기적으로'} 모읍니다(엣지가 수집하는 법인은 그 엣지의 설정을 따릅니다).
-        이 카드는 그 값이 vCenter 별로 얼마나 채워지는지와 실제로 어떤 글자로 오는지를 보여 줍니다. 내려받은 파일에는 VM 이름이 없습니다 — vCenter 이름 · 판, 수집 상태와 오류 문구, OS 종류 · 버전 · 개수가 들어 있습니다.
+        이 카드는 그 값이 vCenter 별로 얼마나 채워지는지와 실제로 어떤 글자로 오는지를 보여 줍니다. 내려받은 파일에는 VM 이름이 없습니다 — vCenter 이름 · 판, 수집 상태와 오류 문구, OS 종류 · 버전 · 개수, 형식을 못 읽은 보고 원문이 들어 있습니다.
       </p>
-      {data?.collect?.osEnabled === false && <div className="banner warn" style={{ marginBottom: 8 }}>이 포탈의 실제 OS 수집이 꺼져 있습니다(VM_OS_SCAN=false). 이 포탈이 직접 수집하는 법인은 새 값이 들어오지 않습니다.</div>}
+      {data?.collect?.osEnabled === false && <div className="banner warn" style={{ marginBottom: 8 }}>이 포탈의 실제 OS 수집이 꺼져 있습니다(VM_OS_SCAN=false). 이 포탈이 직접 수집하는 vCenter은 새 값이 들어오지 않습니다.</div>}
       {data?.demo && <div className="banner" style={{ marginBottom: 8 }}>데모 데이터입니다 — 종류 · 버전 · 개수는 실제 현장 값이 아닙니다.</div>}
       {err && <div className="banner warn" style={{ marginBottom: 8 }}>점검 결과를 읽지 못했습니다: {err}{data ? ' — 아래는 직전에 받은 결과입니다.' : ''}</div>}
       {!data ? (!err && <div className="muted" style={{ fontSize: 12 }}>읽는 중…</div>) : (
@@ -152,12 +152,17 @@ export function RealOsProbe({ scope }) {
             </>
           )}
 
+          {data.detailedAge && t.detailed > 0 && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8, whiteSpace: 'normal' }}>
+              보고를 읽은 시각(보고 있음 {n(t.detailed)}대): 하루 안 {n(data.detailedAge.d1)} · 7일 안 {n(data.detailedAge.d7)} · 7일 넘음 {n(data.detailedAge.older)}{data.detailedAge.unknown ? ` · 시각 미상 ${n(data.detailedAge.unknown)}` : ''}
+            </div>
+          )}
           {((data.extraKeys || []).length > 0 || (data.unparsed || []).length > 0 || t.extraDropped > 0) && (
             <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'normal' }}>
               {(data.extraKeys || []).length > 0 && <div>문서에 없는 키: {data.extraKeys.map((x) => `${x.key}(${n(x.count)})`).join(' · ')}{data.extraKeysOmitted ? ` · 상한으로 ${n(data.extraKeysOmitted)}가지 생략` : ''}{t.extraDropped ? ` · VM 마다 상한으로 버린 키 ${n(t.extraDropped)}개(파일에도 없음)` : ''}</div>}
               {(data.unparsed || []).length > 0 && (
                 <div>
-                  형식을 읽지 못한 보고 {n(t.unparsedVms ?? data.unparsed.reduce((a, x) => a + x.count, 0))}건 — {data.unparsedOmitted
+                  형식을 읽지 못한 보고 {n(t.unparsedVms)}건{t.partialVms ? ` · 일부만 읽은 보고 ${n(t.partialVms)}건` : ''} — {data.unparsedOmitted
                     ? `원문 ${n(data.unparsed.length)}가지는 내려받은 파일에 있고, 상한으로 ${n(data.unparsedOmitted)}가지는 파일에도 없습니다.`
                     : '원문은 내려받은 파일에 있습니다.'}
                 </div>

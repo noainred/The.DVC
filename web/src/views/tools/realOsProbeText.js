@@ -62,6 +62,9 @@ export function statusText(st, row = null, ctx = null) {
   // 점검 4회차: 묻지 않은 이유가 '판 미달' 인지 '판 미상' 인지 가른다(서버 detailedApiOk 는 판을 못 읽어도 묻지 않는다).
   if (st && st.osAt != null) return { text: `${at(st.osAt)} · ${st.osAsked ? 'Tools 보고 요청' : notAskedText(st.apiVersion)}`, tone: 'ok' };
   if (ctx?.demo) return { text: '데모 데이터(수집 상태 없음)', tone: 'muted' };
+  // 점검 5회차: REST 폴백으로 받은 vCenter 는 Tools 보고 · 구성을 읽지 않는다 — 낡은 SOAP 시절 상태를 '지금' 으로 보이지 않게(서버도 status 를 붙이지 않는다).
+  if (row?.collectSource === 'rest') return { text: 'REST 폴백 수집 — Tools 보고를 읽지 않음', tone: 'amber' };
+  if (row?.collectSource === 'site' && row?.collectMethod === 'rest') return { text: '엣지 수집(REST 폴백 — Tools 보고를 읽지 않음)', tone: 'amber' };
   if (row?.collectSource === 'site') return { text: '엣지 수집(상태는 엣지에)', tone: 'muted' };
   if (ctx?.collect && ctx.collect.osEnabled === false) return { text: '이 포탈의 실제 OS 수집 꺼짐', tone: 'amber' };
   return { text: '이 포탈 수집 기록 없음(수집 전 · 접속 실패 등)', tone: 'muted' };
