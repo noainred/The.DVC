@@ -93,7 +93,7 @@ export default function BackupSection({ bk, items, corpName, no, scoped = false 
     : `${s.days[0]?.label || ''} 하루 동안 끝난 백업 · VM 단위(하루에 여러 번 돌았으면 그 VM 의 마지막 결과) · 저장된 결과만 읽습니다`;
   const prevSub = !mode || mode === 'all' ? '' : mode === 'some'
     ? `두 기간을 다 안 ${numText(s.cmp.pairs)} / ${numText(s.cmp.of)} 법인 · 백업만 견주면 ${numText(s.cmp.cur.f)} · 앞 기간 ${numText(s.cmp.prev.f)}(${deltaText(s.cmp.cur.f, s.cmp.prev.f)})`
-    : '두 기간을 다 안 법인 · 백업이 없어 견주지 않음';
+    : s.prev.sealed ? '두 기간 모든 날을 안 법인 · 백업이 없어 견주지 않음' : '앞 기간 적재 없음(적재 전이거나 보관 기간 밖)';
   return (
     <>
       {head(periodSub)}

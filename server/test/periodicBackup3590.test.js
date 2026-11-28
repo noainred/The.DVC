@@ -209,6 +209,22 @@ test('⑤ 3절 조립 — 알았음 줄 · 앞 기간 표지 · 지금 실패 �
   const prevUnk = L.backupSummary(L.buildBackupSection({ days: [D, D + 1], prevDays: [D - 2, D - 1], dayRows: dayRows.filter((r) => r.vc === 'a'), vmRows, prevDayRows: [...prevDayRows, { day: D - 1, product: 'veeam', vc: 'q', status: 'unknown' }], products: ['veeam', 'bareos'] }));
   assert.equal(L.prevComparable(prevUnk), false, '앞 기간에 확인 불가가 있는 쌍은 견주지 않는다');
   assert.equal(L.prevMode(prevUnk), 'some', '그 쌍만 빼고 견준다 — 한 법인 하루가 전체를 막지 않는다(반증 R7)');
+  // 이번 기간 하루가 빈 쌍(적재 · 확정 전)은 앞 기간을 다 알아도 견주지 않는다 — 쌍 판정의 이번 기간 절반(반증 3회차 P5)
+  const curGap = L.backupSummary(L.buildBackupSection({ days: [D, D + 1], prevDays: [D - 2, D - 1], products: ['bareos'],
+    dayRows: [{ day: D, product: 'bareos', vc: 'a', status: 'known', targets: 4, ended: 4, ok: 4, warn: 0, fail: 0, norun: 0 }],
+    prevDayRows: [{ day: D - 2, product: 'bareos', vc: 'a', status: 'known', targets: 4, ended: 4, ok: 4, warn: 0, fail: 0, norun: 0 }, { day: D - 1, product: 'bareos', vc: 'a', status: 'known', targets: 4, ended: 4, ok: 3, warn: 0, fail: 1, norun: 0 }] }));
+  assert.equal(L.prevMode(curGap), 'none', '이번 기간 하루가 비면 그 쌍은 부분 합 — 견주지 않는다');
+  // 대상 모르는 날(tu) — 대상은 끝난 수를 하한으로 · 실행 없음은 아는 날만 · 모든 알았음 줄이 모르면 모름(반증 3회차 N3 · P2)
+  const tuSec = L.buildBackupSection({ days: [D, D + 1], products: ['veeam'], vmRows: [],
+    dayRows: [{ day: D, product: 'veeam', vc: 'a', status: 'known', targets: 10, ended: 9, ok: 9, warn: 0, fail: 0, norun: 1 },
+      { day: D + 1, product: 'veeam', vc: 'a', status: 'known', targets: null, ended: 8, ok: 8, warn: 0, fail: 0, norun: null }] });
+  const tuS = L.backupSummary(tuSec);
+  assert.deepEqual([tuS.total.tu, tuS.total.t, tuS.total.n, tuS.total.e], [1, 18, 1, 17], '대상 하한 18 ≥ 끝난 17 · 실행 없음은 아는 날 1');
+  const tuHtml = RD.renderReportHtml({ id: 'x', kind: 'weekly', items: [], corps: [{ vc: 'a', name: 'A' }], counts: {}, overall: 'ok', backup: tuSec }, {});
+  assert.match(tuHtml, /실행 없음 <b>≥ 1<\/b>/, 'HTML 도 ≥ 로(반증 3회차 P3)');
+  const allTu = L.backupSummary(L.buildBackupSection({ days: [D], products: ['veeam'], vmRows: [], dayRows: [{ day: D, product: 'veeam', vc: 'a', status: 'known', targets: null, ended: 3, ok: 3, warn: 0, fail: 0, norun: null }] }));
+  assert.match(RD.renderReportHtml({ id: 'y', kind: 'daily', items: [], corps: [], counts: {}, overall: 'ok', backup: L.buildBackupSection({ days: [D], products: ['veeam'], vmRows: [], dayRows: [{ day: D, product: 'veeam', vc: 'a', status: 'known', targets: null, ended: 3, ok: 3, warn: 0, fail: 0, norun: null }] }) }, {}), /실행 없음 <b>—<\/b>/, '모든 알았음 줄이 대상을 모르면 ≥ 0 이 아니라 —');
+  assert.equal(allTu.total.tu, 1);
   assert.equal(s.failNow, 1, '지금 결과를 다 읽지 못한 법인(b)은 지금 실패를 부분 합으로 세지 않는다 · 실지 않은 백업의 모름(a|clone-x)은 a 를 빼지 않는다(반증 F7)');
   assert.equal(s.nowPartial, 1);
   assert.equal(s.repeatVms, 1); assert.equal(s.fails, 3);
@@ -414,8 +430,10 @@ test('⑧ 설정 정규화 — 백업 · 객체 주기는 400(500 아님)', () =
   assert.equal(R.normalizeSettings({ backup: { ledger: 1 } }, null, { now }).field, 'backup.ledger');
   assert.equal(R.normalizeSettings({ backup: { keepDays: 30 } }, null, { now }).field, 'backup.keepDays');
   assert.equal(R.normalizeSettings({ backup: { keepDays: '' } }, null, { now }).field, 'backup.keepDays', '빈 값은 0 이 아니라 잘못된 값');
-  const ok = R.normalizeSettings({ backup: { kinds: ['weekly', 'monthly'], products: { clone: false }, ledger: false, keepDays: 120 } }, null, { now });
-  assert.deepEqual(ok.settings.backup, { kinds: ['weekly', 'monthly'], products: { veeam: true, bareos: true, clone: false }, ledger: false, keepDays: 120 });
+  assert.equal(R.normalizeSettings({ backup: { keepDays: 120 } }, null, { now }).field, 'backup.keepDays', '분기 회차가 앞 분기와 견주려면 190일은 있어야 한다(반증 3회차 N2)');
+  assert.equal(L.LEDGER_KEEP.min, 190);
+  const ok = R.normalizeSettings({ backup: { kinds: ['weekly', 'monthly'], products: { clone: false }, ledger: false, keepDays: 200 } }, null, { now });
+  assert.deepEqual(ok.settings.backup, { kinds: ['weekly', 'monthly'], products: { veeam: true, bareos: true, clone: false }, ledger: false, keepDays: 200 });
   assert.deepEqual(R.normalizeSettings({ chat: { enabled: false } }, ok.settings, { now }).settings.backup, ok.settings.backup);
   const doc = { items: [], corps: [], backup: sec };
   assert.deepEqual(R.matrixOf(doc).bk, L.backupMatrixOf(sec));
@@ -749,5 +767,28 @@ test('⑭ 반증 2회차 재현 — 죽은 동안 대상 모름 · 3절 연속 �
   { env: { ...process.env, CONFIG_DIR: old }, encoding: 'utf8' });
   const cols = JSON.parse(out.trim().split('\n').pop());
   assert.ok(cols.seen.includes('lossy') && cols.cursor.includes('src'), `앞 판 표에 새 칸을 더한다(반증 2회차 R5): ${out}`);
+  // 옛 줄은 잃은 틈으로(다시 확정해도 '다 봤다' 로 뒤집히지 않게 — 반증 3회차 N5) · 두 프로세스가 같은 순간 처음 열어도 둘 다 연다(N1)
+  const old2 = fs.mkdtempSync(path.join(TMP, 'olddb2-'));
+  const od2 = new DatabaseSync(path.join(old2, 'periodic.db'));
+  od2.exec('CREATE TABLE pr_bk_seen (product TEXT NOT NULL, vc TEXT NOT NULL, day INTEGER NOT NULL, first_at INTEGER, last_at INTEGER, max_gap INTEGER NOT NULL DEFAULT 0, n_fresh INTEGER NOT NULL DEFAULT 0, n_stale INTEGER NOT NULL DEFAULT 0, targets TEXT, PRIMARY KEY (product, vc, day));'
+    + "INSERT INTO pr_bk_seen(product, vc, day, max_gap) VALUES ('bareos', 'a', 1, 600000);"
+    + 'CREATE TABLE pr_bk_cursor (product TEXT NOT NULL, vc TEXT NOT NULL, last_at INTEGER, first_day INTEGER, sealed_to INTEGER, active_at INTEGER, PRIMARY KEY (product, vc));');
+  od2.close();
+  const { spawn } = await import('node:child_process');
+  const openOne = () => new Promise((resolve) => {
+    const ch = spawn(process.execPath, ['--experimental-sqlite', '--no-warnings', '-e',
+      `import(${JSON.stringify(dbMod)}).then(async (m) => { const db = await m.getPeriodicDb(); console.log(JSON.stringify({ ok: !!db, err: m.periodicDbError(), lossy: db ? db.prepare("SELECT lossy FROM pr_bk_seen WHERE vc = 'a'").get()?.lossy : null })); process.exit(0); })`],
+    { env: { ...process.env, CONFIG_DIR: old2 } });
+    let o = ''; ch.stdout.on('data', (d) => { o += d; }); ch.on('close', () => resolve(o.trim().split('\n').pop()));
+  });
+  // 경합을 결정적으로 — 칸이 없다고 읽은 뒤 ALTER 가 'duplicate column'(다른 프로세스가 먼저 더함)이면 던지지 않는다(반증 3회차 N1)
+  const { addBackupColumns } = await import('../src/periodic/db.js');
+  const fake = { prepare: () => ({ all: () => [] }), exec: (sql) => { if (/^ALTER/.test(sql)) throw new Error('duplicate column name: lossy'); } };
+  assert.doesNotThrow(() => addBackupColumns(fake), '경합에서 진 쪽도 연다');
+  const bad = { prepare: () => ({ all: () => [] }), exec: (sql) => { if (/^ALTER/.test(sql)) throw new Error('disk I/O error'); } };
+  assert.throws(() => addBackupColumns(bad), /disk I\/O/, '다른 오류는 숨기지 않는다');
+  const both = (await Promise.all([openOne(), openOne()])).map((x) => JSON.parse(x));
+  assert.ok(both.every((x) => x.ok), `같은 순간 처음 열어도 둘 다 연다: ${JSON.stringify(both)}`);
+  assert.ok(both.some((x) => x.lossy === 1), `옛 줄은 잃은 틈으로: ${JSON.stringify(both)}`);
 });
 

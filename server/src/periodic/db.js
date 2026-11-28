@@ -50,9 +50,27 @@ const BACKUP_SCHEMA = `CREATE TABLE IF NOT EXISTS pr_bk_obs (
 `;
 /** 나중에 더한 칸(표 · 칸 · 정의) — CREATE TABLE IF NOT EXISTS 는 있는 표에 칸을 더하지 않는다. */
 const BACKUP_COLUMNS = Object.freeze([
-  ['pr_bk_seen', 'lossy', 'INTEGER NOT NULL DEFAULT 0'],
-  ['pr_bk_cursor', 'src', 'TEXT'],
+  // 옛 줄은 잃은 것이 있었는지 모른다 — 잃은 틈으로 본다(다시 확정해도 '다 봤다' 로 뒤집히지 않게 · 반증 3회차 N5)
+  ['pr_bk_seen', 'lossy', 'INTEGER NOT NULL DEFAULT 0', 'UPDATE pr_bk_seen SET lossy = 1'],
+  ['pr_bk_cursor', 'src', 'TEXT', null],
 ]);
+/**
+ * 나중에 더한 칸을 앞 판 표에 더한다(순수 — conn 만 쓴다 · 시험이 경합을 흉내 낸 conn 으로 부른다).
+ *   두 프로세스가 같은 순간 처음 열면 진 쪽의 ALTER 가 'duplicate column' — 이미 더해졌으니 그대로 간다(반증 3회차 N1 — 아니면 periodic.db 전체가 닫혔다).
+ */
+export function addBackupColumns(conn) {
+  for (const [table, col, ddl, after] of BACKUP_COLUMNS) {
+    const has = conn.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+    if (has) continue;
+    try {
+      conn.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+    } catch (e) {
+      if (!/duplicate column/i.test(String(e?.message || e))) throw e;
+      continue;   // 다른 프로세스가 더했다 — 옛 줄 고치기도 그쪽이 했다
+    }
+    if (after) conn.exec(after);   // 더한 순간의 옛 줄만 고친다(그 뒤 새 줄은 정의의 기본값)
+  }
+}
 const lockRetry = createLockRetry();
 const DAY = 86_400_000;
 
@@ -94,10 +112,7 @@ async function openDb() {
       CREATE INDEX IF NOT EXISTS pr_deliv_kind_at ON pr_deliveries(kind, at);`);
     conn.exec(BACKUP_SCHEMA);
     // 칸 더하기 — 앞 판(릴리스 전 빌드 포함)이 만든 표에 새 칸이 없으면 더한다(반증 R5 — 'no such column' 으로 3절 전체가 읽히지 않았다). 다음 칸도 여기에.
-    for (const [table, col, ddl] of BACKUP_COLUMNS) {
-      const has = conn.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
-      if (!has) conn.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
-    }
+    addBackupColumns(conn);
     lockRetry.ok();
     _db = conn; _err = '';
   } catch (e) {

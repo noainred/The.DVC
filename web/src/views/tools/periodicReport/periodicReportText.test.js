@@ -86,6 +86,7 @@ describe('정기 점검 보고 문구', () => {
     expect(T.bkAtLeast({ kd: 2, tu: 1 }, 17)).toBe('≥ 17', '대상을 모르는 날이 있으면 적어도');
     expect(T.bkAtLeast({ kd: 2, tu: 0 }, 17)).toBe('17');
     expect(T.bkAtLeast({ kd: 0, tu: 0 }, 0)).toBe('—');
+    expect(T.bkAtLeast({ kd: 2, tu: 2 }, 0)).toBe('—', '모든 알았음 줄이 대상을 모르면 ≥ 0 이 아니라 모름(반증 3회차 N3)');
   });
   it('v3.59 백업 3절 — 법인 판정 칸은 백업 항목 행의 가장 나쁜 것(새 판정 없음)', () => {
     const items = [

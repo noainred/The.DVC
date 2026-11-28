@@ -38,8 +38,8 @@ export const SEAL_LAG_MS = 3 * 3_600_000;
 export const REFILL_DAYS = 4;
 /** 관측 원본 · 관측 범위 보관 일수(확정 뒤 재확정 · 주간 줄무늬 · 연속 실패 계산에만 쓴다). */
 export const RAW_KEEP_DAYS = 40;
-/** 확정 결과 보관 일수(설정) — 분기 보고서가 앞 분기와 견줄 수 있게 최소 92일. */
-export const LEDGER_KEEP = Object.freeze({ def: 400, min: 92, max: 1825 });
+/** 확정 결과 보관 일수(설정) — 분기 보고서가 앞 분기와 견줄 수 있게 최소 190일(이번 분기 92일 + 앞 분기 92일 + 여유 — 92일이면 앞 분기가 늘 정리돼 있었다 · 반증 3회차 N2). */
+export const LEDGER_KEEP = Object.freeze({ def: 400, min: 190, max: 1825 });
 const HISTORY_PRODUCTS = new Set(['bareos', 'clone']);
 const CLOCK_SKEW_MS = 5 * 60_000;
 /** 실패 목록 상한(문서 크기) — 법인마다 최소 몇 줄은 남긴다(범위 계정 · 법인판이 자기 법인 실패를 '없음' 으로 받지 않게 — 판정 축 반증 F3). */
@@ -286,7 +286,7 @@ export function backupJudge({ failNow = 0, failRepeat = 0, rpo7 = 0, rpo3 = 0, u
 
 /* ───────────────────────── 보고서 3절 ───────────────────────── */
 
-/** 묶음 합 — t · n(대상 · 실행 없음)은 대상을 안 줄(kd - tu)만의 합이고 tu = 대상을 모르는 알았음 줄 수(화면 '≥ n'). */
+/** 묶음 합 — tu = 대상을 모르는 알았음 줄 수. 그 줄은 대상에 끝난 수만 더하고(하한) 실행 없음에는 더하지 않는다(화면 '≥ n' · 모든 알았음 줄이 모르면 '—'). */
 const zero = () => ({ t: 0, e: 0, ok: 0, w: 0, f: 0, n: 0, kd: 0, ud: 0, tu: 0 });
 const pz = () => ({ e: 0, f: 0, ok: 0, w: 0, kd: 0, ud: 0 });
 const addInto = (a, b) => { for (const k of Object.keys(a)) a[k] += Number(b?.[k]) || 0; return a; };
@@ -354,7 +354,8 @@ export function buildBackupSection(a) {
     if (r.status !== 'known') { p.ud += 1; di[4] += 1; continue; }
     p.kd += 1; di[5] += 1;
     p.e += Number(r.ended) || 0; p.ok += Number(r.ok) || 0; p.w += Number(r.warn) || 0; p.f += Number(r.fail) || 0;
-    if (r.targets == null) p.tu += 1; else { p.t += Number(r.targets) || 0; p.n += Number(r.norun) || 0; }
+    // 대상을 모르는 날 — 대상은 적어도 그날 끝난 수(하한이 끝난 수보다 작아 보이지 않게 · 반증 3회차 N3) · 실행 없음은 더하지 않는다
+    if (r.targets == null) { p.tu += 1; p.t += Number(r.ended) || 0; } else { p.t += Number(r.targets) || 0; p.n += Number(r.norun) || 0; }
     di[0] += Number(r.ended) || 0; di[1] += Number(r.ok) || 0; di[2] += Number(r.warn) || 0; di[3] += Number(r.fail) || 0;
   }
   for (const r of Array.isArray(a.pending) ? a.pending : []) {

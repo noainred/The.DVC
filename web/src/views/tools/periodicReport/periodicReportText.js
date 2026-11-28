@@ -116,7 +116,7 @@ export function prevMode(s) {
 }
 export const prevComparable = (s) => prevMode(s) === 'all';
 /** 대상 · 실행 없음 — 대상 목록을 모르는 날(tu)이 있으면 '≥ n'(아는 날의 합 — 적어도). 알았음 줄이 없으면 '—'. */
-export const bkAtLeast = (c, v) => (c && Number(c.kd) > 0 ? `${Number(c.tu) > 0 ? '≥ ' : ''}${numText(v)}` : '—');
+export const bkAtLeast = (c, v) => (c && Number(c.kd) > 0 && Number(c.tu || 0) < Number(c.kd) ? `${Number(c.tu) > 0 ? '≥ ' : ''}${numText(v)}` : '—');   // 모든 알았음 줄이 대상을 모르면 '—'(서버 render.js kt 와 같다)
 /** 백업 항목들(run.items)에서 법인(vc) 하나의 가장 나쁜 판정 — 항목이 없거나 그 법인 행이 없으면 null. */
 export function backupCorpStatus(items, vc, products = BK_PRODUCTS) {
   const rank = { ok: 0, unknown: 1, warn: 2, crit: 3 };

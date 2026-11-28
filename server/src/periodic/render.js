@@ -79,7 +79,7 @@ const pct = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number
 /** 알았음 줄(kd)이 없는 묶음의 수는 '—'(못 읽은 값을 0 으로 적지 않는다). */
 const kn = (x, v) => (x && Number(x.kd) > 0 ? num(v) : '—');
 /** 대상 · 실행 없음 — 대상 목록을 모르는 날(tu)이 있으면 아는 날의 합이라 '≥ n'(적어도). */
-const kt = (x, v) => (x && Number(x.kd) > 0 ? `${Number(x.tu) > 0 ? '≥ ' : ''}${num(v)}` : '—');
+const kt = (x, v) => (x && Number(x.kd) > 0 && Number(x.tu || 0) < Number(x.kd) ? `${Number(x.tu) > 0 ? '≥ ' : ''}${num(v)}` : '—');   // 모든 알았음 줄이 대상을 모르면 모름(≥ 0 이 아니다 — 반증 3회차 N3)
 const STRIP = { ok: ['✓', '#15803d'], warn: ['✓', '#b45309'], fail: ['×', '#b91c1c'], none: ['–', '#64748b'], unknown: ['?', '#475569'], pre: ['·', '#94a3b8'] };
 /** 3절 합계 · 법인 줄(라우트가 붙였으면 그것 — 아니면 여기서 같은 함수로). */
 export function backupParts(bk) {
@@ -92,7 +92,7 @@ function prevText(s, key = 'f') {
   if (!mode) return '';
   if (mode === 'all') return `(앞 기간 ${num(s.prev[key])})`;
   if (mode === 'some') return `(두 기간을 다 안 ${num(s.cmp.pairs)} / ${num(s.cmp.of)} 법인 · 백업만 견주면 이번 ${num(s.cmp.cur[key])} · 앞 기간 ${num(s.cmp.prev[key])})`;
-  return '(앞 기간과 견줄 법인 · 백업이 없음 — 두 기간 다 안 곳이 없다)';
+  return s.prev.sealed ? '(앞 기간과 견줄 법인 · 백업이 없음 — 두 기간 모든 날을 안 곳이 없다)' : '(앞 기간 적재 없음 — 적재 전이거나 보관 기간 밖)';   // 원인을 가른다(반증 3회차 N4)
 }
 const failNowText = (s) => (s.failNow == null ? ' · 지금 실패 상태 모름(결과를 읽지 못함)' : `${s.failNow ? ` · 지금 실패 상태 ${num(s.failNow)}대` : ''}${s.nowPartial ? `(법인 ${num(s.nowPartial)}곳은 지금 결과를 못 읽어 뺌)` : ''}`);
 /** 3절 한 줄 요약(메일). 실을 것이 없으면 ''. */
