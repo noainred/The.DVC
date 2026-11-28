@@ -77,7 +77,8 @@ export function parseGuestDetailedData(raw) {
   let ok = false;
   let knownKeys = 0;      // 아는 키를 형식대로 읽은 수(값이 비어도)
   let extraDropped = 0;   // 모르는 키 상한 · 이름 형식으로 버린 수
-  let skipped = 0;        // 형식 밖 조각 수
+  let skipped = 0;        // 형식 밖 조각 수 · 같은 아는 키가 다시 나온 수(점검 6회차 — 처음 값 하나로 고정하고 흔적을 partial · raw 로 남긴다)
+  const seenKnown = new Set();
   let truncated = raw.length > RAW_IN_MAX;
   const n = s.length;
   let i = 0;
@@ -107,6 +108,8 @@ export function parseGuestDetailedData(raw) {
     if (!closed) { truncated = true; break; }   // 닫는 따옴표 없이 끝났다 — 잘린 값은 버린다(지어내지 않는다)
     const val = cap(parts.join(''), VALUE_MAX);
     if (DETAIL_SET.has(key)) {
+      if (seenKnown.has(key)) { skipped += 1; continue; }
+      seenKnown.add(key);
       knownKeys += 1;
       if (val != null) { fields[key] = val; ok = true; }
     } else if (val != null && !Object.hasOwn(extra, key)) {
@@ -184,7 +187,8 @@ export function normalizeGos({ at = null, edgeAt = null, asked = false, parse = 
   const d = a && detailed && typeof detailed === 'object' && Object.keys(detailed).length ? detailed : null;
   const r0 = a ? cap(raw, RAW_KEEP_MAX) : null;
   let p = a && PARSE_SET.has(parse) ? parse : null;
-  if (d) { if (p !== 'partial') p = 'ok'; } else if (p === 'ok' || p === 'partial') p = r0 ? 'malformed' : null;
+  // partial 은 근거 원문(raw)이 있을 때만 — 엣지가 원문 없이 partial 이라 하면 ok 로 낮춘다(점검 6회차: 화면에 '일부만 읽음' 이 세어지는데 원문 목록은 비었다).
+  if (d) { p = p === 'partial' && r0 ? 'partial' : 'ok'; } else if (p === 'ok' || p === 'partial') p = r0 ? 'malformed' : null;
   if (a && !d && p == null && r0) p = 'malformed';
   const e = a && extra && typeof extra === 'object' && Object.keys(extra).length ? extra : null;
   const drop = a && Number.isSafeInteger(extraDropped) && extraDropped > 0 ? extraDropped : 0;
@@ -258,7 +262,9 @@ export function sanitizeVmGos(g, now = Date.now()) {
     at,
     edgeAt: typeof g.at === 'number' && Number.isFinite(g.at) && g.at > now ? Math.trunc(g.at) : null,
     asked: g.asked === true,
-    parse: typeof g.parse === 'string' ? g.parse : null,
+    // 점검 6회차(호환): 이미 릴리스된 엣지(3.54 ~ 3.58)는 parse 칸 없이 '아는 키를 못 읽은 원문' 을 raw 로 보낸다(값만 빈 보고 포함).
+    //   parse 가 없고 detailed 도 없으면 원문을 같은 파서로 다시 판정한다(원문은 512자 상한 — 비용이 작다). 옛 엣지의 partial 은 원문이 오지 않아 되살릴 수 없다(ok 로 남는다).
+    parse: typeof g.parse === 'string' ? g.parse : (!detailed && typeof g.raw === 'string' && g.asked === true ? outcomeOf(parseGuestDetailedData(g.raw.slice(0, RAW_KEEP_MAX))) : null),
     detailed, extra, extraDropped,
     raw: typeof g.raw === 'string' ? g.raw : null,
     vapp,

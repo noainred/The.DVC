@@ -109,13 +109,17 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
     const apiVersion = typeof c?.sc?.apiVersion === 'string' ? c.sc.apiVersion.slice(0, 32) : null;
     // 점검 4회차: '예산 소진으로 건너뜀' 은 **읽을 VM 이 있는데** 예산이 없을 때만 — 예전에는 대상이 0 이어도 건너뜀(주황)을 남겼다.
     const skip = dueAll.length > 0 && Date.now() >= budgetEnd;
+    // 점검 6회차: 장치 목록(dev)에 읽을 VM 이 있으면 os 는 남은 예산의 절반까지만 — 재시작 직후 os 가 예산을 다 써 dev 가 여러 주기 통째로 빠졌다.
+    const devWaiting = cfgOn && !(st.devBackoffUntil > now)
+      && pickDue(vcId, vmRefs.filter((r) => !_retry.dev.resting(vcId, r, now)), 'dev', { now, periodMs: settings.vmDevRefreshMs, max: 1 }).length > 0;
+    const osEnd = devWaiting ? Math.min(budgetEnd, Date.now() + Math.max(0, budgetEnd - Date.now()) / 2) : budgetEnd;
     setStatus(vcId, skip ? { osAsked: asked, osApiVersion: apiVersion, osSkippedAt: now, osSkipReason: 'budget' } : { osAsked: asked, osApiVersion: apiVersion, osSkipReason: null });
     const due = skip ? [] : dueAll;
     if (due.length) {
       const track = {};
       try {
         const r = await fetchKind(c, vcId, due, {
-          kind: 'os', paths: gosPaths(asked), chunk: CHUNK, now, budgetEnd, track,
+          kind: 'os', paths: gosPaths(asked), chunk: CHUNK, now, budgetEnd: osEnd, track,
           retrieveOpts: asked ? { soapVersion: GOS_SOAP_VERSION } : undefined,
           parse: (props, at) => parseVmGosProps(props, at, { asked }),
         });
@@ -130,8 +134,12 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
       }
     }
   }
-  if (cfgOn && !(st.devBackoffUntil > now) && Date.now() < budgetEnd) {
-    const due = pickDue(vcId, vmRefs.filter((r) => !_retry.dev.resting(vcId, r, now)), 'dev', { now, periodMs: settings.vmDevRefreshMs, max: settings.vmDevPerCycle });
+  if (cfgOn && !(st.devBackoffUntil > now)) {
+    const dueAll = pickDue(vcId, vmRefs.filter((r) => !_retry.dev.resting(vcId, r, now)), 'dev', { now, periodMs: settings.vmDevRefreshMs, max: settings.vmDevPerCycle });
+    // 점검 6회차: 읽을 VM 이 있는데 예산이 없어 건너뛰면 사유를 남긴다(os 와 같은 규칙 — 조용히 빠지지 않게).
+    const skip = dueAll.length > 0 && Date.now() >= budgetEnd;
+    setStatus(vcId, skip ? { devSkippedAt: now, devSkipReason: 'budget' } : { devSkipReason: null });
+    const due = skip ? [] : dueAll;
     if (due.length) {
       const track = {};
       try {

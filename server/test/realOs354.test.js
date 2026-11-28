@@ -735,3 +735,71 @@ test('R5 문구 — 3.54.0 릴리스 노트 · 배너가 vCenter 를 법인이�
   assert.equal(/직접 수집하는 법인/.test(jsx), false);
   assert.match(jsx, /data\.detailedAge/); assert.match(jsx, /t\.partialVms/);
 });
+
+/* ---------------------------- 점검 6회차(재설계 뒤 반증 재현) 회귀 ---------------------------- */
+
+test('R6 같은 아는 키 중복 — 처음 값 + partial(원문 남김)', () => {
+  const P = (x) => parseVmGosProps({ 'guest.guestDetailedData': x }, 1, { asked: true });
+  const a = P("prettyName='A' prettyName='B'");
+  assert.equal(a.detailed.prettyName, 'A'); assert.equal(a.parse, 'partial'); assert.ok(a.raw);
+  const b = P("prettyName='A' prettyName=''");
+  assert.equal(b.detailed.prettyName, 'A'); assert.equal(b.parse, 'partial');
+  const c = P("prettyName='' prettyName='B'");
+  assert.equal(c.detailed, null); assert.equal(c.parse, 'malformed', '처음 값(빈 값)으로 고정 — 중복 흔적이 있어 empty 가 아니다');
+});
+
+test('R6 partial 은 원문이 있을 때만 — 엣지가 원문 없이 보내면 ok', () => {
+  for (const raw of [undefined, null, '', '   ']) {
+    const g = sanitizeVmGos({ asked: true, parse: 'partial', detailed: { prettyName: 'R' }, raw }, 1);
+    assert.equal(g.parse, 'ok', String(raw)); assert.equal(g.raw, null);
+  }
+  const g2 = sanitizeVmGos({ asked: true, parse: 'partial', detailed: { prettyName: 'R' }, raw: 'x junk' }, 1);
+  assert.equal(g2.parse, 'partial'); assert.equal(g2.raw, 'x junk');
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.match(jsx, /t\.unparsedVms > 0 \|\| t\.partialVms > 0\) && \(/, '원문 목록이 비어도 수는 보인다');
+});
+
+test('R6 옛 엣지(3.54 ~ 3.58 모양 — parse 칸 없음) 호환: 빈 값 보고는 empty, 형식 밖은 malformed', () => {
+  // 3.54.0 엣지는 아는 키를 못 읽으면 원문을 raw 로, 읽었으면 detailed 만 보냈다(emptyValues · parse 칸 없음).
+  const empty = sanitizeVmGos({ at: 1, asked: true, detailed: null, extra: null, raw: "prettyName='' distroName=''", vapp: null }, 5);
+  assert.equal(empty.parse, 'empty'); assert.equal(empty.raw, null);
+  const bad = sanitizeVmGos({ at: 1, asked: true, detailed: null, extra: null, raw: 'zz', vapp: null }, 5);
+  assert.equal(bad.parse, 'malformed'); assert.equal(bad.raw, 'zz');
+  const ok = sanitizeVmGos({ at: 1, asked: true, detailed: { prettyName: 'R' }, extra: null, raw: null, vapp: null }, 5);
+  assert.equal(ok.parse, 'ok');
+  const notAsked = sanitizeVmGos({ at: 1, asked: false, detailed: null, raw: "prettyName=''" }, 5);
+  assert.equal(notAsked.parse, null);
+  const p = buildOsProbe([vm('a', 'v', { gos: empty }), vm('b', 'v', { gos: bad })], [{ id: 'v' }], [], { now: 9 });
+  assert.equal(p.noDetail.emptyValues, 1); assert.equal(p.noDetail.unparsed, 1);
+});
+
+test('R6 예산 공정성 — dev 에 읽을 VM 이 있으면 os 는 남은 예산의 절반까지만 · dev 건너뜀 사유', async () => {
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  const slow = (ms) => {
+    const calls = [];
+    return {
+      calls, sc: { apiVersion: '8.0.3.0' },
+      async retrieveManyObjectProps(type, refs, paths, chunk, opts) {
+        calls.push({ paths: [...paths], t: Date.now() });
+        await new Promise((r) => setTimeout(r, ms));
+        const isOs = paths.includes('config.vAppConfig.product');
+        return refs.map((ref) => ({ type, ref, props: isOs ? { 'guest.guestDetailedData': ROCKY } : paths.includes('config.hardware.device') ? { 'config.hardware.device': '' } : {} }));
+      },
+    };
+  };
+  const refs = Array.from({ length: 1000 }, (_, i) => `vm-${i}`);
+  const c = slow(60);
+  const r = await refreshVmCfg(c, 'vcF', refs, { now: NOW, budgetMs: 400, settings: { ...SET, vmCfgPerCycle: 250, vmOsPerCycle: 1000, vmDevPerCycle: 75 } });
+  assert.ok(r.dev && r.dev.fetched > 0, `os 가 예산을 다 쓰지 않아 dev 도 읽는다: ${JSON.stringify(r)}`);
+  assert.ok(r.os.cut > 0, 'os 는 남은 몫까지만 읽고 다음 주기로');
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  await refreshVmCfg(fakeClient(), 'vcG', ['vm-1'], { now: NOW, budgetMs: 0, settings: SET });
+  assert.equal(statusOf('vcG').devSkipReason, 'budget', '읽을 VM 이 있는데 예산이 없으면 사유를 남긴다');
+});
+
+test('R6 화면 문구 — 나이 구간 · 버린 키 · 파일 내용', () => {
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.match(jsx, /1~7일 \{n\(data\.detailedAge\.d7\)\}/); assert.equal(/7일 안 \{/.test(jsx), false);
+  assert.match(jsx, /\{t\.extraDropped > 0 && <div>상한 · 이름 형식으로 버린 모르는 키/);
+  assert.match(jsx, /문서에 없는 키의 이름 · 개수와 예시 값/);
+});

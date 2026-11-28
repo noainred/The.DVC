@@ -602,7 +602,7 @@
   **전역 판을 올리지 말 것**(다른 응답의 직렬화가 바뀔 수 있다). 판 문자열은 `SOAP_VERSION_RE` 꼴만 헤더에 싣는다. vCenter `about.apiVersion` 이 8.0.2 미만이거나 못 읽으면 **묻지 않는다**
   (`asked:false` — 화면이 'Tools 가 보고하지 않음' 과 '묻지 않음' 을 가른다). 없는 속성은 요청 전체를 InvalidProperty 로 만든다.
 - **수집**: vmcfg 의 셋째 종류 `os`(`vmcfg/collect.js` — cfg 다음 · dev 앞 · 6시간 · 주기당 1,000 · 실패는 그 종류만 쉼). 설정 객체에 `vmOsScan` 이 없으면 끈 것으로 본다(옛 호출 · 시험 보존).
-  스냅샷 `vm.gos`(없으면 미수집). 정상 보고는 원문을 싣지 않고, **아는 키를 하나도 못 읽은 원문만** `raw`(512자) — 실측으로 형식을 고치기 위해서다.
+  스냅샷 `vm.gos`(없으면 미수집). 정상(ok) 보고는 원문을 싣지 않고, **형식 밖 조각 · 같은 키 중복이 있거나(partial) 아는 키를 하나도 못 읽은(malformed) 보고만** `raw`(512자) — 실측으로 형식을 고치기 위해서다(규칙은 `normalizeGos` 하나 · 6회차 정정).
 - **엣지 수신**: `routes/central.js sanitizeInventoryList` 가 `sanitizeVmGos` 로 다시 좁힌다(아는 키만 · 글자만 · 상한 · 시각은 수신 시각 이하). 수집기가 `vm.gos` 에 필드를 더하면 여기에도.
 - **점검**: `GET /api/admin/os-scan/probe`(관리자 · 조회 범위 먼저 · 요청 필터 뒤) — 집계는 `inventory/osProbe.js buildOsProbe`(O(N) 1회 · 목록마다 상한 + 생략 수). **VM 이름을 싣지 않는다**
   (화면이 응답을 그대로 JSON 파일로 내려받게 한다). 보고 없음 사유 키는 `NO_DETAIL_REASONS` 하나 — 웹 문구 `views/tools/realOsProbeText.js REASON_TEXT` 와 시험이 대조.
@@ -614,6 +614,8 @@
   **`normalizeGos` 하나**가 세운다 — 수집기(`parseVmGosProps`)와 엣지 정제(`sanitizeVmGos`)가 둘 다 지난다(무작위 2,000조합 시험). 점검의 사유는 parse 만 본다(raw · extra 로 다시 짐작하지 않는다).
   글자 칸은 전부 `cleanText`(짝 잃은 서로게이트 → U+FFFD · 자른 자리 반쪽 제거). 수집 경로는 세 값(`direct` · `rest` · `site` + 엣지 `collectMethod:'rest'`) — 이 포탈 상태는 `direct` 에만.
   보고 나이는 구간으로 따로 센다(`detailedAge` — 읽은 시각 기준 · 문턱을 지어내지 않는다). `VM_OS_SCAN=false` 면 캐시의 os 를 버린다(`cache.dropKind`). 모르는 키 버림 수 `extraDropped`. schema 5.
+  6회차: partial 은 원문이 있을 때만(엣지가 원문 없이 보내면 ok) · 같은 아는 키 중복은 처음 값 + partial · **옛 엣지(3.54 ~ 3.58, parse 칸 없음)의 raw 는 같은 파서로 다시 판정**(빈 값 보고가 '형식 못 읽음' 으로 바뀌지 않게 — 옛 엣지 partial 은 되살릴 수 없다) ·
+  장치 목록(dev)에 읽을 VM 이 있으면 os 는 남은 예산의 절반까지만 · dev 도 예산으로 건너뛰면 `devSkipReason`.
   **형식을 못 읽은 보고(raw · extra)는 사유 'unparsed' 로 따로** — 'Tools 정상인데 보고 없음'(other)과 섞으면 파서 결함이 Tools 미보고로 읽힌다(반증 지적).
   **어플라이언스 = OVF 제품 정보(vapp)가 있는 VM 만** — 확장이 관리하는 VM(managedBy: 복제본 · vCLS)은 '확장 관리' 로 따로 센다. 묶음 키는 `JSON.stringify([…])`(값 안 구분자로 합쳐지지 않게).
 - 남긴 것(다음 단계): 판정 코어(종류 · 버전 · Windows 빌드 → 릴리스) · Summary OS 합계 전환 · VM 성격(일반 / 어플라이언스 / 시스템 VM)과 수동 지정 · EOL · SQLite 저장 · 게스트 조회 스캐너를 '보고 없는 VM 만' 으로.
