@@ -4,7 +4,7 @@
 // 인벤토리 수집은 성공이고, 직전 캐시 값은 그대로 남는다(at 으로 낡음이 보인다).
 import { config } from '../config.js';
 import { VM_CFG_PATHS, VM_DEV_PATHS, parseVmCfgProps, parseVmDeviceHygiene } from './parse.js';
-import { pickDue, put, prune, setStatus, statusOf } from './cache.js';
+import { pickDue, put, prune, setStatus, statusOf, get as cacheGet } from './cache.js';
 import { createRetryTracker, isRequestTimeout } from '../dscfg/collect.js'; // v2.721(감사 S1-03) — 대상별 재시도 백오프(한 벌)
 import { GOS_SOAP_VERSION, detailedApiOk, gosPaths, parseVmGosProps } from '../inventory/guestDetail.js'; // v3.54(실제 OS 1단계)
 
@@ -90,10 +90,24 @@ export async function refreshVmCfg(c, vcId, vmRefs, { now = Date.now(), budgetMs
   //   guestDetailedData 는 API 8.0.2.0 속성이라 **이 요청만** SOAPAction 을 그 판으로 보낸다(포탈 기본 8.0.0.1). 판이 8.0.2 미만이거나
   //   못 읽은 vCenter 에는 묻지 않는다(asked:false — 화면이 'Tools 가 보고하지 않음' 과 '묻지 않음' 을 가른다).
   //   settings.vmOsScan 이 없는 설정 객체(옛 호출·테스트)는 끈 것으로 본다 — 운영 설정(config.js)은 기본 켜짐.
-  if (osOn && !(st.osBackoffUntil > now) && Date.now() < budgetEnd) {
+  if (osOn && !(st.osBackoffUntil > now) && Date.now() >= budgetEnd) {
+    // 점검 3회차: 앞 종류가 예산을 다 써 이번 주기를 건너뛰었다 — 사유를 남긴다(화면이 '수집 기록 없음 · 접속 실패 등' 으로 흐리지 않게).
+    setStatus(vcId, { osSkippedAt: now, osSkipReason: 'budget' });
+  } else if (osOn && !(st.osBackoffUntil > now)) {
     const asked = detailedApiOk(c?.sc?.apiVersion);
     const periodMs = settings.vmOsRefreshMs || 21_600_000;
-    const due = pickDue(vcId, vmRefs.filter((r) => !_retry.os.resting(vcId, r, now)), 'os', { now, periodMs, max: settings.vmOsPerCycle || 1_000 });
+    const max = settings.vmOsPerCycle || 1_000;
+    // 점검 3회차: vCenter 판이 바뀌어 '묻는가(asked)' 가 달라진 VM 은 갱신 주기를 기다리지 않고 먼저 다시 읽는다 — 예전에는 8.0.2 로 올려도
+    //   최대 6시간 동안 '판 미달 · 묻지 않음' 이 남았다. 판 · asked 는 대상이 0 이어도 상태에 바로 싣는다.
+    const stale = [];
+    const rest = [];
+    for (const r of vmRefs) {
+      if (_retry.os.resting(vcId, r, now)) continue;
+      const e = cacheGet(vcId, r)?.os;
+      (e && e.asked !== asked ? stale : rest).push(r);
+    }
+    const due = [...stale.slice(0, max), ...pickDue(vcId, rest, 'os', { now, periodMs, max: Math.max(0, max - stale.length) })];
+    setStatus(vcId, { osAsked: asked, osApiVersion: typeof c?.sc?.apiVersion === 'string' ? c.sc.apiVersion.slice(0, 32) : null, osSkipReason: null });
     if (due.length) {
       const track = {};
       try {

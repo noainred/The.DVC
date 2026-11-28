@@ -178,6 +178,7 @@ export function buildOsProbe(vms, vcenters = [], statuses = [], { now = Date.now
       osAt: Number.isFinite(s.osAt) ? s.osAt : null, osError: typeof s.osError === 'string' ? s.osError : null,
       osAsked: typeof s.osAsked === 'boolean' ? s.osAsked : null, apiVersion: typeof s.osApiVersion === 'string' ? s.osApiVersion : null,
       osFetched: Number.isFinite(s.osFetched) ? s.osFetched : null, osCut: Number.isFinite(s.osCut) ? s.osCut : null,
+      osSkippedAt: Number.isFinite(s.osSkippedAt) ? s.osSkippedAt : null, osSkipReason: typeof s.osSkipReason === 'string' ? s.osSkipReason : null,
       osBackoffUntil: Number.isFinite(s.osBackoffUntil) && s.osBackoffUntil > now ? s.osBackoffUntil : null,
     } : null;
   }

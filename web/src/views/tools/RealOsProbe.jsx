@@ -8,10 +8,13 @@ import { saveText } from '../../util/saveBlob.js';
 import { Card } from './shared.jsx';
 import { REASON_TEXT, n, pct, at, statusText, periodText, topText, managedText, archText, probeFileName } from './realOsProbeText.js';
 
+const SAMPLE_VIEW = 50;   // 표본 표가 처음에 그리는 행 수 — 넘으면 제목이 밝히고 '모두 보기' 로 펼친다
+
 export function RealOsProbe({ scope }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [allSamples, setAllSamples] = useState(false);   // 점검 3회차: 표본 표가 50행에서 잘렸으면 밝히고 펼친다
   const gen = useRef(0);
   const load = () => {
     const g = ++gen.current;
@@ -41,7 +44,7 @@ export function RealOsProbe({ scope }) {
       </div>
       <p className="muted" style={{ fontSize: 12, margin: '0 0 10px', lineHeight: 1.6, whiteSpace: 'normal' }}>
         게스트 계정 없이 VMware Tools 가 스스로 보고한 실제 설치 OS(vCenter 8.0.2 이상 · Tools 11.2 이상)를 {period ? `${period} 주기로` : '주기적으로'} 모읍니다(엣지가 수집하는 법인은 그 엣지의 설정을 따릅니다).
-        이 카드는 그 값이 법인별로 얼마나 채워지는지와 실제로 어떤 글자로 오는지를 보여 줍니다. 내려받은 파일에는 VM 이름이 없고 종류 · 버전 · 개수만 있습니다.
+        이 카드는 그 값이 vCenter 별로 얼마나 채워지는지와 실제로 어떤 글자로 오는지를 보여 줍니다. 내려받은 파일에는 VM 이름이 없습니다 — vCenter 이름 · 판, 수집 상태와 오류 문구, OS 종류 · 버전 · 개수가 들어 있습니다.
       </p>
       {data?.collect?.osEnabled === false && <div className="banner warn" style={{ marginBottom: 8 }}>이 포탈의 실제 OS 수집이 꺼져 있습니다(VM_OS_SCAN=false). 이 포탈이 직접 수집하는 법인은 새 값이 들어오지 않습니다.</div>}
       {data?.demo && <div className="banner" style={{ marginBottom: 8 }}>데모 데이터입니다 — 종류 · 버전 · 개수는 실제 현장 값이 아닙니다.</div>}
@@ -61,7 +64,7 @@ export function RealOsProbe({ scope }) {
             </div>
           )}
 
-          <div style={{ fontSize: 12.5, fontWeight: 700, margin: '6px 0' }}>법인별 수집 현황</div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, margin: '6px 0' }}>vCenter별 수집 현황</div>
           <div style={{ overflowX: 'auto', marginBottom: 12 }}>
             <STable className="v3-table" minWidth={1100}>
               <thead><tr>
@@ -93,12 +96,17 @@ export function RealOsProbe({ scope }) {
           </div>
 
           <div style={{ fontSize: 12.5, fontWeight: 700, margin: '6px 0' }}>
-            Tools 가 보고한 OS 종류 · 버전 <span className="muted" style={{ fontWeight: 500 }}>{n((data.samples || []).length)}가지{data.samplesOmitted ? ` · 상한으로 ${n(data.samplesOmitted)}가지 생략(파일에도 없음)` : ''}</span>
+            Tools 가 보고한 OS 종류 · 버전 <span className="muted" style={{ fontWeight: 500 }}>{n((data.samples || []).length)}가지{data.samplesOmitted ? ` · 상한으로 ${n(data.samplesOmitted)}가지 생략(파일에도 없음)` : ''}{!allSamples && (data.samples || []).length > SAMPLE_VIEW ? ` · 위 ${SAMPLE_VIEW}가지만 표시` : ''}</span>
+            {(data.samples || []).length > SAMPLE_VIEW && (
+              <button className="logout-btn" style={{ flex: 'none', padding: '3px 10px', marginLeft: 8, fontSize: 12 }} onClick={() => setAllSamples((v) => !v)}>
+                {allSamples ? `위 ${SAMPLE_VIEW}가지만` : '모두 보기'}
+              </button>
+            )}
           </div>
           <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-            <STable className="v3-table" minWidth={1140} limit={50}>
+            <STable className="v3-table" minWidth={1140} limit={allSamples ? 0 : SAMPLE_VIEW}>
               <thead><tr>
-                <th>보고된 이름</th><th>계열</th><th>배포판</th><th>버전</th><th>아키텍처</th><th className="right">VM</th><th className="right">켜짐</th><th className="right">법인</th>
+                <th>보고된 이름</th><th>계열</th><th>배포판</th><th>버전</th><th>아키텍처</th><th className="right">VM</th><th className="right">켜짐</th><th className="right">vCenter</th>
                 <th data-nosort>vCenter 설정값(상위)</th><th data-nosort>커널 · 빌드(상위)</th>
               </tr></thead>
               <tbody>

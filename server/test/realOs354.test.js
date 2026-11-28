@@ -536,3 +536,53 @@ test('R2 엣지 시각 원본 — 수신 시각으로 잘랐을 때만 edgeAt', 
   const past = sanitizeVmGos({ at: NOW2 - 5000, asked: true }, NOW2);
   assert.equal(past.at, NOW2 - 5000); assert.equal(Object.hasOwn(past, 'edgeAt'), false);
 });
+
+/* ---------------------------- 점검 3회차(반증 재현) 회귀 ---------------------------- */
+
+test('R3 판이 바뀌면 주기를 기다리지 않고 다시 묻는다 · 판은 대상이 0 이어도 상태에', async () => {
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  const refs = Array.from({ length: 3 }, (_, i) => `vm-${i}`);
+  const old = fakeClient({ apiVersion: '8.0.1.0' });
+  await refreshVmCfg(old, 'vcU', refs, { now: NOW, settings: SET });
+  assert.equal(cacheGet('vcU', 'vm-0').os.asked, false);
+  const nu = fakeClient({ apiVersion: '8.0.3.0' });
+  const r = await refreshVmCfg(nu, 'vcU', refs, { now: NOW + 60_000, settings: SET });
+  assert.equal(r.os.due, 3, '6시간을 기다리지 않는다');
+  assert.equal(r.os.asked, true);
+  assert.equal(cacheGet('vcU', 'vm-2').os.detailed.distroName, 'Rocky Linux');
+  const r2 = await refreshVmCfg(fakeClient({ apiVersion: '8.0.3.0' }), 'vcU', refs, { now: NOW + 120_000, settings: SET });
+  assert.equal(r2.os, null, '다 바뀐 뒤에는 다시 주기를 따른다');
+  assert.equal(statusOf('vcU').osApiVersion, '8.0.3.0');
+  // 판 바뀐 VM 이 상한보다 많으면 상한만큼씩
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  const many = Array.from({ length: 25 }, (_, i) => `vm-${i}`);
+  await refreshVmCfg(fakeClient({ apiVersion: '8.0.1.0' }), 'vcM', many, { now: NOW, settings: { ...SET, vmOsPerCycle: 30 } });
+  const r3 = await refreshVmCfg(fakeClient({ apiVersion: '8.0.3.0' }), 'vcM', many, { now: NOW + 1000, settings: { ...SET, vmOsPerCycle: 10 } });
+  assert.equal(r3.os.due, 10);
+});
+
+test('R3 예산 건너뜀 · 일부만 읽음을 정상 톤으로 덮지 않는다', async () => {
+  _resetVmCfgCache(); _resetVmCfgRetry();
+  await refreshVmCfg(fakeClient(), 'vcB', ['vm-1'], { now: NOW, budgetMs: 0, settings: SET });
+  const st = statusOf('vcB');
+  assert.equal(st.osSkipReason, 'budget'); assert.equal(st.osSkippedAt, NOW); assert.equal(st.osAt ?? null, null);
+  const p = buildOsProbe([], [{ id: 'vcB' }], [{ vcenterId: 'vcB', ...st }], { now: NOW });
+  const t = statusText(p.vcenters[0].status, p.vcenters[0], { collect: { osEnabled: true } });
+  assert.equal(t.tone, 'amber'); assert.match(t.text, /이번 주기 건너뜀/);
+  await refreshVmCfg(fakeClient(), 'vcB', ['vm-1'], { now: NOW + 1000, settings: SET });
+  assert.equal(statusOf('vcB').osSkipReason, null, '다음에 돌면 건너뜀 사유를 지운다');
+  const cut = statusText({ osAt: 5, osAsked: true, osCut: 750 }, { collectSource: 'direct' }, { collect: { osEnabled: true } });
+  assert.equal(cut.tone, 'amber'); assert.match(cut.text, /일부만 읽음\(750대 남음/);
+  // 건너뛴 뒤 다시 수집했으면(osAt > osSkippedAt) 정상
+  assert.equal(statusText({ osAt: 10, osSkippedAt: 5, osSkipReason: 'budget', osAsked: true }, { collectSource: 'direct' }, {}).tone, 'ok');
+});
+
+test('R3 화면 — vCenter 를 법인이라 부르지 않는다 · 50행 절단을 밝힌다 · 파일 설명이 사실과 맞다 · 보고율 경계', () => {
+  const jsx = fs.readFileSync(new URL('../../web/src/views/tools/RealOsProbe.jsx', import.meta.url), 'utf8');
+  assert.equal(/법인별 수집 현황|<th className="right">법인<\/th>/.test(jsx), false);
+  assert.match(jsx, /vCenter별 수집 현황/);
+  assert.match(jsx, /limit=\{allSamples \? 0 : SAMPLE_VIEW\}/); assert.match(jsx, /모두 보기/);
+  assert.equal(/종류 · 버전 · 개수만 있습니다/.test(jsx), false, '파일에 vCenter 이름 · 오류 문구도 있다');
+  assert.match(jsx, /수집 상태와 오류 문구/);
+  assert.equal(pct(5849, 5850), '>99%'); assert.equal(pct(1, 5850), '<1%'); assert.equal(pct(0, 5850), '0%'); assert.equal(pct(5850, 5850), '100%'); assert.equal(pct(1, 2), '50%');
+});

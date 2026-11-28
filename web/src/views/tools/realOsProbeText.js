@@ -18,10 +18,16 @@ export function n(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString('ko-KR') : '—';
 }
 
-/** a / b 백분율('87%') — 분모가 0 이거나 못 읽으면 '—'(0% 로 말하지 않는다). */
+/**
+ * a / b 백분율('87%') — 분모가 0 이거나 못 읽으면 '—'(0% 로 말하지 않는다).
+ * 점검 3회차: 채움 비율을 재는 화면이라 경계에서 반올림이 사실을 뒤집지 않게 — 하나라도 빠졌으면 '100%' 가 아니라 '>99%', 하나라도 있으면 '0%' 가 아니라 '<1%'.
+ */
 export function pct(a, b) {
   if (!(typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b) && b > 0)) return '—';
-  return `${Math.round((a / b) * 100)}%`;
+  const p = Math.round((a / b) * 100);
+  if (p >= 100 && a < b) return '>99%';
+  if (p <= 0 && a > 0) return '<1%';
+  return `${p}%`;
 }
 
 /** 시각(ms) → 'MM-DD HH:mm' · 없으면 '—'. */
@@ -40,6 +46,13 @@ export function at(ms) {
  */
 export function statusText(st, row = null, ctx = null) {
   if (st?.osError) return { text: `오류 — ${String(st.osError).slice(0, 80)}`, tone: 'amber' };
+  // 점검 3회차: 예산 때문에 일부만 읽었거나 이번 주기를 건너뛴 것을 정상 톤으로 덮지 않는다.
+  if (st?.osSkipReason === 'budget' && !(st.osAt != null && st.osSkippedAt != null && st.osAt > st.osSkippedAt)) {
+    return { text: `이번 주기 건너뜀(수집 시간 예산 소진${st.osAt != null ? ` · 마지막 수집 ${at(st.osAt)}` : ''})`, tone: 'amber' };
+  }
+  if (st && st.osAt != null && typeof st.osCut === 'number' && st.osCut > 0) {
+    return { text: `${at(st.osAt)} · 일부만 읽음(${n(st.osCut)}대 남음 · 다음 주기에 이어서)`, tone: 'amber' };
+  }
   if (st && st.osAt != null) return { text: `${at(st.osAt)} · ${st.osAsked ? 'Tools 보고 요청' : '제품 정보만(판 미달)'}`, tone: 'ok' };
   if (ctx?.demo) return { text: '데모 데이터(수집 상태 없음)', tone: 'muted' };
   if (row?.collectSource === 'site') return { text: '엣지 수집(상태는 엣지에)', tone: 'muted' };
