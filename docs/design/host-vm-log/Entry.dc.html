@@ -33,7 +33,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 select{height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;padding:0 8px;font:inherit;font-size:12.5px}
 </style>
 </helmet>
-<div style="box-sizing:border-box;width:1440px;min-height:980px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
+<div style="box-sizing:border-box;width:1440px;min-height:1160px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
   <div style="display:flex;flex-direction:column;gap:4px">
     <h1 style="margin:0;font-size:18px;font-weight:800">들어오는 길 3곳 · 기록 설정</h1>
     <div class="muted">청록색 줄이 새로 생기는 부분이고, 나머지는 지금 있는 화면입니다.</div>
@@ -46,7 +46,7 @@ select{height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626
       <div class="box">
         <div style="display:flex;align-items:center;gap:8px"><span class="tag warn">경고</span><b>호스트 연결 끊김: esx-pl1-04</b></div>
         <div class="muted" style="font-size:12.5px">VC-PL1 / PL-PROD-A · 14:37</div>
-        <div class="newline"><span class="tag new">새로</span><span>직전 기록 <span class="mono">14:00</span> · 구동 VM 18대</span><a href="Main.dc.html">VM 목록 보기 ›</a></div>
+        <div class="newline"><span class="tag new">새로</span><span>끊김 직전 기록 <span class="mono">14:36</span> · 구동 VM 17대 · HA 다시 켬 10</span><a href="Main.dc.html">VM 목록 보기 ›</a></div>
       </div>
       <div class="why">장애를 알게 되는 첫 자리에서 한 번에 넘어갑니다.</div>
     </section>
@@ -56,8 +56,8 @@ select{height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626
       <h2>호스트 › VM 탭 위에 한 줄</h2>
       <div class="box">
         <div class="muted" style="font-size:12px">vCenter › VC-PL1 › esx-pl1-04 › VM</div>
-        <div class="newline"><span class="tag new">새로</span><span>이 호스트의 지난 기록 — 매시 정각 · 마지막 <span class="mono">14:00</span></span><a href="Main.dc.html">시각별 기록 보기 ›</a></div>
-        <div class="muted" style="font-size:12.5px">지금 이 호스트의 VM 0대 · (아래는 지금 있는 VM 표)</div>
+        <div class="newline"><span class="tag new">새로</span><span>이 호스트의 지난 기록 — 매시 정각 · 마지막 <span class="mono">14:00</span> · 끊김 직전 <span class="mono">14:36</span></span><a href="Main.dc.html">시각별 기록 보기 ›</a></div>
+        <div class="muted" style="font-size:12.5px">지금 이 호스트에 등록된 VM 8대 — 모두 응답 없음(구동 중이던 5 · 그때 꺼져 있던 3) · (아래는 지금 있는 VM 표)</div>
       </div>
       <div class="why">호스트가 멈추면 이 탭의 ‘지금’ 표는 비거나 달라집니다 — 그때 지난 기록으로 가는 길입니다. 호스트 빠른 확인(오른쪽 드로어)의 ‘VM 보기’ 옆에도 같은 링크를 둡니다.</div>
     </section>
@@ -68,7 +68,7 @@ select{height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626
       <div class="box">
         <div class="newline" style="align-items:flex-start;flex-direction:column;gap:4px">
           <div style="display:flex;align-items:center;gap:8px"><span class="tag new">새로</span><b>호스트별 VM 기록</b></div>
-          <span class="muted" style="font-size:12px">가상화 호스트마다 매시 정각에 구동 중이던 VM 을 남긴다 · 호스트 장애 때 직전 기록으로 영향 받은 VM 과 지금 위치 확인 · CSV</span>
+          <span class="muted" style="font-size:12px">가상화 호스트마다 매시 정각과 끊김 직전에 구동 중이던 VM 을 남긴다 · 호스트 장애 때 영향 받은 VM · HA 가 다시 켠 호스트 · 규칙 · 아직 멈춘 서비스 확인 · 대비 점검 · Excel / CSV</span>
         </div>
         <div class="muted" style="font-size:12.5px">주소 <span class="mono" style="color:#e6edf6">#/tools/host-vm-log</span> · 호스트를 고르면 <span class="mono" style="color:#e6edf6">…/host-vm-log/&lt;호스트&gt;</span> 로 바뀌어 주소를 그대로 공유할 수 있습니다.</div>
       </div>
@@ -86,7 +86,7 @@ select{height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626
         <span class="tag blue">1시간 · 고정</span>
       </div>
       <div class="row">
-        <div class="l"><b>보관 기간</b><span class="muted" style="font-size:12.5px">지난 기록을 얼마나 남길지. 달라진 것만 저장하므로 기간을 늘려도 용량은 VM 이동 횟수만큼만 늘어납니다.</span></div>
+        <div class="l"><b>보관 기간</b><span class="muted" style="font-size:12.5px">지난 기록을 얼마나 남길지. 달라진 것만 저장하므로 기간을 늘려도 용량은 VM 이동 · 전원 변화 횟수와 기록한 시각 수만큼만 늘어납니다.</span></div>
         <label class="muted" style="font-size:12.5px;display:inline-flex;align-items:center;gap:8px">보관 <select><option>30일</option><option selected>90일</option><option>180일</option><option>1년</option></select></label>
       </div>
       <div class="row">
@@ -113,7 +113,7 @@ select{height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626
   </section>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1160}}'>
 class Component extends DCLogic {
 renderVals() { return {}; }
 }

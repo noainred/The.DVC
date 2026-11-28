@@ -30,7 +30,7 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
 .two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 .out{border:1px dashed #33415f;border-radius:10px;padding:12px;background:#0f1626;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
 /* 엑셀 시트(밝은 면) */
-.sheet{background:#f8fafc;color:#0f172a;border-radius:8px;overflow:hidden;border:1px solid #243049}
+.sheet{background:#f8fafc;color:#0f172a;border-radius:8px;overflow-x:auto;border:1px solid #243049}
 .sheet .cap{padding:8px 10px;font-size:12px;font-weight:700;background:#e2e8f0;color:#0f172a;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
 .sheet .cap span{font-weight:500;color:#334155}
 .xl{border-collapse:collapse;width:100%;font-size:12px}
@@ -50,7 +50,7 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
 .desc b{color:#e6edf6}
 </style>
 </helmet>
-<div style="box-sizing:border-box;width:1440px;min-height:1560px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
+<div style="box-sizing:border-box;width:1440px;min-height:1680px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
   <div style="display:flex;flex-direction:column;gap:4px">
     <h1 style="margin:0;font-size:18px;font-weight:800">기록 내보내기 — 서버별 · 날짜별로 Excel / CSV</h1>
     <div class="muted">화면 머리와 VM 표의 ‘내보내기’ 단추가 여는 창(왼쪽)과, 고른 묶는 기준에 따라 만들어지는 파일의 모습(오른쪽)입니다. 시트 구성은 지금 있는 ‘호스트 · 클러스터 엑셀’ 과 같은 문법입니다.</div>
@@ -73,20 +73,20 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
         <label class="opt"><input type="radio" name="target"><span>이 호스트 <span class="mono">esx-pl1-04</span></span></label>
         <label class="opt on"><input type="radio" name="target" checked><span>이 클러스터 <span class="mono">PL-PROD-A</span> <span class="muted">· 6대</span></span></label>
         <label class="opt"><input type="radio" name="target"><span>이 vCenter <span class="mono">VC-PL1</span> <span class="muted">· 9대</span></span></label>
-        <label class="opt"><input type="radio" name="target"><span>직접 고르기 <span class="muted">· 왼쪽 목록에서 체크한 호스트</span></span></label>
+        <label class="opt"><input type="radio" name="target"><span>직접 고르기 <span class="muted">· ‘호스트 전체’ 탭에서 체크한 호스트</span></span></label>
         <label class="opt"><input type="radio" name="target"><span>볼 수 있는 호스트 전부 <span class="muted">· 658대</span></span></label>
       </fieldset>
 
       <fieldset>
         <legend>3. 시각 · 기간</legend>
         <div class="two">
-          <label class="opt on"><input type="radio" name="when" checked><span>지금 보는 시각<span class="d mono">11-26 14:00</span></span></label>
+          <label class="opt on"><input type="radio" name="when" checked><span>정각 기록 하나<span class="d mono">11-26 14:00</span></span></label>
           <label class="opt"><input type="radio" name="when"><span>하루<span class="d">날짜 하나의 24칸</span></span></label>
           <label class="opt"><input type="radio" name="when"><span>최근 7일</span></label>
           <label class="opt"><input type="radio" name="when"><span>최근 30일</span></label>
         </div>
         <label class="opt"><input type="radio" name="when"><span style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">직접 <input type="date" aria-label="시작 날짜" style="height:28px;border-radius:6px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12px;padding:0 6px"> ~ <input type="date" aria-label="끝 날짜" style="height:28px;border-radius:6px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12px;padding:0 6px"></span></label>
-        <span class="muted" style="font-size:11.5px">서버별로 여러 날을 고르면 ‘하루 한 번, 고른 시각’ 의 목록을 날짜마다 만듭니다(시트 = 호스트, 그 안에 날짜 구역).</span>
+        <span class="muted" style="font-size:11.5px">끊김 직전 기록(멈춘 호스트만 남는다)은 ‘장애 보고’ 시트로 들어갑니다. 서버별로 여러 날을 고르면 ‘하루 한 번, 고른 시각’ 의 목록을 날짜마다 만듭니다(시트 = 호스트, 그 안에 날짜 구역).</span>
       </fieldset>
 
       <fieldset>
@@ -110,7 +110,7 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
       <div class="out" aria-label="만들어질 파일">
         <div><b>만들어질 파일</b> <span class="tag blue">서버별 · Excel</span></div>
         <div>시트 11장 — 요약 · 호스트 목록 · 호스트 6장 · 전체 목록 · 장애 보고 · 읽는 법</div>
-        <div>VM <span class="mono">108</span>줄 <span class="muted">(구동 99 + 꺼짐 9)</span> · 기록 없는 시각 <span class="mono">0</span></div>
+        <div>전체 목록 VM <span class="mono">108</span>줄 <span class="muted">(구동 99 + 꺼짐 9)</span> · 장애 보고 <span class="mono">17</span>줄 · 기록 없는 시각 <span class="mono">0</span></div>
         <div class="mono" style="overflow-wrap:anywhere">호스트별VM기록_PL-PROD-A_2026-11-26_1400.xlsx</div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -143,13 +143,13 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
           </table>
           <div class="cap" style="border-top:2px solid #94a3b8">esx-pl1-04 <span>← 호스트 목록 · 이전 esx-pl1-03 · 다음 esx-pl1-05 · 구동 18 · 꺼짐 3 · vCPU 110 · 메모리 560 GB</span></div>
           <table class="xl">
-            <thead><tr><th>VM</th><th>그때 전원</th><th>IP</th><th>게스트 OS</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>이 호스트에 온 시각</th><th>지금 위치</th><th>지금 상태</th></tr></thead>
+            <thead><tr><th>VM</th><th>서비스</th><th>그때 전원</th><th>IP</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>규칙</th><th>HA 결과</th><th>지금 위치</th><th>지금 상태</th></tr></thead>
             <tbody>
-              <tr><td>db-pl1-ora01</td><td>켜짐</td><td>10.48.12.21</td><td>Oracle Linux 8</td><td class="num">16</td><td class="num">128</td><td>2026-11-02 09:00</td><td>esx-pl1-04</td><td class="bad">응답 없음</td></tr>
-              <tr><td>erp-pl1-app01</td><td>켜짐</td><td>10.48.10.31</td><td>Windows Server 2019</td><td class="num">8</td><td class="num">32</td><td>2026-11-19 22:00</td><td>esx-pl1-02</td><td>구동 중</td></tr>
-              <tr><td>print-pl1-01</td><td>켜짐</td><td>10.48.20.31</td><td>Windows Server 2016</td><td class="num">2</td><td class="num">8</td><td>2026-11-02 09:00</td><td>esx-pl1-05</td><td>꺼짐</td></tr>
-              <tr><td>lab-pl1-test07</td><td>켜짐</td><td>—</td><td>Ubuntu 20.04</td><td class="num">2</td><td class="num">4</td><td>2026-11-25 16:00</td><td>—</td><td>인벤토리에 없음</td></tr>
-              <tr><td colspan="9" style="color:#475569">… 17줄 더(조치 필요 → 꺼짐 → 없음 → 구동 중 순서 · 화면의 표와 같은 순서)</td></tr>
+              <tr><td>db-pl1-ora01</td><td>Oracle DB</td><td>켜짐</td><td>10.48.12.21</td><td class="num">16</td><td class="num">128</td><td>호스트 필수 · 분리(그때 위반)</td><td>재시작 기록 없음</td><td>esx-pl1-04</td><td class="bad">응답 없음</td></tr>
+              <tr><td>erp-pl1-app01</td><td>ERP</td><td>켜짐</td><td>10.48.10.31</td><td class="num">8</td><td class="num">32</td><td>분리(그때 위반 · 지금 지킴)</td><td>14:39 HA 재시작 → esx-pl1-02</td><td>esx-pl1-02</td><td>구동 중</td></tr>
+              <tr><td>print-pl1-01</td><td>출력</td><td>켜짐</td><td>10.48.20.31</td><td class="num">2</td><td class="num">8</td><td>—</td><td>14:41 켜기 실패 → esx-pl1-05</td><td>esx-pl1-05</td><td>꺼짐</td></tr>
+              <tr><td>lab-pl1-test07</td><td>(소속 없음)</td><td>켜짐</td><td>—</td><td class="num">2</td><td class="num">4</td><td>—</td><td>재시작 기록 없음</td><td>—</td><td>인벤토리에 없음</td></tr>
+              <tr><td colspan="10" style="color:#475569">… 17줄 더(조치 필요 → 구동 중 → 그때 꺼져 있던 VM 순서) · 오른쪽으로 이 호스트에 온 시각 · 게스트 OS · vmx 경로 열이 더 있습니다</td></tr>
             </tbody>
           </table>
           <div class="tabs"><span>요약</span><span class="on">호스트 목록</span><span>esx-pl1-01</span><span>esx-pl1-02</span><span>esx-pl1-03</span><span>esx-pl1-04</span><span>esx-pl1-05</span><span>esx-pl1-06</span><span>전체 목록</span><span>장애 보고</span><span>읽는 법</span></div>
@@ -189,7 +189,7 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
         <div class="desc muted">
           <span><b>날짜별 수</b> — 날짜 한 줄: 기록된 시각 수 · 구동 VM 최소 · 최대 · 들어옴 · 나감</span>
           <span><b>배치 구간</b> — VM · 호스트 · 부터 · 까지 · 머문 시간. 피벗용 원자료이고 CSV 는 이 표</span>
-          <span><b>변화</b> — 시각 · VM · 들어옴/나감 · 상대 호스트(화면의 ‘이 호스트의 변화’ 와 같은 내용)</span>
+          <span><b>변화</b> — 시각 · VM · 들어옴/나감 · 상대 호스트 · HA 재시작인지(화면 ‘장애 타임라인’ 의 이동 줄과 같은 모양)</span>
           <span><b>기록 없는 시각</b> — 11-26 03:00 처럼 vCenter 를 읽지 못한 시각. 그 날 칸이 24 가 아닌 까닭</span>
           <span><b>호스트를 여럿 고르면</b> — ‘호스트 × 날짜’ 한 장이 더 생깁니다(칸 = 그 날 구동 VM 최대)</span>
           <span><b>하루만 고르면</b> — 열이 날짜 대신 00시 ~ 23시 24칸이 됩니다(칸 = 있었음 표시)</span>
@@ -206,7 +206,7 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1680}}'>
 class Component extends DCLogic {
 renderVals() {
   var hostRows = [

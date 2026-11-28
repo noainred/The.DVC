@@ -52,31 +52,32 @@ tr.grp td{background:#0f1626;font-size:11.5px;font-weight:700;color:#8b9bb4}
   </div>
   <nav class="vtabs" aria-label="보기">
     <a href="Main.dc.html">장애 대응 <span class="tag crit">1</span></a>
-    <a class="on" href="Ready.dc.html">대비 점검 <span class="tag warn">3</span></a>
+    <a class="on" href="Ready.dc.html">대비 점검 <span class="tag warn">5</span></a>
     <a href="#after">복귀 뒤 대조</a>
     <a href="#">호스트 전체 <span class="muted" style="font-weight:500">658</span></a>
   </nav>
 
-  <div class="sect">대비 점검 — 장애가 나기 전에 보는 것</div>
+  <div class="sect">대비 점검 — 다음 장애 전에 보는 것</div>
+  <div class="muted" style="font-size:12.5px">확인할 것 <b style="color:#e6edf6">5</b> — 남는 메모리 부족 2(PL-VDI) · 규칙 어긋남 2(ORA-SEPARATE · MES-TOGETHER) · 규칙의 허용 호스트 끊김 1(ORA-LICENSE). 탭의 숫자가 이것입니다.</div>
 
   <!-- 이 호스트가 죽으면 -->
   <section class="card">
     <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px">
       <h2>이 호스트가 멈추면 — 남은 호스트가 받아 줄 수 있나</h2>
-      <span class="muted" style="font-size:12px">VC-PL1 · 마지막 기록 11-26 14:00 기준 · 호스트마다 ‘그 호스트의 VM 메모리 합’ 과 ‘같은 클러스터 나머지 호스트의 남는 메모리’ 를 견준 값</span>
+      <span class="muted" style="font-size:12px">VC-PL1 · 지금(14:52) 배치 기준 · 호스트마다 ‘그 호스트의 구동 VM 메모리 합’ 과 ‘같은 클러스터 나머지 호스트의 남는 메모리’ 를 견준 값 · 지금 끊긴 호스트와 유지보수 중인 호스트는 받는 쪽에서 뺍니다</span>
     </div>
     <div class="box">
       <table>
         <thead><tr><th>호스트</th><th class="num">구동 VM</th><th class="num">VM 메모리 합(GB)</th><th class="num">나머지 호스트 여유(GB)</th><th>어림 판정</th><th>다시 켜지지 못할 수 있는 VM</th><th>이 호스트의 관리 VM</th></tr></thead>
         <tbody>
-          <tr class="grp"><td colspan="7">PL-PROD-A · 6대 · HA 켜짐 · 승인 제어 켜짐</td></tr>
+          <tr class="grp"><td colspan="7">PL-PROD-A · 6대(지금 1대 끊김 — esx-pl1-04) · HA 켜짐 · 승인 제어 켜짐</td></tr>
           <sc-for list="{{ prod }}" as="h" hint-placeholder-count="6">
-            <tr><td class="mono">{{ h.name }}</td><td class="num mono">{{ h.vm }}</td><td class="num mono">{{ h.mem }}</td><td class="num mono">{{ h.free }}</td><td><span class="tag ok">받을 수 있음</span></td><td>{{ h.stuck }}<span class="sub">{{ h.stuckSub }}</span></td><td>{{ h.mgmt }}</td></tr>
+            <tr><td class="mono">{{ h.name }}</td><td class="num mono">{{ h.vm }}</td><td class="num mono">{{ h.mem }}</td><td class="num mono">{{ h.free }}</td><td><span class="tag {{ h.vCls }}">{{ h.verdict }}</span></td><td>{{ h.stuck }}<span class="sub">{{ h.stuckSub }}</span></td><td>{{ h.mgmt }}</td></tr>
           </sc-for>
           <tr class="grp"><td colspan="7">PL-VDI · 3대 · HA 켜짐 · <span style="color:#fcd34d">승인 제어 꺼짐</span> · esx-pl1-13 유지보수 중(계산에서 뺌)</td></tr>
-          <tr><td class="mono">esx-pl1-11</td><td class="num mono">42</td><td class="num mono">620</td><td class="num mono">168</td><td><span class="tag crit">부족 452 GB</span></td><td>0</td><td>—</td></tr>
-          <tr><td class="mono">esx-pl1-12</td><td class="num mono">40</td><td class="num mono">600</td><td class="num mono">148</td><td><span class="tag crit">부족 452 GB</span></td><td>0</td><td>—</td></tr>
-          <tr><td class="mono">esx-pl1-13</td><td class="num mono">0</td><td class="num mono">0</td><td class="num mono">316</td><td><span class="tag gray">유지보수 중</span></td><td>0</td><td>—</td></tr>
+          <tr><td class="mono">esx-pl1-11</td><td class="num mono">42</td><td class="num mono">620</td><td class="num mono">168</td><td><span class="tag crit">부족 452 GB</span></td><td>메모리 부족분 약 452 GB 어치<span class="sub">어느 VM 인지는 재시작 순서에 달려 미리 이름을 대지 않습니다</span></td><td>—</td></tr>
+          <tr><td class="mono">esx-pl1-12</td><td class="num mono">40</td><td class="num mono">600</td><td class="num mono">148</td><td><span class="tag crit">부족 452 GB</span></td><td>메모리 부족분 약 452 GB 어치<span class="sub">어느 VM 인지는 재시작 순서에 달려 미리 이름을 대지 않습니다</span></td><td>—</td></tr>
+          <tr><td class="mono">esx-pl1-13</td><td class="num mono">0</td><td class="num mono">0</td><td class="num mono">—</td><td><span class="tag gray">유지보수 중</span></td><td>—</td><td>—</td></tr>
         </tbody>
       </table>
     </div>
@@ -93,9 +94,9 @@ tr.grp td{background:#0f1626;font-size:11.5px;font-weight:700;color:#8b9bb4}
       <table>
         <thead><tr><th>규칙</th><th>종류</th><th>VM</th><th>어긋나 있던 시간(7일)</th><th>vCenter 표시</th><th>지금</th></tr></thead>
         <tbody>
-          <tr><td class="mono">ORA-SEPARATE</td><td><span class="tag blue">분리</span></td><td class="mono">db-pl1-ora01 · db-pl1-ora02</td><td>창 내내<span class="sub">둘 다 esx-pl1-04</span></td><td>준수 아님</td><td><span class="tag crit">어긋남</span><span class="sub">둘 다 응답 없음</span></td></tr>
-          <tr><td class="mono">ERP-APP-SEPARATE</td><td><span class="tag blue">분리</span></td><td class="mono">erp-pl1-app01 · erp-pl1-app02</td><td>6일 14시간<span class="sub">11-20 00:00 ~ 11-26 14:37 · esx-pl1-04</span></td><td>준수</td><td><span class="tag ok">지킴</span><span class="sub">HA 뒤 esx-pl1-02 · 03 으로 떨어짐</span></td></tr>
-          <tr><td class="mono">MES-TOGETHER</td><td><span class="tag cyan">함께</span></td><td class="mono">mes-pl1-db01 · mes-pl1-web01</td><td>0<span class="sub">장애 전까지 지킴</span></td><td>준수 아님</td><td><span class="tag warn">어긋남</span><span class="sub">14:40 부터 · web01 만 esx-pl1-02</span></td></tr>
+          <tr><td class="mono">ORA-SEPARATE</td><td><span class="tag blue">분리</span></td><td class="mono">db-pl1-ora01 · db-pl1-ora02</td><td>7일 내내<span class="sub">둘 다 esx-pl1-04</span></td><td>준수 아님</td><td><span class="tag crit">어긋남</span><span class="sub">둘 다 응답 없음</span></td></tr>
+          <tr><td class="mono">ERP-APP-SEPARATE</td><td><span class="tag blue">분리</span></td><td class="mono">erp-pl1-app01 · erp-pl1-app02</td><td>6일 16시간 남짓<span class="sub">11-19 22:00 ~ 11-26 14:36 · 둘 다 esx-pl1-04</span></td><td>준수</td><td><span class="tag ok">지킴</span><span class="sub">HA 뒤 esx-pl1-02 · 03 으로 떨어짐</span></td></tr>
+          <tr><td class="mono">MES-TOGETHER</td><td><span class="tag cyan">함께</span></td><td class="mono">mes-pl1-db01 · mes-pl1-web01</td><td>기록상 0<span class="sub">장애 전까지 지킴 · 14:40 부터의 어긋남은 다음 정각(15:00) 기록에 잡힙니다</span></td><td>준수 아님</td><td><span class="tag warn">어긋남</span><span class="sub">14:40 부터 · web01 만 esx-pl1-02</span></td></tr>
           <tr><td class="mono">ORA-LICENSE</td><td><span class="tag purple">호스트 필수</span></td><td class="mono">db-pl1-ora01 · db-pl1-ora02 → esx-pl1-03 · 04</td><td>0</td><td>준수</td><td><span class="tag warn">허용 호스트 1대 끊김</span></td></tr>
           <tr><td class="mono">DC-SEPARATE</td><td><span class="tag blue">분리</span></td><td class="mono">ad-pl1-dc01 · ad-pl1-dc02</td><td>0</td><td>준수</td><td><span class="tag ok">지킴</span></td></tr>
           <tr><td class="mono">UAG-SEPARATE</td><td><span class="tag blue">분리</span></td><td class="mono">vdi-pl1-uag01 · vdi-pl1-uag02</td><td>0</td><td>준수</td><td><span class="tag ok">지킴</span></td></tr>
@@ -133,14 +134,14 @@ tr.grp td{background:#0f1626;font-size:11.5px;font-weight:700;color:#8b9bb4}
 
   <section class="card">
     <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px">
-      <h2><span class="mono">esx-pl1-04</span> 복귀 <span class="mono">11-26 16:10</span> — 끊김 직전 17대는 지금 어디에</h2>
-      <span class="muted" style="font-size:12px">HA 로 옮겨진 VM 은 호스트가 돌아와도 저절로 돌아오지 않습니다</span>
+      <h2><span class="mono">esx-pl1-04</span> 복귀 <span class="mono">11-26 16:10</span> — 끊김 직전 17대는 지금 어디에 <span class="tag blue">다른 시점 · 16:10 의 모습</span></h2>
+      <span class="muted" style="font-size:12px">위 대비 점검과 ① 은 14:52 의 모습이고, 이 절은 같은 장애에서 호스트가 돌아온 뒤(16:10)를 미리 그린 것입니다 · HA 로 옮겨진 VM 은 호스트가 돌아와도 저절로 돌아오지 않습니다</span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:10px">
       <div class="tile"><span class="k">원래 자리(이 호스트)</span><span class="v mono">5</span><span class="s">켜짐 2 · 꺼짐 3 — 전원 확인</span></div>
       <div class="tile"><span class="k">다른 호스트에 남음</span><span class="v mono">11</span><span class="s">구동 10 · 꺼짐 1</span></div>
       <div class="tile"><span class="k">인벤토리에 없음</span><span class="v mono">1</span><span class="s">lab-pl1-test07</span></div>
-      <div class="tile"><span class="k">호스트별 구동 VM — 끊김 전 → 지금</span><span class="mono" style="font-size:12.5px;line-height:1.7">01 16→16 · 02 19→23 · 03 17→20<br>04 18→2 · 05 15→17 · 06 14→16</span></div>
+      <div class="tile"><span class="k">호스트별 구동 VM — 끊김 전 → 지금</span><span class="mono" style="font-size:12.5px;line-height:1.7">01 16→16 · 02 19→23 · 03 18→20<br>04 17→2 · 05 15→17 · 06 14→16</span></div>
     </div>
     <div class="box">
       <table>
@@ -164,13 +165,13 @@ tr.grp td{background:#0f1626;font-size:11.5px;font-weight:700;color:#8b9bb4}
 class Component extends DCLogic {
 renderVals() {
   var prod = [
-    ['esx-pl1-01', '16', '448', '1,552', '0', '', 'ad-pl1-dc01 · 포탈 엣지'],
-    ['esx-pl1-02', '19', '512', '1,616', '0', '', 'vCenter Server'],
-    ['esx-pl1-03', '17', '480', '1,584', '0', '', '—'],
-    ['esx-pl1-04', '18', '560', '1,664', '3', 'ora01 · ora02(필수 규칙의 남는 호스트 1대) · mes-pl1-db01(우선순위 사용 안 함)', 'ad-pl1-dc02'],
-    ['esx-pl1-05', '15', '384', '1,488', '0', '', '—'],
-    ['esx-pl1-06', '14', '352', '1,456', '0', '', '—']
-  ].map(function (x) { return { name: x[0], vm: x[1], mem: x[2], free: x[3], stuck: x[4], stuckSub: x[5], mgmt: x[6] }; });
+    ['esx-pl1-01', '16', '448', '1,140', '0', '', 'ad-pl1-dc01 · 포탈 엣지', 'ok', '받을 수 있음'],
+    ['esx-pl1-02', '23', '608', '1,300', '0', '', 'vCenter Server', 'ok', '받을 수 있음'],
+    ['esx-pl1-03', '20', '544', '1,236', '0', 'ORA-LICENSE 의 허용 호스트가 이 호스트만 남음(ora01 · ora02 는 지금 esx-pl1-04 에서 멈춤)', '—', 'ok', '받을 수 있음'],
+    ['esx-pl1-04', '—', '—', '—', '—', '', '—', 'crit', '지금 끊김 — 계산에서 뺌'],
+    ['esx-pl1-05', '17', '408', '1,100', '0', '', '—', 'ok', '받을 수 있음'],
+    ['esx-pl1-06', '16', '372', '1,064', '0', '', 'ad-pl1-dc02(장애 뒤 옮겨 옴)', 'ok', '받을 수 있음']
+  ].map(function (x) { return { name: x[0], vm: x[1], mem: x[2], free: x[3], stuck: x[4], stuckSub: x[5], mgmt: x[6], vCls: x[7], verdict: x[8] }; });
   return { prod: prod };
 }
 }

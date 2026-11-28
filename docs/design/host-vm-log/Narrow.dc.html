@@ -48,17 +48,17 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .svc{padding:8px 10px;border-radius:8px;border:1px solid #7f1d1d;background:rgba(239,68,68,.06);font-size:12.5px;display:flex;justify-content:space-between;gap:8px}
 </style>
 </helmet>
-<div style="width:400px;min-height:2420px;box-sizing:border-box;background:#0a0e17;padding:12px;display:flex;flex-direction:column;gap:12px">
+<div style="width:400px;min-height:2700px;box-sizing:border-box;background:#0a0e17;padding:12px;display:flex;flex-direction:column;gap:12px">
 
   <header style="display:flex;flex-direction:column;gap:4px">
     <div class="muted" style="font-size:11.5px">서버 › Hypervisor</div>
     <h1 style="margin:0;font-size:18px;font-weight:800">호스트별 VM 기록</h1>
-    <div class="muted" style="font-size:12px">마지막 기록 <span class="mono" style="color:#e6edf6">11-26 14:00</span> · 오프라인 사본 <span class="mono" style="color:#e6edf6">11-26 03:00</span></div>
+    <div class="muted" style="font-size:12px">마지막 기록 <span class="mono" style="color:#e6edf6">11-26 14:00</span> · 오프라인 사본 <span class="mono" style="color:#e6edf6">11-26 03:00</span> · 보관 90일</div>
   </header>
 
   <nav class="vtabs" aria-label="보기">
     <a class="on" href="Main.dc.html">장애 대응 <span class="tag crit">1</span></a>
-    <a href="Ready.dc.html">대비 점검 <span class="tag warn">3</span></a>
+    <a href="Ready.dc.html">대비 점검 <span class="tag warn">5</span></a>
     <a href="Ready.dc.html#after">복귀 뒤 대조</a>
   </nav>
 
@@ -102,10 +102,12 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
       <button type="button" class="tile act"><span class="k" style="color:#fca5a5">다시 켜지지 않음</span><span class="v mono" style="color:#fca5a5">5</span></button>
       <button type="button" class="tile"><span class="k">켜기 실패 · 꺼짐</span><span class="v mono" style="color:#fcd34d">1</span></button>
       <button type="button" class="tile"><span class="k">인벤토리에 없음</span><span class="v mono">1</span></button>
+      <div class="tile" style="grid-column:1 / -1"><span class="k">규칙이 걸린 VM</span><span class="mono" style="font-size:13px;font-weight:700">8 · 분리 6 · 함께 2 · 호스트 필수 2(겹침 2)</span></div>
     </div>
     <div style="padding:0 12px;display:flex;flex-wrap:wrap;gap:8px">
+      <button class="btn" type="button" style="flex:1 1 150px">VM 이름 복사</button>
       <button class="btn" type="button" style="flex:1 1 150px">수동 복구 목록 복사</button>
-      <button class="btn" type="button" style="flex:1 1 150px">내보내기 · Excel / CSV</button>
+      <a class="btn" href="Export.dc.html" style="flex:1 1 150px">내보내기 · Excel / CSV</a>
     </div>
     <div>
       <sc-for list="{{ rows }}" as="r" hint-placeholder-count="9">
@@ -121,10 +123,20 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
     </div>
   </section>
 
-  <div class="muted" style="font-size:11.5px;padding:0 4px">‘재시작 기록 없음’ 의 까닭은 단정하지 않고 확인된 설정만 단서로 적습니다. 장애 타임라인은 이 아래 카드로 이어집니다.</div>
+  <section class="card" style="padding:12px;display:flex;flex-direction:column;gap:6px">
+    <h2 style="margin:0;font-size:14px;font-weight:700">장애 타임라인</h2>
+    <div class="muted" style="font-size:12px;overflow-wrap:anywhere"><span class="mono" style="color:#e6edf6">14:00</span> 정각 기록 · 구동 18</div>
+    <div class="muted" style="font-size:12px;overflow-wrap:anywhere"><span class="mono" style="color:#e6edf6">14:21</span> scm-pl1-git01 → esx-pl1-03(장애 전 · HA 아님)</div>
+    <div class="muted" style="font-size:12px;overflow-wrap:anywhere"><span class="mono" style="color:#e6edf6">14:36</span> 끊김 직전 기록 · 구동 17</div>
+    <div class="muted" style="font-size:12px;overflow-wrap:anywhere"><span class="mono" style="color:#fca5a5">14:37</span> 연결 끊김 · 그 전에 유지보수 모드 · 종료 요청 없음 → 예기치 않은 정지 후보</div>
+    <div class="muted" style="font-size:12px;overflow-wrap:anywhere"><span class="mono" style="color:#86efac">14:38 ~ 14:41</span> HA 재시작 10 · 켜기 실패 1</div>
+    <div class="muted" style="font-size:12px;overflow-wrap:anywhere"><span class="mono" style="color:#e6edf6">14:52 지금</span> 응답 없음 5 · 꺼짐 1 · 인벤토리에 없음 1</div>
+  </section>
+
+  <div class="muted" style="font-size:11.5px;padding:0 4px">‘재시작 기록 없음’ 의 까닭은 단정하지 않고 확인된 설정만 단서로 적습니다. 그 시간대 이벤트를 받지 못했으면 ‘HA 결과 모름’ 으로 따로 적습니다.</div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2420}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2700}}'>
 class Component extends DCLogic {
 renderVals() {
   var hrs = ['09', '10', '11', '12', '13', '14'];

@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>호스트별 VM 기록 — 상태 6종</title>
+<title>호스트별 VM 기록 — 상태 7종</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -29,7 +29,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .kv{display:flex;justify-content:space-between;gap:12px;font-size:12.5px}
 </style>
 </helmet>
-<div style="box-sizing:border-box;width:1440px;min-height:980px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
+<div style="box-sizing:border-box;width:1440px;min-height:1300px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
   <div style="display:flex;flex-direction:column;gap:4px">
     <h1 style="margin:0;font-size:18px;font-weight:800">기록이 없거나 지금 상태를 모를 때 — 화면이 하는 말</h1>
     <div class="muted">못 읽은 것을 0대로 보이지 않고, 모르는 것은 모른다고 적습니다. 값이 없는 칸은 ‘—’.</div>
@@ -55,7 +55,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
         <div class="kv"><span>지금 위치 · 상태</span><span class="tag warn">모름 18</span></div>
         <div class="muted" style="font-size:12.5px">VC-PL1 에 지금 연결할 수 없어 ‘지금’ 열은 비워 둡니다. 그때 기록은 포탈에 저장돼 있어 그대로 볼 수 있습니다.</div>
       </div>
-      <div class="why">vCenter 가 그 호스트 위에서 돌다가 같이 멈춘 경우에도 VM 목록 · IP 는 남아 있습니다 — 이 기능이 가장 필요한 때입니다.</div>
+      <div class="why">vCenter 가 그 호스트 위에서 돌다가 같이 멈춘 경우에도 VM 목록 · IP 는 남아 있습니다 — 이 기능이 가장 필요한 때입니다. 이때 포탈에는 ‘호스트 끊김’ 이 아니라 ‘vCenter 연결 불가’ 로 보여 <b style="color:#e6edf6">끊김 직전 기록은 남지 않고</b> 가장 가까운 정각 기록을 엽니다.</div>
     </section>
 
     <section class="card">
@@ -101,10 +101,21 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
       <div class="why">기록이 조용히 멈추지 않게 — 화면 머리의 ‘마지막 기록’ 이 2시간 넘게 지나면 같은 경고를 띄웁니다.</div>
     </section>
 
+    <section class="card">
+      <span class="no">상태 7 · HA 결과 모름</span>
+      <h2>그 시간대 vCenter 이벤트를 받지 못했을 때</h2>
+      <div class="box">
+        <div class="kv"><span>HA 가 다시 켬</span><span class="tag gray">모름</span></div>
+        <div class="kv"><span>지금 다른 호스트에서 구동 중</span><b class="mono">10</b></div>
+        <div class="muted" style="font-size:12.5px">14:37 ~ 14:52 사이 VC-PL1 의 이벤트를 받지 못했습니다(이벤트 수집 꺼짐 · 수집 지연 · 보관 기간 밖). 그래서 ‘HA 가 다시 켬’ · ‘재시작 기록 없음’ 을 가르지 않고, 지금 위치만 보여 줍니다.</div>
+      </div>
+      <div class="why">이벤트가 없는 것과 이벤트를 받지 못한 것을 같은 ‘재시작 기록 없음’ 으로 적지 않습니다 — ESXi 호스트 구성 점검의 ‘최근 재부팅’ 판정이 이벤트를 못 받았을 때 ‘판정 불가’ 로 두는 것과 같은 규칙입니다.</div>
+    </section>
+
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
 class Component extends DCLogic {
 renderVals() { return {}; }
 }

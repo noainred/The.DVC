@@ -79,6 +79,7 @@ tr.need td{background:rgba(239,68,68,.06)}
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
           <span class="pill"><span class="dot ok"></span>마지막 기록 <b class="mono">11-26 14:00</b></span>
           <span class="pill">기록한 vCenter <b class="mono">28 / 28</b></span>
+          <button type="button" class="pill" style="cursor:pointer;font:inherit;font-size:12px">보관 <b>90일</b></button>
           <span class="pill"><span class="dot ok"></span>오프라인 사본 <b class="mono">11-26 03:00</b></span>
           <a class="btn" href="Export.dc.html">기록 내보내기</a>
           <button class="btn" type="button">지금 기록</button>
@@ -87,7 +88,7 @@ tr.need td{background:rgba(239,68,68,.06)}
 
       <nav class="vtabs" aria-label="보기">
         <a class="on" href="Main.dc.html">장애 대응 <span class="tag crit">1</span></a>
-        <a href="Ready.dc.html">대비 점검 <span class="tag warn">3</span></a>
+        <a href="Ready.dc.html">대비 점검 <span class="tag warn">5</span></a>
         <a href="Ready.dc.html#after">복귀 뒤 대조</a>
         <a href="#">호스트 전체 <span class="muted" style="font-weight:500">658</span></a>
       </nav>
@@ -131,14 +132,14 @@ tr.need td{background:rgba(239,68,68,.06)}
       <section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px">
           <h2 style="margin:0;font-size:14px;font-weight:700">영향 받은 서비스 11개 — 아직 멈춘 것 5</h2>
-          <span class="muted" style="font-size:12px">서비스는 서비스 인벤토리의 소속, 우선순위는 클러스터 HA 의 재시작 우선순위입니다</span>
+          <span class="muted" style="font-size:12px">서비스 = 서비스 인벤토리의 소속 · 서비스의 우선순위 = 그 서비스 VM 의 HA 재시작 우선순위 중 가장 높은 것 · 소속 없는 VM 1대(lab-pl1-test07)는 세지 않았습니다</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:10px">
-          <div class="svc"><b>Oracle DB <span class="tag purple">높음</span></b><span>2대 중 2대 응답 없음</span></div>
-          <div class="svc"><b>MES <span class="tag gray">보통</span></b><span>3대 중 1대 응답 없음(DB) · 2대 다시 켜짐</span></div>
-          <div class="svc"><b>설비 연동 <span class="tag gray">보통</span></b><span>1대 중 1대 응답 없음</span></div>
-          <div class="svc"><b>백업 <span class="tag gray">낮음</span></b><span>1대 중 1대 응답 없음</span></div>
-          <div class="svc" style="border-color:#78350f;background:rgba(245,158,11,.06)"><b>출력 <span class="tag gray">낮음</span></b><span>1대 중 1대 꺼짐(켜기 실패)</span></div>
+          <div class="svc"><b>Oracle DB <span class="muted" style="font-weight:500;font-size:12px">· 우선순위 높음</span></b><span>2대 중 2대 응답 없음</span></div>
+          <div class="svc"><b>MES <span class="muted" style="font-weight:500;font-size:12px">· 우선순위 보통</span></b><span>3대 중 1대 응답 없음(DB) · 2대 다시 켜짐</span></div>
+          <div class="svc"><b>설비 연동 <span class="muted" style="font-weight:500;font-size:12px">· 우선순위 보통</span></b><span>1대 중 1대 응답 없음</span></div>
+          <div class="svc"><b>백업 <span class="muted" style="font-weight:500;font-size:12px">· 우선순위 낮음</span></b><span>1대 중 1대 응답 없음</span></div>
+          <div class="svc" style="border-color:#78350f;background:rgba(245,158,11,.06)"><b>출력 <span class="muted" style="font-weight:500;font-size:12px">· 우선순위 낮음</span></b><span>1대 중 1대 꺼짐(켜기 실패)</span></div>
         </div>
         <div class="muted" style="font-size:12.5px">다시 켜진 서비스 6 — <span style="color:#e6edf6">AD · ERP · VDI · 파일 · 모니터링 · WMS</span></div>
       </section>
@@ -152,7 +153,7 @@ tr.need td{background:rgba(239,68,68,.06)}
         <div style="display:flex;flex-wrap:wrap;gap:10px">
           <button type="button" class="tile"><span class="k">HA 가 다시 켬</span><span class="v mono" style="color:#86efac">10</span><span class="s">esx-pl1-02 · 03 · 05 · 06 에서 구동 중</span></button>
           <button type="button" class="tile act"><span class="k" style="color:#fca5a5">다시 켜지지 않음 · 응답 없음</span><span class="v mono" style="color:#fca5a5">5</span><span class="s">이 호스트에 남음 · HA 재시작 기록 없음</span></button>
-          <button type="button" class="tile"><span class="k">HA 가 켜려 했으나 실패</span><span class="v mono" style="color:#fcd34d">1</span><span class="s">다른 호스트에 등록됨 · 꺼짐</span></button>
+          <button type="button" class="tile"><span class="k">켜기 실패</span><span class="v mono" style="color:#fcd34d">1</span><span class="s">다른 호스트에 등록됨 · 전원 켜기 실패 이벤트 · 꺼짐</span></button>
           <button type="button" class="tile"><span class="k">인벤토리에 없음</span><span class="v mono">1</span><span class="s">삭제됐거나 등록 해제</span></button>
           <div class="tile"><span class="k">규칙이 걸린 VM</span><span class="v mono">8</span><span class="s">분리 6 · 함께 2 · 호스트 필수 2 (겹침 2)</span></div>
         </div>
@@ -181,7 +182,7 @@ tr.need td{background:rgba(239,68,68,.06)}
             </tbody>
           </table>
         </div>
-        <div class="muted" style="font-size:12px">‘HA 가 다시 켬’ 은 vCenter 의 HA 재시작 이벤트가 있는 VM 입니다(시각 · 다시 켜진 호스트). 이벤트가 없으면 ‘재시작 기록 없음’ 이고, 까닭은 단정하지 않고 확인된 설정만 ‘단서’ 로 적습니다. vmx 경로는 조치가 필요한 VM 에만 펼쳐 보이고 복사 단추는 전부 담습니다.</div>
+        <div class="muted" style="font-size:12px">‘HA 가 다시 켬’ 은 vCenter 의 HA 재시작 이벤트가 있는 VM 입니다(시각 · 다시 켜진 호스트). 이벤트가 없으면 ‘재시작 기록 없음’, 그 시간대 이벤트를 받지 못했으면 ‘HA 결과 모름’(③ 상태 7)이고, 까닭은 단정하지 않고 확인된 설정만 ‘단서’ 로 적습니다. vmx 경로는 조치가 필요한 VM 에만 펼쳐 보이고 복사 단추는 전부 담습니다.</div>
       </section>
 
       <!-- 타임라인 -->
@@ -193,7 +194,7 @@ tr.need td{background:rgba(239,68,68,.06)}
         <div class="ev"><span class="t mono">11-26 14:00</span><span class="tag blue">정각 기록</span><span>구동 VM 18대</span></div>
         <div class="ev"><span class="t mono">14:21</span><span class="tag gray">이동</span><span><span class="mono">scm-pl1-git01</span> → esx-pl1-03 <span class="muted">(장애 전 · HA 아님)</span></span></div>
         <div class="ev"><span class="t mono">14:36</span><span class="tag blue">끊김 직전 기록</span><span>구동 VM 17대 · 마지막으로 정상 수집한 목록</span></div>
-        <div class="ev"><span class="t mono">14:37</span><span class="tag crit">연결 끊김</span><span>유지보수 모드 진입 · 종료 요청 없음 → <b>예기치 않은 정지 후보</b></span></div>
+        <div class="ev"><span class="t mono">14:37</span><span class="tag crit">연결 끊김</span><span>그 전에 유지보수 모드 진입 · 종료 요청이 없었습니다 → <b>예기치 않은 정지 후보</b> <span class="muted">(ESXi 호스트 구성 점검 ‘최근 재부팅’ 과 같은 판정)</span></span></div>
         <div class="ev"><span class="t mono">14:38 ~ 14:41</span><span class="tag ok">HA 재시작</span><span>10대 다시 켜짐(우선순위 높음 → 보통 → 낮음 순) · 켜기 실패 1대</span></div>
         <div class="ev"><span class="t mono">14:52 지금</span><span class="tag crit">남은 것</span><span>응답 없음 5 · 꺼짐 1 · 인벤토리에 없음 1</span></div>
         <div class="ev"><span class="t mono">—</span><span class="tag gray">호스트 복귀</span><span class="muted">아직 돌아오지 않았습니다. 돌아오면 ‘복귀 뒤 대조’ 에서 원래 자리와 지금 자리를 맞춰 봅니다.</span></div>

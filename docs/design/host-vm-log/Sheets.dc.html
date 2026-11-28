@@ -166,7 +166,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
           <div class="kpi">
             <div><span class="k">끊김 직전 구동 VM</span><span class="v">17</span></div>
             <div><span class="k">HA 가 다시 켬</span><span class="v">10</span></div>
-            <div><span class="k">재시작 기록 없음</span><span class="v bad">5</span></div>
+            <div><span class="k">재시작 기록 없음 · 응답 없음</span><span class="v bad">5</span></div>
             <div><span class="k">켜기 실패</span><span class="v">1</span></div>
             <div><span class="k">인벤토리에 없음</span><span class="v">1</span></div>
             <div><span class="k">아직 멈춘 서비스</span><span class="v bad">5</span></div>
@@ -178,7 +178,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
               <tr><td>2026-11-26 14:00</td><td>정각 기록</td><td>구동 VM 18대</td></tr>
               <tr><td>2026-11-26 14:21</td><td>이동</td><td>scm-pl1-git01 → esx-pl1-03 (장애 전 · HA 아님)</td></tr>
               <tr><td>2026-11-26 14:36</td><td>끊김 직전 기록</td><td>구동 VM 17대 — 마지막으로 정상 수집한 목록</td></tr>
-              <tr><td>2026-11-26 14:37</td><td>연결 끊김</td><td class="bad">유지보수 모드 진입 · 종료 요청 없음 → 예기치 않은 정지 후보</td></tr>
+              <tr><td>2026-11-26 14:37</td><td>연결 끊김</td><td class="bad">그 전에 유지보수 모드 진입 · 종료 요청이 없었음 → 예기치 않은 정지 후보</td></tr>
               <tr><td>2026-11-26 14:38 ~ 14:41</td><td>HA 재시작</td><td>10대 다시 켜짐 · 켜기 실패 1대(print-pl1-01)</td></tr>
               <tr><td>2026-11-26 14:52</td><td>지금</td><td>응답 없음 5 · 꺼짐 1 · 인벤토리에 없음 1</td></tr>
             </tbody>
@@ -188,7 +188,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
             <thead><tr><th>서비스</th><th>재시작 우선순위</th><th>VM</th><th>상태</th></tr></thead>
             <tbody>
               <tr><td>Oracle DB</td><td>높음</td><td>db-pl1-ora01 · db-pl1-ora02</td><td class="bad">2대 중 2대 응답 없음</td></tr>
-              <tr><td>MES</td><td>사용 안 함 · 보통</td><td>mes-pl1-db01</td><td class="bad">3대 중 1대 응답 없음</td></tr>
+              <tr><td>MES</td><td>보통(멈춘 mes-pl1-db01 은 ‘사용 안 함’)</td><td>mes-pl1-db01</td><td class="bad">3대 중 1대 응답 없음</td></tr>
               <tr><td>설비 연동</td><td>보통</td><td>plc-pl1-gw01</td><td class="bad">1대 중 1대 응답 없음</td></tr>
               <tr><td>백업</td><td>낮음</td><td>bkp-pl1-proxy01</td><td class="bad">1대 중 1대 응답 없음</td></tr>
               <tr><td>출력</td><td>낮음</td><td>print-pl1-01</td><td class="warn">꺼짐(켜기 실패)</td></tr>
@@ -207,7 +207,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
               <tr><th>HA 결과</th><td>vCenter 의 HA 재시작 이벤트가 있으면 시각 → 다시 켜진 호스트 · 없으면 ‘재시작 기록 없음’(까닭은 적지 않습니다) · — = 호스트가 멈추지 않아 해당 없음</td></tr>
               <tr><th>시트 이름</th><td>호스트 이름의 첫 마디(esx-pl1-04.corp.example → esx-pl1-04) · 겹치면 전체 이름 · 31자까지</td></tr>
               <tr><th>이동</th><td>호스트 목록의 호스트 이름 · 요약 ‘확인할 것’ 의 호스트 = 그 시트로 · 호스트 시트 맨 위 ‘← 호스트 목록’ · ‘◀ 이전 / 다음 ▶’</td></tr>
-              <tr><th>기록 시각</th><td>매시 정각에 남긴 기록입니다. 정각과 정각 사이에 들어왔다 나간 VM 은 없습니다</td></tr>
+              <tr><th>기록 시각</th><td>매시 정각에 남긴 기록입니다. 정각과 정각 사이에 들어왔다 나간 VM 은 담기지 않습니다 · 끊김 직전 기록(멈춘 호스트만)은 ‘장애 보고’ 시트에 있습니다</td></tr>
               <tr><th>그때 · 지금</th><td>‘그때’ 칸 = 기록 시각의 값 · ‘지금’ 칸 = 파일을 내려받은 순간의 값(요약에 그 시각)</td></tr>
               <tr><th>지금 상태</th><td>구동 중 · 꺼짐 · 응답 없음(호스트가 끊긴 채 그 호스트에 남음) · 인벤토리에 없음 · 모름(vCenter 를 읽지 못함)</td></tr>
               <tr><th>—</th><td>값을 읽지 못했습니다(0 으로 쓰지 않습니다)</td></tr>
@@ -278,7 +278,7 @@ renderVals() {
     ['erp-pl1-app02', '10.48.10.32', 'Windows Server 2019', 8, 32, '2026-11-19 22:00', 'esx-pl1-03', '구동 중', ''],
     ['mes-pl1-web01', '10.48.10.41', 'Red Hat Enterprise Linux 8', 4, 16, '2026-11-24 03:00', 'esx-pl1-02', '구동 중', ''],
     ['mes-pl1-web02', '10.48.10.42', 'Red Hat Enterprise Linux 8', 4, 16, '2026-11-26 13:00', 'esx-pl1-05', '구동 중', ''],
-    ['ad-pl1-dc02', '10.48.1.12', 'Windows Server 2022', 4, 16, '2026-10-28 09:00', 'esx-pl1-06', '구동 중', ''],
+    ['ad-pl1-dc02', '10.48.1.12', 'Windows Server 2022', 4, 16, '2026-11-02 09:00', 'esx-pl1-06', '구동 중', ''],
     ['file-pl1-01', '10.48.20.11', 'Windows Server 2019', 4, 16, '2026-11-02 09:00', 'esx-pl1-03', '구동 중', ''],
     ['mon-pl1-zbx01', '10.48.1.51', 'Rocky Linux 9', 4, 8, '2026-11-11 14:00', 'esx-pl1-05', '구동 중', ''],
     ['vdi-pl1-cs01', '10.48.40.11', 'Windows Server 2019', 4, 16, '2026-11-20 10:00', 'esx-pl1-02', '구동 중', ''],
@@ -311,12 +311,20 @@ renderVals() {
   ['old-pl1-erp-bak', 'tst-pl1-ci01', 'mig-pl1-file00'].forEach(function (n, i) {
     h4.push({ name: n, power: '꺼짐', ip: '—', os: OS[(i + 1) % OS.length], cpu: 2, mem: 4, since: '2026-11-02 09:00', nowHost: 'esx-pl1-04', now: '응답 없음', nowCls: '', cls: 'offrow', svc: '—', rule: '—', ha: '꺼져 있던 VM — HA 대상 아님', vmx: '[PL-DS-02] ' + n + '/' + n + '.vmx' });
   });
+  // 다른 보드(⑦ 관리 VM · 규칙)가 가리키는 VM 을 해당 호스트 시트에 둔다 — 이름 · 서비스 · 규칙만 바꾼다(크기는 그대로)
+  var put = function (rows, k, name, svc, rule, ip) { rows[k].name = name; rows[k].svc = svc; rows[k].rule = rule; rows[k].ip = ip; rows[k].vmx = rows[k].vmx.replace(/\] .*$/, '] ' + name + '/' + name + '.vmx'); };
+  var h1 = gen(1, [16, 16, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2], [128, 64, 64, 32, 32, 32, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 2);
+  put(h1, 10, 'ad-pl1-dc01', 'AD', '분리 DC-SEPARATE(지킴)', '10.48.1.11'); put(h1, 11, 'edge-pl1-01', '포탈 엣지', '—', '10.48.1.21');
+  var h2 = gen(2, [16, 16, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2, 2], [128, 64, 64, 32, 32, 32, 32, 16, 16, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 1);
+  put(h2, 0, 'vc-pl1', 'vCenter', '—', '10.48.0.5');
+  var h3 = gen(3, [16, 16, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2], [128, 64, 64, 64, 32, 32, 16, 16, 16, 8, 8, 8, 8, 4, 4, 4, 4], 0);
+  put(h3, 13, 'vdi-pl1-uag02', 'VDI', '분리 UAG-SEPARATE(지킴)', '10.48.40.22');
   var h5 = gen(5, [16, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2], [64, 64, 64, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 4, 4], 2);
   h5[8].name = 'tst-pl1-ci03'; h5[8].since = '2026-11-26 13:00'; h5[8].vmx = '[PL-DS-05] tst-pl1-ci03/tst-pl1-ci03.vmx';
   var hosts = [
-    { name: 'esx-pl1-01', now: '연결됨', nowCls: '', rows: gen(1, [16, 16, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2], [128, 64, 64, 32, 32, 32, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 2) },
-    { name: 'esx-pl1-02', now: '연결됨', nowCls: '', rows: gen(2, [16, 16, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2, 2], [128, 64, 64, 32, 32, 32, 32, 16, 16, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 1) },
-    { name: 'esx-pl1-03', now: '연결됨', nowCls: '', rows: gen(3, [16, 16, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2], [128, 64, 64, 64, 32, 32, 16, 16, 16, 8, 8, 8, 8, 4, 4, 4, 4], 0) },
+    { name: 'esx-pl1-01', now: '연결됨', nowCls: '', rows: h1 },
+    { name: 'esx-pl1-02', now: '연결됨', nowCls: '', rows: h2 },
+    { name: 'esx-pl1-03', now: '연결됨', nowCls: '', rows: h3 },
     { name: 'esx-pl1-04', now: '연결 끊김', nowCls: 'bad', rows: h4 },
     { name: 'esx-pl1-05', now: '연결됨', nowCls: '', rows: h5 },
     { name: 'esx-pl1-06', now: '연결됨', nowCls: '', rows: gen(6, [16, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2], [64, 64, 64, 32, 32, 32, 16, 16, 8, 8, 8, 4, 2, 2], 1) }
