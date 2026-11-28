@@ -1,6 +1,7 @@
 // v3.54 — 실제 설치 OS 1단계(VMware Tools 보고 guestDetailedData · 어플라이언스 제품 정보 · 수집 점검).
 // ① 파서(키=값 스캐너 · 이스케이프 · 형식 밖 · 상한 · 선형) ② 제품 정보 XML ③ API 판 · Tools 판 ④ vm.gos 모양 ⑤ 엣지 수신 정제(실제 진입 함수)
 // ⑥ 수집기(이 요청만 SOAP 판 8.0.2.0 · 판 미달이면 묻지 않음 · 실패 격리) ⑦ 가짜 vCenter 로 SOAPAction 헤더 ⑧ 점검 집계 · 범위 ⑨ 배선 · 웹 문구 키.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -1,4 +1,5 @@
 // v2.699 — 호스트 구성·보안(A1·A9·A11·A12) 수집·판정·드리프트·엣지 정제.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {

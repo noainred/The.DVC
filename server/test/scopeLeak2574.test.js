@@ -10,6 +10,7 @@
  *   응답 본문으로** 본다. 소스 grep 은 미들웨어 순서가 바뀌어도 통과한다(v2.506 교훈).
  *   자식 프로세스인 이유: `config.js` 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

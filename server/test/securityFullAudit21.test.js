@@ -4,6 +4,7 @@
  *      봉인된 값이 있으면 키를 만들지 않고, 복호 실패 칸은 원래 암호문을 다시 쓴다(env 를 되돌리면 그대로 복호)
  *  M-2 비밀 칸이 아닌 칸(이름 · 메모)의 봉인 문자열은 열지 않는다(복호 오라클)
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

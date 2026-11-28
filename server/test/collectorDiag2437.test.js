@@ -4,6 +4,7 @@
  *  ② 정체 충돌 기록에 양쪽 hostname/peer 를 남겨 '어느 장비냐'를 답할 수 있게 한다.
  * 불변조건: 토큰 값은 어떤 경로로도 나가지 않는다(지문·길이만).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 

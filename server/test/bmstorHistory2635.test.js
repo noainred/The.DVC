@@ -5,6 +5,7 @@
 //  ③ 슬롯(KST 0시·12시)당 한 번 — 같은 슬롯에서는 더 온전한 값만 덮는다
 //  ④ 폴러가 기동 뒤 한 번도 돌지 않았으면 적재하지 않는다
 //  ⑤ 조회 API 가 기간·종류를 지키고 주소를 싣지 않는다
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

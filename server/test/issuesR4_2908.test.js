@@ -6,6 +6,7 @@
  *  9 포탈 알림함(받을 사람 판정 공유 · 메일 스위치와 따로 · 지금 범위로 다시 거름)
  * 10 다른 알람 · 백업 실패 → 이슈 자동 등록(지연 · 중복 · 해소 · 하루 상한)
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

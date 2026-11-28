@@ -12,6 +12,7 @@
  *   admin 응답에 같은 IP 가 **실제로 있는지**도 확인한다(가릴 것이 없어서 통과하는 공허한 테스트 방지).
  *   기준 시각은 고정값(정시 경계에서 떨어뜨린 값)이다(CLAUDE.md v2.517).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

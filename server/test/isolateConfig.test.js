@@ -9,13 +9,16 @@
  *  ② CONFIG_DIR 이 없으면 빈 임시 폴더를 잡고 · 있으면 건드리지 않는다 · 프로세스가 끝나면 지운다.
  *  ③ 시험 실행기는 시험 파일마다 자식 프로세스에서 이 파일을 불러온다 — 파일마다 다른 폴더(실측 고정: 부모에서만 돌면 이 보호는 성립하지 않는다).
  *  ④ 죽은 실행이 남긴 폴더 청소 · ⑤ 상위 폴더가 심링크 · 남의 것이면 쓰지 않는다 · ⑥ 웹 vitest 전역 준비도 같은 규칙(`_tmpRoot.js` 하나).
+ *  ⑦ (2026-11-28) 기본 설정 폴더에 **쓴** 시험 파일은 첫 import 로 `./_isolateConfig.js` 를 스스로 부른다 — 아니면 그 파일을 실패시킨다.
+ *     미리 불러오기는 `npm test` 에만 붙는다: 선언이 없는 파일을 `node --test test/x.test.js` 로 직접 돌리면 실제 server/config 에 쓴다
+ *     (이번에 파일마다 빈 상자로 다시 훑으니 11-26 의 '12개' 보다 훨씬 많았다 — 같은 파일은 먼저 쓴 시험만 보여 가려졌다).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -204,4 +207,196 @@ test('⑥ 웹 vitest 전역 준비도 같은 규칙 — 계정별 상위 폴더 
     { env: { ...env, CONFIG_DIR: '/nonexistent-keep' }, encoding: 'utf8' }).trim();
     assert.equal(keep, 'undefined|/nonexistent-keep');
   } finally { fs.rmSync(dead, { recursive: true, force: true }); }
+});
+
+/* ── ⑦ 기본 설정 폴더에 쓴 시험을 잡는다(2026-11-28) ─────────────────────────────────────────────────────────── */
+// 실제 실행기로 돌린다: 임시 폴더에 격리 파일 셋(_isolateConfig · _tmpRoot · _stripComments)의 **사본**과 시험 파일을 두고 `node --test --import ./_isolateConfig.js`.
+//   사본인 이유 — 선언은 시험 파일 **옆의** './_isolateConfig.js' 를 부르는 줄이다(미리 불러오기와 같은 모듈이어야 한 번만 평가된다).
+const HELPERS = ['_isolateConfig.js', '_tmpRoot.js', '_stripComments.js'];
+/** @returns {{status:number|null, out:string, left:string[]}} left = 끝난 뒤 임시 폴더에 남은 이름(사본 · 시험 파일 포함) */
+function runGuard(files, { preload = true, env: extra = {}, runner = ['--test', '--test-reporter=spec'] } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-isolate-guard-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'package.json'), '{ "type": "module" }\n');
+    for (const h of HELPERS) fs.copyFileSync(path.join(HERE, h), path.join(tmp, h));
+    for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(tmp, name), body);
+    const env = { ...process.env, ...extra };
+    for (const k of ['CONFIG_DIR', 'DVC_TEST_ISOLATED_CONFIG', 'NODE_TEST_CONTEXT']) if (!(k in extra)) delete env[k];
+    const names = Object.keys(files).filter((n) => /\.test\.[cm]?js$/.test(n));
+    const r = spawnSync(process.execPath, [...runner, ...(preload ? ['--import', './_isolateConfig.js'] : []), ...names],
+      { cwd: tmp, env, encoding: 'utf8', timeout: 60_000 });
+    return { status: r.status, out: `${r.stdout || ''}\n${r.stderr || ''}`, left: fs.readdirSync(tmp).sort() };
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+const HEAD = `import { test } from 'node:test'; import fs from 'node:fs';\n`;
+const DECL = `import './_isolateConfig.js';\n`;
+const WRITE = `test('w', () => { fs.writeFileSync(process.env.CONFIG_DIR + '/x.json', '{}'); console.log('CFG=' + process.env.CONFIG_DIR); });\n`;
+const FLAG = /\[시험 격리\] (\S+)/g;
+const flagged = (out) => [...out.matchAll(FLAG)].map((m) => m[1]).sort();
+
+test('⑦ 선언 없이 기본 설정 폴더에 쓴 시험 파일은 실패한다 — 안내문이 파일 · 남긴 것 · 고치는 법을 말하고, 같이 돈 다른 파일은 그대로 통과', () => {
+  // 픽스처 확장자는 저장소 시험 파일 전부와 같은 `.test.js` 다 — `.mjs` 만 쓰면 시험 파일 판정을 `.mjs` 로 좁혀도(실제 파일 전부에서 검사가 꺼진다) 통과했다(반증 F1 — 재현).
+  const r = runGuard({ 'w.test.js': HEAD + WRITE, 'c.test.js': `import { test } from 'node:test';\ntest('c', () => {});\n` });
+  assert.notEqual(r.status, 0, r.out);
+  assert.deepEqual(flagged(r.out), ['w.test.js'], r.out);
+  assert.match(r.out, /남긴 것: x\.json/);
+  assert.match(r.out, /import '\.\/_isolateConfig\.js';/, '고치는 법(넣을 줄)을 그대로 보여 준다');
+  assert.match(r.out, /실제 server\/config 에 쓸 수 있다/);
+  assert.match(r.out, /pass 2\b/, `시험 자체는 둘 다 통과했다: ${r.out}`);
+  assert.match(r.out, /fail 1\b/, '실패는 쓴 파일 하나(파일 단위)');
+});
+
+test('⑦ 첫 import 로 선언한 파일은 써도 통과하고 상자는 지워진다 — 쓰지 않은 파일은 선언이 없어도 통과', () => {
+  const r = runGuard({
+    'd.test.mjs': DECL + HEAD + WRITE,
+    // 폴더가 있는지 보고 · 읽고 · 이미 있는 폴더를 recursive 로 만드는 것은 쓰기가 아니다
+    'n.test.mjs': HEAD + `test('n', () => { const d = process.env.CONFIG_DIR; fs.mkdirSync(d, { recursive: true }); fs.readdirSync(d); fs.existsSync(d + '/auth-secret'); });\n`,
+  });
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(flagged(r.out), []);
+  const cfg = /CFG=(\S+)/.exec(r.out)?.[1];
+  assert.ok(cfg, r.out);
+  assert.equal(fs.existsSync(cfg), false, '끝나면 지워진다');
+});
+
+test('⑦ 쓰고 지운 것 · 종료 훅의 늦은 저장 · 물려받은 자식 프로세스의 쓰기 · 폴더째 지우기도 잡는다(남은 파일만 보면 놓친다)', () => {
+  const r = runGuard({
+    // hangClear2560 · storageAuthGuard2528 꼴: 남지 않아 폴더 검사로는 보이지 않지만, 직접 돌리면 개발 PC 의 실제 파일을 지운다
+    'gone.test.mjs': HEAD + `test('g', () => { const f = process.env.CONFIG_DIR + '/gone.json'; fs.writeFileSync(f, '{}'); fs.rmSync(f); });\n`,
+    // util/exitFlush.js 꼴: 디바운스 저장이 exit 훅에서 쓴다
+    'late.test.mjs': HEAD + `test('l', () => { const d = process.env.CONFIG_DIR; process.once('exit', () => { fs.writeFileSync(d + '/late.json', '{}'); }); });\n`,
+    // 시험이 띄운 node 가 물려받은 CONFIG_DIR 에 쓴다 — 주인은 시험 파일이다
+    'kid.test.mjs': HEAD + `import { execFileSync } from 'node:child_process';
+test('k', () => { execFileSync(process.execPath, ['-e', "require('node:fs').writeFileSync(process.env.CONFIG_DIR + '/kid.json', '{}')"], { env: { ...process.env } }); });\n`,
+    'rm.test.mjs': HEAD + `test('r', () => { fs.rmSync(process.env.CONFIG_DIR, { recursive: true, force: true }); });\n`,
+    // 폴더 시각이 그대로여도(시각 표지를 못 쓰는 파일시스템 흉내 — 쓴 뒤 시각을 되돌린다) 남은 항목으로 잡는다
+    'keep.test.mjs': HEAD + `test('m', () => { const d = process.env.CONFIG_DIR; fs.writeFileSync(d + '/keep.json', '{}'); fs.utimesSync(d, 1, 1); });\n`,
+    // 폴더 자리에 파일을 둔다 — 읽기 실패가 '없음' 이 아니면 '지웠다' 고 단정하지 않고 사유를 그대로 말한다
+    'unread.test.mjs': HEAD + `test('u', () => { const d = process.env.CONFIG_DIR; fs.rmSync(d, { recursive: true, force: true }); fs.writeFileSync(d, 'x'); });\n`,
+  });
+  assert.notEqual(r.status, 0, r.out);
+  assert.deepEqual(flagged(r.out), ['gone.test.mjs', 'keep.test.mjs', 'kid.test.mjs', 'late.test.mjs', 'rm.test.mjs', 'unread.test.mjs'], r.out);
+  assert.match(r.out, /unread\.test\.mjs — 기본 설정 폴더에 썼다\(기본 설정 폴더를 읽을 수 없게 바꿨다\(ENOTDIR\)\)/);
+  assert.match(r.out, /keep\.test\.mjs — 기본 설정 폴더에 썼다\(남긴 것: keep\.json\)/);
+  assert.match(r.out, /gone\.test\.mjs — 기본 설정 폴더에 썼다\(쓰고 지웠다\)/);
+  assert.match(r.out, /late\.test\.mjs — 기본 설정 폴더에 썼다\(남긴 것: late\.json\)/);
+  assert.match(r.out, /kid\.test\.mjs — 기본 설정 폴더에 썼다\(남긴 것: kid\.json\)/);
+  assert.match(r.out, /rm\.test\.mjs — 기본 설정 폴더에 썼다\(기본 설정 폴더를 지웠다\)/);
+});
+
+test('⑦ 선언은 **첫 import** 여야 한다 — 뒤에 두거나 주석 안이면 선언이 아니다(안내문이 갈린다)', () => {
+  const r = runGuard({
+    'helper.mjs': 'export const x = 1;\n',
+    'second.test.mjs': `import { x } from './helper.mjs';\n${DECL}${HEAD}${WRITE}void x;\n`,
+    'comment.test.mjs': `// import './_isolateConfig.js';\n/* import './_isolateConfig.js'; */\n${HEAD}${WRITE}`,
+    // `export … from` 도 모듈 요청이다 — 선언보다 앞이면 그쪽이 먼저 평가된다(반증 F5 — 직접 실행에서 실제 폴더에 썼다)
+    'exportfrom.test.mjs': `export { x as _x } from './helper.mjs';\n${DECL}${HEAD}${WRITE}`,
+    // 코드 안의 문자열(파일 이름)은 선언 줄이 아니다 — '있지만 첫 import 가 아니다' 로 잘못 안내하지 않는다(반증 F8)
+    'string.test.mjs': `${HEAD}const PRE = './_isolateConfig.js'; void PRE;\n${WRITE}`,
+  });
+  assert.notEqual(r.status, 0, r.out);
+  assert.deepEqual(flagged(r.out), ['comment.test.mjs', 'exportfrom.test.mjs', 'second.test.mjs', 'string.test.mjs'], r.out);
+  const exportFrom = r.out.slice(r.out.indexOf('[시험 격리] exportfrom.test.mjs'));
+  assert.match(exportFrom.slice(0, 600), /첫 import 가 아니다/);
+  const str = r.out.slice(r.out.indexOf('[시험 격리] string.test.mjs'));
+  assert.match(str.slice(0, 600), /고치는 법/);
+  const second = r.out.slice(r.out.indexOf('[시험 격리] second.test.mjs'));
+  assert.match(second.slice(0, 600), /첫 import 가 아니다/);
+  const comment = r.out.slice(r.out.indexOf('[시험 격리] comment.test.mjs'));
+  assert.match(comment.slice(0, 600), /고치는 법/);
+});
+
+test('⑦ 왜 첫 import 인가 — 미리 불러오기 없이 직접 돌릴 때: 첫 줄이면 기본 폴더(실제 설정 폴더 흉내)에 쓰지 않고, 뒤에 두면 쓴다', () => {
+  // cfg.mjs 는 src/config.js 흉내 — 로드할 때 경로를 굳힌다(CONFIG_DIR 이 없으면 옆의 real-config).
+  const cfg = `export const dir = process.env.CONFIG_DIR || new URL('./real-config', import.meta.url).pathname;\n`;
+  const body = `test('w', () => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(dir + '/x.json', '{}'); console.log('CFG=' + dir); });\n`;
+  const first = runGuard({ 'cfg.mjs': cfg, 'a.test.mjs': `${DECL}${HEAD}import { dir } from './cfg.mjs';\n${body}` }, { preload: false });
+  assert.equal(first.status, 0, first.out);
+  assert.ok(!first.left.includes('real-config'), `첫 import 로 선언하면 기본 폴더에 쓰지 않는다: ${first.left}`);
+  const used = /CFG=(\S+)/.exec(first.out)?.[1];
+  assert.ok(used && /dvc-test-cfg-/.test(used), first.out);
+  assert.equal(fs.existsSync(used), false, '직접 돌려도 상자는 끝나면 지워진다');
+  // 대조: 같은 파일에서 선언을 config 흉내 뒤에 두면 정적 import 순서대로 cfg.mjs 가 먼저 굳는다 → 기본 폴더에 쓴다(이 시험이 순서에 민감하다는 증거)
+  const late = runGuard({ 'cfg.mjs': cfg, 'a.test.mjs': `${HEAD}import { dir } from './cfg.mjs';\n${DECL}${body}` }, { preload: false });
+  assert.ok(late.left.includes('real-config'), `뒤에 두면 기본 폴더에 쓴다: ${late.left} · ${late.out.slice(0, 300)}`);
+});
+
+test('⑦ 실제 시험 파일 — 선언한 파일(src 를 정적 import 한다)을 미리 불러오기 없이 직접 돌려도 실제 설정 폴더(server/config)에 쓰지 않는다', () => {
+  // 위 시험은 config.js 흉내로 순서를 본다 — 이것은 진짜 src/config.js · auth.js 로 본다. bareosInventory 는 src 를 정적 import 하고, 인증 모듈이 로드될 때 auth-secret 을 만든다
+  //   (선언을 빼면 그 파일이 실제 server/config 에 생긴다 — 2026-11-28 수정 전 판본으로 A/B 확인).
+  const REAL = path.join(SERVER, 'config');
+  const names = () => (fs.existsSync(REAL) ? fs.readdirSync(REAL).sort() : []);
+  const before = names();
+  const env = { ...process.env };
+  for (const k of ['CONFIG_DIR', 'DVC_TEST_ISOLATED_CONFIG', 'NODE_TEST_CONTEXT', 'AUTH_SECRET']) delete env[k];
+  const r = spawnSync(process.execPath, ['--test', '--experimental-sqlite', '--test-reporter=spec', 'test/bareosInventory.test.js'], { cwd: SERVER, env, encoding: 'utf8', timeout: 100_000 });
+  const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+  assert.equal(r.status, 0, out.slice(-800));
+  const made = /AUTH_SECRET 미설정 — (\S+auth-secret) 에/.exec(out)?.[1];
+  assert.ok(made, `auth-secret 을 만든 곳을 알리는 줄이 없다(실제 폴더에 이미 있어 읽기만 했다면 격리되지 않은 것이다): ${out.slice(0, 400)}`);
+  assert.ok(!path.resolve(made).startsWith(REAL + path.sep), `실제 설정 폴더에 만들었다: ${made}`);
+  assert.match(made, /dvc-test-cfg-[^/]+\/\d+-[^/]+\/cfg\/auth-secret$/, '격리 상자의 cfg 안');
+  assert.equal(fs.existsSync(made), false, '상자는 끝나면 지워진다');
+  assert.deepEqual(names(), before, '실제 설정 폴더에 새 파일이 생겼다');
+});
+
+test('⑦ 실행기 없이(node --import … x.test.js) 돌려도 잡는다 — 시험이 cwd 를 바꿔도 파일을 찾고, 이미 정한 종료 코드는 덮지 않는다', () => {
+  const body = (extra) => `import fs from 'node:fs'; import os from 'node:os';\nprocess.chdir(os.tmpdir());\nfs.writeFileSync(process.env.CONFIG_DIR + '/x.json', '{}');\n${extra}`;
+  const r = runGuard({ 'chdir.test.js': body('') }, { runner: [] });
+  assert.equal(r.status, 1, r.out);
+  assert.deepEqual(flagged(r.out), ['chdir.test.js'], '상대 경로 인자 + cwd 변경에도 시험 파일을 읽어 판정한다');
+  const kept = runGuard({ 'code.test.js': body('process.exitCode = 3;\n') }, { runner: [] });
+  assert.equal(kept.status, 3, `시험이 정한 종료 코드를 덮지 않는다: ${kept.out}`);
+  assert.deepEqual(flagged(kept.out), ['code.test.js']);
+});
+
+// 격리를 끄는 플래그는 node 22.8 부터다(engines 는 22.5 부터) — 받아 주는 판에서만 돈다.
+const ISOLATION_NONE = spawnSync(process.execPath, ['--experimental-test-isolation=none', '-e', '0'], { encoding: 'utf8', timeout: 30_000 }).status === 0;
+test('⑦ 시험 파일 여럿을 한 프로세스에서 돌리면(격리를 끈 실행) 탓하지 않는다 — 누가 썼는지 알 수 없다', { skip: !ISOLATION_NONE && '이 node 판에는 --experimental-test-isolation 이 없다' }, () => {
+  // 예전 판은 argv 의 첫 시험 파일(쓰지 않은 aa)을 탓하고 종료 코드를 올렸다(반증 F8 — 재현). npm test 는 이 방식을 쓰지 않는다.
+  const r = runGuard({ 'aa-clean.test.mjs': `import { test } from 'node:test';\ntest('c', () => {});\n`, 'zz-writer.test.mjs': HEAD + WRITE },
+    { runner: ['--test', '--test-reporter=spec', '--experimental-test-isolation=none'] });
+  assert.deepEqual(flagged(r.out), [], r.out);
+  assert.equal(r.status, 0, r.out);
+});
+
+test('⑦ CONFIG_DIR 이 이미 있으면(현장 · CI · 상위 셸) 검사하지 않는다 — 그 폴더는 부른 쪽이 정한 것이다', () => {
+  const mine = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-isolate-given-'));
+  try {
+    const r = runGuard({ 'w.test.mjs': HEAD + WRITE }, { env: { CONFIG_DIR: mine } });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(flagged(r.out), []);
+    assert.equal(fs.existsSync(path.join(mine, 'x.json')), true, '정해 준 폴더에 쓴다');
+  } finally { fs.rmSync(mine, { recursive: true, force: true }); }
+});
+
+test('⑦ declaresIsolation — 주석을 뺀 소스의 첫 모듈 요청(import · export … from)만 본다', async () => {
+  const { declaresIsolation } = await import('./_isolateConfig.js');
+  const yes = [
+    `import './_isolateConfig.js';\nimport x from '../src/a.js';`,
+    `import "./_isolateConfig.js"\nimport { test } from 'node:test';`,
+    `/**\n * 머리말 — import 라는 낱말이 주석에 있어도 된다\n * import { a } from './b.js';\n */\nimport './_isolateConfig.js';   // 설명\nimport { test } from 'node:test';`,
+    `// import { test } from 'node:test';\nimport './_isolateConfig.js' ;\n`,
+    `/*\nimport x from 'y';\n*/\nimport './_isolateConfig.js';\nimport { test } from 'node:test';`,   // 블록 주석 안의 줄은 import 가 아니다
+    `import './_isolateConfig.js';\r\nimport { test } from 'node:test';\r\n`,                                 // CRLF(Windows 체크아웃) — 줄 끝 \r 때문에 선언을 놓치지 않는다(반증 F3)
+    `\uFEFFimport './_isolateConfig.js';\nimport { test } from 'node:test';`,                                   // BOM
+    `import './_isolateConfig.js'; import { test } from 'node:test';`,                                           // 같은 줄의 다음 import — 순서는 그대로다
+    `import'./_isolateConfig.js';\nimport fs from 'node:fs';`,
+    `export const a = 1;\nimport './_isolateConfig.js';\nimport fs from 'node:fs';`,                             // from 없는 export 는 모듈 요청이 아니다
+  ];
+  const no = [
+    '', 'const a = 1;',
+    `import { test } from 'node:test';\nimport './_isolateConfig.js';`,
+    `// import './_isolateConfig.js';\nimport { test } from 'node:test';`,
+    `/* import './_isolateConfig.js'; */\nimport fs from 'node:fs';`,
+    `/*\nimport './_isolateConfig.js';\n*/\nimport { test } from 'node:test';`,                             // 주석 안의 선언은 선언이 아니다
+    `import {\n  test } from 'node:test';\nimport './_isolateConfig.js';`,
+    `import './_isolateConfig.mjs';`, `import '../_isolateConfig.js';`, `import './x_isolateConfig.js';`,
+    `import iso from './_isolateConfig.js';`,
+    `export { x } from './cfg.js';\nimport './_isolateConfig.js';`,                                             // export … from 이 먼저 평가된다(반증 F5)
+    `export * from './cfg.js';\r\nimport './_isolateConfig.js';\r\n`,
+  ];
+  for (const s of yes) assert.equal(declaresIsolation(s), true, JSON.stringify(s));
+  for (const s of no) assert.equal(declaresIsolation(s), false, JSON.stringify(s));
+  assert.equal(declaresIsolation(null), false); assert.equal(declaresIsolation(undefined), false);
 });

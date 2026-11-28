@@ -12,6 +12,7 @@
  *    (닫히지 않은 <id> 100KB 0.3초 · <returnval> 220KB 0.5초) → vcenter/soapParse.js 선형 훑기 한 벌(contention 도 같은 것).
  * 확인 — (73 F2) 로그 분석 크기 기억(WeakMap)이 합치기 · 줄이기 · 직렬화 뒤에도 상한을 넘기거나 일찍 막지 않는다(불변식).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

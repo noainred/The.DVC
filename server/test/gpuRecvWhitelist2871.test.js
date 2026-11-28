@@ -7,6 +7,7 @@
  *  ③ 실제 수신 경로(sanitizeInventoryList)도 같은 정제를 탄다.
  *  ④ 수집기 소스의 GPU 원소 키가 화이트리스트에 있다(수집기가 필드를 더하면 이 시험이 깨진다 — 중앙에서 조용히 사라지지 않게).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

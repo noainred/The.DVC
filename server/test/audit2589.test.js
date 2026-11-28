@@ -1,4 +1,5 @@
 // v2.589 — 5축 감사(아키텍처·버그·보안·웹·성능) 확정분 회귀. 각 항목은 실행으로 재현한 결함을 고정한다.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

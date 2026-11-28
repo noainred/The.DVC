@@ -10,6 +10,7 @@
  * ⚠ v2.566 교훈도 여기서 함께 고정한다 — push/pull 진입 함수는 **실제로 호출하는 테스트**가
  * 있어야 TDZ 급 결함이 잡힌다(순수 헬퍼만 고정하면 통과하면서 놓친다).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

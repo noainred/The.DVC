@@ -1,6 +1,7 @@
 // v2.973 하드웨어 내보내기 — '안 나오는 정보' 채우기(사용자 요청 2026-11-11: A1~A14 · B1 · C1 · C2 모두 진행).
 //   A: 엣지 서버만 비던 값 — 엣지 축약 인벤토리(collector/compactInv.js)와 중앙 수신 정제(collector/remoteInventory.js INV_SHAPE)에 **짝으로** 추가.
 //   B1: 팬 상태(수집기가 health.fan 을 채우지 않음) → 부품 원소 판정. C1: 사양서 vCenter 두 줄. C2: 열 너비를 값 길이에.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compactInv } from '../src/collector/compactInv.js';

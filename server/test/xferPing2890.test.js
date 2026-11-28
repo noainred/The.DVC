@@ -13,6 +13,7 @@
  *  ⑧ 서버 사유 코드 ↔ 웹 PING_REASON_TEXT 1:1 · 대상 id 는 store.edgeTargetId 하나(사본 금지)
  *  ⑨ Ping 모니터가 꺼져 있으면(PING_MON_ENABLED=false) monitor-off + 남은 기록은 그대로
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

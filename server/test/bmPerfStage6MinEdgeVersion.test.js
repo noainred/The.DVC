@@ -4,6 +4,7 @@
  *   · 5단계 함수 · 이름 · 동작은 그대로(bmPerfMinEdgeVersion2929 · bmUsageMinEdgeVersion2933 이 계속 통과해야 한다).
  *   · 6단계 엣지 경로를 쓰는 모듈은 최소 버전을 숫자로 박지 않는다(소스 스윕).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

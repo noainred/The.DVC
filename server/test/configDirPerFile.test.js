@@ -9,6 +9,9 @@
  *  · `../src/` 를 **정적 import 하지 않는다** — 정적 import 는 호이스팅돼 본문의 대입보다 먼저 돈다(gpuGuestIpOverride 가 그렇게 샜다).
  *  · 첫 `../src/` 동적 import 가 그 대입보다 뒤다 · 임시 폴더는 after 에서 지운다(tmpCleanup3188 꼴).
  * 상세 · 찾는 법: docs/rules/common.md '설정에 쓰는 시험은 파일 자체도 …'. ⚠ 소스 검사는 주석을 먼저 제거한다(test/_stripComments.js).
+ *
+ * 2026-11-28: 이 12개가 전부가 아니었다(같은 파일은 먼저 쓴 시험만 보여 57개가 가려져 있었다 — 그중 47개는 직접 돌리면 실제 폴더에 썼다 · 시간에 달린 쓰기 1개가 더 있었다). 나머지는 첫 import 로 `./_isolateConfig.js` 를 부르는 한 줄로 고쳤고,
+ *   그 꼴은 목록으로 고정하지 않는다 — 미리 불러오기의 자동 검사가 기본 설정 폴더에 쓴 시험을 전량 실행마다 잡는다(isolateConfig.test.js ⑦). 이 12개는 기본 폴더에 쓰지 않으므로 그 검사에 걸리지 않는다.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

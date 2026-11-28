@@ -1,4 +1,5 @@
 // v2.632 그룹 F(서버쪽) — WEB2632-03 인사이트 토폴로지 사용률 결측 · WEB2632-04 예측 목록 상한 표지.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTopology } from '../src/insights/topology.js';

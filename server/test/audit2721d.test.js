@@ -3,6 +3,7 @@
  *   낡음·기록 없음·텔레메트리 실패로 확인 불가인 장비(스트리밍 중일 수 있다)를 '장비 − 스트리밍 중' 뺄셈으로 '스트리밍 아님' 에 넣지 않는다.
  *   서버 cvpTotals 의 notStreaming 은 unconfirmedBy['not-streaming'] 와 같아야 한다(웹 totalsFromDevices 와 같은 규칙).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

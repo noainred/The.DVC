@@ -1,6 +1,7 @@
 // v2.969 통합 서버 인벤토리 — 법인(DataCenter) 기준(사용자 요청 2026-11-11). 사용자 결정 '서버 분석처럼 수집한 Agent 이름에 따라 분류 — Agent 자동 판정만':
 //   수동 법인 지정은 두지 않는다(첫 판의 /fleet/dc-assign · fleetDcAssign.js 는 걷어냈다). 판정은 insights/hwExport/corp.js 하나(서버 분석 색인 재사용).
 //   서버 분석의 상태 보드 · 법인별 서버 정보(/admin/idrac)도 Agent 스캔 대역 법인(scanDatacenterId)을 싣는다.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

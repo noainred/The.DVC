@@ -10,6 +10,7 @@
  * ⚠ 검증 방식: 라우트는 **실제 api 라우터를 express 에 띄워 역할·범위별 응답으로** 본다. admin 응답에 가릴 값이
  *   실제로 있는지도 확인한다(가릴 것이 없어서 통과하는 공허한 테스트 방지). 기준 시각은 고정값이다(CLAUDE.md v2.517).
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

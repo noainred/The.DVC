@@ -5,6 +5,7 @@
  *  ③ 블록 제거·추출은 선형(닫는 태그 없는 입력).
  *  ④ 엣지가 올린 dns 필드는 아는 모양만(sanitizeVmDns), 인벤토리 정제가 그것을 부른다.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { vmIps, vmDns, stripXmlBlocks } from '../src/vcenter/soapClient.js';

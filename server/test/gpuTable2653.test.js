@@ -1,4 +1,5 @@
 // v2.653 — GPU 표 시안 A: 게스트 값이 빈 이유 판정 · ESXi GPU 메모리·온도 카운터 · 메모리 사용량(MB) 저장 · 호스트 VM 목록.
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

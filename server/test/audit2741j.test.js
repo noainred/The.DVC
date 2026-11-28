@@ -65,7 +65,9 @@ test('WEB-02 pyportal hub/csvio.py _guard 도 같은 규칙', (t) => {
     'print(json.dumps({"g": [_guard(x) for x in xs], "u": [_unguard(_guard(x)) for x in xs],',
     '  "nums": [_guard(-12.5), _guard(-7), _guard(0), _guard(True), _guard(float("-inf"))]}))',
   ].join('\n');
-  const r = spawnSync('python3', ['-I', '-c', code], { input: JSON.stringify(STR_INPUTS), encoding: 'utf8', timeout: 20_000 });
+  // -B: 저장소의 hub/csvio.py 를 import 하므로, 없으면 파이썬이 그 옆에 pyportal/hub/__pycache__/ 를 남긴다(2026-11-28 — 시험은 저장소 폴더에 남기지 않는다.
+  //   -I 는 PYTHON* 환경변수를 무시하므로 PYTHONDONTWRITEBYTECODE 로는 꺼지지 않는다)
+  const r = spawnSync('python3', ['-I', '-B', '-c', code], { input: JSON.stringify(STR_INPUTS), encoding: 'utf8', timeout: 20_000 });
   if (r.error && r.error.code === 'ENOENT') { t.skip('python3 없음 — pyportal 대조를 건너뜀(pyportal CI 가 따로 돈다)'); return; }
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);

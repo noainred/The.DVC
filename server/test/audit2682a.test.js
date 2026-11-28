@@ -3,6 +3,7 @@
  *   R3D-03 스토리지 전력 부분 합(일부 PSU 만 읽음) · R3D-08 시스템 합계 되풀이 · R3D-05 용량 카드 사용량 모름·낡음 ·
  *   R3D-10 물리·GPU 카드 비활성·오래된 인벤토리 · R3S-07 원천 오류 원문 가림 · R3A-01 경영 보기 스토리지 추이 knownIds.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

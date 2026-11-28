@@ -7,6 +7,7 @@
  *  R3A-02 등록·사용 중 스위치가 보고를 멈추면 그 시리즈를 '없어진 것' 으로 빼지 않는다(heldSeries) · 응답에 retiredSeries
  *  R3A-07 공개 API storage-growth 행 단위 excludedFromTotals · meta 기준 명시
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

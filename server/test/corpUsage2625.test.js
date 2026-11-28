@@ -14,6 +14,7 @@
  *  ⑦ mergeLatestRows 는 ts 가 큰 쪽 · makeCapOf 폴백 순서
  *  ⑧ 실제 api 라우터: 200 · 응답에 서버 이름 없음 · 범위 계정 필터
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

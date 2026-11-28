@@ -5,6 +5,7 @@
  * 남았다. 2.923~2.925 는 다른 작업의 릴리스라 스냅샷 대행 라우트가 없고, 중앙은 그 엣지를 ‘가능’ 으로 보고 요청해 404 를 받았다.
  * 같은 사고가 재발하지 않게 릴리스 노트(사실의 원천)에서 그 기능을 처음 실은 번호를 찾아 상수와 대조한다.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -8,6 +8,7 @@
  *   N138-4: 포탈 상태(health pollerCheck)의 ‘스냅샷 이력 기록’ 행이 하루 1번 기록 시각(lastResult)만 보아 기록 30분 뒤부터 다음 기록까지 거짓 ‘주의’ 였다 —
  *           폴러가 틱 시각(lastRun) · 주기(intervalMs) · 실패(warn)를 싣는다.
  */
+import './_isolateConfig.js';   // 기본 설정 폴더 격리 — 직접 실행(--import 없이)에도 실제 server/config 에 쓰지 않는다(첫 import 여야 한다)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
